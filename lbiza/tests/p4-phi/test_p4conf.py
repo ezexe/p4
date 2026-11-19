@@ -42,6 +42,15 @@ class P4Conf(unittest.TestCase):
         for c in COPIES:
             self.assertEqual(c.read_bytes(), src, c)
 
+    def test_these_tests_run_the_copy_beside_phi_py(self):
+        """Both plugins hold a p4conf.py and import it by that one name. Whichever test file was imported before
+        this one, as the files of tests/p4-temportal/ are when pytest is given that folder first, `p4conf` here is
+        the copy in p4-phi's scripts/: the one copy that tells the allow rules, since phi.py is beside it.
+        test_isolation.py runs this case after the like case of test_lifetime.py, and before it."""
+        self.assertEqual(Path(p4conf.__file__).resolve(), (SRC / "p4conf.py").resolve())
+        self.assertIs(sys.modules["p4conf"], p4conf)
+        self.assertIsNotNone(p4conf.allow_rules(sys.platform, {}))
+
     def test_every_setting_scratchpad_reads_has_its_default(self):
         """Each key temportal's scratchpad.py maps to a constant is in DEFAULTS, at the constant's own value, so a
         store's p4.json is never told it holds an unknown key."""

@@ -106,6 +106,29 @@ class Isolation(unittest.TestCase):
                 self.assertEqual(saw["inside"][:2], [0, "true"], saw["inside"][2])
 
 
+class OwnModules(unittest.TestCase):
+    """Both plugins hold a p4conf.py, which their files and their tests import by that one name. A test file gets
+    its own plugin's copy whichever folder of tests/ pytest was given first."""
+    # One case of each folder, which holds the `p4conf` of its file and of the plugin's file beside it to that
+    # plugin's own copy, and to what only that copy does.
+    CASES = ("tests/p4-temportal/test_lifetime.py::OwnCopy::test_these_tests_run_the_copy_in_p4_temportals_hooks",
+             "tests/p4-phi/test_p4conf.py::P4Conf::test_these_tests_run_the_copy_beside_phi_py")
+
+    def test_a_test_file_gets_its_own_plugins_module_in_either_order_of_the_folders(self):
+        """A child pytest runs the two cases in one process, once in each order. It imports both test files whole,
+        in the order given, before it runs either case, as a run of both folders does. Before conftest.py kept each
+        folder's modules, the second file took the first one's p4conf: with tests/p4-temportal first, five cases of
+        test_p4conf.py found no allow rules, and in the suite's own order test_lifetime.py ran p4-phi's copy."""
+        lbiza = os.path.dirname(os.path.dirname(os.path.abspath(conftest.__file__)))
+        env = {k: v for k, v in os.environ.items() if not k.upper().startswith("PYTEST_")}     # this run's own
+        for order in (self.CASES, self.CASES[::-1]):
+            with self.subTest(first=order[0].split("/")[1]):
+                r = subprocess.run([sys.executable, "-m", "pytest", "-n", "0", "-p", "no:cacheprovider", "-q", *order],
+                                   cwd=lbiza, env=env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                self.assertIn("2 passed", r.stdout)
+
+
 class PutBack(unittest.TestCase):
     """Two tests that each leave state behind and each find none: whichever runs second in a process proves the
     first one's was put back, and each proves it of every test that ran before it there."""

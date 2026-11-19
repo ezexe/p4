@@ -20,6 +20,12 @@ so a test file runs beside any other in one process and in any order.
 
 A file that tests the code of a plugin sits in the folder of tests/ named after that plugin and reaches that code by
 its SRC folder. A hooks module's `*.test.ts` file stays inside its plugin, where `claude plugin test` reads it.
+
+Both plugins hold a p4conf.py, which each plugin's files and tests import by that one name, and python keeps one
+module for a name in a process. So each folder of tests/ has the modules of plugin code its own files imported, and
+`own` hands them to the process before a test file of that folder is imported and before each of its tests runs:
+`import p4conf` in a test file, or in a file of the plugin it tests, gives that plugin's copy, whichever folder's
+files were imported before it.
 """
 import os
 import shutil
@@ -34,6 +40,11 @@ KEEP = ("P4_FIXTURES", "P4_MAC_STORE", "P4_PHI_TEST_TMP")
 WORKERS_MOST = 8        # half the logical processors of ezexe's machine, so a second run there has the other half
 GIT_SETTINGS = "[core]\n\tautocrlf = false\n\tlongpaths = true\n[user]\n\tname = tests\n\temail = tests@localhost\n"
 TEMP = None             # this process's own temp folder, once it is one that runs tests
+TESTS = os.path.dirname(os.path.abspath(__file__))
+PLUGINS = os.path.join(os.path.dirname(TESTS), "plugins")       # the code under test, a folder for each plugin
+HELD = {}               # a folder of tests/ -> the modules of plugin code its files imported, set aside for now
+FOLDER = None           # the folder of tests/ whose modules of plugin code sys.modules holds now
+OF_A_PLUGIN = {}        # a module's file -> whether it is under PLUGINS
 
 
 def remove(path):
@@ -79,6 +90,57 @@ def isolate(base, name):
     tempfile.tempdir = None             # read from TMPDIR again
     os.chdir(tmp)
     TEMP = tmp
+
+
+def folder_of(path):
+    """The folder of tests/ a test file is in, by the first name of its path under tests/: a plugin's name for a
+    test of that plugin's code, and "" for a file of tests/ itself."""
+    full, root = os.path.normcase(os.path.abspath(str(path))), os.path.normcase(TESTS) + os.sep
+    rest = full[len(root):] if full.startswith(root) else ""
+    return rest.split(os.sep, 1)[0] if os.sep in rest else ""
+
+
+def of_a_plugin(module):
+    """True for a module loaded from a file under PLUGINS, by whichever name and from whichever plugin."""
+    file = getattr(module, "__dict__", {}).get("__file__")
+    if not isinstance(file, str):
+        return False
+    if file not in OF_A_PLUGIN:
+        root = os.path.normcase(os.path.realpath(PLUGINS)) + os.sep
+        OF_A_PLUGIN[file] = os.path.normcase(os.path.realpath(file)).startswith(root)
+    return OF_A_PLUGIN[file]
+
+
+def own(folder):
+    """Hand this process the modules of plugin code that the test files of one folder of tests/ imported, and set
+    aside those the folder before it imported. A module that was set aside keeps what it holds, so a test file and
+    the plugin files it imported go on naming one p4conf between them. Where the folder is named after a plugin,
+    that plugin's folders come first on sys.path, so a module first imported inside a test is that plugin's too."""
+    global FOLDER
+    if folder == FOLDER:
+        return
+    aside = HELD.setdefault(FOLDER, {})
+    for name, module in list(sys.modules.items()):
+        if of_a_plugin(module):
+            aside[name] = sys.modules.pop(name)
+    sys.modules.update(HELD.pop(folder, {}))
+    plugin = os.path.join(PLUGINS, folder)
+    if folder and os.path.isdir(plugin):
+        root = os.path.normcase(os.path.realpath(plugin)) + os.sep
+        sys.path.sort(key=lambda p: not (os.path.normcase(os.path.realpath(p)) + os.sep).startswith(root))
+    FOLDER = folder
+
+
+def pytest_collectstart(collector):
+    """Before a test file is imported: the modules of plugin code are those of the file's own folder of tests/."""
+    if isinstance(collector, pytest.Module):
+        own(folder_of(collector.path))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """Before a test and its fixtures: the same, since a plugin's file imports p4conf inside a function too."""
+    own(folder_of(item.path))
 
 
 def pytest_configure(config):
