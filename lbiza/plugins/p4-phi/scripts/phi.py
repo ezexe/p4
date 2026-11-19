@@ -2909,6 +2909,33 @@ GOAL_ASKED = ("kept: p4-phi sets this condition as this session's goal once the 
               "condition names, since that model reads the conversation alone and runs nothing.")
 GOAL_SHORT = "state the goal's condition as a whole sentence: what holds when the work is done, and what shows it"
 GOAL_LONG = "a goal's condition holds 4,000 characters at most"
+GOAL_STARTER = ("The session that started this one is `{sid}`. A part of this condition counts as met once a message "
+                "from that session in this conversation says that session does that part itself or takes that part "
+                "or the whole work as done.")
+
+
+def goal_condition(s, line, cut_to_fit=True):
+    """A condition as it is set for the session `s`: `line`, and for a session another session started the two
+    sentences of GOAL_STARTER after it, which name the starter by the id its messages carry. goal.md, "Write an
+    effective condition": "The evaluator judges your condition against what Claude has surfaced in the conversation."
+    So a brief's line that its starter later changes by a message cannot be met as worded unless the condition says
+    that such a message counts. Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326: a worker's line named
+    "a session you start" and a push, its starter then made that start and that push itself and wrote that the work
+    was taken as done, and the evaluator answered "it did not change the wording of the condition" and sent the
+    worker back nine times at the end of every turn, until its starter stopped the turn. A brief's line is cut to
+    leave the sentences room in the 4,000 characters a condition holds. With `cut_to_fit` false, for a condition the
+    session stated itself, one that leaves them no room is set as it was stated."""
+    line = str(line or "")
+    above = spawned_from(s)
+    if not above or not line:
+        return line
+    tail = GOAL_STARTER.format(sid=above)
+    room = plans.GOAL_CHARS - len(tail) - 1
+    if len(line) > room:
+        if not cut_to_fit or room < plans.GOAL_LEAST:
+            return line
+        line = line[:room].rstrip()
+    return line + " " + tail
 
 
 def goal_ask(home, s, condition):
@@ -2933,23 +2960,26 @@ def goal_due(home, sid):
     asked for itself, goal_ask, which any session gets whatever phi.json says, and which takes the place of a goal
     it has. Else the line `Done looks like:` of the brief of a session another session started, once its first turn
     has ended, where phi.json turns `goal` on, answered once for a session. Either is kept on session.json as `goal`
-    with when it was asked for, and one the session asked for with `own`."""
+    with when it was asked for, and one the session asked for with `own`. Either is set as goal_condition words it,
+    so a session another session started is given a condition its starter's later message can settle."""
     s = load_session(home, sid) if sid else {}
     if not s.get("sessionId") or s.get("doneRetired") or s.get("archived"):
         return ""
     ask = s.get("goalAsk") if isinstance(s.get("goalAsk"), dict) else {}
     if ask.get("condition"):
         s.pop("goalAsk", None)
-        s["goal"] = {"condition": ask["condition"], "asked": ask.get("asked") or now(), "own": True}
+        condition = goal_condition(s, ask["condition"], cut_to_fit=False)
+        s["goal"] = {"condition": condition, "asked": ask.get("asked") or now(), "own": True}
         save_session(home, s)
-        return ask["condition"]
+        return condition
     if not GOAL or not spawned_from(s) or s.get("goal") or not s.get("doneLine"):
         return ""
     if not last_turn_row(home, s["sessionId"]):
         return ""
-    s["goal"] = {"condition": s["doneLine"], "asked": now()}
+    condition = goal_condition(s, s["doneLine"])
+    s["goal"] = {"condition": condition, "asked": now()}
     save_session(home, s)
-    return s["doneLine"]
+    return condition
 
 
 def goal_set(home, sid):

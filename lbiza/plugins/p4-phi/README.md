@@ -113,6 +113,9 @@ Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was 
 
 Where a store's `phi.json` sets `goal` true, a worker gets Claude Code's own goal in place of that send-back.
 The line `Done looks like:` of its brief is the goal's condition, and the module sets it once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`.
+The condition of a session another session started ends with two sentences p4-phi adds: the id of the session that started it, and that a part of the condition counts as met once a message from that session in the conversation says that session does that part itself or takes that part or the whole work as done.
+The evaluator "judges your condition against what Claude has surfaced in the conversation", by `goal.md`, so a brief's line cannot follow a later change of orders unless the condition says such a message counts.
+Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326, without those sentences: a worker whose line named a start and a push that its starter then made itself was sent back nine times at the end of every turn, until its starter stopped the turn.
 No other route sets a goal with nobody at the prompt: `goal.md` names the typed command alone, `SetGoal` is no tool of a session, a brief that begins with `/goal` runs no command since the app writes a started session's first message itself, and a `/goal` in another session's message arrives as text.
 While the goal is set the Stop hook sends no turn back for an open step, since the goal's evaluator does and the two share Claude Code's one count of eight continuations in a row.
 The evaluator "does not call tools, so it can only judge what Claude has already surfaced in the conversation", by `goal.md`, so the checks a script makes stay in the Stop hook: the regression test of a worker's issue, the commits on the default branch and the open issue.

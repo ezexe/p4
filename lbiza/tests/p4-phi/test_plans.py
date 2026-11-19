@@ -1860,6 +1860,10 @@ class NativeGoal(unittest.TestCase):
     BRIEF = "Port the flush to the new hook.\nFiles: hooks/flush.py\nDone looks like: " + LINE + "\n\nReport then."
     ON = {"P4_PHI_GOAL": "1"}
 
+    def worded(self, line):
+        """A worker's condition as it is set: the line, then the sentences that name the session that started it."""
+        return line + " " + phi.GOAL_STARTER.format(sid=TOP)
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = Tree(self._tmp.name)
@@ -1904,7 +1908,7 @@ class NativeGoal(unittest.TestCase):
         self.stop("I ported half the flush.", "u1", **self.ON)
         self.stop("Still porting.", "u1", **self.ON)
         self.stop("Still porting.", "u1", **self.ON)
-        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.worded(self.LINE))
         self.assertEqual(self.phi("goal", "set"), {"set": True})
 
     def test_a_briefs_line_is_read_whole_and_a_goal_row_says_how_its_goal_ended(self):
@@ -1975,7 +1979,7 @@ class NativeGoal(unittest.TestCase):
         s = self.t.session(KID)
         self.assertTrue(s.get("task"), "the task, from the transcript's turn")
         self.assertEqual(s.get("doneLine"), self.LINE)
-        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.worded(self.LINE))
         self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
 
     def test_with_the_setting_off_the_first_stop_keeps_the_task_and_no_done_line(self):
@@ -1990,10 +1994,11 @@ class NativeGoal(unittest.TestCase):
         self.assertNotIn("goal", self.phi("look", **self.ON), "no turn has ended yet")
         out = self.stop("I ported half the flush.", "u1", **self.ON)
         self.assertEqual(out.get("decision"), "block", "no goal is set yet, so the Stop hook still sends back")
-        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.worded(self.LINE))
         self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
         goal = self.t.session(KID)["goal"]
-        self.assertEqual(goal["condition"], self.LINE)
+        self.assertEqual(goal["condition"], self.worded(self.LINE))
+        self.assertEqual(self.t.session(KID)["doneLine"], self.LINE, "the brief's line is kept as the brief has it")
         self.assertNotIn("set", goal)
         self.assertEqual(self.stop("Still porting.", "u2", **self.ON).get("decision"), "block",
                          "asked for and not set: the command may have failed, so the send-back stays")
@@ -2061,10 +2066,38 @@ class NativeGoal(unittest.TestCase):
         self.assertNotIn("goalAsk", self.t.session(KID))
         self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN).returncode, 0)
         self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN + " Or stop after 20 turns.").returncode, 0)
-        self.assertEqual(self.phi("look").get("goal"), self.OWN + " Or stop after 20 turns.", "the later ask")
+        self.assertEqual(self.phi("look").get("goal"), self.worded(self.OWN + " Or stop after 20 turns."),
+                         "the later ask, which names the worker's starter as its brief's line did")
         goal = self.t.session(KID)["goal"]
         self.assertEqual((goal["own"], "set" in goal), (True, False), "the one before it is replaced, and not yet set")
         self.assertNotIn("goal", self.phi("look", **self.ON), "the brief's line is not answered again")
+
+    def test_a_workers_condition_says_its_starters_later_word_settles_a_part(self):
+        """Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326: a worker's line named "a session you start"
+        and a push, its starter then made that start and that push itself and wrote that the work was taken as done,
+        and the evaluator, which reads the conversation alone, answered that the message "did not change the wording
+        of the condition" and sent the worker back nine times at the end of every turn. So the condition a session
+        another session started is given names that session by its id and says a message of its settles a part. A
+        session nobody started gets its condition as stated. A brief's line is cut to leave the sentences room in the
+        4,000 characters a condition holds, and a condition a session stated itself that leaves none is set as stated."""
+        kid = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
+        tail = phi.GOAL_STARTER.format(sid=TOP)
+        self.assertIn("`" + TOP + "`", tail)
+        self.assertIn("takes that part or the whole work as done", tail)
+        self.assertEqual(phi.goal_condition(kid, self.LINE), self.LINE + " " + tail)
+        self.assertEqual(phi.goal_condition({"sessionId": TOP}, self.LINE), self.LINE, "nobody started it")
+        self.assertEqual(phi.goal_condition(kid, ""), "", "no condition, so no sentence alone")
+        long = "x" * plans.GOAL_CHARS
+        cut = phi.goal_condition(kid, long)
+        self.assertEqual(len(cut), plans.GOAL_CHARS)
+        self.assertTrue(cut.endswith(" " + tail) and cut.startswith("x" * 100), cut[-80:])
+        self.assertEqual(phi.goal_condition(kid, long, cut_to_fit=False), long, "its own words are not cut")
+        fits = "x" * (plans.GOAL_CHARS - len(tail) - 1)
+        self.assertEqual(phi.goal_condition(kid, fits, cut_to_fit=False), fits + " " + tail)
+        # the whole road: the worker asks for a condition of 4,000 characters, and the look answers it as stated
+        self.given_a_goal()
+        self.assertEqual(self.t.cli(KID, "goal", "ask", "--", long).returncode, 0)
+        self.assertEqual(self.phi("look").get("goal"), long)
 
     def test_while_the_goal_is_set_the_stop_hook_sends_no_turn_back(self):
         self.given_a_goal()
