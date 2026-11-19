@@ -1245,7 +1245,7 @@ WRITES = ("autoMemoryDirectory", "attribution.commit")
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it.
-KEEPER = 5
+KEEPER = 6
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1563,6 +1563,15 @@ def carry_memory(src, dst):
 # never written back, wherever the plugin folder moves. Only p4-phi's copy, which sits beside phi.py and so knows the
 # path phi.py prints, writes them; the copy in p4-temportal leaves them as they are. The store's `claude` section sets
 # `allowRules` false to have p4 remove its entries.
+# An installed copy sits in Claude Code's plugin cache at `cache/<marketplace>/<plugin>/<version>/`, and an update
+# makes a new version folder beside the old one. plugins/loading.md, "When auto-update runs": "The running session
+# keeps the versions it loaded", and "Cleanup of previous versions": Claude Code "removes that directory in a
+# background cleanup 14 days later, so a session that already loaded the old version keeps running". So a session
+# can run from any version folder still on disk, and the keeper keeps the two rules for each of them beside the
+# running copy's, and drops a folder's rules once Claude Code has removed the folder. Each rule names one folder
+# exactly: permissions.md, "Wildcard patterns", says "A `*` in a Bash rule matches any text, including spaces", so a
+# `*` in place of the version would allow more than these scripts, and a rule wider than the two ezexe approved is
+# ezexe's to write.
 ALLOW_KEY = "permissions.allow"
 OWN_KEYS = ("allowRules",)
 PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: this file's own folder, when phi.py is there
@@ -1576,12 +1585,31 @@ def allow_rules(platform, conf):
     here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
     if not os.path.isfile(os.path.join(here, "phi.py")):
         return None
-    s = fwd(here)
-    cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
-    out = [f"Bash({c})" for c in cmds]
-    if platform.startswith("win"):
-        out += [f"PowerShell({c})" for c in cmds]
+    out = []
+    for s in [fwd(here)] + version_folders(here):
+        cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
+        out += [f"Bash({c})" for c in cmds]
+        if platform.startswith("win"):
+            out += [f"PowerShell({c})" for c in cmds]
     return out
+
+
+_CACHED = re.compile(r"^(.+/cache/[^/]+/[^/]+)/([^/]+)/scripts$")
+
+
+def version_folders(here):
+    """The scripts folders of the other versions of this plugin that Claude Code's plugin cache still holds beside
+    the running copy's, each with a phi.py: the folders a session that loaded an older version still runs from. []
+    for a copy that is not in the cache's `<plugin>/<version>/` layout, such as a checkout."""
+    m = _CACHED.match(fwd(here))
+    if not m:
+        return []
+    try:
+        names = sorted(os.listdir(m.group(1)))
+    except OSError:
+        return []
+    return [f"{m.group(1)}/{n}/scripts" for n in names
+            if n != m.group(2) and os.path.isfile(os.path.join(m.group(1), n, "scripts", "phi.py"))]
 
 
 # The ask rule ezexe approved for p4 to keep in the local file of every project where p4 runs: an explicit ask rule
@@ -1625,26 +1653,27 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
         entries.remove(e)                               # deleted by hand: never written back, wherever it moves
         hand.append(rule_identity(e))
     if wanted is not None and not owned_only:
-        mine_now = {rule_identity(e): e for e in entries}
-        if GEN >= gen:
-            for e in [e for e in entries if e not in wanted and rule_identity(e) not in map(rule_identity, wanted)]:
-                have.remove(e)                          # p4's own, no longer wanted: only that entry goes
-                entries.remove(e)
-                mine_now.pop(rule_identity(e), None)
+        # `wanted` may hold one identity more than once, a rule for each version folder a session can run from
         for w in wanted:
             ident = rule_identity(w)
-            old = mine_now.get(ident)
-            if old == w or ident in hand:
+            if w in entries or ident in hand:
                 continue
-            if old is not None:
-                if GEN >= gen:                          # the plugin folder moved: the entry in place, replaced
-                    have[have.index(old)] = w
-                    entries[entries.index(old)] = w
+            mine_now = [e for e in entries if rule_identity(e) == ident]
+            if mine_now and GEN < gen:
+                continue                                # a newer copy wrote this identity's entries: left to it
+            stale = [e for e in mine_now if e not in wanted]
+            if stale:                                   # the plugin folder moved: the entry in place, replaced
+                have[have.index(stale[0])] = w
+                entries[entries.index(stale[0])] = w
                 continue
-            if any(rule_identity(h) == ident for h in have):
+            if not mine_now and any(rule_identity(h) == ident for h in have):
                 continue                                # the user's own rule, or another copy's: left as it is
             have.append(w)
             entries.append(w)
+        if GEN >= gen:
+            for e in [e for e in entries if e not in wanted]:
+                have.remove(e)                          # p4's own, no longer wanted: only that entry goes
+                entries.remove(e)
         gen = max(gen, GEN)
     if have != (cur if cur is not _NONE else []):
         _put(new, key, have)

@@ -175,7 +175,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <ul>
 <li>Source, <code>plugins/cli-reference.md</code>, "plugin update": "Update a plugin to the latest version its marketplace offers. The new version loads in your next session, or after you run <code>/reload-plugins</code> in a running one." Its form is <code>claude plugin update &lt;plugin&gt; [options]</code>, and "a <code>&lt;plugin&gt;</code> argument is a plugin <code>name</code> or <code>name@marketplace</code>".</li>
 <li>An update with no bump before it changes nothing. Source for what it prints then, <code>plugins/cli-reference.md</code>, "plugin update": "When nothing is newer, it prints <code>formatter is already at the latest version (1.0.0).</code> and exits <code>0</code>".</li>
-<li>Each update moves the installed copy's folder, since the version is in its path. p4's two allow rules name the running copy's scripts folder, and the settings keeper writes them again at the first session start after the version changes, as <a href="claude-settings.html">Claude Code settings</a> sets out.</li>
+<li>Each update moves the installed copy's folder, since the version is in its path. p4's two allow rules name the running copy's scripts folder, and at the first session start after the version changes the settings keeper writes them for the new folder and keeps those of each older version folder still in the cache, so a session that still runs the version before stays covered, as <a href="claude-settings.html">Claude Code settings</a> sets out.</li>
 </ul>
 <h3>3. What the plugin makes a model do is checked by its evals suite, and a development copy runs only from a scratch project</h3>
 <ul>

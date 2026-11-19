@@ -1018,6 +1018,61 @@ class ClaudeSettings(unittest.TestCase):
             self.assertNotIn(self.rules(moved)[0], self.read(self.local())["permissions"]["allow"],
                              "deleted by hand: not written back")
 
+    def cached(self, *versions):
+        """Version folders of p4-phi as Claude Code's plugin cache holds them, `cache/<marketplace>/<plugin>/
+        <version>/`, each with a phi.py -> their scripts folders."""
+        out = []
+        for v in versions:
+            s = os.path.join(self.tmp, "plugins", "cache", "p4-marketplace", "p4-phi", v, "scripts")
+            os.makedirs(s, exist_ok=True)
+            Path(s, "phi.py").write_text("", encoding="utf-8")
+            out.append(s)
+        return out
+
+    def test_a_session_still_running_an_older_version_keeps_its_rules_until_its_folder_is_gone(self):
+        """plugins/loading.md, "When auto-update runs": "The running session keeps the versions it loaded", and
+        "Cleanup of previous versions": the old version directory is removed "14 days later, so a session that
+        already loaded the old version keeps running". So after an update the keeper of the new copy keeps the rules
+        of each version folder still on disk beside its own, each naming its folder exactly, and drops a folder's
+        rules once the folder is gone."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": {"allow": ["Bash(npm test)"]}}, f)
+        old, = self.cached("0.11.46")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", old):
+            p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], ["Bash(npm test)"] + self.rules(old))
+        _, new = self.cached("0.11.46", "0.11.48")
+        os.makedirs(os.path.join(os.path.dirname(os.path.dirname(new)), "0.11.47"))   # no phi.py: no copy to cover
+        self.assertEqual(p4conf.version_folders(new), [os.path.abspath(old).replace("\\", "/")])
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
+            for _ in range(2):
+                p4conf.keep_settings(self.project, platform="win32")
+        both = ["Bash(npm test)"] + self.rules(old) + self.rules(new)
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], both,
+                         "the session on 0.11.46 is still covered, and the new copy's rules stand beside its")
+        self.assertFalse([r for r in both if "*/scripts" in r or "p4-phi/*" in r], "no rule spans versions by a *")
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", old):        # the older session's own keeper runs again
+            p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(sorted(self.read(self.local())["permissions"]["allow"]), sorted(both))
+        shutil.rmtree(os.path.dirname(old))                         # Claude Code's cleanup took the old version
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
+            p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], ["Bash(npm test)"] + self.rules(new),
+                         "the folder is gone, and its rules with it")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(new)))
+
+    def test_a_copy_outside_the_plugin_cache_keeps_one_folders_rules(self):
+        """A checkout is no version folder: its rules follow it, and no folder beside it is read as a version."""
+        beside = os.path.join(self.tmp, "repo", "lbiza", "plugins", "other", "scripts")
+        here = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
+        for s in (beside, here):
+            os.makedirs(s)
+            Path(s, "phi.py").write_text("", encoding="utf-8")
+        self.assertEqual(p4conf.version_folders(here), [])
+
     def test_the_users_autoMemoryEnabled_is_never_touched(self):
         """autoMemoryEnabled is ezexe's switch: a local `false` stays after two checks and the record never names it,
         while autoMemoryDirectory beside it stays p4's."""
