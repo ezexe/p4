@@ -6,8 +6,9 @@
 Checked: the page is linked from the index and the README, says the commands and settings of Claude Code's own
 that a development session uses, shows the development project's local settings, cites its sources and keeps a
 section of what they do not confirm, and describes nothing p4-phi builds in their place; the evals suite's command
-and a row for each of its cases in place of a prompt piped by hand, both installed plugins off, and every link of
-the page leading somewhere.
+and a row for each of its cases in place of a prompt piped by hand, both installed plugins off, the marketplace as it
+is registered and the installed copy as a copy in Claude Code's cache that auto-update moves, and every link of the
+page leading somewhere.
 """
 
 import os
@@ -77,6 +78,50 @@ class Page(unittest.TestCase):
         page = read(PAGE)
         for plugin in ("p4-phi", "p4-temportal"):
             self.assertIn(f'"{plugin}@p4-marketplace": false', page, plugin)
+
+    def test_the_marketplace_is_registered_from_github_and_the_installed_copy_is_a_copy_in_the_cache(self):
+        """The marketplace is added by the repository's name, its one catalog is at the repository's root, and an
+        installed copy is a folder of Claude Code's plugin cache with the version in its path: no checkout is one."""
+        page = read(PAGE)
+        self.assertIn('id="the-marketplace"', page)
+        self.assertIn('href="#the-marketplace"', page)
+        for said in ("<code>claude plugin marketplace add ezexe/p4</code>",
+                     "<code>claude plugin install p4-phi@p4-marketplace</code>",
+                     "<code>claude plugin install p4-temportal@p4-marketplace</code>",
+                     "<code>.claude-plugin/marketplace.json</code> at the repository's root",
+                     "<code>~/.claude/plugins/cache/p4-marketplace/p4-phi/&lt;version&gt;/</code>",
+                     "So no checkout of ezexe/p4 on the machine is the installed copy.",
+                     "<code>extraKnownMarketplaces</code>", '"autoUpdate": true', '"repo": "ezexe/p4"',
+                     "<code>Source path does not exist</code>", "Claude Code 2.1.328",
+                     "uninstalls every plugin you installed from it",
+                     "plugins/marketplace-reference.md", "plugins/install.md", "plugins/create-marketplace.md"):
+            self.assertIn(said, page, said)
+        catalog = os.path.join(REPO, ".claude-plugin", "marketplace.json")
+        self.assertTrue(os.path.isfile(catalog), "the catalog the page names")
+        self.assertFalse(os.path.exists(os.path.join(REPO, "lbiza", ".claude-plugin", "marketplace.json")),
+                         "the page says lbiza/ holds none")
+
+    def test_a_landings_version_bump_reaches_the_installed_copy_by_auto_update(self):
+        """Rule 2 of the setup in force: auto-update is on for the marketplace, the version lives in plugin.json
+        alone, and `claude plugin update` is the move by hand. The page no longer holds the installed copy back until
+        a release is cut, and no longer lists in place or from the cache as not confirmed."""
+        page = read(PAGE)
+        for said in ("<h3>2. A landing's version bump reaches the installed copy by auto-update</h3>",
+                     "bumps the version in that plugin's <code>.claude-plugin/plugin.json</code>, and no entry of the "
+                     "catalog carries one",
+                     "The <code>version</code> field in the plugin's manifest comes first",
+                     "It then refreshes every marketplace with auto-update on and updates the plugins installed from "
+                     "them on disk.",
+                     "The running session keeps the versions it loaded",
+                     "The move by hand is one update for each plugin:",
+                     "A marketplace added from a folder runs its plugins in place."):
+            self.assertIn(said, page, said)
+        for gone in ("No plugin update after each landing", "only when a release is cut",
+                     "Whether an installed copy from a marketplace added from a folder runs in place or from the "
+                     "cache", "which <a href=\"#not-confirmed\">Not confirmed</a> takes up"):
+            self.assertNotIn(gone, page, gone)
+        self.assertNotIn("only when a release is cut", read(os.path.join(REPO, "dox", "index.html")))
+        self.assertNotIn("only when a release is cut", read(os.path.join(os.path.dirname(HERE), "README.md")))
 
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)
