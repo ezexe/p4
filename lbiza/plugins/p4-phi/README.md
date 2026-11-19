@@ -275,6 +275,28 @@ Its Stop hook keeps that input's list on `session.json`, an entry leaves it when
 
 So the kept list and the check stay, and they rest on the native list alone: where the Stop input held no `background_tasks`, the check refuses nothing.
 
+## The host, from p4-native's capability map
+
+p4-native writes what the host is into `<project>/.claude/p4/native/host.json`, a session's entry under `sessions.<session id>`, and its README gives that file as the one way to read it.
+Where the file holds an entry for the session, p4-phi's hooks module reads it first in the two places where it worked the host out by itself.
+Its own reading stays in both, for a machine with no p4-native, a project with no store, a map that is no JSON and an entry that is not written yet, since p4-native's start does not wait for the map.
+
+- The search for a python, where no runner kept one: whether this is Windows is the entry's `platform`, and the shape of the plugin's own folder where the entry has none or says `unknown`.
+- The first round of calls of the desktop app's own tools: an entry whose `host` is not `desktop` and whose `tools.app` is empty says that no such tool answers, so none is called. p4-phi's own reading is the call itself, which the engine rejects in a session the app does not host.
+- An entry that reads `desktop` and lists no tool of the app was read before the app's tool server had connected, so it decides nothing and the call's own answer tells.
+- Another session's entry is never read, since one folder can be open in the desktop app and in a terminal at once.
+
+Seen on Claude Code 2.1.328, in a scripted `claude -p` run with the installed p4-native and p4-phi's development copy: the entry read `terminal`, `scripted` and `windows` with no tool of the app, and the module's debug log held `p4-native's map reads no tool of the desktop app in this session, so the app's tools are not asked` and no line of a rejected call.
+The search for a python is not seen live, since this machine's plugin data folder holds a kept one.
+
+Left as they are, each with its reason.
+
+- `upkeep.terminal`, which routes work to a worker in the Terminal panel, asks nothing of the host today. Holding it to the entry's `tools.servers.terminal` is a new check and no swap, and an entry read before that server had connected would refuse a worker that could start.
+- `relay.PUSH`, the sentence that opens "Where this session's tool list holds `PushNotification`", leaves the look to the session, whose own tool list is never out of date, and python would need the session's CLI id and the project's root at both places that hand it.
+- The reads of `CLAUDE_CODE_HOST_SESSION_ID` in `phi.py` and `node.py` tell which session of the app this is, which the map does not hold, since p4-native reads no environment variable.
+- The reads of the app's record files tell who started a session and whether it is archived, which the map does not hold either.
+- The python scripts ask their own interpreter for the operating system by `os.name`, which costs nothing and is never out of date.
+
 ## No setup
 
 The plugin works in any project it is enabled in.

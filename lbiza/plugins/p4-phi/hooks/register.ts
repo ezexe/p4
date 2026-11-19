@@ -60,6 +60,10 @@ const RULES_SECTION = 'p4-phi:rules'
 // in python, `served/start-<session>` under the store's models folder. A file `bound-<agent id>` there holds the
 // id of the Agent call that launched the subagent, which hook.launch_of reads at the subagent's SubagentStart.
 const MODELS = '.claude/p4/phi/models'
+// p4-native's capability map, from the project's root: what the host is as that plugin asked the engine, a
+// session's entry under `sessions.<session id>`. p4-phi reads it first where it is there, and its own reading
+// stays for a machine with no p4-native.
+const MAP = '.claude/p4/native/host.json'
 const BOUND = 'bound-'
 // How long a subagent's SubagentStart hooks are held for the `agent.spawn` that started it to answer, where they
 // are raised first. Seen in the desktop app on Claude Code 2.1.326, the spawn answers first and nothing is held.
@@ -290,11 +294,18 @@ let paged: string | undefined
 // sidebar's tools are another server's, which a session can lack by itself.
 let isAppAbsent = false
 let isSidebarAbsent = false
+// p4-native's capability map was asked whether the app's tools answer here, which is done once, before the first
+// round of calls. Where the map has no entry for the session the first call's own answer tells, as before.
+let isMapAsked = false
 let appFlying = 0
 let appAt = Number.NEGATIVE_INFINITY
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 function slashed(path: string): string {
   return path.replaceAll('\\', '/').replace(/\/+$/, '')
@@ -351,10 +362,48 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
+// This session's entry of p4-native's capability map, which that plugin's README gives as the one way to read what
+// the host is: the file MAP in the project's store, with a session's entry under `sessions.<session id>`. None
+// where p4-native is not installed, where the project has no store, where the map is no JSON, and where the entry
+// is not written yet, since that plugin's start does not wait for it. Another session's entry is never read: one
+// folder can be open in the desktop app and in a terminal, on Windows and under WSL.
+async function mapped($: EngineInterface): Promise<Record<string, unknown> | undefined> {
+  try {
+    const id = await $.session.id()
+    const map: unknown = JSON.parse(await $.fs.read(`${slashed(await $.session.root())}/${MAP}`))
+    const sessions = isRecord(map) ? map.sessions : undefined
+    const entry = isRecord(sessions) ? sessions[id] : undefined
+
+    return isRecord(entry) ? entry : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Whether this is Windows: the map's `platform` first, which p4-native asks of the engine by `$.session.info`,
+// and the shape of the plugin's own folder where the map has no entry for this session or its entry says `unknown`.
+async function onWindows($: EngineInterface): Promise<boolean> {
+  const platform = (await mapped($))?.platform
+  const isMapped = typeof platform === 'string' && platform !== '' && platform !== 'unknown'
+
+  return isMapped ? platform === 'windows' : /^[A-Za-z]:[\\/]/.test($.plugin.root)
+}
+
+// Whether the map says that no tool of the desktop app answers in this session: its entry reads a host other than
+// the desktop app and lists no such tool. An entry that reads `desktop` and lists none was read before the app's
+// tool server had connected, which p4-native reads again at the first turn, so it decides nothing here.
+async function isMappedOffTheApp($: EngineInterface): Promise<boolean> {
+  const entry = await mapped($)
+  const tools = isRecord(entry?.tools) ? entry.tools.app : undefined
+  const host = entry?.host
+
+  return typeof host === 'string' && host !== '' && host !== 'desktop' && Array.isArray(tools) && tools.length === 0
+}
+
 // With nothing kept, the search of find-python.sh: the launcher first on Windows, where `python3` can be the Store's
 // stub, and `python3` first elsewhere. Each candidate is proven by one run, since a module has no `command -v`.
 async function provenPython($: EngineInterface): Promise<string | undefined> {
-  const isWindows = /^[A-Za-z]:[\\/]/.test($.plugin.root)
+  const isWindows = await onWindows($)
   const order = isWindows ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python'], ['py', '-3']]
   for (const head of order) {
     try {
@@ -1093,13 +1142,24 @@ async function askSections($: EngineInterface): Promise<unknown> {
 // One round of calls after a look that answered `app_tools`: this session as the app holds it, and the sessions
 // linked to it, written as the tools answered them, with the sidebar's sections where the look asked for them. No
 // round runs while a turn of the main conversation does, nor within a minute of the last, nor while a call of an
-// earlier round has not settled. Nothing waits on it.
+// earlier round has not settled. Nothing waits on it. Before the first round p4-native's capability map is asked
+// whether a tool of the app answers here, and where it says none does no call is made.
 async function askApp($: EngineInterface, withSections = false): Promise<void> {
   try {
     if (isAppAbsent || isInTurn || appFlying > 0) return
     const now = await $.clock.now()
     if (now - appAt < APP_MS) return
     appAt = now
+    if (!isMapAsked) {
+      isMapAsked = true
+      if (await isMappedOffTheApp($)) {
+        isAppAbsent = true
+        isSidebarAbsent = true
+        note($, "p4-native's map reads no tool of the desktop app in this session, so the app's tools are not asked")
+
+        return
+      }
+    }
     const file = await appFile($, await $.session.id())
     if (file === undefined) return
     const own = await appCall($, APP_SELF, { session_id: 'self' })
