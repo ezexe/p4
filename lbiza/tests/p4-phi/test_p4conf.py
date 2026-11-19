@@ -1015,6 +1015,95 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(self.project, platform="win32")
         self.assertEqual(self.read(self.local())["permissions"]["ask"], [self.ARCHIVE_ASK])
 
+    def lists(self, root=None):
+        """What the record holds of who made each list, for the one local file it kept."""
+        rec = json.loads(Path(self.record(root)).read_text(encoding="utf-8"))
+        return next(iter((rec.get("lists") or {}).values()), {})
+
+    def test_a_list_p4_made_goes_with_its_key_once_p4_empties_it_in_both_copies(self):
+        """The keeper left `"ask": []` in the local file once it took its last ask rule out. A list that was not
+        there when p4 wrote its first entry under its key is p4's making, by the record's `lists`, and goes with
+        its key when p4 takes its own last entry out. p4-phi's copy and p4-temportal's do the same, and a section
+        that still holds another key stays."""
+        self.install_phi(enabled=True)
+        for n, copy in enumerate((p4conf, self.temportal())):
+            project = os.path.join(self.tmp, f"made{n}")
+            p4 = os.path.join(project, ".claude", "p4")
+            os.makedirs(p4)
+            copy.keep_settings(project, platform="linux")
+            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK])
+            self.assertIs(self.lists(project)["permissions.ask"], True, "the key was not there: p4 made the list")
+            copy.set_key(p4, "phi.upkeep", True)
+            for _ in range(2):
+                copy.keep_settings(project, platform="linux")
+            got = self.read(self.local(project))["permissions"]
+            self.assertNotIn("ask", got, "the list p4 made and emptied is gone with its key")
+            self.assertEqual(got["deny"], [self.MODEL_DENY], "the section keeps its other key")
+            self.assertNotIn("permissions.ask", self.lists(project))
+            copy.set_key(p4, "phi.upkeep", False)
+            copy.keep_settings(project, platform="linux")
+            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK], "and it is back")
+
+    def test_a_list_a_person_made_stays_when_p4_takes_its_entry_out(self):
+        """A list that was in the file before p4's first entry is a person's, empty or not: p4 takes its own entry
+        out and leaves the list, in both copies. So is a list a person emptied by hand, which p4 did not empty."""
+        self.install_phi(enabled=True)
+        for n, copy in enumerate((p4conf, self.temportal())):
+            project = os.path.join(self.tmp, f"theirs{n}")
+            p4 = os.path.join(project, ".claude", "p4")
+            os.makedirs(p4)
+            _write(self.local(project), {"permissions": {"ask": []}})
+            copy.keep_settings(project, platform="linux")
+            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK])
+            self.assertIs(self.lists(project)["permissions.ask"], False, "the list was there first")
+            copy.set_key(p4, "phi.upkeep", True)
+            copy.keep_settings(project, platform="linux")
+            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [], "a person's list stays")
+        project = os.path.join(self.tmp, "by-hand")
+        p4 = os.path.join(project, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.keep_settings(project, platform="linux")
+        d = self.read(self.local(project))
+        d["permissions"]["ask"] = []
+        _write(self.local(project), d)
+        p4conf.set_key(p4, "phi.upkeep", True)
+        for _ in range(2):
+            p4conf.keep_settings(project, platform="linux")
+        self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [], "emptied by hand: not p4's to drop")
+
+    def test_a_record_from_before_the_lists_takes_a_list_of_p4s_own_entries_as_p4s_making(self):
+        """A store an earlier keeper kept has no `lists` in its record. At the first whole check a list that holds
+        nothing but p4's own entries is p4's making, as a key that already holds p4's value is p4's, and a list
+        that holds a person's rule beside them is the person's."""
+        for n, (mine, left) in enumerate((([], None), (["Bash(git push *)"], ["Bash(git push *)"]))):
+            project = os.path.join(self.tmp, f"before{n}")
+            p4 = os.path.join(project, ".claude", "p4")
+            os.makedirs(p4)
+            _write(self.local(project), {"permissions": {"ask": list(mine)}} if mine else {})
+            p4conf.keep_settings(project, platform="linux")
+            rec = json.loads(Path(self.record(project)).read_text(encoding="utf-8"))
+            rec.pop("lists", None)                              # as a keeper from before the part left it
+            _write(self.record(project), rec)
+            p4conf.set_key(p4, "phi.upkeep", True)
+            p4conf.keep_settings(project, platform="linux")
+            self.assertEqual(self.read(self.local(project))["permissions"].get("ask"), left, mine)
+
+    def test_what_an_earlier_keeper_left_of_a_leftover_ask_rule_goes_with_the_set_in_force(self):
+        """Seen on 2026-11-19 in a store started anew: with `phi.upkeep` on and the set in force the keeper took
+        out the ask rule its record no longer held and left `"ask": []`. The same step takes an empty list the
+        record holds nothing of as what is left of that entry. With the set off it is nobody's to touch."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        _write(self.local(), {"permissions": {"deny": ["Read(./.env)"], "ask": []}})
+        p4conf.set_key(p4, "phi.upkeep", True)
+        p4conf.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], [], "set off: left as it is")
+        p4conf.set_key(p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+        p4conf.keep_settings(self.project, platform="linux")
+        got = self.read(self.local())["permissions"]
+        self.assertNotIn("ask", got)
+        self.assertEqual(got["deny"], ["Read(./.env)", self.MODEL_DENY])
+
     def test_set_key_keeps_every_other_setting_and_a_later_load_never_moves_it(self):
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
@@ -1241,7 +1330,8 @@ class ClaudeSettings(unittest.TestCase):
         rec["phiCopy"] = Path(self.tmp, "gone", "scripts").as_posix()
         _write(self.record(), rec)
         other.migrate_layout(p4)
-        self.assertEqual(self.two_rules(), ([], []), "the checkout is gone, so the two rules go")
+        self.assertEqual(self.two_rules(), (None, None),
+                         "the checkout is gone, so the two rules go, each with the list p4 made for it")
 
     def test_the_rules_follow_the_plugin_folder_and_an_entry_deleted_by_hand_stays_gone(self):
         from unittest import mock

@@ -1258,8 +1258,8 @@ PLANS = "temportal/plans"        # the store's folder of plan files, from the st
 # and this one no longer owns is removed while it still holds the value written.
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
-# holds the KEEPER of the copy that last ran it.
-KEEPER = 8
+# holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at.
+KEEPER = 9
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1327,6 +1327,7 @@ _PER_FILE = {
     "denyRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
                             and _int(v.get("gen", 0))),
     "phi": lambda v: isinstance(v, bool),
+    "lists": lambda v: isinstance(v, dict) and all(isinstance(x, bool) for x in v.values()),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
 }
 
@@ -1713,6 +1714,15 @@ DENY_RULES = ("mcp__ccd_session_mgmt__set_session_model",)
 # `kept`, which a copy from before this part compares whole.
 PHI = "p4-phi"
 PHI_PART = "phi"
+# Who made each list p4 keeps entries in. A list that was not in the local file when p4 wrote its first entry under
+# its key is p4's making, and it goes with its key once p4 takes its own last entry out, as _del drops a section p4
+# emptied: an emptied `"ask": []` is no rule and is left for nobody. A list a person made stays, empty or not, and so
+# does one a person emptied by hand. RECORD's part LISTS holds, by settings file and list key, true for p4's making
+# and false for a list that was there first. A record from before the part names no list: the first whole check then
+# takes a list that holds nothing but p4's own entries as p4's making, as _keep_key takes a key that already holds
+# p4's value, and any other list as a person's. LIST_PARTS names the record's parts whose entries share one list.
+LISTS = "lists"
+LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules"), ASK_KEY: ("askRules",), DENY_KEY: ("denyRules",)}
 
 # --- what is settled before a session's start, with no approval card -------------------------------------------------
 # A session another session started stops on no approval card for work its brief covers. desktop.md names the prompt
@@ -1778,9 +1788,15 @@ def card_tool_rules(p4, phi):
 def _adopt_ask(new, rec, name):
     """CARD_SET's `archive`: an entry of `permissions.ask` that is exactly a rule of ASK_RULES and that the record
     does not hold becomes p4's own entry, so the keeper, which wants none where `phi.upkeep` is on, takes it out. A
-    store started anew loses the record of the entry p4 wrote, and the entry then stood as a person's."""
+    store started anew loses the record of the entry p4 wrote, and the entry then stood as a person's. A keeper from
+    before LISTS took such an entry out and left the list empty: an empty list the record holds nothing of is what
+    is left of that entry, and it goes with its key."""
     cur = _get(new, ASK_KEY)
     if not isinstance(cur, list):
+        return
+    if not cur and not (rec.get("askRules") or {}).get(name) and ASK_KEY not in ((rec.get(LISTS) or {}).get(name)
+                                                                               or {}):
+        _del(new, ASK_KEY)
         return
     part = rec.setdefault("askRules", {})
     mine = dict(part.get(name) or {})
@@ -1859,7 +1875,8 @@ def rule_identity(rule):
 def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules"):
     """p4's own entries of the list `key`, `permissions.allow` or `permissions.ask`, in `new` brought to `wanted`; the
     record's `part` kept in step. At a ConfigChange, `owned_only`, an entry gone from the file is recorded as deleted by
-    hand and nothing else moves."""
+    hand and nothing else moves. A list p4 made goes with its key once p4 takes its own last entry out of it, by
+    LISTS."""
     rules = rec.setdefault(part, {})
     mine = dict(rules.get(name) or {})
     entries, hand = list(mine.get("entries") or []), list(mine.get("hand") or [])
@@ -1868,9 +1885,18 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
     if cur is not _NONE and not isinstance(cur, list):
         return                                          # not a list: left as it is
     have = list(cur) if cur is not _NONE else []
+    made = dict((rec.get(LISTS) or {}).get(name) or {})
+    if cur is _NONE:
+        made.pop(key, None)                             # the list is gone: whoever writes the next one made it
     for e in [e for e in entries if e not in have]:
         entries.remove(e)                               # deleted by hand: never written back, wherever it moves
         hand.append(rule_identity(e))
+    took = False
+    if cur is not _NONE and key not in made and not owned_only:
+        own = entries + [e for p in LIST_PARTS.get(key, ()) if p != part
+                         for e in ((rec.get(p) or {}).get(name) or {}).get("entries") or []]
+        if own:                                         # a record from before LISTS: p4's entries stand in the list
+            made[key] = all(h in own for h in have)
     if wanted is not None and not owned_only:
         # `wanted` may hold one identity more than once, a rule for each version folder a session can run from
         for w in wanted:
@@ -1889,13 +1915,24 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
                 continue                                # the user's own rule, or another copy's: left as it is
             have.append(w)
             entries.append(w)
+            made.setdefault(key, cur is _NONE)          # the first entry under a key: who made its list
         if GEN >= gen:
             for e in [e for e in entries if e not in wanted]:
                 have.remove(e)                          # p4's own, no longer wanted: only that entry goes
                 entries.remove(e)
+                took = True
         gen = max(gen, GEN)
-    if have != (cur if cur is not _NONE else []):
+    if took and not have and made.get(key) is True:
+        _del(new, key)                                  # a list p4 made and p4 emptied: it goes with its key
+        made.pop(key)
+    elif have != (cur if cur is not _NONE else []):
         _put(new, key, have)
+    if made:
+        rec.setdefault(LISTS, {})[name] = made
+    else:
+        (rec.get(LISTS) or {}).pop(name, None)
+        if not rec.get(LISTS):
+            rec.pop(LISTS, None)
     if entries or hand:
         rules[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": gen}
     else:
