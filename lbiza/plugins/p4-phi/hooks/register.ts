@@ -9,7 +9,8 @@
 // prompt, where a command hook can only hand text beside a start. And it keeps the origin Claude Code stamps on
 // each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read. And it is the
 // guard around a tool call: it tells by plain tests which calls python has a check for, and starts python for
-// those alone, so no process starts before a call that has none.
+// those alone, so no process starts before a call that has none. And where a project turns `goal` on it gives a
+// worker Claude Code's own goal, which no command hook and no other session can.
 
 import type {
   AgentSpawnInput,
@@ -103,13 +104,15 @@ const MOST_TOLD = 256
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
-// `rules` is what `phi.py rules` prints alone: the text of the system prompt's section.
+// `rules` is what `phi.py rules` prints alone: the text of the system prompt's section. `goal` is the condition of
+// the native goal this session is to be given, answered once and only where a store's phi.json turns `goal` on.
 type Answer = {
   rules?: string
   dir?: string
   starter?: string
   move?: string
   upkeep?: string
+  goal?: string
   watching?: boolean
   off?: boolean
   changed?: boolean
@@ -390,9 +393,11 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
-    // One turn at most for one look: the work a wait left unmoved first, else the upkeep that is due.
+    // One turn at most for one look: a goal to set first, whose command starts its own turn, then the work a wait
+    // left unmoved, else the upkeep that is due.
     const prompt = answer?.move || answer?.upkeep
-    if (prompt) wake($, prompt)
+    if (answer?.goal) setGoal($, answer.goal)
+    else if (prompt) wake($, prompt)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
     note($, `the watcher's timer failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
@@ -474,6 +479,22 @@ function wake($: EngineInterface, text: string): void {
       if (entered.drop !== undefined) note($, `the wake did not start a turn: ${entered.drop.slice(0, 200)}`)
     },
     error => note($, `the wake was not submitted: ${String((error as Error)?.message ?? error).slice(0, 200)}`),
+  )
+}
+
+// Gives the session Claude Code's own goal, with the condition a look answered: the command a person types, `/goal
+// <condition>`, which `$.command.run` queues until the session is idle and which starts a turn with the condition
+// as its directive. Seen in the desktop app on Claude Code 2.1.326, in a session another session started: the goal
+// was set with no dialog, where `SetGoal` is no tool of the session. Python is told once the command answered that
+// the goal is set, and from then on its Stop hook sends no turn back. Nothing waits on the call.
+function setGoal($: EngineInterface, condition: string): void {
+  $.command.run({ command: 'goal', args: condition }).then(
+    ran => {
+      const answered = ran.text ?? ''
+      if (answered.startsWith('Goal set')) void ask($, ['goal', 'set'], LOOK_MS)
+      else note($, `the goal command did not set the goal: ${answered.slice(0, 200)}`)
+    },
+    error => note($, `the goal was not set: ${String((error as Error)?.message ?? error).slice(0, 200)}`),
   )
 }
 

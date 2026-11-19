@@ -28,6 +28,12 @@ def read(path):
         return f.read()
 
 
+def phi_settings():
+    """The keys phi.py reads from a store's phi/phi.json, read from its SETTINGS table as written."""
+    table = read(os.path.join(SRC, "phi.py")).split("\nSETTINGS = {", 1)[1].split("}", 1)[0]
+    return re.findall(r'"([a-z_]+)":', table)
+
+
 class Page(unittest.TestCase):
     def test_the_page_is_linked_from_the_index_and_the_readme(self):
         self.assertIn('href="plugin-development.html"', read(os.path.join(REPO, "dox", "index.html")))
@@ -202,6 +208,15 @@ class Page(unittest.TestCase):
                      "The done mark is covered in part", "The wake after a wait is covered in part",
                      "stays a Stop hook", "Nothing else of p4-phi is covered", "The plan copies nothing p4-phi builds"):
             self.assertIn(said, covers, said)
+        built = section.split('<h3 id="the-goal-behind-its-setting">The goal behind its setting</h3>', 1)[1]
+        for said in ("<code>goal</code> in the store's <code>phi/phi.json</code>, false unless set true",
+                     "<code>P4_PHI_GOAL</code>", "<code>Done looks like:</code>",
+                     "<code>$.command.run({ command: 'goal', args })</code>", "<code>phi.py goal set</code>",
+                     "<code>plans.keep_going</code> sends no turn back", "stay the Stop hook they are",
+                     "<code>goal_status</code>", "<code>goal met:</code>", "With <code>goal</code> unset",
+                     "is not yet seen"):
+            self.assertIn(said, built, said)
+        self.assertIn("goal", phi_settings(), "the key the page names is one phi.json's settings hold")
         self.assertIn("What the desktop app's Plan pane holds.", page.split('id="not-confirmed"', 1)[1])
 
     def test_every_link_of_the_page_leads_somewhere(self):

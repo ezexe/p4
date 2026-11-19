@@ -62,6 +62,8 @@ type Machine = {
   enters?: (text: string) => Promise<void>
   // What `hook.py lookup-check` prints for a call's input: a PreToolUse command hook's output, or nothing.
   check?: (payload: Record<string, unknown>) => unknown
+  // What the goal command prints for a condition, where it is not `Goal set: <condition>`.
+  goalSays?: (condition: string) => string
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -79,6 +81,8 @@ type Seen = {
   submitted: string[]
   // Each run of `hook.py lookup-check`: its command line past the script, its environment and its input.
   checks: { args: string[]; env: Readonly<Record<string, string>> | undefined; payload: Record<string, unknown> }[]
+  // The slash commands it ran, each as a person would type it.
+  ran: { command: string; args: string }[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -100,7 +104,13 @@ function machine(on: On, has: Machine): Seen {
     sent: [],
     submitted: [],
     checks: [],
+    ran: [],
   }
+  on('command.run', (_, e) => {
+    seen.ran.push({ command: e.command, args: e.args })
+
+    return { text: has.goalSays?.(e.args) ?? `Goal set: ${e.args}` }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
@@ -177,6 +187,9 @@ function machine(on: On, has: Machine): Seen {
       if (args[0] === 'rules') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ rules: has.rules ?? '' })}\n`
+      } else if (args[0] === 'goal') {
+        seen.asked.push([...args])
+        stdout = `${JSON.stringify({ set: true })}\n`
       } else {
         seen.looks.push([...args])
         stdout = `${JSON.stringify(has.look === undefined ? ORCHESTRATOR : await has.look(args))}\n`
@@ -779,6 +792,80 @@ test('no turn is started for upkeep while a turn of the session runs', async ($,
 
   expect(seen.looks.length).toBeGreaterThan(2)
   expect(seen.submitted).toEqual([])
+})
+
+// The condition phi.goal_due answers: the line `Done looks like:` of a worker's brief.
+const CONDITION = 'the flush is ported, its test passes and the commit is on main'
+
+test('a look that answers a goal sets it by the goal command, once, and python is told it is set', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = false
+  const seen = machine(on, {
+    look: () => {
+      const answer = isDue ? { ...STARTED, goal: CONDITION, move: MOVE } : STARTED
+      isDue = false
+
+      return answer
+    },
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  expect(seen.ran).toEqual([])
+
+  // The worker's first turn ends, and the look its end asks for answers the goal. The goal command starts the
+  // turn that follows, so no turn is started for what a wait left unmoved.
+  await $.turn.start({ text: 'port the flush', turnId: 't1' })
+  await clock.advance(6_000)
+  isDue = true
+  await $.turn.complete(TURN)
+  await clock.advance(5_000)
+  expect(seen.ran).toEqual([{ command: 'goal', args: CONDITION }])
+  expect(seen.asked).toEqual([['goal', 'set']])
+  expect(seen.submitted).toEqual([])
+
+  await clock.advance(600_000)
+  expect(seen.ran.length).toBe(1)
+})
+
+test('with the setting off a look answers no goal, and the module runs no command', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => STARTED })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  await $.turn.start({ text: 'port the flush', turnId: 't1' })
+  await clock.advance(6_000)
+  await $.turn.complete(TURN)
+  await clock.advance(600_000)
+
+  expect(seen.ran).toEqual([])
+  expect(seen.asked).toEqual([])
+  expect(seen.sent.length).toBe(1)
+})
+
+test('a goal the command did not set is said to the debug log, and python is not told', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = true
+  const seen = machine(on, {
+    look: () => {
+      const answer = isDue ? { ...STARTED, goal: CONDITION } : STARTED
+      isDue = false
+
+      return answer
+    },
+    goalSays: () => 'Goals are unavailable: hooks are disabled.',
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+
+  expect(seen.ran).toEqual([{ command: 'goal', args: CONDITION }])
+  expect(seen.asked).toEqual([])
+  expect(seen.logged.filter(line => line.includes('did not set the goal')).length).toBe(1)
 })
 
 // The rules built into p4-phi as `phi.py rules` prints them, under the head phi.builtin_text gives them.

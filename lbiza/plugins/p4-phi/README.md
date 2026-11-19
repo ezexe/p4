@@ -100,6 +100,15 @@ The `Agent` entry of `PreToolUse` stays a command hook, and so do the `lookup-re
 Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin beside a probe mod from a scratch project: no shell started before any of four Bash calls, `tool.check` settled in 44.5 ms and 28.2 ms for two plain commands with no python started and in 523.3 ms for `git status`, where `hook.py lookup-check` ran, a `tool.check` hook's `deny` reached the model as `Permission to use Bash denied by plugins p4-four-probe, p4-phi, cc-plugin-privacy: <reason>`, and context a function hook added at `classic.PostToolUse` reached the model beside the result.
 Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was handed the tool, the call's id and the tool's arguments and no agent id, and in a `claude -p` run a subagent's call carried `agentId` at `tool.check` and none at `classic.PreToolUse`.
 
+Where a store's `phi.json` sets `goal` true, a worker gets Claude Code's own goal in place of that send-back.
+The line `Done looks like:` of its brief is the goal's condition, and the module sets it once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`.
+No other route sets a goal with nobody at the prompt: `goal.md` names the typed command alone, `SetGoal` is no tool of a session, a brief that begins with `/goal` runs no command since the app writes a started session's first message itself, and a `/goal` in another session's message arrives as text.
+While the goal is set the Stop hook sends no turn back for an open step, since the goal's evaluator does and the two share Claude Code's one count of eight continuations in a row.
+The evaluator "does not call tools, so it can only judge what Claude has already surfaced in the conversation", by `goal.md`, so the checks a script makes stay in the Stop hook: the regression test of a worker's issue, the commits on the default branch and the open issue.
+Claude Code writes a goal's verdict to the transcript after the Stop hooks have answered, so the look that follows a turn's end reads it: a goal met marks the turn done with the evaluator's reason, and a goal met, judged impossible or cleared is over, so the send-back is back.
+With `goal` unset or false none of this happens, and `phi.py goal` prints how a session's goal stands.
+The page `dox/plugin-development.html` holds what the live probes behind this showed.
+
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
 A worker starts with a model and an effort that fit its step, and `phi.child_levels` in `p4.json` sets them for each kind of step.
@@ -256,8 +265,10 @@ Every key is optional, and the file need not exist.
 | `background_chars` | 3000 |
 | `reports_chars` | 6000 |
 | `wait_s` | 2.0 |
+| `goal` | `false` |
 
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.
+`goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition, and stands the Stop hook's send-back down while that goal is set.
 
 ### Environment variables
 
@@ -267,9 +278,9 @@ Each is for one run, a test or one machine's unusual layout.
 | Variable | Unset means | Set |
 | :- | :- | :- |
 | `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record, the origin kept in a session's folder, the report sent to a starter and the turn started for a wait, while retrieval goes on with the origin kept in the store's `served` folder |
-| `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
+| `P4_PHI_RULES`, `P4_PHI_BOOK`, `P4_PHI_GOAL` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
-| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, and with it the turn the module starts for a wait, while a worker's report still goes to its starter |
+| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, and with it the turn the module starts for a wait and the goal a worker is given, while a worker's report still goes to its starter |
 | `P4_PHI_WATCH_S`, `P4_PHI_WATCH_NET` | a look every 5 seconds, or every 30 once nothing has changed for 10 minutes, with GitHub read | a tick in seconds, `0` for no network |
 | `P4_PHI_ISSUES` | as `phi.issues` says | `0` turns the issue loop off for one run, as `phi.issues` false does |
 | `P4_PHI_GH` | the `gh` on PATH, and no issue loop without one | another `gh` |

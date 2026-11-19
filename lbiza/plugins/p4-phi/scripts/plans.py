@@ -1349,7 +1349,10 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, the Stop input lists a
     background task still running, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times
     already, counting the turns the hooks module started in a row before it, or the next step waits on other
-    sessions' reports while `waits` names sessions not yet complete."""
+    sessions' reports while `waits` names sessions not yet complete. '' too while the session's native goal is set,
+    since that goal's evaluator sends the turn back."""
+    if goal_on(s):
+        return ""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
     if not steps:
@@ -1383,6 +1386,75 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
             "that cannot be undone or publishes outward, end the turn with `mcp__ccd_turn__wrap_up` whose question "
             "names it in one line and whose first button is ezexe's go; if the step is done or dropped, update the "
             "task list.")
+
+
+# --- a worker's native goal -------------------------------------------------------------------------------------------
+#
+# Claude Code has a goal of its own, https://code.claude.com/docs/en/goal.md: one completion condition a session works
+# toward, which a small model judges after each turn from the transcript alone, and while it is not met the turn is
+# sent back. Where a store's phi.json sets `goal` true, a worker's brief line `Done looks like:` becomes its goal. The
+# plugin's hooks module sets it once the worker's first turn has ended, with `$.command.run`, the one call seen to set
+# a goal with no dialog, in the desktop app on Claude Code 2.1.326. While that goal is set keep_going sends no turn
+# back: the goal's evaluator does, and the two would share Claude Code's one count of eight continuations in a row.
+# The checks the evaluator cannot make stay phi.py's Stop hook, since it runs nothing and reads no file.
+
+DONE_LINE = re.compile(r"^[ \t>*_-]*Done looks like[*_]*[ \t]*:[*_]*[ \t]*(\S.*)$", re.I | re.M)
+GOAL_CHARS = 4000             # goal.md, "Write an effective condition": "The condition can be up to 4,000 characters."
+GOAL_LEAST = 12               # a shorter line is no condition, so `/goal clear` or one of its aliases is never sent
+GOAL_TAIL = 1 << 20           # the bytes from a transcript's end read for the goal's last row
+
+
+def done_line(text):
+    """What a brief says done looks like: the words after its first line `Done looks like:`, cut to what a goal's
+    condition holds, or '' where it has no such line or the line is too short to be a condition."""
+    m = DONE_LINE.search(text if isinstance(text, str) else "")
+    line = " ".join(m.group(1).split()) if m else ""
+    return line[:GOAL_CHARS] if len(line) >= GOAL_LEAST else ""
+
+
+def goal_on(s):
+    """True while a session's native goal is set: the hooks module set it, and no row of the transcript has shown it
+    met, judged impossible or cleared since."""
+    g = s.get("goal") if isinstance(s, dict) else None
+    return isinstance(g, dict) and bool(g.get("set")) and not g.get("over")
+
+
+def goal_row(path, tail=GOAL_TAIL):
+    """The last goal row of the transcript at `path`, read from its end, or {}: the attachment of type goal_status
+    Claude Code writes when a goal is set, at each evaluation and when the goal is over. Seen with Claude Code 2.1.326
+    and 2.1.328: `met` false with `sentinel` true as the goal is set, `met` false with a `reason` while it is not yet
+    met, `met` true with the reason once achieved, `failed` true once judged impossible, and `met` true with
+    `sentinel` true when the command clears it."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - tail))
+            lines = f.read().split(b"\n")
+    except (OSError, TypeError, ValueError):
+        return {}
+    for raw in reversed(lines[1:] if size > tail else lines):   # a read from the middle opens on part of a line
+        if b'"goal_status"' not in raw:
+            continue
+        try:
+            att = json.loads(raw.decode("utf-8", "replace")).get("attachment")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(att, dict) and att.get("type") == "goal_status":
+            return att
+    return {}
+
+
+def goal_over(row):
+    """How a goal row says its goal ended: 'met' once the evaluator judged the condition to hold, 'failed' once it
+    judged it impossible, 'cleared' where the command cleared it, and '' while the goal is still set."""
+    if not isinstance(row, dict) or not row:
+        return ""
+    if row.get("failed") is True:
+        return "failed"
+    if row.get("met") is True:
+        return "cleared" if row.get("sentinel") is True else "met"
+    return ""
 
 
 # --- the work in flight, as the Stop input lists it -------------------------------------------------------------------

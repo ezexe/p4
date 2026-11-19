@@ -16,6 +16,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - As a message from a worker it started, at the end of each of that worker's turns: the turn's report, which the plugin's hooks module sends and no worker writes. The message opens `phi (p4-phi): this session ended a turn.`, starts a turn when this session is idle, and needs no reply. A report it holds is named beside it and not repeated. A puppeteer's standing worker and coworkers write their own closing message.
 - As a turn the hooks module starts, after a turn that ended on a step waiting on other sessions: a prompt that opens `phi (p4-phi): the turn before this one ended on` and lists what that wait leaves to move, a child's done and unlanded commit or an open step no live child holds. It is p4-phi's prompt and no message of ezexe's, it comes once for a turn, and such turns count against `phi.keep_going_max` with the turns the Stop hook sends back.
+- Where the store's `phi.json` sets `goal` true, as a turn in a worker once its first turn has ended: Claude Code's own goal, whose condition is the line `Done looks like:` of the worker's brief. The plugin's hooks module sets it by the command `/goal <condition>`, the transcript shows `Goal set:` with the condition, and from then on Claude Code's evaluator sends the turn back until the condition holds, in place of p4-phi's Stop hook, as "A worker's goal" below says.
 - Where the project turns `phi.upkeep` on, beside every message of a session that started others: the upkeep lines, which open `phi (p4-phi): upkeep of the sessions this one started` and list each act that is due, as "Upkeep of a session tree" below says.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, added as context at the subagent's start, each subagent getting the lines of the Agent call that launched it, which the hooks module binds to the subagent's id, and beside the result of a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did: a note a sibling session wrote after the launch, said once, by what the subagent's own transcript already holds.
 - At a tool call p4-phi has a check for, from the hooks module, which checks the call before it runs: a refusal, which is the call's error and reads `Permission to use <tool> denied by plugins <names>: <reason>` with p4-phi's line as the reason; a question put to ezexe before the call runs; or a line beside the call's result.
@@ -54,6 +55,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `meta` runs the meta pass over every orchestrator's ledger and prints `meta-ledger.md`.
 - `settle <session> "<what took it up>"` clears a row of unfinished work a session left at its archive.
 - `upkeep on` and `upkeep off` set `phi.upkeep` in the store's `p4.json` and run the settings keeper at once, `upkeep` alone prints whether it is on with every act due and every item closed, `upkeep wait "<the step>" --on <sessionId>` keeps a step that waits on a session this one started, and `upkeep close <id>` closes an open item or wait with `--commit <sha>`, `--note "<why it is left>"` or `--ezexe "<ezexe's words>"`.
+- `goal` prints how this session's native goal stands, asked for, set, or over as met, failed or cleared, with its condition. `goal set` is the hooks module's own word that the goal command set the goal, and no session runs it.
 
 ## Delegation
 
@@ -172,6 +174,20 @@ A queued message, a pin and a session open on ezexe's screen are in none of p4-p
 A puppeteer, at a message carrying its worker's report, is handed those of the worker and its coworkers whose context passed `phi.clear_at` percent, each by Claude Code's last measure of it, which the hooks module keeps in the session's `usage.json`, so no session is asked for its usage; a session with no measure kept is named for one `get_usage` read.
 The worker is the sender the message's wrapper names, by its `from-session` attribute where it has one, as on a report a hooks module sent, and by `from` otherwise, since the origin names no sender.
 
+## A worker's goal
+
+`goal` in the store's `phi/phi.json` turns this on for a project, and it is off by default.
+With it off, a turn with open steps is sent back by p4-phi's Stop hook alone, as everywhere above.
+
+- The condition is the line `Done looks like:` of the brief a worker was started with, whole, to 4,000 characters. A session nobody started gets no goal, and neither does a worker whose brief has no such line.
+- The plugin's hooks module sets the goal once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`. That is the one route seen to set a goal with nobody at the prompt: `SetGoal` is no tool of a session, a brief that begins with `/goal` runs no command, and a `/goal` in another session's message arrives as text.
+- Claude Code then judges the condition after each turn with its small fast model, from the conversation alone, and sends the turn back while it is not met. So write the line as something the worker's own output can show: the test that passes, by name, or the commit on the default branch.
+- While the goal is set p4-phi's Stop hook sends no turn back for an open step, since the two would share Claude Code's one count of eight continuations in a row with no tool call.
+- The checks only a script can make stay in the Stop hook, since the evaluator runs nothing and reads no file: the regression test of the worker's issue, the commits on the default branch and the open issue.
+- The done mark reads the goal's verdict. Claude Code writes the verdict to the transcript after the Stop hooks have answered, so the look that follows the turn's end reads it: a goal met marks the turn done with the evaluator's reason, on the worker's row and on the row its starter reads.
+- A goal met, judged impossible or cleared with `/goal clear` is over, and from then on the Stop hook sends turns back again.
+- A worker that waits on ezexe under a goal is sent back until Claude Code's cap ends the loop, with the goal still set, and the next message to the session, ezexe's or another session's, starts the evaluation again.
+
 ## Upkeep of a session tree
 
 `phi.upkeep` in the store's `p4.json` turns upkeep on for a project, and it is off by default.
@@ -214,6 +230,7 @@ What upkeep cannot do:
 - It does not start, stop or archive sessions itself, and it runs no git command that removes anything: the gate and the upkeep lines hand the exact call or command, and the session makes it. Its hooks module sends one message of its own, a worker's report to its starter, and submits two prompts of its own, the turn after a wait and, with `phi.upkeep` on, the turn for upkeep that is due.
 - It does not stop a session from filing itself in the section "puppeteers", since the app asks nobody: the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
 - It does not compact a session and hands no session a compact question: Claude Code compacts a session by itself as its context fills.
+- It does not judge a goal, pause one or bound one: Claude Code's evaluator judges it, no tool of a session pauses it, and a condition that states no turn or time clause runs until it is met, judged impossible or cleared.
 - It does not start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls.
 - It does not block a puppeteer's edits, and it closes a request addressed to the puppeteer only when that session declines it.
 - It keeps no lock on a file: Claude Code gives each session that writes a git worktree of its own, so p4-phi holds no start and warns of no go for the files another session covers.

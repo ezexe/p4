@@ -1721,6 +1721,161 @@ class KeepGoing(unittest.TestCase):
         self.assertEqual(self.stop("All done."), {})
 
 
+class NativeGoal(unittest.TestCase):
+    """Claude Code's own goal, https://code.claude.com/docs/en/goal.md, in place of the Stop hook's send-back. Where
+    phi.json turns `goal` on, the line `Done looks like:` of a worker's brief is the condition the hooks module sets
+    once the worker's first turn has ended. While the goal is set the Stop hook sends no turn back, and the done mark
+    is read from the row Claude Code leaves in the transcript. With the setting off nothing of it happens."""
+
+    LINE = "the flush is ported, its test passes and the commit is on main."
+    BRIEF = "Port the flush to the new hook.\nFiles: hooks/flush.py\nDone looks like: " + LINE + "\n\nReport then."
+    ON = {"P4_PHI_GOAL": "1"}
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.say(TOP, "Build the two plugins")
+        self.t.record(KID, TOP, title="port the flush")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def brief(self, **env):
+        """The worker's brief arrives, and it lists two steps."""
+        self.assertEqual(self.t.say(KID, self.BRIEF, **env).returncode, 0)
+        r = self.t.hook("plan", KID, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": items("Port the flush", "Run its test", at=0),
+                                      "tool_response": "Plan updated."}, **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def stop(self, report, uuid, **env):
+        r = self.t.stop(KID, self.BRIEF, (), report=report, uuid=uuid, **env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout) if r.stdout.strip() else {}
+
+    def phi(self, *args, **env):
+        """One command of phi.py as the plugin's hooks module runs it for the worker -> its last line, parsed."""
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), *args], capture_output=True,
+                       text=True, env=self.t.env(KID, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0", **env),
+                       cwd=self.t.proj, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def leaves(self, uuid, **row):
+        """Claude Code writes a goal row at the end of the transcript of the turn `uuid`, as it does once the Stop
+        hooks of a Stop have answered."""
+        with open(os.path.join(self.t.tmp, KID + uuid + ".jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "attachment", "attachment": {"type": "goal_status", "condition": self.LINE,
+                                                                     **row}}) + "\n")
+
+    def given_a_goal(self):
+        """The first turn ended, the look answered the goal, and the module said the command set it."""
+        self.brief(**self.ON)
+        self.stop("I ported half the flush.", "u1", **self.ON)
+        self.stop("Still porting.", "u1", **self.ON)
+        self.stop("Still porting.", "u1", **self.ON)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertEqual(self.phi("goal", "set"), {"set": True})
+
+    def test_a_briefs_line_is_read_whole_and_a_goal_row_says_how_its_goal_ended(self):
+        self.assertEqual(plans.done_line(self.BRIEF), self.LINE)
+        self.assertEqual(plans.done_line("- **Done looks like:** the suite   passes\nmore"), "the suite passes")
+        self.assertEqual(plans.done_line("Done looks like: " + "x" * 5000), "x" * plans.GOAL_CHARS)
+        for none in ("Done looks like: clear", "what done looks like is the suite passing", "", None):
+            self.assertEqual(plans.done_line(none), "", none)      # too short to be a condition, or no such line
+        self.assertEqual(plans.goal_over({"met": True, "reason": "the suite passed"}), "met")
+        self.assertEqual(plans.goal_over({"met": False, "failed": True, "reason": "it cannot hold"}), "failed")
+        self.assertEqual(plans.goal_over({"met": True, "sentinel": True}), "cleared")
+        for still_set in ({"met": False, "sentinel": True}, {"met": False, "reason": "not yet"}, {}, None):
+            self.assertEqual(plans.goal_over(still_set), "", still_set)
+        path = os.path.join(self.t.tmp, "rows.jsonl")
+        write(path, json.dumps({"type": "user", "message": {"content": 'a "goal_status" in a message is no row'}}))
+        self.assertEqual(plans.goal_row(path), {})
+        self.assertEqual(plans.goal_row(os.path.join(self.t.tmp, "none.jsonl")), {})
+        write(path, "\n".join(json.dumps({"type": "attachment", "attachment": {"type": "goal_status", **r}})
+                              for r in ({"met": False, "sentinel": True}, {"met": False, "reason": "not yet"},
+                                        {"met": True, "reason": "the suite passed", "iterations": 2})) + "\n"
+              + json.dumps({"type": "system", "subtype": "stop_hook_summary"}) + "\n")
+        self.assertEqual(plans.goal_row(path).get("reason"), "the suite passed", "the last one, from the end")
+        self.assertEqual(plans.goal_row(path, tail=40), {}, "a tail that holds no whole goal row")
+
+    def test_with_the_setting_off_nothing_of_the_goal_happens(self):
+        self.brief()
+        self.assertNotIn("doneLine", self.t.session(KID))
+        self.assertEqual(self.stop("I ported half the flush.", "u1").get("decision"), "block", "sent back as before")
+        self.assertNotIn("goal", self.phi("look"))
+        s = self.t.session(KID)
+        self.assertNotIn("goal", s)
+        self.assertNotIn("transcript", s)
+        self.assertEqual(self.phi("goal", "set"), {"set": False}, "no goal was asked for, so none is marked set")
+        self.assertEqual(self.stop("Still porting.", "u2").get("decision"), "block")
+
+    def test_the_done_line_is_the_goal_the_look_answers_once_the_first_turn_has_ended(self):
+        self.brief(**self.ON)
+        self.assertEqual(self.t.session(KID).get("doneLine"), self.LINE)
+        self.assertNotIn("goal", self.phi("look", **self.ON), "no turn has ended yet")
+        out = self.stop("I ported half the flush.", "u1", **self.ON)
+        self.assertEqual(out.get("decision"), "block", "no goal is set yet, so the Stop hook still sends back")
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.LINE)
+        self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
+        goal = self.t.session(KID)["goal"]
+        self.assertEqual(goal["condition"], self.LINE)
+        self.assertNotIn("set", goal)
+        self.assertEqual(self.stop("Still porting.", "u2", **self.ON).get("decision"), "block",
+                         "asked for and not set: the command may have failed, so the send-back stays")
+        self.assertNotIn("goal", self.phi("look", "--folder", **self.ON), "the folder question answers no goal")
+
+    def test_a_session_nobody_started_and_a_brief_with_no_line_get_no_goal(self):
+        self.t.say(TOP, "Port it.\nDone looks like: " + self.LINE, **self.ON)
+        self.assertNotIn("doneLine", self.t.session(TOP), "an orchestrator's own request is no worker's brief")
+        self.assertEqual(self.t.say(KID, "Port the flush to the new hook.", **self.ON).returncode, 0)
+        self.stop("Ported.", "u1", **self.ON)
+        self.assertNotIn("goal", self.phi("look", **self.ON))
+
+    def test_while_the_goal_is_set_the_stop_hook_sends_no_turn_back(self):
+        self.given_a_goal()
+        self.assertTrue(self.t.session(KID)["goal"].get("set"))
+        self.assertEqual(self.stop("Working toward the goal.", "g1", **self.ON), {},
+                         "open steps, and the goal's evaluator is the one that sends the turn back")
+        self.assertEqual(self.stop("Working toward the goal.", "g1"), {}, "the goal is set whatever the setting says")
+        self.leaves("g1", met=False, reason="the test has not run")
+        self.assertNotIn("goal", self.phi("look", **self.ON))
+        self.assertNotIn("over", self.t.session(KID)["goal"], "not yet met: still set")
+        self.assertEqual(self.stop("Still working.", "g1", **self.ON), {})
+
+    def test_a_goal_met_marks_the_turn_done_from_the_row_claude_code_leaves(self):
+        self.given_a_goal()
+        self.assertEqual(self.stop("The flush is ported and its test passes.", "g1", **self.ON), {})
+        self.assertFalse(self.t.turns(KID)[-1].get("done"), "the Stop hook runs ahead of the verdict")
+        self.leaves("g1", met=True, reason="The test ran and passed, and the commit is on main.", iterations=3)
+        self.phi("look", **self.ON)
+        goal = self.t.session(KID)["goal"]
+        self.assertEqual(goal.get("over"), "met")
+        turns = self.t.turns(KID)
+        self.assertEqual(turns[-1]["done"], "goal met: The test ran and passed, and the commit is on main.")
+        self.assertEqual(len(turns), 2, "the goal turn's row is marked, and no row is added")
+        told = phi.latest_reports(phi.load_reports(self.t.p4, TOP))
+        self.assertEqual([r["turn"].get("done") for r in told if r["sessionId"] == KID], [turns[-1]["done"]],
+                         "the row its starter reads says done too")
+        self.assertEqual(self.stop("One more thing.", "u9", **self.ON).get("decision"), "block",
+                         "the goal is over, so a later turn with open steps is sent back again")
+
+    def test_a_goal_judged_impossible_or_cleared_is_over_and_marks_nothing_done(self):
+        for row, over in (({"met": False, "failed": True, "reason": "No test exists."}, "failed"),
+                          ({"met": True, "sentinel": True}, "cleared")):
+            with self.subTest(over=over):
+                self.tearDown()
+                self.setUp()
+                self.given_a_goal()
+                self.assertEqual(self.stop("I cannot finish this.", "g1", **self.ON), {})
+                self.leaves("g1", **row)
+                self.phi("look", **self.ON)
+                self.assertEqual(self.t.session(KID)["goal"].get("over"), over)
+                self.assertFalse(self.t.turns(KID)[-1].get("done"))
+                self.assertEqual(self.stop("Next.", "u9", **self.ON).get("decision"), "block")
+
+
 class WaitsOnReports(unittest.TestCase):
     """A step that waits on other sessions' reports stays with the orchestrator, is handed to no child, and
     does not send the turn back while a worker or a session this one messaged is running or has an

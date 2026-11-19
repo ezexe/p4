@@ -1824,8 +1824,15 @@ class Wiring(unittest.TestCase):
 
     def test_the_words_given_to_a_session_hold_no_banned_name(self):
         """Every string the session modules can hand a session: each literal and f-string part, docstrings, keys and
-        regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense."""
+        regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense.
+        goal was p4-phi's own word for a session's task until 0.3.0 took the app's words, and it stays banned as
+        that. It is also Claude Code's own word for its goal, https://code.claude.com/docs/en/goal.md, so phi.py may
+        hold it in the strings listed here, each of which names that goal, and in no other."""
         import ast
+        native = {"goal", "GOAL", "goal met: ", "goal ", "no goal was set for this session",
+                  ": `goal` is off in the store's phi.json",
+                  "set is the hooks module's word that the goal command set the goal; none prints how the session's "
+                  "native goal stands"}
         for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
                      "gaps.py"):
             tree, skip = ast.parse(read(os.path.join(SRC, name))), set()
@@ -1841,7 +1848,8 @@ class Wiring(unittest.TestCase):
                                                                                             "compile"):
                     skip.add(id(n.args[0]))
             given = "\n".join(n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
-                              and isinstance(n.value, str) and id(n) not in skip).lower()
+                              and isinstance(n.value, str) and id(n) not in skip
+                              and not (name == "phi.py" and n.value in native)).lower()
             for word in ("ghost", "memo", "rollup", "node", "play", "steer", "goal") + (
                     ("owner",) if name != "puppeteer.py" else ()):
                 self.assertNotRegex(given, rf"\b{word}s?\b", f"{word} in {name}")

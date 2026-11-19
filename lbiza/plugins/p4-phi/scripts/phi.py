@@ -28,10 +28,12 @@ The hooks, each in its h_ function:
 
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
-own: it prints the text of the system prompt's section as one JSON line.
+own: it prints the text of the system prompt's section as one JSON line. `goal` prints how a session's native goal
+stands, and `goal set` is the hooks module's word that the goal command set it.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
-`background_chars`, `reports_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
+`background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal and is off
+unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
@@ -72,6 +74,7 @@ REPORTS = True
 TURNS = True
 BOOK = True
 RULES = True
+GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
 # saves the output to a file in the session directory. It replaces the output with the file path and a preview of up
@@ -100,7 +103,8 @@ TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
-            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
+            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
+            "goal": "GOAL"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -233,6 +237,8 @@ def configure(home):
             globals()[name] = d[key]
     if os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
+    if os.environ.get("P4_PHI_GOAL") in ("0", "1"):
+        globals()["GOAL"] = os.environ["P4_PHI_GOAL"] == "1"
     if "book" not in d and isinstance(d.get("new_task"), bool):   # the key's name before book, read as an alias
         globals()["BOOK"] = d["new_task"]
     for name in ("P4_PHI_BOOK", "P4_PHI_NEW_TASK"):  # P4_PHI_BOOK first; the older name as its alias
@@ -2289,6 +2295,8 @@ def h_user_prompt_submit(payload):
     if req and not s.get("task"):
         s["task"] = cut(req, TASK_CHARS)
         s["taskAt"] = now()
+        if GOAL and spawned_from(s) and plans.done_line(req):   # the whole line, which the cut task may not hold
+            s["doneLine"] = plans.done_line(req)
     issue_line = ""
     if spawned_from(s) and not load_turns(me.home, s["sessionId"]) and not s.get("issue"):
         issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
@@ -2508,6 +2516,8 @@ def h_stop(payload):
     s.pop("done", None)
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
+    if GOAL and payload.get("transcript_path"):
+        s["transcript"] = str(payload["transcript_path"])   # where goal_verdict reads the goal's last row
     save_session(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
@@ -2705,6 +2715,91 @@ def last_turn_row(home, sid):
     """A session's latest turn row, read from the end of its turns.jsonl, or {}."""
     rows = read_rows(os.path.join(session_dir(home, sid), "turns.jsonl"), TURN_TAIL)
     return rows[-1] if rows else {}
+
+
+# --- a worker's native goal: the condition the hooks module sets, and the verdict Claude Code leaves -------------------
+
+def goal_due(home, sid):
+    """The condition the hooks module sets as the session's native goal, or '': the line `Done looks like:` of the
+    brief of a session another session started, once its first turn has ended, where phi.json turns `goal` on. It is
+    answered once for a session, and kept on session.json as `goal` with when it was asked for."""
+    s = load_session(home, sid) if GOAL and sid else {}
+    if not s.get("sessionId") or not spawned_from(s) or s.get("goal") or not s.get("doneLine"):
+        return ""
+    if s.get("doneRetired") or s.get("archived") or not last_turn_row(home, s["sessionId"]):
+        return ""
+    s["goal"] = {"condition": s["doneLine"], "asked": now()}
+    save_session(home, s)
+    return s["doneLine"]
+
+
+def goal_set(home, sid):
+    """The hooks module's word that the goal command answered `Goal set`: from here the Stop hook sends no turn of
+    the session back, by plans.goal_on. True when a goal that was asked for is marked set."""
+    s = load_session(home, sid) if sid else {}
+    g = s.get("goal")
+    if not isinstance(g, dict) or g.get("set"):
+        return False
+    g["set"] = now()
+    save_session(home, s)
+    return True
+
+
+def goal_verdict(home, sid):
+    """Reads how a session's native goal stands from the last goal row of its transcript. Claude Code writes that row
+    after the Stop hooks of its Stop have answered, so no Stop hook reads it, and the look a turn's end asks for
+    does. A goal met marks the session's latest turn done with the evaluator's reason, on its own row and on the row
+    its starter reads. A goal met, judged impossible or cleared is over, and the Stop hook sends turns back again.
+    Returns how it ended, '' while it is still set or where the session has none."""
+    s = load_session(home, sid) if sid else {}
+    if not plans.goal_on(s):
+        return ""
+    row = plans.goal_row(s.get("transcript") or "")
+    over = plans.goal_over(row)
+    if not over:
+        return ""
+    reason = cut(clean(row.get("reason")), 300)
+    s["goal"].update({"over": over, "overAt": now()}, **({"reason": reason} if reason else {}))
+    save_session(home, s)
+    last = last_turn_row(home, s["sessionId"]) if over == "met" else {}
+    if last and not last.get("done"):
+        last["done"] = cut(clean("goal met: " + (reason or str(s["goal"].get("condition") or ""))), 400)
+        append_line(os.path.join(session_dir(home, s["sessionId"]), "turns.jsonl"), last)
+        above = spawned_from(s)
+        append_line(reports_path(home, above),
+                    {"time": last.get("time") or now(), "sessionId": s["sessionId"], "title": name_of(s), "turn": last})
+        for node in (above, s["sessionId"]):       # the parent's anchor and both pages say done from here
+            relay.make_anchor(home, node, last.get("time") or now())
+        render_page(home, s["sessionId"])
+        render_page(home, above)
+    return over
+
+
+def goal_look(a, me):
+    """`phi.py look` where phi.json turns `goal` on: puppeteer.look's answer, and with it `goal`, the condition the
+    hooks module sets as the session's native goal, where one is due. The verdict of a goal already set is read
+    first, at every look."""
+    out = puppeteer.look(me.home, me.id, net=a.net, folder_only=False)
+    due = ""
+    if not out.get("off"):
+        try:
+            goal_verdict(me.home, safe_id(me.id))
+            due = goal_due(me.home, safe_id(me.id))
+        except Exception as e:  # noqa: BLE001
+            log_failure("goal", {}, e)
+    if due:
+        out["goal"] = due
+    sys.stdout.write(json.dumps(out, ensure_ascii=False, sort_keys=True) + "\n")
+    return 0
+
+
+def goal_text(s):
+    """What `phi.py goal` prints: how the session's native goal stands, with its condition."""
+    g = s.get("goal") if isinstance(s.get("goal"), dict) else None
+    if not g:
+        return "no goal was set for this session" + ("" if GOAL else ": `goal` is off in the store's phi.json")
+    state = f"over, {g['over']}" if g.get("over") else ("set" if g.get("set") else "asked for and not set")
+    return f"goal {state}: {g.get('condition')}" + (f"\n{g['reason']}" if g.get("reason") else "")
 
 
 def ended_turn(home, sid):
@@ -3452,7 +3547,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep"):
+                 "request", "proof", "controls", "gaps", "upkeep", "goal"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3466,6 +3561,10 @@ def main(argv=None):
             p.add_argument("command", help="the regression test that proves this session's issue fixed, run from here")
         if name == "show":
             p.add_argument("which", nargs="?", default="")
+        if name == "goal":
+            p.add_argument("act", nargs="?", default="", choices=("", "set"),
+                           help="set is the hooks module's word that the goal command set the goal; none prints how "
+                                "the session's native goal stands")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
@@ -3517,6 +3616,14 @@ def main(argv=None):
         return 2
     configure(me.home)
     try:
+        if a.cmd == "look" and GOAL and not a.folder:   # a worker's native goal rides the answer of its look
+            return goal_look(a, me)
+        if a.cmd == "goal":                        # ahead of ensure_session: it makes no session's folder either
+            if a.act == "set":
+                sys.stdout.write(json.dumps({"set": goal_set(me.home, safe_id(me.id))}) + "\n")
+            else:
+                print(goal_text(load_session(me.home, safe_id(me.id)) if me.id else {}))
+            return 0
         if a.cmd in puppeteer.COMMANDS:
             return puppeteer.command(a, me)
         if a.cmd == "tree":

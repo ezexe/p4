@@ -361,6 +361,17 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <li>Nothing else of p4-phi is covered. The mirror of the task list, a session's task, the turn record and the reports, the request ledger, the board, the watcher's ledger, the state pages, the steps that wait and the follow-through items all reach past one session, and a goal is set, judged and shown inside one.</li>
 <li>The plan copies nothing p4-phi builds. p4-phi puts no session in plan mode, and the list it mirrors is the app's <code>update_plan</code> list.</li>
 </ul>
+<h3 id="the-goal-behind-its-setting">The goal behind its setting</h3>
+<ul>
+<li>Since a probe showed a goal set with no click, p4-phi sets one where a project asks for it: <code>goal</code> in the store's <code>phi/phi.json</code>, false unless set true, with <code>P4_PHI_GOAL</code> as <code>0</code> or <code>1</code> for one run. With it off nothing below happens and the Stop send-back works as before.</li>
+<li>The condition is the line <code>Done looks like:</code> of a worker's brief, kept whole from its first message. A session nobody started gets no goal, and neither does a brief with no such line.</li>
+<li>The worker's hooks module sets the goal once its first turn has ended: the look that turn's end asks for answers the condition once, the module runs <code>$.command.run({ command: 'goal', args })</code>, and when the command answers <code>Goal set</code> it tells <code>phi.py goal set</code>.</li>
+<li>While the goal is set <code>plans.keep_going</code> sends no turn back, since the goal's evaluator does and the two share the one count of eight. A goal the command did not set stands nothing down.</li>
+<li>The checks only a script can make stay the Stop hook they are: the regression test of a worker's issue, the commits on the default branch and the open issue run in <code>phi.py</code>'s Stop hook under a goal as without one.</li>
+<li>The done mark reads the goal's verdict. The look after a turn's end reads the last <code>goal_status</code> row of the transcript: a goal met marks the turn done with the evaluator's reason, on the worker's row and on the row its starter reads, and a goal met, judged impossible or cleared is over, so the send-back is back.</li>
+<li>Seen on 2026-11-19 with Claude Code 2.1.328 and the development copy, in a scratch project whose records made the session a worker: with <code>goal</code> true the first turn wrote a file and ended, the module ran <code>/goal</code> with the brief's line, the row <code>Goal set:</code> followed with the origin <code>{ kind: 'plugin', name: 'p4-phi' }</code>, the evaluator judged the goal met at the next Stop, and the look marked the turn <code>goal met:</code> with the evaluator's reason on both rows. With <code>goal</code> unset the same brief ran one turn and left no goal row.</li>
+<li>That run was a <code>claude -p</code> session held open on its input, since a run that exits at its first turn's end is gone before the look answers. The same goal in a worker of the desktop app, set by the installed copy, is not yet seen.</li>
+</ul>
 </section>
 <section id="not-confirmed" aria-labelledby="not-confirmed-h">
 <h2 id="not-confirmed-h">Not confirmed</h2>
