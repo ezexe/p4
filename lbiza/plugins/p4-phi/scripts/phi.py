@@ -489,7 +489,7 @@ def _save_session(home, s):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
-              "handedFrom", "effort"):
+              "handedFrom", "effort", "kidCommits"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
@@ -693,6 +693,8 @@ def request_of(prompt):
     text = NOTES_TAIL.sub("", text).strip()
     if text.startswith("<") and not PASTED.match(text):
         return ""                                  # Claude Code speaking, whatever its body quotes
+    if plans.woken(text):
+        return ""                                  # the plugin's hooks module speaking: the prompt of a turn it started
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
     # with their own words: a notification or another session's message that quotes a pasted block stays Claude Code's.
     return PASTED.sub(lambda m: m.group(1), text).strip()
@@ -2198,6 +2200,9 @@ def h_user_prompt_submit(payload):
     req = request_of(payload.get("prompt"))
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
+    s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
+    if not plans.woken(payload.get("prompt")):
+        s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
     plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
@@ -2498,15 +2503,16 @@ def h_stop(payload):
     now_s = load_session(me.home, s["sessionId"]) or s
     if now_s.get("doneRetired") or now_s.get("archived"):
         return None
-    waits = []
+    waits, waited = [], []
+    step = None if spawned_from(now_s) else plans.waiting_step(me.home, now_s["sessionId"])
     if not spawned_from(now_s) and controls.is_puppeteer(now_s, me.store):
         waits = controls.waited_on(now_s)          # its turn may end on a step that waits on its controlled sessions
         RAN["waits_on"] = len(waits)
         controls.board(me.home, now_s)
     named = ""
     if not waits and not spawned_from(now_s):      # a plain orchestrator waiting on the sessions of its tree
-        step = plans.waiting_step(me.home, now_s["sessionId"])
-        waits = waited_on(me.home, now_s, turn.get("calls") or []) if step else []
+        pairs = waited_on(me.home, now_s, turn.get("calls") or [], ids=True) if step else []
+        waits, waited = [w for _, w in pairs], [k for k, _ in pairs]
         if waits:
             RAN["waits_on"] = len(waits)
             named = (f"phi (p4-phi): this turn ends on step {step.get('addr')}, "
@@ -2519,6 +2525,8 @@ def h_stop(payload):
                            background=payload.get("background_tasks") if isinstance(payload.get("background_tasks"),
                                                                                      list) else plans.in_flight(now_s))
     why = "\n\n".join(p for p in (held, why) if p)   # the regression test's verdict, then the open steps
+    # a turn that ends on a waiting step: kept for the look that follows, which names what the wait leaves to move
+    wait_kept(me.home, now_s["sessionId"], row["id"], step if waits and not why else None, waited)
     if why:                                        # open steps the session tree can settle send the turn back
         RAN["kept_going"] = True
         return {"decision": "block", "reason": why}
@@ -2554,10 +2562,10 @@ def messaged(calls):
     return out
 
 
-def waited_on(home, s, calls=()):
-    """The titles of the sessions an orchestrator's waiting step still waits on: each worker or session it
-    messaged that is inside a turn, or whose report it has not been handed yet. The sessions it messaged are kept on
-    its record."""
+def waited_on(home, s, calls=(), ids=False):
+    """The titles of the sessions an orchestrator's waiting step still waits on, or with `ids` each as its id and
+    its title: each worker or session it messaged that is inside a turn, or whose report it has not been handed yet.
+    The sessions it messaged are kept on its record."""
     sid = s["sessionId"]
     sent = [x for x in s.get("messaged") or [] if isinstance(x, str)]
     new = [safe_id(x) for x in messaged(calls) if safe_id(x) not in sent]
@@ -2574,18 +2582,22 @@ def waited_on(home, s, calls=()):
         if not ks.get("sessionId") or relay.gone(home, ks):
             continue
         if puppeteer.working(home, k) or k in unread:
-            out.append(title_of(ks))
+            out.append((k, title_of(ks)) if ids else title_of(ks))
     return out
 
 
-# --- what the hooks module is answered: a worker's starter ----------------------------------------------------------
+# --- what the hooks module is answered: a worker's starter, and the work a wait leaves to move ----------------------
 #
-# hooks/register.ts runs `phi.py look` for a session and acts on a key of its answer, which no command hook could.
+# hooks/register.ts runs `phi.py look` for a session and acts on two keys of its answer, which no command hook could.
 # `starter` is where the report of a worker's turn goes, by `$.session.send`: plugins/mods/api.md, "Send and receive
 # messages between sessions", says the call "makes the same delivery the SendMessage tool makes", and
 # cross-session-messaging.md, "Message delivery", that "When the receiving session is idle, Claude Code starts a new
-# turn with the message." A live probe between two desktop sessions on Claude Code 2.1.326 showed it, as
-# ezexe/p4#157 records.
+# turn with the message." `move` is the prompt of a turn the module starts in a session whose turn ended on a wait
+# while other work of it can move, ezexe/p4#193. A live probe between two desktop sessions on Claude Code 2.1.326
+# showed both, as ezexe/p4#157 records.
+
+TURN_TAIL = 65536             # bytes from the end of a turns.jsonl that hold its latest row
+BESIDES_MAX = 8               # children with unlanded work named beside a wait
 
 
 def starter_cli(home, s):
@@ -2601,6 +2613,122 @@ def starter_cli(home, s):
         held = [c for c in load_session(home, above).get("cliSessionIds") or [] if isinstance(c, str) and c]
         cli = held[-1] if held else ""
     return cli
+
+
+def wait_kept(home, sid, turn_id, step, waited=()):
+    """At a turn's end: the waiting step the turn ended on, kept on session.json as `waitEnded` with the turn's id
+    and the sessions waited on, and taken off where the turn ended on none. It is written under the session's lock
+    and straight to the file, as plans.keep_going writes its count."""
+    path = os.path.join(session_dir(home, sid), "session.json")
+    with relay.locked(path):
+        disk = relay._read_json(path)
+        if not disk.get("sessionId") or (not step and "waitEnded" not in disk):
+            return
+        disk.pop("waitEnded", None)
+        if step:
+            disk["waitEnded"] = {"turn": str(turn_id or ""), "step": str(step.get("addr") or ""),
+                                 "waited": [str(k) for k in waited][:40], "time": now()}
+        relay._write_json(path, disk)
+
+
+def last_turn_row(home, sid):
+    """A session's latest turn row, read from the end of its turns.jsonl, or {}."""
+    rows = read_rows(os.path.join(session_dir(home, sid), "turns.jsonl"), TURN_TAIL)
+    return rows[-1] if rows else {}
+
+
+def ended_turn(home, sid):
+    """The id of the turn a session's last Stop hook ended, when no prompt reached the session since, else ''. It is
+    read from the session's log, as puppeteer.working reads it. A turn that ended on an error or with the session
+    logs no turn id, so it answers ''."""
+    last = {}
+    for r in read_rows(os.path.join(session_dir(home, sid), "log.jsonl"), 256 * 1024):
+        if r.get("hook") in ("user-prompt-submit", "stop"):
+            last = r
+    return str(last.get("turn") or "") if last.get("hook") == "stop" else ""
+
+
+def movable_besides(home, s, step, waited):
+    """What a session whose turn ended on a waiting step can still move, one line each: each child it does not wait
+    on whose latest turn is done with a commit that closes an issue and has not landed, as issues.landed reads
+    origin's branches, and each other open step that depends on no wait. A step that lands or checks work, waits on
+    sessions or on ezexe, is a matter of ezexe's authority, or that a live child holds as its root step depends on
+    the wait and is not named, and neither is a start request, which only ezexe's press starts. At most BESIDES_MAX
+    children are named, and a child's closing commits are kept on the record as kidCommits by its latest turn, so a
+    child is read again only once it reports again."""
+    sid, out = s["sessionId"], []
+    kids = [(k, ks) for k, ks in relay._sessions(home).items()
+            if relay._parent(ks) == sid and not ks.get("stale") and not relay.archived_in_app(ks)]
+    held = {str(ks.get("rootStep") or "") for _, ks in kids if not relay.gone(home, ks)} - {""}
+    kept = dict(s.get("kidCommits") or {}) if isinstance(s.get("kidCommits"), dict) else {}
+    seen = dict(kept)
+    for k, ks in kids:                             # a child counted as finished may still hold unlanded work
+        if len(out) >= BESIDES_MAX:
+            break
+        last = last_turn_row(home, k)
+        if k in waited or not last.get("done"):
+            continue
+        mark = f"{last.get('id')}@{last.get('time')}"
+        was = kept.get(k) if isinstance(kept.get(k), dict) and kept[k].get("mark") == mark else None
+        if was and was.get("landed"):              # every closing commit of this turn was found landed before
+            continue
+        commits = was["commits"] if was else [list(c) for c in relay.closing_commits(home, k, ks)]
+        late = [c for c in commits if not issues.landed(c[0], c[1], c[3])]
+        seen[k] = {"mark": mark, "landed": not late, "commits": commits if late else []}
+        if late:
+            path, sha, subject, closes = late[0]
+            out.append(f"\"{title_of(ks)}\" reported done, and its commit {sha} \"{cut(clean(subject), 80)}\", "
+                       f"which closes {', '.join(closes)}, is on no branch of origin: land it")
+    if seen != kept:
+        path = os.path.join(session_dir(home, sid), "session.json")
+        with relay.locked(path):
+            disk = relay._read_json(path)
+            if disk.get("sessionId"):
+                disk["kidCommits"] = dict(list(seen.items())[-200:])
+                relay._write_json(path, disk)
+    for x in plans.load(home, sid).get("steps") or []:
+        if x.get("status") == "completed" or x.get("addr") == step.get("addr") or str(x.get("addr")) in held:
+            continue
+        text = str(x.get("content") or "")
+        if plans.AWAITS.search(text) or plans.top_stays(text) or plans.AUTHORITY.search(text) \
+                or plans.WAITS_ON_OWNER.search(text):
+            continue
+        out.append(f"step {x.get('addr')}, \"{cut(clean(x.get('content')), 100)}\", depends on no wait: do it")
+    return out
+
+
+def move_text(home, sid):
+    """What `phi.py look` answers as `move`, the prompt of a turn the hooks module starts: the work of a session
+    that its last turn's wait left unmoved, '' for none. It is answered once for a turn, and only while the turn the
+    Stop hook kept as `waitEnded` is the last one that ended and no prompt has reached the session since. Each
+    answer counts as one wake on `woke`, and none is given once the wakes in a row and the Stop hook's send-backs of
+    that turn together reach plans.KEEP_GOING_MAX."""
+    s = load_session(home, sid)
+    wait = s.get("waitEnded") if isinstance(s.get("waitEnded"), dict) else {}
+    turn = str(wait.get("turn") or "")
+    if not turn or wait.get("moved") or relay.gone(home, s) or ended_turn(home, sid) != turn:
+        return ""
+    if plans.wakes(s) + plans.sent_back(s, turn) >= plans.KEEP_GOING_MAX:
+        return ""
+    step = next((x for x in plans.load(home, sid).get("steps") or []
+                 if str(x.get("addr")) == str(wait.get("step")) and x.get("status") != "completed"), None)
+    besides = movable_besides(home, s, step, [str(k) for k in wait.get("waited") or []]) if step else []
+    if not besides:
+        return ""
+    path = os.path.join(session_dir(home, sid), "session.json")
+    with relay.locked(path):
+        disk = relay._read_json(path)
+        held = disk.get("waitEnded") if isinstance(disk.get("waitEnded"), dict) else {}
+        if str(held.get("turn") or "") != turn or held.get("moved"):
+            return ""                              # another look answered it, or a turn began meanwhile
+        held["moved"] = now()
+        disk["woke"] = {"n": plans.wakes(disk) + 1, "time": now()}
+        relay._write_json(path, disk)
+    return (f"{plans.WAKE_MARK} step {step.get('addr')}, \"{cut(clean(step.get('content')), 100)}\", which waits on "
+            "other sessions, and a wait stops only the work that depends on it. p4-phi's hooks module started this "
+            "turn, and ezexe sent no message. Move these, then end the turn on the wait:\n"
+            + "\n".join(f"- {b}" for b in besides[:12])
+            + (f"\n- and {len(besides) - 12} more" if len(besides) > 12 else ""))
 
 
 RAN = {}       # what the running hook learned, for its line in the session's log

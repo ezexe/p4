@@ -1302,11 +1302,40 @@ def waiting_step(home, sid):
     return nxt if awaits_sessions(nxt.get("content")) or AWAITS.search(str(nxt.get("content") or "")) else None
 
 
+# A Stop hook can send back only the turn that is ending. A turn that ends on a step waiting on other sessions is
+# let end, and work that does not depend on that wait may be left unmoved, ezexe/p4#193. The plugin's hooks module
+# starts a turn for it with `$.prompt.submit`, of which plugins/mods/api.md, "Start a turn from a background job",
+# says "The call waits until the session is idle and then starts a new turn." The prompt of such a turn opens with
+# WAKE_MARK, which a UserPromptSubmit hook is given as submitted, so it is told from ezexe's words by its opening.
+# Each wake is counted on session.json as `woke`, until a turn begins that no wake started, and it shares
+# KEEP_GOING_MAX with the Stop hook's send-backs of the turn it follows.
+
+WAKE_MARK = "phi (p4-phi): the turn before this one ended on"
+
+
+def woken(prompt):
+    """True for the prompt of a turn the hooks module started for work a wait left unmoved."""
+    return str(prompt or "").lstrip().startswith(WAKE_MARK)
+
+
+def wakes(disk):
+    """How many turns in a row the hooks module started for a session, by its session.json."""
+    w = disk.get("woke") if isinstance(disk, dict) else None
+    return int(w.get("n") or 0) if isinstance(w, dict) else 0
+
+
+def sent_back(disk, turn_id):
+    """How many times the Stop hook sent back the turn `turn_id`, by the session's session.json."""
+    sent = disk.get("keptGoing") if isinstance(disk, dict) and isinstance(disk.get("keptGoing"), dict) else {}
+    return int(sent.get("n") or 0) if sent.get("turn") == str(turn_id or "") else 0
+
+
 def keep_going(home, s, report, calls, turn_id, active=False, waits=(), background=()):
     """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
     step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, the Stop input lists a
-    background task still running, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times already, or the
-    next step waits on other sessions' reports while `waits` names sessions not yet complete."""
+    background task still running, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times
+    already, counting the turns the hooks module started in a row before it, or the next step waits on other
+    sessions' reports while `waits` names sessions not yet complete."""
     p = load(home, s["sessionId"])
     steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
     if not steps:
@@ -1326,10 +1355,9 @@ def keep_going(home, s, report, calls, turn_id, active=False, waits=(), backgrou
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
-    sent = disk.get("keptGoing") if isinstance(disk.get("keptGoing"), dict) else {}
     key = str(turn_id or "")
-    n = int(sent.get("n") or 0) if sent.get("turn") == key else 0
-    if n >= KEEP_GOING_MAX or (active and not key):
+    n = sent_back(disk, key)
+    if n + wakes(disk) >= KEEP_GOING_MAX or (active and not key):
         return ""                                  # a turn with no id cannot be counted: never sent back twice
     disk["keptGoing"] = {"turn": key, "n": n + 1}
     relay._write_json(path, disk)

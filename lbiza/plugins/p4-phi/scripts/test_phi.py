@@ -247,6 +247,27 @@ class Requests(unittest.TestCase):
         self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>"), "")
         self.assertEqual(phi.request_of(None), "")
 
+    def test_the_prompt_of_a_turn_the_hooks_module_started_is_no_request_of_ezexes(self):
+        """ezexe/p4#193: a UserPromptSubmit hook is given a prompt that a plugin's hooks module submitted as the
+        module wrote it, with no tag around it, as a live probe on Claude Code 2.1.326 showed. p4-phi's own opens
+        with plans.WAKE_MARK, and every reader of a prompt tells it from ezexe's words by that opening. A message
+        that quotes those words further in is still ezexe's."""
+        import plans
+        import prompty_eval
+        import puppeteer
+        import rows
+        wake = plans.WAKE_MARK + " step 1, \"Await the reports\", which waits on other sessions."
+        self.assertEqual(phi.request_of(wake), "")
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + wake), "")
+        self.assertTrue(plans.woken("\n" + wake))
+        self.assertTrue(puppeteer.from_session(wake))
+        self.assertFalse(prompty_eval.own_words(wake))
+        self.assertTrue(rows.WAKE_RE.match(wake), "rows.py spells the mark as plans.py does")
+        asked = "why did it say this: " + wake
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(puppeteer.from_session(asked))
+        self.assertFalse(rows.WAKE_RE.match(asked))
+
     def test_a_paste_only_message_is_the_persons_request(self):
         said = "Fix the port table.\nIt drops the last row."
         paste = '<pasted_content id="9b38">\n' + said + '\n</pasted_content id="9b38">\n'

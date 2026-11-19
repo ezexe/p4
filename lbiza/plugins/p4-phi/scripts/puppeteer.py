@@ -792,7 +792,8 @@ def look(home, sid, net=False, folder_only=False):
     phi.starter_cli answers it, where the module sends the report of each of its turns; `watching`, True when the
     session is an orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`,
     True when P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
-    rewritten; `net`, True when the look read GitHub; and the three times of `pace`.
+    rewritten; `net`, True when the look read GitHub; `move`, the prompt phi.move_text answers for a turn the
+    module starts; and the three times of `pace`.
     `net` asks for a slow look, which reads GitHub unless P4_PHI_WATCH_NET is 0 and checks the routes.
     `folder_only` answers the folder and does nothing else.
     A session whose folder was never made, or was deleted, gets no look: nothing is written and no folder is made,
@@ -835,6 +836,12 @@ def look(home, sid, net=False, folder_only=False):
         return {"watching": False, "why": "no session folder", **pace(home)}
     if relay.gone(home, relay._session(home, sid)):       # the look that shows its end, then none
         return dict(out, why="closed", changed=changed, **pace(home))
+    try:                                            # the work a wait left unmoved at the last turn's end
+        move = _phi().move_text(home, sid)
+    except Exception:  # noqa: BLE001
+        move = ""
+    if move:
+        out["move"] = move
     return dict(out, watching=True, changed=changed, net=reads, **pace(home, sid, True))
 
 
@@ -1077,9 +1084,11 @@ def readings_of(req):
 
 # the app's marks of a message that is not ezexe's, at the start of its body once the leading reminders are off:
 # another session's message, a side-sessions event, a task notification, a system notification, a hook's words
-# given back to the session, or a slash command's wrapper, which rows.HARNESS_RE takes for the harness's too. A
-# paste that holds such a tag further in is still ezexe's.
-SESSION_MARK = re.compile(r"\A\s*(?:Another Claude session sent a message:|<cross-session-message\b|"
+# given back to the session, or a slash command's wrapper, which rows.HARNESS_RE takes for the harness's too, and
+# the prompt of a turn the plugin's hooks module started, which opens with plans.WAKE_MARK. A paste that holds such
+# a tag further in is still ezexe's.
+SESSION_MARK = re.compile(r"\A\s*(?:" + re.escape(plans.WAKE_MARK) + r"|Another Claude session sent a message:|"
+                          r"<cross-session-message\b|"
                           r"<side-sessions-event\b|<task-notification\b|<command-name\b|<command-message\b|"
                           r"<local-command|\[SYSTEM NOTIFICATION\b|"
                           r"(?:Stop|SubagentStop|UserPromptSubmit) hook (?:feedback|blocking))", re.I)

@@ -28,6 +28,7 @@ const WORKER: Answer = { dir: FOLDER, watching: false, why: 'no orchestrator', w
 const STARTER = 'cli-starter-0001'
 const STARTED: Answer = { ...WORKER, starter: STARTER }
 const REPORT = 'The flush is ported and pushed as 4f1c2aa.'
+const MOVE = 'phi (p4-phi): the turn before this one ended on step 2, which waits on other sessions.'
 
 // What `$.session.usage()` answered a live probe in the desktop app on Claude Code 2.1.325.
 const USAGE: SessionUsage = {
@@ -53,8 +54,8 @@ type Machine = {
   refuses?: (to: string) => string | undefined
 }
 
-// What the module read, the pythons it tried, each phi.py command it ran with its whole call, what it wrote and
-// the messages it sent to other sessions.
+// What the module read, the pythons it tried, each phi.py command it ran with its whole call, what it wrote, the
+// messages it sent to other sessions and the prompts it submitted.
 type Seen = {
   files: Record<string, string>
   read: string[]
@@ -64,6 +65,7 @@ type Seen = {
   wrote: { path: string; text: string }[]
   logged: string[]
   sent: { to: string; text: string }[]
+  submitted: string[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -82,6 +84,7 @@ function machine(on: On, has: Machine): Seen {
     wrote: [],
     logged: [],
     sent: [],
+    submitted: [],
   }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -95,6 +98,7 @@ function machine(on: On, has: Machine): Seen {
   })
   on('session.id', () => ({ value: 'cli-0001' }))
   on('session.root', () => ({ value: '/work/project' }))
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.receive', (_, e) => ({ text: e.text }))
   on('session.send', (_, e) => {
@@ -102,6 +106,11 @@ function machine(on: On, has: Machine): Seen {
     const reason = has.refuses?.(e.to)
 
     return reason === undefined ? { isDelivered: true } : { isDelivered: false, reason }
+  })
+  on('prompt.submit', (_, e) => {
+    seen.submitted.push(e.text)
+
+    return { text: e.text }
   })
   on('ui.log', (_, e) => {
     seen.logged.push(e.text)
@@ -610,4 +619,50 @@ test('P4_PHI_WATCH=0 still sends a report, from the starter the folder question 
 
   expect(seen.looks).toEqual([['look', '--folder']])
   expect(seen.sent.length).toBe(1)
+})
+
+test('a look that answers work a wait left unmoved starts a turn of the session for it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isLeft = false
+  const seen = machine(on, {
+    look: () => {
+      const answer = isLeft ? { ...ORCHESTRATOR, move: MOVE } : ORCHESTRATOR
+      isLeft = false
+
+      return answer
+    },
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  expect(seen.submitted).toEqual([])
+
+  // The turn ends on a wait, and the look its end asks for, one tick after the last one, answers what can move.
+  await $.turn.start({ text: 'what came in?', turnId: 't1' })
+  await clock.advance(6_000)
+  isLeft = true
+  await $.turn.complete(TURN)
+  await clock.advance(5_000)
+  expect(seen.submitted).toEqual([MOVE])
+  expect(seen.sent).toEqual([])
+
+  await clock.advance(60_000)
+  expect(seen.submitted).toEqual([MOVE])
+})
+
+test('no turn is started for a wait while a turn of the session runs', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isLeft = false
+  const seen = machine(on, { look: () => (isLeft ? { ...ORCHESTRATOR, move: MOVE } : ORCHESTRATOR) })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  await $.turn.start({ text: 'land the series', turnId: 't1' })
+  isLeft = true
+  await clock.advance(60_000)
+
+  expect(seen.looks.length).toBeGreaterThan(2)
+  expect(seen.submitted).toEqual([])
 })

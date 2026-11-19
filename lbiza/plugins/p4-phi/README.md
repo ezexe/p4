@@ -45,6 +45,7 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Keeps a session's context fill and plan limits in `usage.json` in the session's folder, written by the module at the session's start and at each whole point a figure moves | `plugins/mods/reference.md`, "Mods API methods" and "Events" | "`usage()` returns `{ startedAt, context, rateLimits, cost }`: `context` has `tokens`, `window`, and `percent`, and `rateLimits` is a list of `{ kind, percentUsed, resetsAt }`.", and `session.measure` fires "After each turn, and when a plan limit's percent used changes" |
 
 | Sends the report of each turn of a session another session started to that session, from the module, so no worker is asked for a closing line | `plugins/mods/api.md`, "Send and receive messages between sessions", and `cross-session-messaging.md`, "Message delivery" | "To send one, call `$.session.send({ to, text })`, which makes the same delivery the SendMessage tool makes." and "When the receiving session is idle, Claude Code starts a new turn with the message." |
+| Starts a turn in a session whose turn ended on a step that waits on other sessions, for the work that wait leaves to move | `plugins/mods/api.md`, "Start a turn from a background job" | "The call waits until the session is idle and then starts a new turn." |
 
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
@@ -55,6 +56,12 @@ Claude Code raises `turn.complete` once a turn, after its last Stop hook answere
 A turn ezexe stopped sends none, and neither does a puppeteer's standing worker or coworker, whose first line asks it for the message its turn ends with.
 p4-phi still keeps each report for the starter's next message, and names one that the message already holds without repeating it.
 It keeps them because a send is only queued: `plugins/mods/api.md` says the call "resolves once the message is queued", and `cross-session-messaging.md` says the receiving session may hold or refuse it and that a message reaches only a running session.
+
+A turn that ends on a step waiting on other sessions is let end, since a Stop hook can send back only the turn that is ending.
+The look that follows answers what does not depend on that wait: a child that reported done with a commit that closes an issue and is on no branch of origin, and an open step that is plain work no live child holds.
+The module then submits that list as a prompt, once for a turn, and the session reads it as p4-phi's words and not ezexe's.
+Each such turn counts against `phi.keep_going_max` with the Stop hook's own send-backs, until a turn begins that the module did not start.
+The Stop hook's send-back to an open step stays, because `$.prompt.submit` starts a turn only after the session went idle, which the starter and the app have by then read as a turn's end.
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
@@ -135,7 +142,7 @@ Every key is optional.
 | `chain_max` | 8 | the sessions, 1 to 50, followed upward from a session |
 | `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
-| `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps |
+| `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps, counted together with the turns in a row the hooks module starts for work a wait left unmoved |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
 
@@ -164,10 +171,10 @@ Each is for one run, a test or one machine's unusual layout.
 
 | Variable | Unset means | Set |
 | :- | :- | :- |
-| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record and the report sent to a starter, while retrieval goes on |
+| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record, the report sent to a starter and the turn started for a wait, while retrieval goes on |
 | `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
-| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, while a worker's report still goes to its starter |
+| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, and with it the turn the module starts for a wait, while a worker's report still goes to its starter |
 | `P4_PHI_WATCH_S`, `P4_PHI_WATCH_NET` | a look every 5 seconds, or every 30 once nothing has changed for 10 minutes, with GitHub read | a tick in seconds, `0` for no network |
 | `P4_PHI_ISSUES` | as `phi.issues` says | `0` turns the issue loop off for one run, as `phi.issues` false does |
 | `P4_PHI_GH` | the `gh` on PATH, and no issue loop without one | another `gh` |
@@ -191,4 +198,4 @@ The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
 - The issue loop needs `gh`, signed in, and a repository whose `origin` is on GitHub. Without them it does nothing.
 - The session tree is read from the Claude desktop app's records. In a plain terminal session every session is an orchestrator.
-- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`. No report is sent to a starter there, so a starter reads its workers' reports beside its next message.
+- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`. No report is sent to a starter there and no turn is started for a wait, so a starter reads its workers' reports beside its next message.

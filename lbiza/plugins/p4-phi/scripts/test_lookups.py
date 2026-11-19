@@ -480,6 +480,17 @@ class Train(Base):
 
 
 class Peer(Base):
+    def test_the_prompt_of_a_turn_the_hooks_module_started_is_a_row_that_is_not_the_owners(self):
+        """ezexe/p4#193: the turn p4-phi's hooks module starts is answered like a turn, and its words are not
+        ezexe's, so its row arrives as another session's message does."""
+        import plans
+        import rows
+        import store as st
+        rows.row_open(self.p4, S1, plans.WAKE_MARK + " step 1, which waits on other sessions.", "2026-11-19 08:19")
+        e = st.parse(st.read_text(rows.session_file(self.p4, S1)), "messages/x.md")[-1]
+        self.assertEqual(e.fields["arrival"], "agent message")
+        self.assertFalse(st.owner_message(e))
+
     def test_another_sessions_message_is_a_row_that_is_not_the_owners(self):
         import rows
         import store as st

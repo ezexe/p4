@@ -3,7 +3,8 @@
 // runs `phi.py look`, one pass over the session's subtree that writes its ledger, at a turn's end, at a message's
 // arrival and on a timer. It keeps the session's usage, which no command hook is given, in usage.json in the
 // session's folder in the store, for the python scripts to read. And it wakes an idle session, which no command
-// hook can: at a worker's turn end it sends the worker's report to the session that started it.
+// hook can: at a worker's turn end it sends the worker's report to the session that started it, and where a look
+// answers work that a turn's wait left unmoved it starts a turn of the session's own for it.
 
 import type {
   EngineInterface,
@@ -29,10 +30,11 @@ const MOST_WAIT_MS = 600_000
 const REPORT_CHARS = 4_000
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
-// started this one, as the address `$.session.send` takes.
+// started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here.
 type Answer = {
   dir?: string
   starter?: string
+  move?: string
   watching?: boolean
   off?: boolean
   changed?: boolean
@@ -74,6 +76,8 @@ let starter: string | undefined
 // The look in flight, and the question of the folder and the starter in flight.
 let looking: Promise<Answer | undefined> | undefined
 let asking: Promise<void> | undefined
+// The main conversation is inside a turn.
+let isInTurn = false
 // The whole points of the usage last written to usage.json, and the writes, one after another.
 let written: string | undefined
 let writing: Promise<void> = Promise.resolve()
@@ -296,6 +300,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
+    if (answer?.move) wake($, answer.move)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
     note($, `the watcher's timer failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
@@ -366,6 +371,18 @@ async function report($: EngineInterface, answer: string, reason: TurnCompleteRe
   } catch (error) {
     note($, `the turn's report was not sent: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   }
+}
+
+// Starts a turn of the session's own with what a look answered. A turn that began since is left alone, and its own
+// end is looked at. The call resolves when the turn has started, so nothing waits on it.
+function wake($: EngineInterface, text: string): void {
+  if (isInTurn) return
+  $.prompt.submit({ text }).then(
+    entered => {
+      if (entered.drop !== undefined) note($, `the wake did not start a turn: ${entered.drop.slice(0, 200)}`)
+    },
+    error => note($, `the wake was not submitted: ${String((error as Error)?.message ?? error).slice(0, 200)}`),
+  )
 }
 
 // Writes the figures to usage.json in the session's folder when one of them moved a whole point. `$.fs.write` makes
@@ -445,12 +462,21 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('turn.start', ($, e, next) => {
+    if (e.agentId === undefined) isInTurn = true
+
+    return next(e)
+  })
+
   // A turn's end changes what the ledger shows: the main conversation's for every session, since it is where a
   // session comes to have a task or a child, and a subagent's for an orchestrator, whose ledger names what it wrote.
   // The main conversation's end is also where a worker's report goes to its starter. Claude Code raises this once a
   // turn, after its last Stop hook answered, so phi.py's Stop hook has written by then.
   on('turn.complete', ($, e, next) => {
-    if (e.agentId === undefined) void report($, e.answer, e.reason)
+    if (e.agentId === undefined) {
+      isInTurn = false
+      void report($, e.answer, e.reason)
+    }
     if (e.agentId === undefined || isWatching) void look($, true)
 
     return next(e)

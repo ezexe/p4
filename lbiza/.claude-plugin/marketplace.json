@@ -25,7 +25,7 @@
       "name": "p4-phi",
       "source": "./plugins/p4-phi",
       "description": "What linked Claude Code sessions hand each other, and retrieval from the project's own history: rule and fact lines beside a message or a subagent's task when the ranker is confident, an earlier answer in place of a repeated web lookup, and what worked after a failure an earlier session met.",
-      "version": "0.11.40",
+      "version": "0.11.41",
       "category": "productivity",
       "keywords": [
         "phi",

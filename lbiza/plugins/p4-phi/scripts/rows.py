@@ -4,7 +4,7 @@
 open   the UserPromptSubmit hook `recall` stamps a row: `fingerprint:`, the message quoted and cut to 300
        characters, `time:` and `arrival:`. `arrival:` is `turn` for ezexe's message, `notification` for one that
        Claude Code wrote, whose text opens with a tag HARNESS_RE matches, and `agent message` for another
-       session's. A row of ezexe's also gets `resembles:`, naming the newest completed row of ezexe's in the
+       session's and for the prompt of a turn p4-phi's hooks module started. A row of ezexe's also gets `resembles:`, naming the newest completed row of ezexe's in the
        session that resembles it by store.resembles. A notification is complete on arrival: `state: FRESH` and an
        `addressed:` saying so. Another session's message is answered like a turn: its row stays open to the turn end.
 close  at the turn end, the Stop hook `close` completes the session's last open row from the reply: `state:`,
@@ -34,6 +34,8 @@ RECOMMENDED_CHARS = 300
 HARNESS_RE = re.compile(r"^\s*<(task-notification|system-reminder|local-command|command-name|command-message|"
                         r"bash-input|bash-stdout|user-prompt-submit-hook)", re.I)
 PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
+# the prompt of a turn p4-phi's hooks module started: it opens with plans.WAKE_MARK, and its words are not ezexe's
+WAKE_RE = re.compile(r"^\s*phi \(p4-phi\): the turn before this one ended on\b")
 # a sentence that hands ezexe a recommendation: recommendation phrasing only, not every `should`
 RECOMMEND_RE = re.compile(r"(?i)\b(recommend|suggest|better to|prefer(red|able)?|the right way|instead of|rather than|"
                           r"go with|best (way|option|practice)|i'?d (use|go|pick|keep|pin|set)|the fix is|"
@@ -79,8 +81,9 @@ def row_open(p4, session, prompt, now=None, arrival=None):
     path = session_file(p4, session)
     rel = f"{st.MESSAGES}/{os.path.basename(path)}"
     is_harness = bool(HARNESS_RE.match(prompt or ""))
-    # another session's message arrives as a turn and is answered like one, but its words are not ezexe's
-    is_peer = bool(PEER_RE.match(prompt or ""))
+    # another session's message arrives as a turn and is answered like one, but its words are not ezexe's, and
+    # neither are those of a turn the plugin's hooks module started
+    is_peer = bool(PEER_RE.match(prompt or "") or WAKE_RE.match(prompt or ""))
     arrival = arrival or ("notification" if is_harness else "agent message" if is_peer else "turn")
     pairs = [("fingerprint", quote(prompt, FP_CHARS)), ("time", now), ("arrival", arrival)]
     old = st.parse(st.read_text(path), rel) if os.path.exists(path) else []
