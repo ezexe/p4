@@ -36,6 +36,7 @@ import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 
 import {
   EVENTS,
+  EVENTS_LIMITS,
   NO_COMPACTION,
   PROBES,
   SELF,
@@ -43,8 +44,8 @@ import {
   VETO,
   busyOf,
   fromMap,
+  ofAllEvents,
   ofCompact,
-  ofEvents,
   ofSelf,
   seenAtStart,
 } from './probes'
@@ -122,7 +123,7 @@ export type Facts = {
 
 // One probe's answer as the file keeps it, the answers of one kind of host with the version they were read on, and
 // the file: the kinds of host by name, and the notices no prompt has carried yet.
-type Kept = Said & { claude: string; at: string }
+type Kept = Said & { claude: string; at: string; reads?: number }
 type Ran = { claude: string; at: string; answers: Record<string, Kept> }
 type Book = { hosts: Record<string, Ran>; notices: string[] }
 
@@ -333,6 +334,14 @@ async function check($: EngineInterface): Promise<void> {
   }
 }
 
+// The answer kept for a probe, where it was read by the rule the probe reads by now. One kept under an older rule
+// counts as none, so a verdict the older rule got wrong starts no notice when the newer rule corrects it.
+function keptOf(ran: Ran | undefined, probe: Probe): Kept | undefined {
+  const last = ran?.answers[probe.id]
+
+  return last !== undefined && (last.reads ?? 1) === (probe.reads ?? 1) ? last : undefined
+}
+
 // What a changed answer tells the session.
 function changed(probe: Probe, was: Answer, now: Said, host: Host): string {
   const head =
@@ -356,9 +365,9 @@ async function settle($: EngineInterface, host: Host, answers: ReadonlyMap<Probe
   const at = await now($)
   const made: string[] = []
   for (const [probe, now] of answers) {
-    const was = ran.answers[probe.id]?.answer ?? probe.was
+    const was = keptOf(ran, probe)?.answer ?? probe.was
     if (was !== now.answer) made.push(changed(probe, was, now, host))
-    ran.answers[probe.id] = { ...now, claude: host.claude, at }
+    ran.answers[probe.id] = { ...now, claude: host.claude, at, ...(probe.reads === undefined ? {} : { reads: probe.reads }) }
   }
   if (isWhole) {
     const byHand = PROBES.filter(probe => probe.kind !== 'asked' && probe.fits(host)).map(probe => probe.id)
@@ -410,7 +419,11 @@ async function askOne($: EngineInterface, probe: Probe, host: Host): Promise<Sai
   if (probe.id === 'list-events-of-a-session-at-work') {
     const busy = busyOf((await call($, SESSIONS, { limit: 20 }))?.text)
 
-    return busy === undefined ? undefined : ofEvents(await call($, EVENTS, { session_id: busy, limit: 1 }))
+    if (busy === undefined) return undefined
+    const readings: (Called | undefined)[] = []
+    for (const limit of EVENTS_LIMITS) readings.push(await call($, EVENTS, { session_id: busy, limit }))
+
+    return ofAllEvents(readings)
   }
   if (probe.id === 'module-call-of-an-app-tool') return ofSelf(await call($, SELF, { session_id: 'self' }))
   if (probe.id === 'session-compact-from-a-module') {
@@ -555,7 +568,7 @@ async function listed($: EngineInterface): Promise<string> {
       ? `No probe was read on ${kindOf(host)} yet.`
       : `Probes last read on ${kindOf(host)} with Claude Code ${ran.claude}, at ${ran.at}.`
   const lines = PROBES.filter(probe => probe.fits(host)).flatMap(probe => {
-    const last = ran?.answers[probe.id]
+    const last = keptOf(ran, probe)
 
     return [
       `${probe.id}, ${probe.kind}: ${last === undefined ? 'not read here' : `${last.answer}, ${last.saw}`}`,

@@ -111,7 +111,11 @@ The tool `mcp__p4-native__native` and `/native` take `probes`, which lists every
 
 Three rows of the list this began from are sorted otherwise here.
 A hooks module's `$.tool.call` reached the app's tools on Claude Code 2.1.326 and not in a scripted run on 2.1.328 because the scripted run has none of those tools, not because of the version, so it is two probes, one for each kind of host.
-The desktop app's `list_events` answered a session at work with its messages when the probe first read it, on Claude Code 2.1.326, so that condition reads `open` and its decision can be reopened.
+The probe of `list_events` reads the rows under the tool's header and never the header, which says `showing n of m messages` whether or not anything is under it.
+Its first rule read the header and called the condition open, which was wrong: a call on a session at work answered with that header and one row under it, the stub of a tool call.
+The fault comes and goes: one call answered `(no messages)`, another a lone stub, and a third rows with the assistant's own words.
+So the probe asks three times, for 3, 14 and 30 messages, and the condition is open only where every answer holds what the session's assistant said, and blocked where any one shows the fault.
+An answer kept under the first rule is compared with nothing.
 `FileChanged` for a new file in a watched folder was seen to fire on Claude Code 2.1.328, and p4-temportal 0.3.35 moves a notebook's log at that event, so nothing is blocked there and no probe watches it.
 
 ## ezexe's own choices
@@ -157,11 +161,11 @@ Left out, each with its reason.
 Seen on Claude Code 2.1.328, in a `claude -p` run with the plugin loaded by `--plugin-dir`, started from a desktop session's shell with that session's variables in its environment: the entry read `terminal`, `scripted`, no surface and no tool of the desktop app, and it listed 31 tools of Claude Code, `PushNotification`, `CronCreate` and `SendMessage` among them.
 The run took four seconds end to end.
 Seen in the desktop app on Claude Code 2.1.326, with a development copy loaded from the session's mods folder into a session another session started: the entry read `desktop`, `interactive`, the one surface `desktop`, 67 tools of the desktop app and 43 of Claude Code, and the tool `mcp__p4-native__native` printed the same entry and named its file.
-In that desktop session `probe` read four conditions: `list_events` answered a session at work with `showing 1 of 6779 messages`, the module's call of `get_session` answered, `SetGoal` was not in the tool list, and `session.start` carried `cwd`, `surface` and `isInteractive`.
+In that desktop session `probe` read four conditions: `list_events` answered a session at work with the header `showing 1 of 6779 messages`, the module's call of `get_session` answered, `SetGoal` was not in the tool list, and `session.start` carried `cwd`, `surface` and `isInteractive`.
 In a `claude -p` run on Claude Code 2.1.328 the first turn kept three answers and the turn's end a fourth: the plugin's `$.session.compact` was rejected with `not available in a headless (-p / SDK) session yet`, before any hook heard it, so the veto was not reached.
 Seen in the desktop app on Claude Code 2.1.326: `$.session.compact` called while a `tool.call` hook is held is rejected with `called from a tool.call hook`, which is why that probe waits for the turn's end.
 At that turn's end the same desktop session kept `session-compact-from-a-module` as `blocked`, with the same refusal as the scripted run.
-The notice of the changed `list_events` answer reached the model once, as context of the session's next prompt, and was gone from the file.
+The notice that first rule made reached the model once, as context of the session's next prompt, and was gone from the file, and it reached a second session of another project from the installed copy.
 Seen with the installed copy, version 0.2.0, in a `claude -p` run on Claude Code 2.1.328: the session loaded the tool with ToolSearch, and `map` and `probes` answered.
 Seen in a terminal session at its prompt on Claude Code 2.1.328: the entry read `terminal`, `interactive` and the one surface `terminal`, and the probes ran for `terminal/interactive`.
 Not seen live: a session whose id a `/clear` changed, a change of version between two runs, a call of `start_session` passing through the hook that watches it, and the installed copy in a desktop session, where every check ran a development copy.

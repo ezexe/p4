@@ -140,6 +140,32 @@ class HarmlessTest(unittest.TestCase):
         self.assertIn("await pay($)", end)
 
 
+class EvidenceTest(unittest.TestCase):
+    """A verdict is taken from what differs between the two states, never from a line both states print."""
+
+    def test_list_events_is_judged_by_the_rows_under_its_header_at_three_calls(self):
+        """The tool's header reads "showing n of m messages" whether or not anything is under it, and the fault
+        comes and goes: a session at work was answered "(no messages)", a lone stub of a tool call, and rows with
+        the assistant's words, at different calls. So the probe is open only where every call holds assistant
+        text."""
+        self.assertIn("answer: spoken.length > 0 ? 'open' : 'blocked'", PROBES)
+        self.assertIn("const STUB = /^\\[assistant\\] \\(called [^)]*\\)$/", PROBES)
+        self.assertIn("export const EVENTS_LIMITS = [3, 14, 30] as const", PROBES)
+        self.assertIn("for (const limit of EVENTS_LIMITS) readings.push(await call($, EVENTS, { session_id: busy, limit }))",
+                      MODULE)
+        self.assertIn("return ofAllEvents(readings)", MODULE)
+
+    def test_an_answer_kept_under_an_older_rule_is_compared_with_nothing(self):
+        """The probe's first rule read the header and kept `open`. With `reads` raised, the kept answer counts as
+        none, so the corrected verdict starts no notice that a decision's ground was lost."""
+        self.assertIn("reads: 2,", BY_ID["list-events-of-a-session-at-work"])
+        self.assertIn("(last.reads ?? 1) === (probe.reads ?? 1) ? last : undefined", MODULE)
+        self.assertEqual(MODULE.count("keptOf(ran, probe)"), 2, "where a change is judged and where the list is printed")
+
+    def test_a_start_went_through_only_where_the_answer_holds_the_new_sessions_id(self):
+        self.assertIn("out.deny === undefined && SESSION.test(text)", PROBES)
+
+
 class ToldOnceTest(unittest.TestCase):
     def test_a_notice_is_taken_out_of_the_file_by_the_prompt_that_carries_it(self):
         take = MODULE.split("async function take(", 1)[1].split("\n}\n", 1)[0]

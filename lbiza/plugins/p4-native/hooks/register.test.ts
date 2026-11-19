@@ -3,7 +3,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolInfo } from 'claude-code'
 
-import { PROBES, START, VETO, busyOf, fromMap, ofCompact, ofEvents, ofSelf, seenAtStart } from './probes'
+import { PROBES, START, VETO, busyOf, fromMap, ofAllEvents, ofCompact, ofEvents, ofSelf, seenAtStart } from './probes'
 
 const ROOT = '/work/project'
 const FILE = `${ROOT}/.claude/p4/native/host.json`
@@ -39,7 +39,11 @@ const SESSIONS = JSON.stringify([
   { sessionId: 'local_3', isRunning: true },
 ])
 const NO_MESSAGES = '(no messages)'
-const MESSAGES = 'Session "worker" (running) — showing 1 of 12 messages\n\n[assistant] porting'
+// The header is there whether or not anything is under it: a session at work answered with the stub of a tool
+// call alone, and one whose rows hold what its assistant said.
+const HEADER = 'Session "worker" (running) — showing 20 of 1020 messages\nPass before_uuid="c_1" to page further back.\n\n'
+const STUB = `${HEADER}[assistant] (called Write)`
+const MESSAGES = `${HEADER}[user] port the flush\n[assistant] (called Read)\n[assistant] The flush is ported.\n[result] done (success), 3 turns`
 // The app's refusal of a start on a turn no person began.
 const REFUSAL =
   "Start sessions only on the user's own words to you here; this turn runs an automated event, another session's " +
@@ -572,10 +576,21 @@ test('in a desktop session the probes call the app tools that read, and a fault 
   expect(seen.calls).toEqual([
     'mcp__ccd_session_mgmt__list_sessions',
     'mcp__ccd_session_mgmt__list_events',
+    'mcp__ccd_session_mgmt__list_events',
+    'mcp__ccd_session_mgmt__list_events',
     'mcp__ccd_session_mgmt__get_session',
   ])
   const first = book(seen).hosts['desktop/interactive']
-  expect(first?.answers['list-events-of-a-session-at-work']).toMatchObject({ answer: 'blocked', saw: '(no messages)' })
+  expect(first?.answers['list-events-of-a-session-at-work']).toMatchObject({
+    answer: 'blocked',
+    saw: 'asked for 3 messages: "(no messages)" for a session at work',
+    reads: 2,
+  })
+  expect(seen.inputs.slice(1, 4).map(call => call.input)).toEqual([
+    { session_id: 'local_3', limit: 3 },
+    { session_id: 'local_3', limit: 14 },
+    { session_id: 'local_3', limit: 30 },
+  ])
   expect(first?.answers['module-call-of-an-app-tool']?.answer).toBe('open')
   expect(first?.answers['app-tools-in-a-terminal-session']).toBeUndefined()
   expect(book(seen).notices).toEqual([])
@@ -591,6 +606,30 @@ test('in a desktop session the probes call the app tools that read, and a fault 
   const told = book(seen).notices.join('\n')
   expect(told).toContain('list-events-of-a-session-at-work changed on desktop/interactive, Claude Code 2.1.340')
   expect(told).toContain("can be reopened: p4-phi keeps a worker's reports itself")
+  expect(told).toContain('Saw: each of 3 readings held assistant text. 1 of the 4 rows under the header hold assistant text')
+})
+
+test('a header with only the stub of a tool call under it is blocked, and an answer kept under an older rule starts no notice', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, ...OF_THE_APP],
+    // What the first rule kept, which read the header alone.
+    files: { [BOOK]: ranOn('desktop/interactive', '2.1.320', { 'list-events-of-a-session-at-work': 'open' }) },
+    app: name => (name.endsWith('get_session') ? SELF : name.endsWith('list_sessions') ? SESSIONS : STUB),
+  })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+  const before = await $.command.run({ command: 'native', args: 'probes', ...TYPED })
+  expect(before.text).toContain('list-events-of-a-session-at-work, asked: not read here')
+
+  await $.turn.start(BEGUN)
+  await clock.settle()
+
+  const kept = book(seen).hosts['desktop/interactive']?.answers['list-events-of-a-session-at-work']
+  expect(kept).toMatchObject({ answer: 'blocked', reads: 2 })
+  expect(kept?.saw).toBe('asked for 3 messages: 0 of the 1 rows under the header hold assistant text, and the last row read: [assistant] (called Write)')
+  expect(book(seen).notices.join('\n')).not.toContain('list-events-of-a-session-at-work')
 })
 
 test('a call of an app tool that is refused where it answered before is told as what no longer holds', async ($, on) => {
@@ -733,7 +772,16 @@ test('each probe names its decision, and an asked probe is read off what the eng
   expect(busyOf(SESSIONS)).toBe('local_3')
   expect(busyOf('not json')).toBeUndefined()
   expect(ofEvents({ text: NO_MESSAGES })?.answer).toBe('blocked')
+  expect(ofEvents({ text: STUB })?.answer).toBe('blocked')
+  expect(ofEvents({ text: HEADER.trim() })?.answer).toBe('blocked')
+  expect(ofEvents({ text: `${HEADER}[result] done (success), 15 turns` })?.answer).toBe('blocked')
   expect(ofEvents({ text: MESSAGES })?.answer).toBe('open')
+  expect(ofEvents({ text: 'no such session' })).toBeUndefined()
+  // The fault comes and goes, so one reading that shows it is enough, and one that says nothing leaves it unread.
+  expect(ofAllEvents([{ text: MESSAGES }, { text: MESSAGES }, { text: MESSAGES }])?.answer).toBe('open')
+  expect(ofAllEvents([{ text: MESSAGES }, { text: STUB }, { text: MESSAGES }])).toMatchObject({ answer: 'blocked' })
+  expect(ofAllEvents([{ text: MESSAGES }, { text: STUB }, { text: MESSAGES }])?.saw.startsWith('asked for 14 messages: 0 of the 1 rows')).toBe(true)
+  expect(ofAllEvents([{ text: MESSAGES }, undefined, { text: MESSAGES }])).toBeUndefined()
   expect(ofEvents({ refused: 'no such session' })).toBeUndefined()
   expect(ofSelf({ text: SELF })?.answer).toBe('open')
   expect(ofSelf({ refused: 'no tool named "mcp__ccd_session_mgmt__get_session" in this session' })?.answer).toBe('blocked')
@@ -752,9 +800,12 @@ test('each probe names its decision, and an asked probe is read off what the eng
   expect(fromMap('app-tools-in-a-terminal-session', { host, startKeys: [] })?.answer).toBe('blocked')
 
   expect(seenAtStart({ initiation: 'user_asked' }, { isError: true, text: REFUSAL }, 'peer')?.answer).toBe('blocked')
-  expect(seenAtStart({ initiation: 'user_asked' }, { text: '{}' }, 'sdk')).toBeUndefined()
-  expect(seenAtStart({ initiation: 'offer' }, { text: '{}' }, 'peer')).toBeUndefined()
-  expect(seenAtStart({ initiation: 'user_asked' }, { text: '{}' }, 'task-notification')?.answer).toBe('open')
+  const started = { text: '{"sessionId":"local_9f3a","name":"worker"}' }
+  expect(seenAtStart({ initiation: 'user_asked' }, started, 'sdk')).toBeUndefined()
+  expect(seenAtStart({ initiation: 'offer' }, started, 'peer')).toBeUndefined()
+  expect(seenAtStart({ initiation: 'user_asked' }, started, 'task-notification')?.answer).toBe('open')
+  // A refusal in words the probe does not know is no start.
+  expect(seenAtStart({ initiation: 'user_asked' }, { text: 'Not started: ask the user first.' }, 'peer')).toBeUndefined()
 })
 
 // A session at a terminal's prompt in the project, with Claude Code's own tool that notifies.

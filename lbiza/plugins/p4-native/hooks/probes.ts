@@ -48,6 +48,9 @@ export type Probe = {
   kind: 'asked' | 'seen' | 'by hand'
   // An `asked` probe that is run at the end of a turn, where its call is allowed, and not at the turn's start.
   atTurnEnd?: true
+  // The count of the rule the answer is read by, 1 where left out. It is raised when what the probe judges by
+  // changes, so an answer kept under an older rule is compared with no later one.
+  reads?: number
   // A `by hand` probe's check, and for a `seen` probe the call it is read off.
   check?: string
 }
@@ -95,10 +98,13 @@ export const PROBES: readonly Probe[] = [
     decision:
       "p4-phi keeps a worker's reports itself, in `reports.jsonl` and `phi.py show`, in place of the app's " +
       '`list_events`.',
-    fault: 'The desktop app\'s `list_events` answered "(no messages)" for a session at work.',
+    fault:
+      'The desktop app\'s `list_events` answers a session at work with "(no messages)", or with its header and ' +
+      'under it no more than the stub of a tool call, at some calls and not at others, seen on Claude Code 2.1.326.',
     was: 'blocked',
     fits: isDesktop,
     kind: 'asked',
+    reads: 2,
   },
   {
     id: 'app-tools-in-a-terminal-session',
@@ -251,16 +257,19 @@ export const PROBES: readonly Probe[] = [
 ]
 
 // What a call of `start_session` showed of the first probe: the app's refusal of a start on a turn no person
-// began, a start that went through on such a turn, or nothing where the call says neither. `kind` is the origin of
-// the prompt that began the turn.
+// began, a start that went through on such a turn, or nothing where the call says neither. A start went through
+// only where the answer is no error and holds the new session's id, since a refusal in other words would else read
+// as a start. `kind` is the origin of the prompt that began the turn.
 const REFUSED = /Start sessions only on the user's own words|can only start sessions where this one runs/
+// The id of a session of the desktop app, which the answer of a start that went through holds.
+const SESSION = /\blocal_[0-9a-f]/
 const UNATTENDED = new Set(['peer', 'peer-send-message', 'task-notification', 'scheduled-trigger', 'coordinator'])
 
 export function seenAtStart(input: unknown, result: unknown, kind: string | undefined): Said | undefined {
   const text = cut(JSON.stringify(result ?? ''))
   if (REFUSED.test(text)) return { answer: 'blocked', saw: text }
   const out = result as { isError?: unknown; deny?: unknown } | undefined
-  const isStarted = out !== undefined && out.isError !== true && out.deny === undefined
+  const isStarted = out !== undefined && out.isError !== true && out.deny === undefined && SESSION.test(text)
   const isAsked = (input as { initiation?: unknown }).initiation === 'user_asked'
   if (isStarted && isAsked && kind !== undefined && UNATTENDED.has(kind)) {
     return { answer: 'open', saw: `a start went through on a turn a prompt of the origin ${kind} began` }
@@ -310,13 +319,43 @@ export function busyOf(listed: string | undefined): string | undefined {
   }
 }
 
-// What `list_events` answered of a session at work.
+// What `list_events` answered of a session at work, read off the rows under its header and never off the header,
+// which reads "showing n of m messages" whether or not anything is under it. The condition is open only where a
+// row holds what the session's assistant said, and blocked on "(no messages)", on no row, and on rows that are
+// results and the stubs of tool calls alone.
+const ROW = /^\[[a-z][a-z_ -]*\] /
+const STUB = /^\[assistant\] \(called [^)]*\)$/
+
 export function ofEvents(events: Called | undefined): Said | undefined {
   if (events?.text === undefined) return undefined
-  const head = cut(events.text.trim().split('\n')[0] ?? '')
-  if (/^\(no messages\)/.test(head)) return { answer: 'blocked', saw: head }
+  const text = events.text.trim()
+  if (/^\(no messages\)/.test(text)) return { answer: 'blocked', saw: '"(no messages)" for a session at work' }
+  if (!/showing \d+ of \d+ messages/.test(text)) return undefined
+  const rows = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => ROW.test(line))
+  const spoken = rows.filter(line => line.startsWith('[assistant] ') && !STUB.test(line))
+  const last = spoken.at(-1) ?? rows.at(-1) ?? 'none'
+  const saw = cut(`${spoken.length} of the ${rows.length} rows under the header hold assistant text, and the last row read: ${last}`)
 
-  return /showing \d+ of \d+ messages/.test(head) ? { answer: 'open', saw: head } : undefined
+  return { answer: spoken.length > 0 ? 'open' : 'blocked', saw }
+}
+
+// How many of a session's newest messages each reading of `list_events` asks for. The fault comes and goes, and
+// it was seen at each of these three, so one reading that holds text does not show it gone.
+export const EVENTS_LIMITS = [3, 14, 30] as const
+
+// What the readings of `list_events` come to together: blocked where any of them shows the fault, open only where
+// every one holds what the assistant said, and nothing where one of them says neither.
+export function ofAllEvents(readings: readonly (Called | undefined)[]): Said | undefined {
+  const each = readings.map(ofEvents)
+  const blocked = each.findIndex(now => now?.answer === 'blocked')
+  if (blocked >= 0) return { answer: 'blocked', saw: cut(`asked for ${EVENTS_LIMITS[blocked] ?? '?'} messages: ${each[blocked]?.saw ?? ''}`) }
+  const last = each.at(-1)
+  if (last === undefined || each.some(now => now === undefined)) return undefined
+
+  return { answer: 'open', saw: cut(`each of ${each.length} readings held assistant text. ${last.saw}`) }
 }
 
 // What the module's own call of `get_session` came to.
