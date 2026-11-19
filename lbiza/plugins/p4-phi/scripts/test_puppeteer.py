@@ -1149,6 +1149,34 @@ class Look(Base):
         self.assertEqual(list(only), ["dir", "watching"], "where the session's folder is, and nothing else")
         self.assertEqual(self.files(), before, "none of them wrote a file")
 
+    def test_a_look_answers_a_workers_starter_as_the_address_the_module_sends_its_report_to(self):
+        """ezexe/p4#157: the hooks module sends a worker's report to the session that started it with
+        `$.session.send({ to: { sessionId } })`, whose `sessionId` is "what its `$.session.id()` answers on this
+        machine", by the API's types. That is the CLI session id on the app's record of the starter, so every look
+        of a started session answers it, the one that only asks for the folder too. A session nobody started
+        answers none, and neither does a puppeteer's standing worker, whose first line asks it for the message its
+        turn ends with."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        self.assertEqual(self.look(KID)["starter"], CLI[TOP])
+        only = self.look(KID, "--folder", P4_PHI_WATCH="0")
+        self.assertEqual((list(only), only["starter"]), (["dir", "starter", "watching"], CLI[TOP]))
+        self.assertNotIn("starter", self.look(), "nobody started the orchestrator")
+        with open(os.path.join(t.app, TOP + ".json"), encoding="utf-8") as f:
+            rec = json.load(f)
+        rec["cliSessionId"] = "cccc3333-0000-4000-8000-000000000000"   # the starter runs under a new id since a clear
+        write(os.path.join(t.app, TOP + ".json"), json.dumps(rec))
+        self.assertEqual(self.look(KID)["starter"], "cccc3333-0000-4000-8000-000000000000")
+        rec.pop("cliSessionId")                     # no record names one: the last its session.json holds
+        write(os.path.join(t.app, TOP + ".json"), json.dumps(rec))
+        self.assertEqual(self.look(KID)["starter"], CLI[TOP])
+        path = self.path(KID, "session.json")
+        kid = json.loads(read(path))
+        kid["standingKind"] = "worker"
+        write(path, json.dumps(kid))
+        self.assertNotIn("starter", self.look(KID), "a standing worker writes its own closing message")
+
     def test_a_look_on_a_deleted_session_folder_writes_nothing_and_makes_no_folder(self):
         """ezexe/p4#206: a session folder that is gone gets no look, and one deleted while a look runs is not made
         again by any write of that look."""

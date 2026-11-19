@@ -2,9 +2,17 @@
 // It finds the python that find-python.sh proved for the plugin's runners, and it is an orchestrator's watcher: it
 // runs `phi.py look`, one pass over the session's subtree that writes its ledger, at a turn's end, at a message's
 // arrival and on a timer. It keeps the session's usage, which no command hook is given, in usage.json in the
-// session's folder in the store, for the python scripts to read.
+// session's folder in the store, for the python scripts to read. And it wakes an idle session, which no command
+// hook can: at a worker's turn end it sends the worker's report to the session that started it.
 
-import type { EngineInterface, Register, SessionContextUsage, SessionRateLimit, Timer } from 'claude-code'
+import type {
+  EngineInterface,
+  Register,
+  SessionContextUsage,
+  SessionRateLimit,
+  Timer,
+  TurnCompleteReason,
+} from 'claude-code'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -17,9 +25,14 @@ const SLOW_LOOK_MS = 300_000
 // A session with nothing to watch is checked again after a wait that doubles, to this at most.
 const MOST_WAIT_MS = 600_000
 
-// What `phi.py look` prints, as puppeteer.look answers it: the times are seconds.
+// The most of a report that is sent to a starter: what phi.py keeps of one, its REPORT_CHARS.
+const REPORT_CHARS = 4_000
+
+// What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
+// started this one, as the address `$.session.send` takes.
 type Answer = {
   dir?: string
+  starter?: string
   watching?: boolean
   off?: boolean
   changed?: boolean
@@ -56,6 +69,11 @@ let timer: Timer | undefined
 
 // The session's own folder in the store, as phi.py answers it, asked for once.
 let folder: string | undefined
+// The session that started this one, as phi.py answers it with the folder: never asked yet, or '' for none.
+let starter: string | undefined
+// The look in flight, and the question of the folder and the starter in flight.
+let looking: Promise<Answer | undefined> | undefined
+let asking: Promise<void> | undefined
 // The whole points of the usage last written to usage.json, and the writes, one after another.
 let written: string | undefined
 let writing: Promise<void> = Promise.resolve()
@@ -178,6 +196,13 @@ async function ask($: EngineInterface, args: readonly string[], timeoutMs: numbe
   }
 }
 
+// What an answer says of the session itself. Only an answer that names the session's folder speaks of its starter.
+function keep(answer: Answer | undefined): void {
+  if (answer?.dir === undefined) return
+  folder = answer.dir
+  starter = answer.starter ?? ''
+}
+
 function milliseconds(seconds: number | undefined, otherwise: number): number {
   return typeof seconds === 'number' && seconds > 0 ? Math.max(50, Math.round(seconds * 1000)) : otherwise
 }
@@ -229,6 +254,20 @@ async function readSwitches($: EngineInterface): Promise<Switches> {
   }
 }
 
+// One run of `phi.py look`. What it says of the session is kept before anything that waited on the run goes on.
+async function ran($: EngineInterface, isSlow: boolean): Promise<Answer | undefined> {
+  try {
+    const answer = await ask($, isSlow ? ['look', '--net'] : ['look'], isSlow ? SLOW_LOOK_MS : LOOK_MS)
+    keep(answer)
+
+    return answer
+  } catch (error) {
+    note($, `the watcher's look failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+
+    return undefined
+  }
+}
+
 // One look, when one is due: never two in flight, and never two within the watcher's tick. A look asked for too
 // early is taken by the timer when it is due.
 async function look($: EngineInterface, isEvent: boolean): Promise<void> {
@@ -252,15 +291,10 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     lookedAt = now
     timer?.cancel()
     timer = undefined
-    let answer: Answer | undefined
-    try {
-      answer = await ask($, isSlow ? ['look', '--net'] : ['look'], isSlow ? SLOW_LOOK_MS : LOOK_MS)
-    } catch (error) {
-      note($, `the watcher's look failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
-    } finally {
-      isLooking = false
-    }
-    folder = answer?.dir ?? folder
+    looking = ran($, isSlow)
+    const answer = await looking
+    isLooking = false
+    looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
@@ -276,11 +310,62 @@ function points(context: SessionContextUsage, limits: readonly SessionRateLimit[
   return [context.window, context.percent ?? '', ...windows.sort()].join('|')
 }
 
+// Asks python where the session's folder is and who started it. A look in flight answers both, so it is waited
+// for, and there is never a second such question in flight.
+async function learn($: EngineInterface): Promise<void> {
+  if (looking !== undefined) await looking
+  if (folder !== undefined) return
+  asking ??= ask($, ['look', '--folder'], LOOK_MS)
+    .then(keep, () => undefined)
+    .finally(() => {
+      asking = undefined
+    })
+  await asking
+}
+
 // The session's folder in the store. Python is asked where it is, once, and again while the session has none.
 async function folderOf($: EngineInterface): Promise<string | undefined> {
-  folder ??= (await ask($, ['look', '--folder'], LOOK_MS))?.dir
+  if (folder === undefined) await learn($)
 
   return folder
+}
+
+// The session that started this one. Python answers it with the folder, so it is asked once, and again while the
+// session has no folder.
+async function starterOf($: EngineInterface): Promise<string | undefined> {
+  if (starter === undefined) await learn($)
+
+  return starter
+}
+
+// A turn's report as its starter reads it. The first line is all a person sees of a message until they open it.
+function reportText(answer: string, reason: TurnCompleteReason): string {
+  const said = answer.trim()
+  if (said === '') return `phi (p4-phi): this session ended a turn with no report: the turn's end was ${reason}.`
+  const cut = said.length > REPORT_CHARS ? `${said.slice(0, REPORT_CHARS)} ...` : said
+
+  return `phi (p4-phi): this session ended a turn. Its report follows, and needs no reply.\n\n${cut}`
+}
+
+// At the end of a turn of a session another session started: its report goes to that session, where a message
+// starts a turn when the session is idle. A turn the person stopped is theirs to speak of. A starter that runs under
+// a new id since a clear or a resume is asked of python once more.
+async function report($: EngineInterface, answer: string, reason: TurnCompleteReason): Promise<void> {
+  try {
+    switches ??= readSwitches($)
+    if ((await switches).isPhiOff || reason === 'aborted') return
+    const to = await starterOf($)
+    if (!to) return
+    const text = reportText(answer, reason)
+    let sent = await $.session.send({ to: { sessionId: to }, text })
+    if (!sent.isDelivered) {
+      keep(await ask($, ['look', '--folder'], LOOK_MS))
+      if (starter && starter !== to) sent = await $.session.send({ to: { sessionId: starter }, text })
+    }
+    if (!sent.isDelivered) note($, `the turn's report did not reach the starter: ${sent.reason.slice(0, 200)}`)
+  } catch (error) {
+    note($, `the turn's report was not sent: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
 }
 
 // Writes the figures to usage.json in the session's folder when one of them moved a whole point. `$.fs.write` makes
@@ -353,6 +438,7 @@ export const register: Register = on => {
   on('session.end', ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
       folder = undefined
+      starter = undefined
       written = undefined
     }
 
@@ -361,7 +447,10 @@ export const register: Register = on => {
 
   // A turn's end changes what the ledger shows: the main conversation's for every session, since it is where a
   // session comes to have a task or a child, and a subagent's for an orchestrator, whose ledger names what it wrote.
+  // The main conversation's end is also where a worker's report goes to its starter. Claude Code raises this once a
+  // turn, after its last Stop hook answered, so phi.py's Stop hook has written by then.
   on('turn.complete', ($, e, next) => {
+    if (e.agentId === undefined) void report($, e.answer, e.reason)
     if (e.agentId === undefined || isWatching) void look($, true)
 
     return next(e)

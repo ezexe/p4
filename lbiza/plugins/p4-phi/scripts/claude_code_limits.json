@@ -46,15 +46,6 @@
   },
   {
     "repo": "ezexe/p4",
-    "issue": 157,
-    "title": "wiring: notify_when_idle is named nowhere",
-    "behaviour": "notify_when_idle makes no subscription to a session reached through Claude Desktop's session messaging, and the app's side-sessions-event continuation stops reaching a starter after many automated messages in a row.",
-    "source": "undocumented; observed on 2026-11-17, https://github.com/ezexe/p4/issues/157#issuecomment-6940830224 and https://github.com/ezexe/p4/issues/157#issuecomment-6940711420",
-    "changes_when": "notify_when_idle subscribes between desktop sessions, or a starter is always continued when a session it started ends a turn; p4 then drops the closing SendMessage it asks of a finished worker.",
-    "terms": ["notify_when_idle", "side-sessions-event", "SendMessage", "send_message"]
-  },
-  {
-    "repo": "ezexe/p4",
     "issue": 220,
     "title": "p4-phi: a session holding a start request asks ezexe for the same press at every turn ezexe did not begin",
     "behaviour": "start_session with initiation user_asked is refused in a turn that another session's message, a background event or a handed task began, so a start such a turn wants is a suggested task card that waits on ezexe's press.",

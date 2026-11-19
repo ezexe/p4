@@ -1039,10 +1039,18 @@ def findings_text(home, s, new, store=""):
     return "\n\n".join(x for x in (mine, straight, rest) if x)
 
 
-def reports_text(home, s, room=None, store=""):
+def in_message(report, said):
+    """True when the message a turn began with holds a report's opening words, as when the plugin's hooks module
+    sent the report itself to this session at its worker's turn end."""
+    head = " ".join(str(report or "").split())[:300]
+    return len(head) >= 40 and head in " ".join(str(said or "").split())
+
+
+def reports_text(home, s, room=None, store="", said=""):
     """The reports of this session's workers that finished a turn since it last looked, and how many rows
     that covers. Each report is shown as kept, up to REPORT_CHARS, where it fits in `room`, and cut with ... where
-    it does not; the ones there is no room for at all are named by count with their pages. The `Finding:` lines they
+    it does not; the ones there is no room for at all are named by count with their pages. A report that `said`,
+    the message this turn began with, already holds is named there and not repeated. The `Finding:` lines they
     carry come last, with what becomes of them, as findings_text says."""
     rows = load_reports(home, s["sessionId"])
     seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
@@ -1059,7 +1067,12 @@ def reports_text(home, s, room=None, store=""):
     rest = [r for r in reversed(new) if r not in shown]
     each = max(500, (room - len(out[0]) - 110 * len(rest)) // len(shown) - 140)
     for r in shown:
-        lines = turn_lines(name_of(load_session(home, r["sessionId"]), r), r["turn"], report=REPORT_CHARS)
+        turn = r["turn"]
+        sent = in_message(turn.get("report"), said)
+        lines = turn_lines(name_of(load_session(home, r["sessionId"]), r), dict(turn, report="") if sent else turn,
+                           report=REPORT_CHARS)
+        if sent:
+            lines.append("  reported: in the message this turn began with")
         out += [cut("\n".join(lines), each), f"  its page: {page_path(home, r['sessionId'])}"]
     if rest:
         out.append(f"Not shown here for want of room, {len(rest)} more, each on its page: " + ", ".join(
@@ -1088,9 +1101,10 @@ MAX_CHILDREN = 8              # nor one that has this many live children already
 # - the desktop app's turn-end tool, `mcp__ccd_turn__wrap_up`, whose own text puts a decision that waits on ezexe as
 #   one question with buttons, the pick first.
 # Every other sentence stays. Some are what that text lacks: the decisions file, the session tree as what settles a
-# next step, the push of green issue-closing commits, a child's question to its parent session, the go a project's
-# rules ask for, and a worker's closing line to a starter that waits on it, which works around the limit
-# claude_code_limits.json logs under ezexe/p4#157. The rest only the desktop app's text states, and no docs page
+# next step, the push of green issue-closing commits, a child's question to its parent session, and the go a
+# project's rules ask for. The rule asks a worker for no line to its starter at a turn's end: the plugin's hooks
+# module sends the starter the turn's report with `$.session.send`, which by plugins/mods/api.md "makes the same
+# delivery the SendMessage tool makes", ezexe/p4#157. The rest only the desktop app's text states, and no docs page
 # does for a session in its default style, so a session outside the app would lose it: that a question research can
 # settle is not asked, and that only a matter of ezexe's authority is. output-styles.md states the like for the
 # Proactive style alone, "It makes reasonable assumptions about routine decisions rather than stopping to ask", and
@@ -1107,8 +1121,6 @@ BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task,
             "undone or publish outward, but for the push of green issue-closing commits, which p4-phi orders at "
             "once. A child asks its parent "
             "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "
-            "A worker whose starter waits on it ends each turn with one SendMessage line to the starter, since a "
-            "report reaches an idle session only beside its next message. "
             "Where the project's rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is "
             "ezexe's to give, by a button: wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project
@@ -2218,7 +2230,8 @@ def h_user_prompt_submit(payload):
     parts = [live_rules(s, me.store),
              pin_of(me.home, s), handed]
     if REPORTS:
-        text, seen = reports_text(me.home, s, room * 3 // 5 if room else None, me.store)
+        text, seen = reports_text(me.home, s, room * 3 // 5 if room else None, me.store,
+                                  said=str(payload.get("prompt") or ""))
         s["reportsSeen"] = seen
         parts.append(text)
     save_session(me.home, s)
@@ -2563,6 +2576,31 @@ def waited_on(home, s, calls=()):
         if puppeteer.working(home, k) or k in unread:
             out.append(title_of(ks))
     return out
+
+
+# --- what the hooks module is answered: a worker's starter ----------------------------------------------------------
+#
+# hooks/register.ts runs `phi.py look` for a session and acts on a key of its answer, which no command hook could.
+# `starter` is where the report of a worker's turn goes, by `$.session.send`: plugins/mods/api.md, "Send and receive
+# messages between sessions", says the call "makes the same delivery the SendMessage tool makes", and
+# cross-session-messaging.md, "Message delivery", that "When the receiving session is idle, Claude Code starts a new
+# turn with the message." A live probe between two desktop sessions on Claude Code 2.1.326 showed it, as
+# ezexe/p4#157 records.
+
+
+def starter_cli(home, s):
+    """The session that started `s`, as the address `$.session.send({ to: { sessionId } })` takes: the CLI session
+    id on the app's record of the starter, which is what `$.session.id()` answers there, else the last one its
+    session.json holds. '' for a session nobody started, for a starter no record names a CLI session of, and for a
+    puppeteer's standing worker or coworker, whose own first line asks it for the message its turn ends with."""
+    above = spawned_from(s)
+    if not above or s.get("standingKind") in ("worker", "coworker"):
+        return ""
+    cli = str(app_record(above).get("cliSessionId") or "")
+    if not cli:
+        held = [c for c in load_session(home, above).get("cliSessionIds") or [] if isinstance(c, str) and c]
+        cli = held[-1] if held else ""
+    return cli
 
 
 RAN = {}       # what the running hook learned, for its line in the session's log

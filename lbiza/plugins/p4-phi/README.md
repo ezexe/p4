@@ -44,9 +44,17 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Asks for a look at a turn's end and at a message's arrival | `plugins/mods/reference.md`, "Events" | `turn.complete` fires when "A turn ended", and `session.receive` when "A message arrives from, or is about to go to, another agent or session." |
 | Keeps a session's context fill and plan limits in `usage.json` in the session's folder, written by the module at the session's start and at each whole point a figure moves | `plugins/mods/reference.md`, "Mods API methods" and "Events" | "`usage()` returns `{ startedAt, context, rateLimits, cost }`: `context` has `tokens`, `window`, and `percent`, and `rateLimits` is a list of `{ kind, percentUsed, resetsAt }`.", and `session.measure` fires "After each turn, and when a plan limit's percent used changes" |
 
+| Sends the report of each turn of a session another session started to that session, from the module, so no worker is asked for a closing line | `plugins/mods/api.md`, "Send and receive messages between sessions", and `cross-session-messaging.md`, "Message delivery" | "To send one, call `$.session.send({ to, text })`, which makes the same delivery the SendMessage tool makes." and "When the receiving session is idle, Claude Code starts a new turn with the message." |
+
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 `phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
+
+The module asks python once who started the session, with the question of where its folder is, and sends that session the turn's last message at `turn.complete`, cut to 4,000 characters.
+Claude Code raises `turn.complete` once a turn, after its last Stop hook answered, so a turn the Stop hook sends back raises no report.
+A turn ezexe stopped sends none, and neither does a puppeteer's standing worker or coworker, whose first line asks it for the message its turn ends with.
+p4-phi still keeps each report for the starter's next message, and names one that the message already holds without repeating it.
+It keeps them because a send is only queued: `plugins/mods/api.md` says the call "resolves once the message is queued", and `cross-session-messaging.md` says the receiving session may hold or refuse it and that a message reaches only a running session.
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
@@ -156,10 +164,10 @@ Each is for one run, a test or one machine's unusual layout.
 
 | Variable | Unset means | Set |
 | :- | :- | :- |
-| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher and the usage record, while retrieval goes on |
+| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record and the report sent to a starter, while retrieval goes on |
 | `P4_PHI_RULES`, `P4_PHI_BOOK` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
-| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting |
+| `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, while a worker's report still goes to its starter |
 | `P4_PHI_WATCH_S`, `P4_PHI_WATCH_NET` | a look every 5 seconds, or every 30 once nothing has changed for 10 minutes, with GitHub read | a tick in seconds, `0` for no network |
 | `P4_PHI_ISSUES` | as `phi.issues` says | `0` turns the issue loop off for one run, as `phi.issues` false does |
 | `P4_PHI_GH` | the `gh` on PATH, and no issue loop without one | another `gh` |
@@ -183,4 +191,4 @@ The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
 - The issue loop needs `gh`, signed in, and a repository whose `origin` is on GitHub. Without them it does nothing.
 - The session tree is read from the Claude desktop app's records. In a plain terminal session every session is an orchestrator.
-- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`.
+- The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`. No report is sent to a starter there, so a starter reads its workers' reports beside its next message.

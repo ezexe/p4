@@ -560,6 +560,27 @@ class Turns(unittest.TestCase):
         self.assertIn("not shown done", text)
         self.assertEqual(self.t.say(TOP, "and now?").stdout.strip(), "")
 
+    def test_a_report_the_hooks_module_sent_is_not_repeated_beside_the_message_that_holds_it(self):
+        """ezexe/p4#157: the hooks module's message to a starter holds the worker's report, and the starter's prompt
+        hook hands the reports kept for it beside that same message. A report the message already holds is named
+        with its steps and its page and not repeated, and one the message does not hold is handed whole."""
+        self.kid_stops()
+        sent = ("<cross-session-message from=\"uds:x\" from-session=\"" + KID + "\" from-plugin=\"p4-phi\">\n"
+                "phi (p4-phi): this session ended a turn. Its report follows, and needs no reply.\n\n" + LONG
+                + "\n</cross-session-message>")
+        text = context(self.t.say(TOP, sent))
+        self.assertIn("reports of this session's workers", text)
+        self.assertIn("  reported: in the message this turn began with", text)
+        self.assertNotIn(LONG, text)
+        self.assertIn("edited export/flush.py", text)
+        self.assertIn("its page: ", text)
+        self.kid_stops(report="The header row is fixed too, in flush_header, and the suite passes.", uuid="u1",
+                       prompt="now the header row")
+        text = context(self.t.say(TOP, sent))           # an older message: the newer report is not in it
+        self.assertIn("reported: The header row is fixed too", text)
+        self.assertTrue(phi.in_message(LONG, sent))
+        self.assertFalse(phi.in_message("Done.", "Done."), "too short a report to tell by")
+
     def test_only_the_latest_turn_of_a_session_is_given(self):
         self.kid_stops(report="first try")
         self.kid_stops(report="second try")
@@ -1017,7 +1038,21 @@ class NewTask(unittest.TestCase):
     def test_act_dont_wait_rides_with_the_rules(self):
         self.assertIn("act-don't-wait", phi.BUILT_IN)
         self.assertIn("authority", phi.BUILT_IN)
-        self.assertIn("ends each turn with one SendMessage line to the starter", phi.BUILT_IN, "ezexe/p4#157")
+
+    def test_the_built_in_rule_asks_a_worker_for_no_line_to_its_starter(self):
+        """ezexe/p4#157: the plugin's hooks module sends a worker's report to its starter at each turn's end with
+        `$.session.send`, which by plugins/mods/api.md "makes the same delivery the SendMessage tool makes", and
+        cross-session-messaging.md says "When the receiving session is idle, Claude Code starts a new turn with the
+        message." So the rule asks no worker for a closing line, and the limit that line worked around is logged no
+        more. A child's own question to its parent session stays the child's to send."""
+        for gone in ("ends each turn with one SendMessage line", "whose starter waits on it",
+                     "only beside its next message"):
+            self.assertNotIn(gone, phi.BUILT_IN)
+        self.assertIn("A child asks its parent session with SendMessage", phi.BUILT_IN)
+        with open(os.path.join(HERE, "claude_code_limits.json"), encoding="utf-8") as f:
+            logged = json.load(f)
+        self.assertNotIn(157, [row["issue"] for row in logged])
+        self.assertFalse([row["issue"] for row in logged if "notify_when_idle" in row["terms"]])
 
     def test_the_built_in_rule_leaves_how_a_question_is_laid_out_to_the_apps_own_tools(self):
         """tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you
@@ -1026,7 +1061,7 @@ class NewTask(unittest.TestCase):
         holds no sentence of its own on how a question is laid out, and it keeps every sentence that text lacks or
         that no docs page states: the decision by research with its decisions file, the session tree, the matters
         of ezexe's authority with the push of green issue-closing commits excepted, a child's question to its
-        parent session, a worker's closing line to its waiting starter, and the go a project's rules ask for."""
+        parent session, and the go a project's rules ask for."""
         for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
                      "typed text only", "no click can carry"):
             self.assertNotIn(gone, phi.BUILT_IN)
@@ -1037,12 +1072,8 @@ class NewTask(unittest.TestCase):
                      "permissions or security settings, credentials, spending",
                      "but for the push of green issue-closing commits, which p4-phi orders at once",
                      "A child asks its parent session with SendMessage",
-                     "ends each turn with one SendMessage line to the starter",
                      "that go is ezexe's to give, by a button"):
             self.assertIn(kept, phi.BUILT_IN)
-        with open(os.path.join(HERE, "claude_code_limits.json"), encoding="utf-8") as f:
-            logged = {row["issue"]: row for row in json.load(f)}
-        self.assertIn("SendMessage", logged[157]["terms"], "the limit behind the worker's closing line is logged")
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)

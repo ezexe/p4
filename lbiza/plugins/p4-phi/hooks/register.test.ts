@@ -24,6 +24,10 @@ const ORCHESTRATOR: Answer = {
   net_s: 120,
 }
 const WORKER: Answer = { dir: FOLDER, watching: false, why: 'no orchestrator', watch_s: 5, wait_s: 30, net_s: 120 }
+// A worker as its look answers it: `starter` is what `$.session.id()` answers in the session that started it.
+const STARTER = 'cli-starter-0001'
+const STARTED: Answer = { ...WORKER, starter: STARTER }
+const REPORT = 'The flush is ported and pushed as 4f1c2aa.'
 
 // What `$.session.usage()` answered a live probe in the desktop app on Claude Code 2.1.325.
 const USAGE: SessionUsage = {
@@ -45,9 +49,12 @@ type Machine = {
   pythons?: Record<string, string>
   look?: (args: readonly string[]) => Answer | Promise<Answer>
   usage?: SessionUsage
+  // Why a message to an address is not delivered there, where it is not.
+  refuses?: (to: string) => string | undefined
 }
 
-// What the module read, the pythons it tried, each phi.py command it ran with its whole call, and what it wrote.
+// What the module read, the pythons it tried, each phi.py command it ran with its whole call, what it wrote and
+// the messages it sent to other sessions.
 type Seen = {
   files: Record<string, string>
   read: string[]
@@ -56,6 +63,7 @@ type Seen = {
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined }[]
   wrote: { path: string; text: string }[]
   logged: string[]
+  sent: { to: string; text: string }[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -65,7 +73,16 @@ function plain(path: string): string {
 
 function machine(on: On, has: Machine): Seen {
   const files = has.files ?? { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '', [`${FOLDER}/session.json`]: '{}' }
-  const seen: Seen = { files, read: [], tried: [], looks: [], calls: [], wrote: [], logged: [] }
+  const seen: Seen = {
+    files,
+    read: [],
+    tried: [],
+    looks: [],
+    calls: [],
+    wrote: [],
+    logged: [],
+    sent: [],
+  }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
@@ -80,6 +97,12 @@ function machine(on: On, has: Machine): Seen {
   on('session.root', () => ({ value: '/work/project' }))
   on('turn.complete', () => ({ text: '' }))
   on('session.receive', (_, e) => ({ text: e.text }))
+  on('session.send', (_, e) => {
+    seen.sent.push({ to: e.to, text: e.text })
+    const reason = has.refuses?.(e.to)
+
+    return reason === undefined ? { isDelivered: true } : { isDelivered: false, reason }
+  })
   on('ui.log', (_, e) => {
     seen.logged.push(e.text)
 
@@ -459,4 +482,132 @@ test('after a clear the folder is asked for again and the usage is written again
 
   expect(seen.looks).toEqual([['look', '--folder'], ['look', '--folder']])
   expect(seen.wrote.length).toBe(2)
+})
+
+test("a worker's report goes to the session that started it when its turn ends", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => STARTED })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: `  ${REPORT}\n` })
+  await clock.settle()
+
+  expect(seen.sent.length).toBe(1)
+  expect(seen.sent[0]?.to.includes(STARTER)).toBe(true)
+  const lines = seen.sent[0]?.text.split('\n') ?? []
+  expect(lines[0]).toBe('phi (p4-phi): this session ended a turn. Its report follows, and needs no reply.')
+  expect(lines.slice(1)).toEqual(['', REPORT])
+  // The starter came with the first look's answer, so python was asked nothing more for it.
+  expect(seen.looks.filter(args => args.includes('--folder'))).toEqual([])
+})
+
+test('each turn of a worker sends one report, a long one cut and an empty one named by its end', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => STARTED })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: 'x'.repeat(4_500) })
+  await $.turn.complete({ ...TURN, turnId: 't2', answer: '', reason: 'error' })
+  await clock.settle()
+
+  expect(seen.sent.length).toBe(2)
+  expect(seen.sent[0]?.text.split('\n\n')[1]).toBe(`${'x'.repeat(4_000)} ...`)
+  expect(seen.sent[1]?.text).toBe("phi (p4-phi): this session ended a turn with no report: the turn's end was error.")
+})
+
+test("a subagent's turn, a turn the person stopped and a session nobody started send no report", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isStarted = true
+  const seen = machine(on, { look: () => (isStarted ? STARTED : ORCHESTRATOR) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, agentId: 'a1', answer: REPORT })
+  await $.turn.complete({ ...TURN, answer: REPORT, isAborted: true, reason: 'aborted' })
+  await clock.settle()
+  expect(seen.sent).toEqual([])
+
+  // A look that names no starter is a session nobody started, or one detached from the session that did.
+  isStarted = false
+  await clock.advance(30_000)
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+  expect(seen.sent).toEqual([])
+})
+
+test('a report whose turn ends while the first look runs waits for the starter that look answers', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    look: async () => {
+      await clock.sleep(2_000)
+
+      return STARTED
+    },
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+  expect(seen.sent).toEqual([])
+
+  await clock.advance(2_000)
+  expect(seen.sent.length).toBe(1)
+  expect(seen.looks).toEqual([['look', '--net']])
+})
+
+test('a starter that runs under a new id is asked of python once more, and the report goes there', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const gone = `no live session on this machine has id ${STARTER}`
+  const moved: Answer = { dir: FOLDER, watching: false, starter: 'cli-starter-0002' }
+  const seen = machine(on, {
+    look: args => (args.includes('--folder') ? moved : STARTED),
+    refuses: to => (to.includes(STARTER) ? gone : undefined),
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+
+  expect(seen.sent.map(message => message.to.includes('cli-starter-0002'))).toEqual([false, true])
+  expect(seen.looks.filter(args => args.includes('--folder')).length).toBe(1)
+  expect(seen.logged).toEqual([])
+})
+
+test('a report no live session takes is said to the debug log, and the turn ends as it would', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const gone = `no live session on this machine has id ${STARTER}`
+  const seen = machine(on, { look: () => STARTED, refuses: () => gone })
+
+  await $.session.start(START)
+  await clock.settle()
+  const ended = await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+
+  expect(ended.text).toBe('')
+  expect(seen.sent.length).toBe(1)
+  expect(seen.logged).toEqual([`the turn's report did not reach the starter: ${gone}`])
+})
+
+test('P4_PHI_WATCH=0 still sends a report, from the starter the folder question answers', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI_WATCH: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => ({ dir: FOLDER, watching: false, starter: STARTER }) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+
+  expect(seen.looks).toEqual([['look', '--folder']])
+  expect(seen.sent.length).toBe(1)
 })

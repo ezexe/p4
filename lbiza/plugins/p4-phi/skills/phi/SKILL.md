@@ -14,6 +14,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 - At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message, unless it was cut back to a pointer or its body says the plugin carries its rule.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
+- As a message from a worker it started, at the end of each of that worker's turns: the turn's report, which the plugin's hooks module sends and no worker writes. The message opens `phi (p4-phi): this session ended a turn.`, starts a turn when this session is idle, and needs no reply. A report it holds is named beside it and not repeated. A puppeteer's standing worker and coworkers write their own closing message.
 - In a subagent it starts: the step the subagent serves and retrieval's lines, added as context at the subagent's start, and before a tool call of the subagent a warning of what changed beside its parent session since its launch, when anything did: a note a sibling session wrote after the launch, or the files it changed, each said once, by what the subagent's own transcript already holds.
 - At the moment each applies: the advice on where each work step of an orchestrator's task list goes; a writing child's issue line, which says its loop; the push line, which goes only to the tree's orchestrator, the one session that lands and pushes, a worker's `Closes #N` commit included, and which names the worker's branch to merge into the default branch first; and the line `done` prints, which says what follows.
 
@@ -43,7 +44,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 - `gaps` lists each feedback memory of the store that still holds a behaviour rule with no landed feature: one tied to no issue, and one whose issue is open.
 - `detach [sessionId]` moves a session to top level in p4-phi's records, and `reparent <sessionId> <under sessionId>` puts it, with every session below it, under another; the app's sidebar follows neither.
 - `controls <sessionId> ...` records the sessions a puppeteer controls, `controls` alone prints each by its full title, `--drop <sessionId>` ends one, `--hand <new sessionId>` hands over to a successor, `--from <old sessionId>` takes over from one, and `--decline <request id> "<why>"` declines a request.
-- `ledger` prints `ledger.md`, which an orchestrator's watcher writes in its session folder from p4-phi's files and the app's records, and `look` is one pass of that watcher, which the plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its timer, so no session runs it.
+- `ledger` prints `ledger.md`, which an orchestrator's watcher writes in its session folder from p4-phi's files and the app's records, and `look` is one pass of that watcher, which the plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its timer, and whose answer also tells the module who started the session, so no session runs it.
 - `draft "<words>"` drafts the next session for any words, and `pioneer <draft id>` prints the gate's verdict for a kept draft again.
 - `readings "<one>" "<two>" --words "<the message>"` drafts one child for each reading of a message, and `merge <group> --result "<text>"` settles a fork between them.
 - `routes` lists the registered routes, `routes --register` registers every landed topic the records back, and `routes --why <sessionId>` says what a topic's route still lacks.
@@ -149,7 +150,7 @@ A puppeteer, at a message carrying its worker's report, is handed the ids of the
 ## What it does not do
 
 - Apart from retrieval, which ranks the corpus against each message, p4-phi finds no earlier turn by the words of a request: a session is given what the sessions linked to it kept, and of earlier topics only a registered route, a landed topic whose records back it, is scored against a message.
-- It does not start, stop or message sessions itself: the gate hands the exact call, and the session makes it.
+- It does not start or stop sessions itself: the gate hands the exact call, and the session makes it. Its hooks module sends one message of its own, a worker's report to its starter.
 - It does not stop a session from filing itself in the section "puppeteers", since the app asks nobody: the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it saw the session there, and tells every session it lists who claims it.
 - It does not compact a session and hands no session a compact question: Claude Code compacts a session by itself as its context fills.
 - It does not start a successor or move a session between sections: those are the app's tools, and the puppeteer makes the calls.

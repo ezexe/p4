@@ -788,9 +788,10 @@ def pace(home, top="", watching=False):
 
 def look(home, sid, net=False, folder_only=False):
     """One look over the subtree of the session `sid`, run by the hooks module, and what the module reads of it.
-    The answer holds `dir`, the session's folder, where it has one; `watching`, True when the session is an
-    orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`, True when
-    P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
+    The answer holds `dir`, the session's folder, where it has one; `starter`, the session that started it as
+    phi.starter_cli answers it, where the module sends the report of each of its turns; `watching`, True when the
+    session is an orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`,
+    True when P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
     rewritten; `net`, True when the look read GitHub; and the three times of `pace`.
     `net` asks for a slow look, which reads GitHub unless P4_PHI_WATCH_NET is 0 and checks the routes.
     `folder_only` answers the folder and does nothing else.
@@ -801,6 +802,12 @@ def look(home, sid, net=False, folder_only=False):
     if not sid or not os.path.isfile(os.path.join(folder, "session.json")):
         return {"watching": False, "why": "no session folder", **pace(home)}
     out = {"watching": False, "dir": folder.replace("\\", "/")}
+    try:                                            # where the module sends the report of a worker's turn
+        starter = _phi().starter_cli(home, relay._session(home, sid))
+    except Exception:  # noqa: BLE001
+        starter = ""
+    if starter:
+        out["starter"] = starter
     if folder_only:
         return out
     if os.environ.get("P4_PHI") == "0" or os.environ.get("P4_PHI_WATCH") == "0":
