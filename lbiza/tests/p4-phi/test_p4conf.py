@@ -889,6 +889,28 @@ class ClaudeSettings(unittest.TestCase):
         self.assertIn("<td>Yes", row)
         self.assertNotIn("no plugin moves a plan", page)
 
+    def test_the_settings_page_says_where_the_keeper_reads_the_managed_settings(self):
+        """The row of autoMemoryDirectory in the table of the keys p4 writes says the keeper takes the managed
+        settings from the hooks module where one is loaded, by the method and under the name the code uses, and
+        reads the managed file where none is. The row of plansDirectory points at it."""
+        import re
+        page =(PLUGINS.parents[1] / "docs" / "claude-settings.html").read_text(encoding="utf-8")
+        written = page.split("<th>Why it is p4's</th>", 1)[1].split("</table>", 1)[0]
+        memory = written.split("<tr><td><code>autoMemoryDirectory</code></td>", 1)[1].split("</tr>", 1)[0]
+        for said in ("p4-temportal's hooks module", "<code>$.settings.read</code>", "every managed tier merged",
+                     "<code>SessionStart</code> hook input", "loads no hooks module", "<code>ConfigChange</code>",
+                     "the platform's managed settings file", "from disk either way",
+                     'href="temportal-native.html#row-memory"'):
+            self.assertIn(said, memory, said)
+        plans = written.split("<tr><td><code>plansDirectory</code></td>", 1)[1].split("</tr>", 1)[0]
+        self.assertIn("the managed settings read as the row above says", plans)
+        module = (PLUGINS / "p4-temportal" / "hooks" / "register.ts").read_text(encoding="utf-8")
+        self.assertIn("$.settings.read({ source })", module)
+        self.assertIn(f"const HANDED = '{p4conf.HANDED_KEY}'", module)
+        self.assertIn('id="row-memory"', (PLUGINS.parents[1] / "docs" / "temportal-native.html").read_text("utf-8"))
+        prose = re.sub(r"<code>.*?</code>", "", memory, flags=re.S)
+        self.assertNotIn("(", re.sub(r"<[^>]+>", "", prose), "no parenthetical in what this row adds")
+
     def test_another_folder_named_by_the_user_is_left_to_win(self):
         """A user file naming another folder: no local key, which would override that choice."""
         conf = os.environ["CLAUDE_CONFIG_DIR"]
