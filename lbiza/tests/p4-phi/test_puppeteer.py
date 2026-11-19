@@ -273,6 +273,24 @@ class Linear(Base):
         self.assertRegex(area, r"^Area: `[^`]*docs/guides`\.$", "the folder to be made, and no ref and no repository")
         self.assertRegex(prompt, r"(?m)^Files: `[^`]*docs/guides`$")
 
+    def test_a_draft_takes_no_other_repositorys_name_for_a_path(self):
+        """A message that names another repository as one, `the repository anthropics/claude-code`, got a draft
+        whose `Area:` and `Files:` lines held `anthropics/claude-code` under the project's folder, since the
+        project's repository knows nothing of it. relay.repos_said reads the message's own words, so the draft
+        names the folder still to be made and no repository."""
+        t = self.t
+        subprocess.run(["git", "init", "-q", t.proj], check=True)
+        subprocess.run(["git", "-C", t.proj, "remote", "add", "origin", "https://github.com/ezexe/p4.git"], check=True)
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        said = RETRY + ", as the repository anthropics/claude-code and anthropics/claude-code#110694 have it"
+        prompt = call_in(context(t.say(TOP, said)))["prompt"]
+        self.assertNotIn("Area:", prompt)
+        self.assertNotIn("Files:", prompt)
+        prompt = call_in(context(t.say(TOP, said + ", in a new folder docs/guides")))["prompt"]
+        self.assertRegex(prompt, r"(?m)^Files: `[^`]*docs/guides`$", "the folder to be made, and no repository")
+        self.assertNotIn("claude-code`", prompt)
+
     def test_a_typed_slash_command_is_drafted_as_no_session(self):
         """A message that is a slash command is Claude Code's to run and no work of ezexe's to route: `/goal` with a
         condition that reads as work got a start draft titled by the command. phi.request_of takes no request from

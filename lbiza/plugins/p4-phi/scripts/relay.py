@@ -379,19 +379,68 @@ def ref_word(p, n, base=""):
         return False
     _, names, slugs = _known(base)
     known = (parts[0] == "refs" or parts[0] in names or re.sub(r"\.git$", "", w, flags=re.I).lower() in slugs
-             or branch(base, w))
+             or branch(base, w) or (len(parts) == 2 and owner_known(parts[0], base)))
     return known and not (drive_ok(n) and os.path.lexists(n))
+
+
+def owner_known(word, base):
+    """True when `word` is the owner in the address of a remote of the repository at `base`, as `ezexe` is where a
+    remote is ezexe/p4, and the project has no folder of that name, so `ezexe/phi` there is that owner's other
+    repository and no folder still to be made."""
+    owners = {x.split("/")[0] for x in _known(base)[2]}
+    return word.lower() in owners and not os.path.lexists(os.path.join(base, word))
+
+
+# A repository the project's repository knows nothing of, as a message says it is one. Nothing on this machine knows
+# `anthropics/claude-code`, and by its shape it is a folder still to be made, so only the message's own words tell
+# it. GitHub's "Autolinked references and URLs" writes an issue of another repository `Username/Repository#26` and a
+# commit `User/Repository@SHA`, the gh manual gives `-R, --repo [HOST/]OWNER/REPO`, and prose puts the word
+# repository or repo directly before the name or directly behind it. A word such as "in" or "of" before it says
+# nothing, since a path follows those words as often.
+_SLUG = r"[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*?"
+_SLUG_END = r"""(?=(?:\.git)?(?:[`'"’#@\s,;:)]|\.?\s|\.?$))"""
+_MORE = r"(?:`?(?:\.git)?`?(?:\s*,\s*(?:and\s+|or\s+)?|\s+and\s+|\s+or\s+)`?" + _SLUG + _SLUG_END + r")*"
+REPO_SAID = re.compile(
+    r"(?:\b(?:repository|repositories|repos|repo)[\s:]+`?|(?<![\w-])(?:-R|--repo)[\s=]+`?|\bgithub\.com[:/]+)"
+    r"(" + _SLUG + _SLUG_END + _MORE + r")"
+    r"|(?<![\w./\\-])(" + _SLUG + r")(?:\.git)?(?:#\d+\b|@[0-9a-f]{7,40}\b|`?\s+(?:repository|repo)\b)", re.I)
+_SLUG_RE = re.compile(r"(?<![\w./\\-])" + _SLUG + _SLUG_END)
+
+
+def repos_said(text, base=""):
+    """The `owner/name` words a text says are repositories, in lower case, REPO_SAID. Each has nothing on disk under
+    `base` by that name and an owner that is no folder there, so `the repo lib/sub` and a folder to be made under
+    `docs` stay paths."""
+    out = []
+    for m in REPO_SAID.finditer(str(text or "")):
+        for w in ([m.group(2)] if m.group(2) else _SLUG_RE.findall(m.group(1))):
+            n = norm(w, base)
+            there = drive_ok(n) and (os.path.lexists(n) or os.path.lexists(os.path.dirname(n)))
+            if not there and w.lower() not in out:
+                out.append(w.lower())
+    return out
+
+
+def _repo_form(p):
+    """The words `p` as a repository's name is compared: without a host before it, without `.git`, and without the
+    `#26` or `@SHA` of a reference that backticks kept on it, in lower case."""
+    w = re.sub(r"^github\.com[:/]+", "", str(p or "").replace(chr(92), "/"), flags=re.I)
+    return re.sub(r"(?:\.git)?(?:#\d+|@[0-9a-f]{7,40})?$", "", w, flags=re.I).lower()
 
 
 def paths_in(text, base=""):
     """The paths a note names: in backticks, or written with a slash. A slash command is no path, command_word, and
-    neither is a git ref or a repository's name that the repository at `base` knows, ref_word."""
+    neither is a git ref or a repository's name that the repository at `base` knows, ref_word, nor a repository the
+    note itself says is one, repos_said."""
     out = []
     text = re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", str(text or ""))       # a URL is not a path
+    said = repos_said(text, base)
     for m in PATH_RE.finditer(text):
         p = m.group(1) or m.group(2)
         if p and ("/" in p or "\\" in p or "." in p) and not p.startswith(("http:", "https:")):
             p = p.rstrip(".,;:)")
+            if said and _repo_form(p) in said:
+                continue
             n = norm(p, base)
             if n and n not in out and drive_ok(n) and not command_word(p, n) and not ref_word(p, n, base):
                 out.append(n)

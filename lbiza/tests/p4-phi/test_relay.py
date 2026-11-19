@@ -151,6 +151,54 @@ class Paths(unittest.TestCase):
                                  [relay.norm(x, base) for x in ("docs/guides", "notes/drafts", "origin/main",
                                                                 "ezexe/p4")])
 
+    def test_a_repository_the_message_names_as_one_is_no_path(self):
+        """`anthropics/claude-code` is a repository the project's repository knows nothing of, and by its shape it
+        is a folder still to be made, so a message that named it got a draft with that path under the project. The
+        message's own words tell it: the word repository or repo directly before or behind the name, `-R` and
+        `--repo` of the gh manual, a host before it, and GitHub's autolinked references `owner/name#26` and
+        `owner/name@SHA`. A second repository of an owner in a remote's address, such as `ezexe/phi` beside
+        ezexe/p4, is known by that owner. A folder still to be made stays a path, and so does a name the message
+        only puts behind a word such as "in"."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "proj").replace("\\", "/")
+            os.makedirs(os.path.join(base, "lib", "sub"))
+            os.makedirs(os.path.join(base, "docs"))
+            subprocess.run(["git", "init", "-q", base], check=True)
+            subprocess.run(["git", "-C", base, "remote", "add", "origin", "https://github.com/ezexe/p4.git"],
+                           check=True)
+            guides = [relay.norm("docs/guides", base)]
+            for said in ("Read the repository anthropics/claude-code for it, then make docs/guides.",
+                         "Read the repo `anthropics/claude-code`, then make docs/guides.",
+                         "Read the anthropics/claude-code repository, then make docs/guides.",
+                         "As anthropics/claude-code#110694 says, make docs/guides.",
+                         "As `anthropics/claude-code#110694` says, make docs/guides.",
+                         "As anthropics/claude-code@1efb487 has it, make docs/guides.",
+                         "Run gh issue list -R anthropics/claude-code, then make docs/guides.",
+                         "Run gh issue list --repo=anthropics/claude-code.git and make docs/guides.",
+                         "See github.com/anthropics/claude-code, then make docs/guides.",
+                         "The repositories anthropics/claude-code, `ezexe/phi` and astral-sh/uv: make docs/guides.",
+                         "Make docs/guides as ezexe/phi and ezexe/p4-phi-experiments have it."):
+                self.assertEqual(relay.paths_in(said, base), guides, said)
+            self.assertEqual(relay.repos_said("the repos Anthropics/Claude-Code and astral-sh/uv.", base),
+                             ["anthropics/claude-code", "astral-sh/uv"])
+            # no word of the message says it is a repository: a path, as a folder still to be made is
+            for said, want in (("Work in anthropics/claude-code and docs/guides.",
+                                ["anthropics/claude-code", "docs/guides"]),
+                               ("Make the folder notes/drafts in the repository.", ["notes/drafts"]),
+                               ("In the repo lib/sub is wrong, and the repo docs/new is to be made.",
+                                ["lib/sub", "docs/new"]),
+                               ("Fix lib/new.py#L12 of the repository.", ["lib/new.py"])):
+                self.assertEqual(relay.paths_in(said, base), [relay.norm(x, base) for x in want], said)
+            # the owner of a remote's address, and a folder of the owner's name that is there
+            self.assertTrue(relay.ref_word("ezexe/phi", relay.norm("ezexe/phi", base), base))
+            self.assertFalse(relay.ref_word("ezexe/phi/src", relay.norm("ezexe/phi/src", base), base))
+            os.makedirs(os.path.join(base, "ezexe"))
+            self.assertFalse(relay.ref_word("ezexe/phi", relay.norm("ezexe/phi", base), base), "a folder is there")
+            plain = os.path.join(tmp, "plain").replace("\\", "/")
+            os.makedirs(plain)
+            self.assertEqual(relay.paths_in("Read the repository anthropics/claude-code for ezexe/phi.", plain),
+                             [relay.norm("ezexe/phi", plain)], "said in a folder that is no repository")
+
     def test_a_slash_command_is_no_path(self):
         """`/goal` and `/plan` in a message are Claude Code's commands, commands.md, and a plugin's is written
         `/plugin-name:skill-name`, skills.md. Joined to a base on a machine with drive letters each read as a folder
