@@ -103,7 +103,16 @@ class Loop(unittest.TestCase):
 
     def tearDown(self):
         os.environ.pop("FAKE_GH_DIR", None)
-        self._tmp.cleanup()
+        # A run a Stop left in the background holds the work folder as its working folder until it has ended, which
+        # on a busy machine is after its result is written: the folder goes once that process has let go of it.
+        for left in range(50, -1, -1):
+            try:
+                self._tmp.cleanup()
+                break
+            except PermissionError:
+                if not left:
+                    raise
+                time.sleep(0.1)
 
     def git(self, repo, *args):
         return subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@t", *args], check=True,
