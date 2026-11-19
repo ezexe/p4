@@ -135,7 +135,7 @@ class Page(unittest.TestCase):
         seen = {
             "the plugin's own compaction at a quiet moment": (found["compaction"], (
                 "<code>temportal.compact_at</code> to 1", "a minute after a turn ended", "<code>manual</code>",
-                "50,068 tokens to 9,549", "No second compaction followed")),
+                "50,068 tokens to 9,549", "each with the plugin as its origin", "No second compaction followed")),
             "a compaction Claude Code starts by itself": (found["compaction"], (
                 "a compaction Claude Code starts by itself", "<code>CLAUDE_CODE_AUTO_COMPACT_WINDOW</code>",
                 "each read <code>auto</code>", "carried from list to list")),
@@ -149,7 +149,8 @@ class Page(unittest.TestCase):
                 "as one chain", "the first session's start wrote the key", "neither asked about nor refused",
                 "the session after the one whose start wrote it")),
             "an older build": (open_still, (
-                "Seen on Claude Code 2.1.322", "does not load there at all", "<code>tool.run</code> is no event")),
+                "Seen on Claude Code 2.1.322", "does not load there at all", "<code>tool.run</code> is no event",
+                "The command hooks ran all the same", "was not seen on it")),
         }
         for what, (where, words) in seen.items():
             for said in words:
@@ -158,7 +159,7 @@ class Page(unittest.TestCase):
             "how the app draws the message": (open_still, (
                 "Still not seen live: how the app draws the message", "A scripted run draws nothing")),
             "whether the cleanup reaches a plansDirectory": (open_still, (
-                "It is still not seen", "A scripted start on Claude Code 2.1.328 ran no cleanup at all",
+                "It is still not seen", "showed no cleanup to watch",
                 "dated sixty days back", "whether the folder is trusted")),
             "the plan chain in the desktop app and off Windows": (found["plans"], (
                 "Still not seen: the chain in the desktop app", "anywhere but on Windows",
@@ -168,6 +169,8 @@ class Page(unittest.TestCase):
             for said in words:
                 self.assertIn(said, where, f"{what}: {said}")
         self.assertNotIn("Not seen live: a compaction Claude Code starts by itself", text)
+        # what one run did not show: its project began with both keys in its settings file
+        self.assertNotIn("the settings keeper wrote both keys", text)
 
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()
