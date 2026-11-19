@@ -53,6 +53,7 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 `phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
+A puppeteer's line at its standing worker's report and the upkeep's check of a short context read each session's share there, so no session is asked for its usage, and only a session with no measure kept is named for a `get_usage` read.
 
 The module asks python once who started the session, with the question of where its folder is, and sends that session the turn's last message at `turn.complete`, cut to 4,000 characters.
 Claude Code raises `turn.complete` once a turn, after its last Stop hook answered, so a turn the Stop hook sends back raises no report.

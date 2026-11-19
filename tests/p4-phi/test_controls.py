@@ -768,6 +768,32 @@ class Supervisor(unittest.TestCase):
             self.assertIn(sid, line)
         self.assertIn(f"{controls.CLEAR_AT} percent", line)
         self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, "and now?")), "only at its report")
+        # the hooks module keeps each session's measure in usage.json: a session with one is read there, not asked
+        report = f'<cross-session-message from="{WORKER}">Checked 5 archives.</cross-session-message>'
+
+        def measured(sid, percent):
+            write(os.path.join(t.dir(sid), phi.USAGE_FILE), json.dumps(
+                {"at": 1, "context": {"tokens": percent * 10000, "window": 1000000, "percent": percent},
+                 "rateLimits": []}))
+        measured(WORKER, controls.CLEAR_AT + 12)
+        measured(CO1, controls.CLEAR_AT - 1)
+        line = next((x for x in context(t.say(PUP, report)).splitlines() if f"worker `{WORKER}` reported" in x), "")
+        self.assertIn(f"`{WORKER}` at {controls.CLEAR_AT + 12} percent", line, "past the line, by its own measure")
+        self.assertIn("usage.json", line)
+        self.assertNotIn(CO1, line, "a coworker measured under the line is not named")
+        self.assertRegex(line, rf"No measure is kept of `{CO2}`: read `mcp__ccd_session_mgmt__get_usage`")
+        self.assertEqual(line.count("get_usage"), 1, "only the session with no measure is asked for one")
+        self.assertIn("clear_session", line)
+        measured(CO2, controls.CLEAR_AT)
+        line = next((x for x in context(t.say(PUP, report)).splitlines() if f"worker `{WORKER}` reported" in x), "")
+        self.assertNotIn("get_usage", line, "every session measured: no session is asked for its usage")
+        self.assertIn(f"`{CO2}` at {controls.CLEAR_AT} percent", line, "at the line counts as past it")
+        self.assertIn("naming them", line)
+        for sid in (WORKER, CO2):
+            measured(sid, controls.CLEAR_AT - 20)
+        write(os.path.join(t.dir(CO1), phi.USAGE_FILE), '{"at":1,"context":{"window":1000000},"rateLimits":[]}')
+        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, report)),
+                         "every measure under the line, a fresh window among them: no line")
         r = t.hook("session-start", CO1, {"hook_event_name": "SessionStart", "source": "compact"})
         page = f"{copad}/state.md"              # the scratchpad of its first turn, kept across a clear
         self.assertTrue(context(r).startswith("phi (p4-phi): ") and page in context(r).split("\n", 1)[0],

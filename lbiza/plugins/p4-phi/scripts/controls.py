@@ -480,17 +480,40 @@ def tool_line(s, store):
 
 
 def usage_line(home, s, prompt, store):
-    """A puppeteer, at a message carrying its standing worker's report: one line naming the worker and each of its
-    coworkers, to read each one's context and tell the worker which passed the line. '' otherwise."""
+    """A puppeteer, at a message carrying its standing worker's report: one line naming those of the worker and its
+    coworkers whose context passed the line, for the puppeteer to name to the worker. Each one's share is Claude
+    Code's last measure of it, which the plugin's hooks module keeps in usage.json in the session's folder and
+    phi.usage_of reads, so no session is asked for it. A session with no measure kept, which no hooks module wrote
+    for, is still named for one `get_usage` read. '' otherwise, and where every measure reads under the line."""
     held = worker_of(s)
     if not held or f'<cross-session-message from="{held}"' not in str(prompt or "") or not is_puppeteer(s, store):
         return ""
     every = relay._sessions(home)
     ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))
-    return (f"phi (p4-phi): its standing worker `{held}` reported. Read `mcp__ccd_session_mgmt__get_usage` for each "
-            f"of {', '.join(f'`{k}`' for k in ids)}, and send the worker one line naming any whose context passes "
-            f"{clear_at(store)} percent, so that session brings its state page up to date and calls "
-            f"`mcp__ccd_session_mgmt__clear_session` with `\"self\"` at its turn's end.")
+    at = clear_at(store)
+    past, unmeasured = [], []
+    for k in ids:
+        kept = PHI.usage_of(home, k)
+        share = (kept.get("context") or {}).get("percent")
+        if not kept:
+            unmeasured.append(k)
+        elif share is not None and share >= at:    # a fresh window holds no share yet: nothing to clear
+            past.append(f"`{k}` at {share:g} percent")
+    if not past and not unmeasured:
+        return ""
+    clears = ("so that session brings its state page up to date and calls `mcp__ccd_session_mgmt__clear_session` "
+              "with `\"self\"` at its turn's end")
+    said = [f"phi (p4-phi): its standing worker `{held}` reported."]
+    if past:
+        said.append(f"By Claude Code's last measure of each, kept in its usage.json, the context of "
+                    f"{', '.join(past)} passes {at:g} percent: send the worker one line naming "
+                    f"{'it' if len(past) == 1 else 'them'}, {clears}.")
+    if unmeasured:
+        named = ', '.join(f'`{k}`' for k in unmeasured)
+        said.append(f"No measure is kept of {named}: read `mcp__ccd_session_mgmt__get_usage` for each, and "
+                    + (f"name in that line any whose context passes {at:g} percent." if past else
+                       f"send the worker one line naming any whose context passes {at:g} percent, {clears}."))
+    return " ".join(said)
 
 
 STATE_IN_TASK = re.compile(r"\bState page:\s*(\S+?)[.,;]?(?=\s|$)")

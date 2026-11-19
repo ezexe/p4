@@ -166,7 +166,7 @@ A session that keeps no state page, started by one that keeps one, is told once 
 The app counts a session's context, so p4-phi measures none: the same line tells the session to read its share with `mcp__ccd_session_mgmt__get_usage` on `"self"` and, where it reads past `phi.clear_at` percent, 60 by default in `.claude/p4/p4.json`, to make `clear_session` on `"self"` its turn's last call.
 No tool clears a session together with the sessions it started, so ahead of its own clear the line names one `clear_session` call for each coworker p4-phi's records hold idle with an empty queue: a live session it started itself that keeps a state page, is not inside a turn, holds no open plan step and no background task, and whose last report it has been handed, and one told at a `wrap_up` to keep its page only once that file is written.
 A queued message, a pin and a session open on ezexe's screen are in none of p4-phi's records, so the app's own refusal of the clear covers them, and a coworker whose clear is refused stays as it is.
-A puppeteer, at a message carrying its worker's report, is handed the ids of the worker and its coworkers, to read each one's `get_usage`.
+A puppeteer, at a message carrying its worker's report, is handed those of the worker and its coworkers whose context passed `phi.clear_at` percent, each by Claude Code's last measure of it, which the hooks module keeps in the session's `usage.json`, so no session is asked for its usage; a session with no measure kept is named for one `get_usage` read.
 
 ## Upkeep of a session tree
 
