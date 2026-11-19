@@ -753,6 +753,8 @@ async function answer($: EngineInterface, typed: string): Promise<string> {
 
 // The slash command and the tool, registered at each start of the module. A name that is taken is refused with a
 // throw, and each is registered whatever became of the other.
+// The command's name is no skill's of this plugin: Claude Code refuses a module's command that is named as one of
+// the plugin's own skills, which is why the skill is `host`.
 async function offer($: EngineInterface): Promise<void> {
   try {
     await $.command.register({

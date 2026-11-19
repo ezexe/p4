@@ -36,6 +36,15 @@ The session does not wait for the map.
 The map is read again at the first turn of the main conversation, when a tool server that was still connecting at the start has answered, and after the session's id changed, as a `/clear` changes it.
 An entry is written again only where it says something new.
 
+## The command and the skill
+
+The hooks module registers the command `/native`, and the plugin's skill is named `host`, which a session's list shows as `p4-native:host`.
+The two names differ on purpose: Claude Code gives a plugin's skill the command `/<plugin>:<skill>` and refuses a module's command of the skill's name.
+Until p4-native 0.5.15 the skill was named `native`, and the debug log of every session held `/native was not registered: p4-native: $.command.register: "/native" refused: it is the plugin's /p4-native:native`, seen on Claude Code 2.1.311, 2.1.322 and 2.1.328.
+So `/native` ran the skill's page and never the module's command, and `probes`, `probe` and `weighed` answered through the tool alone.
+Seen on Claude Code 2.1.328 in a `claude -p` run of a copy where the skill is named `host`: the debug log held `$.command.register (p4-native): /native listed`, and the prompt `/native` printed the map.
+Not seen: the command typed in the desktop app.
+
 ## One way to read it
 
 The map is the file `<project>/.claude/p4/native/host.json`, and a session's entry is under `sessions.<session id>`.

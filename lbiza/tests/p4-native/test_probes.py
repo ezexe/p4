@@ -10,7 +10,7 @@ PLUGIN = LBIZA / "plugins" / "p4-native"
 PROBES = (PLUGIN / "hooks" / "probes.ts").read_text(encoding="utf-8")
 MODULE = (PLUGIN / "hooks" / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
-SKILL = (PLUGIN / "skills" / "native" / "SKILL.md").read_text(encoding="utf-8")
+SKILL = (PLUGIN / "skills" / "host" / "SKILL.md").read_text(encoding="utf-8")
 
 # Each probe of probes.ts as its fields read: one `{ ... }` of the list PROBES.
 LIST = PROBES.split("export const PROBES: readonly Probe[] = [", 1)[1].split("\n]\n", 1)[0]

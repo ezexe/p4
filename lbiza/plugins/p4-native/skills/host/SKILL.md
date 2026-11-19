@@ -1,9 +1,9 @@
 ---
-name: native
+name: host
 description: What this host is and can do, as p4-native read it at the session's start, and the conditions it watches for a decision the platform blocked. The desktop app or a terminal, interactive or scripted, the Claude Code version, and which tools of the desktop app and of Claude Code answer in this session. Use before relying on a tool of the desktop app or on a feature one host has and another lacks, when a step differs between the desktop app, a terminal and a scripted run, when a line from p4-native says a watched condition changed, and when asked what this session can do or where the capability map is kept.
 ---
 
-# native
+# host
 
 p4-native is the host layer of ezexe/p4.
 It builds no copy of anything Claude Code or the desktop app does: it asks the engine what this host is and keeps the answer where a session and the other p4 plugins read it.

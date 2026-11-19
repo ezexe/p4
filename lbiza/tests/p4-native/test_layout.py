@@ -13,7 +13,7 @@ HOOKS = PLUGIN / "hooks"
 FILE = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
 MODULE = (HOOKS / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
-SKILL = (PLUGIN / "skills" / "native" / "SKILL.md").read_text(encoding="utf-8")
+SKILL = (PLUGIN / "skills" / "host" / "SKILL.md").read_text(encoding="utf-8")
 MAP = ".claude/p4/native/host.json"
 
 
@@ -100,8 +100,24 @@ class SkillTest(unittest.TestCase):
     def test_the_skill_is_named_and_described(self):
         head = re.match(r"---\n(.*?)\n---\n", SKILL, re.S).group(1)
         fields = dict(line.split(": ", 1) for line in head.splitlines())
-        self.assertEqual(fields["name"], "native")
+        self.assertEqual(fields["name"], "host")
         self.assertIn("Use ", fields["description"])
+
+    def test_no_skill_of_the_plugin_has_the_name_of_the_command_its_module_registers(self):
+        """Claude Code gives a plugin's skill the command `/<plugin>:<skill>` and refuses a module's command of the
+        skill's name. Seen on Claude Code 2.1.311, 2.1.322 and 2.1.328 while the skill was named `native`: the debug
+        log held `"/native" refused: it is the plugin's /p4-native:native`, so `/native` ran the skill's page and
+        never the module's command. With the skill named `host`, a `claude -p` run on 2.1.328 logged `/native
+        listed`, and `/native` printed the map."""
+        skills = sorted(p.name for p in (PLUGIN / "skills").iterdir() if (p / "SKILL.md").is_file())
+        self.assertEqual(skills, ["host"])
+        commands = re.findall(r"\$\.command\.register\(\{\s*name: '([a-z-]+)'", MODULE)
+        self.assertEqual(commands, ["native"])
+        heads = [re.match(r"---\n(.*?)\n---\n", (PLUGIN / "skills" / s / "SKILL.md").read_text(encoding="utf-8"), re.S)
+                 for s in skills]
+        named = [dict(line.split(": ", 1) for line in h.group(1).splitlines())["name"] for h in heads]
+        self.assertFalse(set(named) & set(commands), "a skill named as the command is the one `/native` would run")
+        self.assertIn("the skill is named `host`", README)
 
 
 class ProseTest(unittest.TestCase):
