@@ -111,6 +111,9 @@ A plugin's version lives in one file, its own `lbiza/plugins/<plugin>/.claude-pl
 No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `lbiza/tests/p4-phi/test_wiring.py` holds every entry of the catalog to that.
 The `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request and every push to `main`: every test under `lbiza/tests/` through `python -m pytest`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
 [CONTRIBUTING.md](CONTRIBUTING.md#tests) says how to run the tests in a checkout.
+The `release` workflow of [`.github/workflows/release.yml`](.github/workflows/release.yml) runs on every push to `main`, and releases each plugin whose version has no tag yet.
+It runs the tests, publishes the plugin as the npm package `@ezexe/<plugin>` on GitHub Packages, tags the commit `<plugin>--v<version>` with `claude plugin tag`, and makes a [GitHub release](https://github.com/ezexe/p4/releases) of that tag, which holds a zip of the plugin's folder.
+A push that raises no plugin's version releases nothing.
 An install takes the new version at Claude Code's next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` where it is off, as it is by default for a marketplace like this one.
 A session that is running keeps the version it loaded until `/reload-plugins` or its next start.
 A marketplace added from a local folder, by `claude plugin marketplace add` with the path of a checkout's root, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.

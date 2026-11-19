@@ -8,12 +8,16 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The release workflow runs these jobs before it tags a plugin's version.
+  workflow_call:
 
 permissions:
   contents: read
 
+# Called by the release workflow, github.workflow is that workflow's name, so its run of these jobs waits on no run
+# of this workflow and is cancelled by none.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

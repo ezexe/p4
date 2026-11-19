@@ -1,0 +1,116 @@
+name: release
+
+# A push to main that leaves a plugin at a version with no tag yet releases that plugin: the tests run, a zip of the
+# plugin's folder is made, the plugin is published as the npm package @ezexe/<plugin> on GitHub Packages, the commit is
+# tagged <plugin>--v<version> by `claude plugin tag`, and a GitHub release of that tag holds the zip. A push that
+# raises no version releases nothing. To release a plugin, raise version in its
+# lbiza/plugins/<plugin>/.claude-plugin/plugin.json, the one file that holds it.
+#
+# The package is published before the tag is made, so a release whose package fails leaves no tag behind. It holds no
+# secret: the package, the tag and the release are made with the token GitHub gives the run.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, and a release that has begun is never cancelled by a later push.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.read.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: read
+        name: List the plugins whose version has no tag yet
+        run: |
+          new=()
+          for manifest in lbiza/plugins/*/.claude-plugin/plugin.json; do
+            name=$(jq -r .name "$manifest")
+            version=$(jq -r .version "$manifest")
+            tag="$name--v$version"
+            if [ -z "$(git ls-remote --tags origin "refs/tags/$tag")" ]; then
+              new+=("{\"name\":\"$name\",\"version\":\"$version\",\"tag\":\"$tag\"}")
+              echo "$tag: new" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "$tag: released" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+          echo "plugins=[$(IFS=,; echo "${new[*]}")]" >> "$GITHUB_OUTPUT"
+
+  tests:
+    needs: versions
+    if: needs.versions.outputs.plugins != '[]'
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    needs: [versions, tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        plugin: ${{ fromJSON(needs.versions.outputs.plugins) }}
+    env:
+      NAME: ${{ matrix.plugin.name }}
+      VERSION: ${{ matrix.plugin.version }}
+      TAG: ${{ matrix.plugin.tag }}
+      PACKAGE: "@${{ github.repository_owner }}/${{ matrix.plugin.name }}"
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Claude Code
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          claude --version
+      - name: Make the zip of the plugin's tracked files
+        run: git archive --format=zip --prefix="$NAME/" -o "$RUNNER_TEMP/$NAME-$VERSION.zip" "HEAD:lbiza/plugins/$NAME"
+      - name: Publish the npm package to GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+        run: |
+          stage="$RUNNER_TEMP/package"
+          mkdir -p "$stage"
+          git archive --format=tar "HEAD:lbiza/plugins/$NAME" | tar -x -C "$stage"
+          jq -n --arg name "$PACKAGE" --arg version "$VERSION" \
+            --arg description "$(jq -r .description "lbiza/plugins/$NAME/.claude-plugin/plugin.json")" \
+            --arg url "https://github.com/${{ github.repository }}.git" \
+            '{name: $name, version: $version, description: $description, license: "MIT",
+              repository: {type: "git", url: $url},
+              publishConfig: {registry: "https://npm.pkg.github.com", access: "public"}}' > "$stage/package.json"
+          cd "$stage"
+          printf '@%s:registry=https://npm.pkg.github.com\n//npm.pkg.github.com/:_authToken=%s\n' \
+            "${{ github.repository_owner }}" "$NODE_AUTH_TOKEN" > .npmrc
+          if npm view "$PACKAGE@$VERSION" version >/dev/null 2>&1; then
+            echo "$PACKAGE@$VERSION is published already"
+          else
+            npm publish
+          fi
+      - name: Tag the commit
+        run: |
+          if [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
+            echo "$TAG exists already"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            claude plugin tag "lbiza/plugins/$NAME" --push
+          fi
+      - name: Release the zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$TAG" "$RUNNER_TEMP/$NAME-$VERSION.zip"
+          --repo "${{ github.repository }}"
+          --verify-tag
+          --title "$NAME $VERSION"
+          --generate-notes
