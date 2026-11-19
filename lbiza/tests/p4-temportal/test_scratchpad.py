@@ -75,6 +75,18 @@ def run_sub(sub, payload, extra=None, **kw):
     return out.buffer.getvalue().decode("utf-8", "replace").strip()
 
 
+def said(printed, pad=None):
+    """What a hook's stdout says to a session: plain text as it is, and of the hook's JSON the `additionalContext`,
+    '' when it holds none. With `pad`, the JSON names that folder alone as `watchPaths`."""
+    try:
+        out = json.loads(printed)["hookSpecificOutput"]
+    except (ValueError, KeyError, TypeError):
+        return printed
+    if pad is not None:
+        assert out["watchPaths"] == [pad] and os.path.isabs(pad), out
+    return out.get("additionalContext", "")
+
+
 def put(base, rel, text="x\n"):
     path = os.path.join(base, *rel.split("/"))
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -87,7 +99,14 @@ def notebook_out():
     pad = os.path.join(root, ".claude", "p4", "temportal", "notebook")
 
     def sweep():
-        return run_sub("notebook-out", {}, CLAUDE_PROJECT_DIR=root)
+        return said(run_sub("notebook-out", {}, CLAUDE_PROJECT_DIR=root), pad)
+
+    def changed(rel, event="add"):
+        """notebook-changed as Claude Code runs it at FileChanged for that path of the notebook."""
+        path = rel if os.path.isabs(rel) else os.path.join(pad, *rel.split("/"))
+        got = run_sub("notebook-changed", {"hook_event_name": "FileChanged", "file_path": path, "event": event,
+                                           "cwd": root}, CLAUDE_PROJECT_DIR=root)
+        return json.loads(got)["systemMessage"] if got else ""
 
     def exists(rel):
         return os.path.exists(os.path.join(pad, *rel.split("/")))
@@ -129,6 +148,19 @@ def notebook_out():
         assert "re-seeded" in sweep(), "a changed .out/ ignore was not re-seeded"
         os.remove(os.path.join(pad, ".out", ".gitignore"))
         assert "re-seeded" in sweep(), "a deleted .out/ ignore was not re-seeded"
+        # at FileChanged a log added to the notebook moves at once, and the line is a systemMessage
+        put(pad, "probe/trace.log")
+        out = changed("probe/trace.log")
+        assert out.startswith("p4-temportal: ") and "binaries moved: 1, probe/trace.log" in out, out
+        assert not exists("probe/trace.log") and exists(".out/probe/trace.log"), "the added log stayed"
+        put(pad, "late.log")
+        assert "binaries moved: 1, late.log" in changed("late.log", "change"), "a changed log stayed"
+        # a note, the move's own write into .out/, a deleted file and a path outside the notebook move nothing
+        put(pad, "stays.log")
+        for rel, event in (("notes.md", "add"), (".out/probe/trace.log", "add"), ("stays.log", "unlink"),
+                           (os.path.join(root, "build", "x.log"), "add")):
+            assert changed(rel, event) == "" and exists("stays.log"), f"{event} of {rel} moved something"
+        assert run_sub("notebook-changed", {"cwd": root}, CLAUDE_PROJECT_DIR=root) == "", "an input with no path spoke"
     finally:
         wipe(root)
     print("test_scratchpad.py: notebook-out cases green")
@@ -179,7 +211,7 @@ def session_start(root, extra):
                            env=env_with(extra, CLAUDE_PLUGIN_ROOT=os.path.dirname(SRC), CLAUDE_PROJECT_DIR=root,
                                         CLAUDE_CONFIG_DIR=os.path.join(root, ".config")))   # never the real profile
         assert r.returncode == 0, r
-        out.append(r.stdout.decode("utf-8", "replace"))
+        out.append(said(r.stdout.decode("utf-8", "replace").strip()))
     return "".join(out)
 
 

@@ -14,7 +14,7 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 - A temporary file, a probe, a log or a download goes in this session's own scratchpad, the folder Claude Code names to hooks as `scratchpad_dir`, never under `.claude/`, where every write asks ezexe even in bypass mode.
 - A finding meant to outlast the session goes through p4-phi's `phi.py note "<claim>" --source "<where>"`, which p4 writes into the store.
 - `temportal/notebook/` is the notebook, kept across sessions and written by p4's scripts only, never by a session's own tools.
-- Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores.
+- Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores, at each start and as soon as one is added or changed, so look for such a file under `.out/` at the same relative path.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
 
 ## What Claude Code keeps by itself

@@ -166,6 +166,25 @@ class ModuleTest(unittest.TestCase):
         self.assertIn(".catch(() => ({", text.split("on('tool.run'", 1)[1].split("\n\n", 1)[0])
 
 
+class FileChangedTest(unittest.TestCase):
+    """The notebook's logs, build output and binaries move into its `.out/` when they appear, and at each start. By
+    https://code.claude.com/docs/en/hooks.md, "FileChanged": a group with "an omitted matcher" is one "which matches
+    every watched file and adds nothing to the watch list", and the watch list is seeded "with a SessionStart or
+    CwdChanged hook that returns `watchPaths`"."""
+
+    def test_a_watched_file_runs_the_notebooks_move_and_no_matcher_adds_a_file_to_watch(self):
+        groups = HOOKS["FileChanged"]
+        self.assertEqual([g.get("matcher") for g in groups], [None])
+        self.assertEqual(sum("scratchpad notebook-changed" in c for c in runs("FileChanged", "run.log")), 1)
+
+    def test_the_move_at_a_start_stays_and_hands_the_notebook_to_watch(self):
+        for source in ("startup", "resume", "clear", "compact"):
+            self.assertEqual(sum("scratchpad notebook-out" in c for c in runs("SessionStart", source)), 1, source)
+        text = (SRC / "scratchpad.py").read_text(encoding="utf-8")
+        self.assertIn('"watchPaths": [pad]', text)
+        self.assertIn("FileChanged", FILE["description"])
+
+
 class PreCompactTest(unittest.TestCase):
     """A session where the hooks module does not load is told the keep list by a command hook. By
     https://code.claude.com/docs/en/hooks.md, "PreCompact output": "When a PreCompact hook exits 0 and doesn't block,

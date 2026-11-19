@@ -154,10 +154,10 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-notebook"><th scope="row">The notebook and saved code</th>
           <td><p><code>eed8107</code> made the notebook <code>temportal/notebook</code>, and <code>80ca12d</code> brought saved code back as <code>temportal/src</code>.</p></td>
           <td><p>Nothing. No docs page gives a project a folder of notes or of code kept for reuse beside its memory.</p></td>
-          <td><p>It keeps both in the store, moves the notebook's logs, build output and binaries into its <code>.out/</code> at a start, and can name saved code the repository uses.</p></td>
-          <td><p>Nothing.</p></td>
-          <td><p>All of it is the plugin's own. Moving a notebook file into <code>.out/</code> when it appears, by the <code>FileChanged</code> hook, is left: <code>hooks.md</code> gives a watched path as a file, and no page says a watched folder raises the event for a new file in it.</p></td>
-          <td class="n">left</td></tr>
+          <td><p>It keeps both in the store, moves the notebook's logs, build output and binaries into its <code>.out/</code> at a start and when one appears, and can name saved code the repository uses.</p></td>
+          <td><p>The watch. The start hook hands Claude Code the notebook's folder as <code>watchPaths</code>, and a <code>FileChanged</code> entry with no matcher runs the same move when a log, a build output or a binary is added or changed there.</p></td>
+          <td><p>The move and what counts as a log, a build output or a binary are the plugin's own. Seen on Claude Code 2.1.328 in a <code>claude -p</code> run from a scratch project: a folder in <code>watchPaths</code> raised <code>FileChanged</code> with the event <code>add</code> for a new file in it and in a folder under it, and a log written into the notebook was in <code>.out/</code> within a second while a note beside it stayed.</p></td>
+          <td class="n">built</td></tr>
         <tr id="row-lifetimes"><th scope="row">How long the store's files stay</th>
           <td><p><code>b01f260</code>: it "clears what is no longer relevant, as a browser does with its cache and cookies".</p></td>
           <td><p><code>claude-directory.md</code>: the retention sweep covers Claude Code's own folders under <code>~/.claude</code> and nothing a project keeps.</p></td>
@@ -202,7 +202,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
       <li><code>plugins/mods/reference.md</code> gives <code>session.compact</code> one line, "The conversation is about to be compacted", and lists <code>compact</code> among the methods of <code>$.session</code> with no words. What the event's input holds and what a plugin's own compaction does was read from the types file of the bundled skill plugin-authoring and checked live in the desktop app on Claude Code 2.1.326.</li>
       <li>Not seen live: a compaction Claude Code starts by itself, the compaction of a subagent's transcript, and how the app draws the message the plugin adds, which the transcript stores as a row of the user's with a plugin as its origin.</li>
       <li><code>claude-directory.md</code> lists <code>plans/</code> as cleaned up automatically and does not say whether the sweep reaches a <code>plansDirectory</code> a project names.</li>
-      <li><code>hooks.md</code> does not say whether a folder in <code>watchPaths</code> raises <code>FileChanged</code> for a new file in it.</li>
+      <li><code>hooks.md</code> does not say whether a folder in <code>watchPaths</code> raises <code>FileChanged</code> for a new file in it. Seen on Claude Code 2.1.328 it does, with the event <code>add</code>, also for a file in a folder under it, and the notebook's move rests on that.</li>
     </ul>
   </section>
 

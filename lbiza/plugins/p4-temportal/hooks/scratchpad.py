@@ -8,8 +8,13 @@ transcript, and no command here moves, links, stages, commits or removes one.
   notebook-out   at SessionStart, seeds the notebook's `.out/.gitignore` with `*`, seeds it again when it is missing
                  or changed, and moves every log, build output and binary found elsewhere in the notebook into `.out/`
                  at the same relative path. A taken name gets the time as a suffix, and nothing is overwritten or
-                 removed. It prints one line when it seeded the file again or moved something, and the first seed of a
-                 new notebook is silent.
+                 removed. It says one line when it seeded the file again or moved something, and the first seed of a
+                 new notebook is silent. What it prints is the hook's JSON: the line as `additionalContext`, and the
+                 notebook's folder as `watchPaths`, so Claude Code raises FileChanged for a file in it.
+
+  notebook-changed  at FileChanged, which Claude Code raises for a file added or changed in the watched notebook:
+                 when that file is a log, a build output or a binary outside `.out/`, the same move runs at once,
+                 and the line it says is a `systemMessage`, which ezexe reads. Any other path moves nothing.
 
   tmp-unlink     at SessionStart, and by hand as `scratchpad.py tmp-unlink [project]`: every app scratchpad of the
                  project, `<temp>/claude*/<project>/<session>/scratchpad`, that an earlier version made a junction or a
@@ -189,8 +194,8 @@ def sweep_notebook(root, now_tag):
     return reseeded, moved, sorted(tracked & set(moved))
 
 
-def cmd_notebook_out(payload):
-    root = project_root(payload)
+def moved_line(root):
+    """Run the notebook's move for the project at `root` -> the one line that says what it did, '' for nothing."""
     reseeded, moved, tracked = sweep_notebook(root, time.strftime("%Y%m%d-%H%M%S"))
     parts = []
     out = f".claude/p4/{p4conf.rel('scratchpad', OUT_NAME)}/"
@@ -201,8 +206,42 @@ def cmd_notebook_out(payload):
                      + ", ".join(moved[:6]) + (", …" if len(moved) > 6 else "") + f", into {out}")
     if tracked:
         parts.append(f"{len(tracked)} of them were tracked by the store and show as deleted there")
-    if parts:
-        print("p4-temportal: " + "; ".join(parts) + ".")
+    return "p4-temportal: " + "; ".join(parts) + "." if parts else ""
+
+
+def cmd_notebook_out(payload):
+    """At SessionStart: the move, and the notebook's folder as a path Claude Code watches. hooks.md, "SessionStart
+    decision control", gives `watchPaths` as "Array of absolute paths to watch for FileChanged events during this
+    session". Seen on Claude Code 2.1.328 in a `claude -p` run: a folder there raised FileChanged with the event
+    `add` for a new file in it and in a folder under it, and `change` for a file in it that was appended to."""
+    root = project_root(payload)
+    line = moved_line(root)
+    pad = p4conf.sub(os.path.join(os.path.abspath(root), ".claude", "p4"), "scratchpad")
+    out = {"hookEventName": "SessionStart", "watchPaths": [pad]}
+    if line:
+        out["additionalContext"] = line
+    print(json.dumps({"hookSpecificOutput": out}))
+    return 0
+
+
+def cmd_notebook_changed(payload):
+    """At FileChanged: the move, when the file that was added or changed is one the move takes. A file under
+    `.out/`, a note, a deleted file and a path outside the notebook move nothing, so the move's own writes into
+    `.out/` start no second move."""
+    path = payload.get("file_path")
+    if payload.get("event") not in ("add", "change") or not isinstance(path, str) or not path:
+        return 0
+    root = project_root(payload)
+    pad = p4conf.sub(os.path.join(os.path.abspath(root), ".claude", "p4"), "scratchpad")
+    try:
+        rel = os.path.relpath(os.path.abspath(path), pad)
+    except ValueError:                                  # another drive
+        return 0
+    if rel.split(os.sep)[0] == os.pardir or os.path.isabs(rel) or not is_ignorable(rel):
+        return 0
+    line = moved_line(root)
+    if line:
+        print(json.dumps({"systemMessage": line}))
     return 0
 
 
@@ -387,6 +426,8 @@ def main():
             layout(payload)
         if sub == "notebook-out":
             return cmd_notebook_out(payload)
+        if sub == "notebook-changed":
+            return cmd_notebook_changed(payload)
         if sub == "repo-uses":
             return cmd_repo_uses(payload)
         if sub == "tmp-unlink":
