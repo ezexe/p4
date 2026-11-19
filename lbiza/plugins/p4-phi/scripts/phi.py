@@ -879,7 +879,9 @@ def request_of(prompt, by=""):
     the request, also when the message is nothing but the block. '' when nothing is left or what is left is Claude
     Code speaking. `by` is whose words the prompt is by its origin, rows.whose: a background task's notification
     and a plugin's prompt hold no request, ezexe's own message is one whatever it opens with, and where the origin
-    does not say, the opening of the text tells."""
+    does not say, the opening of the text tells. A message that opens with a slash command holds none whoever sent
+    it, relay.command_word: `/goal <condition>` reaches the prompt hooks as typed, Claude Code runs it, and routing
+    drafted a session from its condition, titled `/goal For each of the three sessions`."""
     text = prompt if isinstance(prompt, str) else ""
     while REMINDER.match(text):
         text = REMINDER.sub("", text, count=1)
@@ -888,6 +890,9 @@ def request_of(prompt, by=""):
         text = text[m.end():]
     text = FORK_HEAD.sub("", text, count=1)
     text = NOTES_TAIL.sub("", text).strip()
+    first = text.split(None, 1)[0] if text else ""
+    if relay.command_word(first, relay.norm(first)):
+        return ""                                  # a slash command, whoever typed or ran it: Claude Code runs it
     if by in ("event", "plugin"):
         return ""                                  # Claude Code or a plugin's hooks module speaking, by the origin
     if by != "user":

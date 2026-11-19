@@ -239,6 +239,23 @@ class Linear(Base):
         self.assertRegex(files, r"^Files: `[^`]*lib/x\.py`$", "the file it names, and no command")
         self.assertRegex(prompt, r"(?m)^Area: `[^`]*lib/x\.py`\.$")
 
+    def test_a_typed_slash_command_is_drafted_as_no_session(self):
+        """A message that is a slash command is Claude Code's to run and no work of ezexe's to route: `/goal` with a
+        condition that reads as work got a start draft titled by the command. phi.request_of takes no request from
+        it, so the hook hands no draft, and the same words with no command before them are drafted as before."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        before = set(os.listdir(os.path.join(t.dir(TOP), "drafts"))) if os.path.isdir(
+            os.path.join(t.dir(TOP), "drafts")) else set()
+        ctx = context(t.say(TOP, "/goal " + RETRY))
+        self.assertNotIn("routing read this message", ctx)
+        self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx)
+        after = set(os.listdir(os.path.join(t.dir(TOP), "drafts"))) if os.path.isdir(
+            os.path.join(t.dir(TOP), "drafts")) else set()
+        self.assertEqual(after, before, "no draft is kept for it")
+        self.assertIn("routing read this message", context(t.say(TOP, RETRY)))
+
     def test_a_python_files_tests_are_found_in_the_tests_folders_above_it_too(self):
         """A project that keeps its tests in a `tests` folder, at its top or beside the code, as pytest's good
         practices lay a project out, has them named too: the folder nearest the file first, in each the file named

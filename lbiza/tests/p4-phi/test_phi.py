@@ -2277,6 +2277,24 @@ class Origins(unittest.TestCase):
         self.assertEqual(rows.whose({}), "")
         self.assertEqual(rows.whose(None), "")
 
+    def test_a_message_that_opens_with_a_slash_command_holds_no_request(self):
+        """`/goal <condition>` reaches the prompt hooks as it was typed, with the origin `composer` where ezexe typed
+        it and `plugin` where a hooks module ran it. Claude Code runs the command, so its words are no message to
+        route: seen in a desktop session, routing drafted a session from a typed goal, titled `/goal For each of the
+        three sessions`. One slash and one name is a command, commands.md, a plugin's is `/plugin-name:skill-name`,
+        skills.md, and a message that opens with a path of more than one part stays ezexe's request."""
+        goal = "/goal Add a retry to the narwhal exporter for when the ports table write fails, or stop after 20 turns"
+        for by in ("user", "plugin", ""):
+            self.assertEqual(phi.request_of(goal, by), "", by)
+            self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + goal, by), "", by)
+        for said in ("/goal", "/goal clear", "/plan fix the exporter", "/p4-phi:readings the exporter is slow",
+                     "/mcp__github__pr_review 456", "/phi-pane"):
+            self.assertEqual(phi.request_of(said, "user"), "", said)
+        for said in ("/goal/notes.md holds the retry plan, add it to the exporter",
+                     "lib/goal is where the retry goes", "Give the exporter a /goal of its own",
+                     "/ is the root, list what is in it", "/goal.md is the file to fix"):
+            self.assertEqual(phi.request_of(said, "user"), said, said)
+
     def test_the_origin_settles_what_the_head_of_a_text_can_only_suggest(self):
         import prompty_eval
         import puppeteer
