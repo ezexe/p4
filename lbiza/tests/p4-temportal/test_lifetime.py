@@ -273,6 +273,98 @@ class Tick(unittest.TestCase):
         self.assertEqual((answer["said"], os.path.exists(due)), (["cleared expired files: 1, notebook/due.md."], False))
 
 
+class KeptPlans(unittest.TestCase):
+    """`plansDirectory` holds from the session after the one whose start wrote it, so that session's plan file is in
+    Claude Code's own plans folder. The last sweep copies it into the store and leaves the original, since a session
+    resumed later still writes it where it made it."""
+
+    def setUp(self):
+        from unittest import mock
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-plans-")
+        self.addCleanup(wipe, self.base)
+        self.root = os.path.join(self.base, "proj")
+        self.p4 = os.path.join(self.root, ".claude", "p4")
+        os.makedirs(os.path.join(self.p4, "temportal"))
+        self.config = os.path.join(self.base, "config")
+        self.own = os.path.join(self.config, "plans")
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.config})
+        env.start()
+        self.addCleanup(env.stop)
+        self.kept = os.path.join(self.p4, "temportal", "plans")
+        self.key(".claude/p4/temportal/plans")
+
+    def key(self, value):
+        """The project's local settings file with `plansDirectory` as given, or without it for None."""
+        with open(os.path.join(self.root, ".claude", "settings.local.json"), "w", encoding="utf-8") as f:
+            json.dump({} if value is None else {"plansDirectory": value}, f)
+
+    def test_a_plan_the_session_created_is_copied_and_its_original_stays(self):
+        plan = put(os.path.join(self.own, "quick-plan-brave-otter.md"), "# the plan\n")
+        said = lifetime.keep_plans(self.root, [plan])
+        self.assertEqual(read(os.path.join(self.kept, "quick-plan-brave-otter.md")), "# the plan\n")
+        self.assertEqual(read(plan), "# the plan\n", "the original is the one a resumed session writes")
+        self.assertEqual(len(said), 1)
+        self.assertIn("copied the plan quick-plan-brave-otter.md", said[0])
+        self.assertIn("temportal/plans/", said[0])
+        self.assertEqual(lifetime.keep_plans(self.root, [plan]), [], "a copy that is no older is left as it is")
+
+    def test_nothing_is_copied_unless_the_key_names_the_stores_folder(self):
+        plan = put(os.path.join(self.own, "a.md"))
+        for value in (None, "docs/plans", 7):
+            self.key(value)
+            self.assertEqual(lifetime.keep_plans(self.root, [plan]), [], value)
+            self.assertFalse(os.path.exists(self.kept), value)
+        self.key(".claude\\p4\\temportal\\plans" if os.name == "nt" else ".claude/p4/temportal/plans/")
+        self.assertEqual(len(lifetime.keep_plans(self.root, [plan])), 1, "the same folder, spelled another way")
+
+    def test_only_a_plain_markdown_file_of_claude_codes_own_plans_folder_is_copied(self):
+        elsewhere = put(os.path.join(self.base, "other", "plans", "b.md"))
+        deeper = put(os.path.join(self.own, "deep", "c.md"))
+        text = put(os.path.join(self.own, "d.txt"))
+        gone = os.path.join(self.own, "gone.md")
+        self.assertEqual(lifetime.keep_plans(self.root, [elsewhere, deeper, text, gone]), [])
+        self.assertFalse(os.path.exists(self.kept))
+
+    def test_an_edit_reaches_the_copy_and_a_file_only_edited_gets_no_copy_of_its_own(self):
+        """A resumed session edits the plan its first process made, so the copy the store holds is brought up. A
+        file this process only edited and the store holds no copy of may be another project's, and is left alone."""
+        plan = put(os.path.join(self.own, "mine.md"), "one\n")
+        other = put(os.path.join(self.own, "another-projects.md"), "theirs\n")
+        lifetime.keep_plans(self.root, [plan])
+        put(plan, "one\ntwo\n")
+        later = time.time() + 5
+        os.utime(plan, (later, later))
+        said = lifetime.keep_plans(self.root, [], [plan, other])
+        self.assertEqual(read(os.path.join(self.kept, "mine.md")), "one\ntwo\n")
+        self.assertFalse(os.path.exists(os.path.join(self.kept, "another-projects.md")))
+        self.assertIn("mine.md", said[0])
+        self.assertNotIn("another-projects.md", said[0])
+        # a plan the store holds that is the newer of the two stays as it is
+        put(os.path.join(self.kept, "mine.md"), "written in the store\n")
+        newer = later + 5
+        os.utime(os.path.join(self.kept, "mine.md"), (newer, newer))
+        self.assertEqual(lifetime.keep_plans(self.root, [plan], [plan]), [])
+        self.assertEqual(read(os.path.join(self.kept, "mine.md")), "written in the store\n")
+
+    def test_a_tick_copies_the_plans_it_is_handed_before_it_sweeps(self):
+        """The module's last sweep names them as `--plan` and `--plan-edited`, and the process let go of is started
+        with the same words."""
+        plan = put(os.path.join(self.own, "handed.md"), "# handed\n")
+        r = run("tick", "--plan", plan, "--plan-edited", os.path.join(self.own, "none.md"),
+                CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        answer = json.loads(r.stdout)
+        self.assertTrue(any("copied the plan handed.md" in line for line in answer["said"]), answer)
+        self.assertEqual(read(os.path.join(self.kept, "handed.md")), "# handed\n")
+        started = []
+        old = lifetime.let_go
+        try:
+            lifetime.let_go = lambda args: started.append(args) or True
+            self.assertEqual(lifetime.tick(self.root, True, ["a.md"], ["b.md"]), {"let_go": True})
+        finally:
+            lifetime.let_go = old
+        self.assertEqual(started, [["tick", "--plan", "a.md", "--plan-edited", "b.md"]])
+
+
 class Lifetime(unittest.TestCase):
     maxDiff = None
 

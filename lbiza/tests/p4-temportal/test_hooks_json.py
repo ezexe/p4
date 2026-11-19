@@ -103,6 +103,20 @@ class ModuleTest(unittest.TestCase):
         self.assertIn("mapped === undefined ? /^[A-Za-z]:", search)
         self.assertIn("p4-native", FILE["description"])
 
+    def test_the_module_names_the_plan_files_a_session_wrote_to_the_last_sweep(self):
+        """settings-reference.md, `plansDirectory`: unset, "Claude Code uses `~/.claude/plans`". The key the keeper
+        writes holds from the next session, so the module notes the plan files written in a folder named plans at
+        classic.PostToolUse and hands them to `lifetime.py tick` at the session's end, which copies them."""
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        for said in ("on('classic.PostToolUse'", "'--plan'", "'--plan-edited'", "wrote.type === 'create'"):
+            self.assertIn(said, text)
+        script = (SRC / "lifetime.py").read_text(encoding="utf-8")
+        for said in ('"--plan"', '"--plan-edited"', "def keep_plans(root, made, edited=()):", "shutil.copy2(path, kept)"):
+            self.assertIn(said, script)
+        self.assertNotIn("shutil.move", script.split("def keep_plans", 1)[1].split("\ndef ", 1)[0])
+        for word in ("classic.PostToolUse", "plansDirectory", "leaves the original"):
+            self.assertIn(word, FILE["description"])
+
     def test_no_command_hook_runs_the_retention_sweep(self):
         """The module sweeps at a session's start, on its timer and at the session's end, and it runs lifetime.py with
         no `sh`. A SessionEnd command hook shares 1.5 seconds with every other one, which a plugin's `timeout` does

@@ -151,6 +151,8 @@ function machine(on: On, has: Machine): Seen {
 
     return {}
   })
+  // The PostToolUse command hooks, beneath every hooks module.
+  on('classic.PostToolUse', () => ({}))
   on('settings.read', (_, e) => {
     seen.sources.push(e.source)
     if (has.settings === undefined) return { deny: 'the settings are closed to this plugin' }
@@ -1172,3 +1174,54 @@ for (const [what, map] of [
     expect(seen.tried.map(argv => argv[0]).slice(3, 6)).toEqual(own)
   })
 }
+
+// A tool call that wrote a file, as a PostToolUse hook is handed it: what the Write tool answers names the file and
+// says whether it made it, and what Edit answers names the file.
+function wrote(tool: 'Write' | 'Edit' | 'Read', filePath: string, type?: 'create' | 'update') {
+  const tool_response = type === undefined ? { filePath } : { type, filePath }
+
+  return { tool_name: tool, tool_input: { file_path: filePath }, tool_response, tool_use_id: `u-${tool}-${filePath}` }
+}
+
+test('the last sweep is handed the plan files the session created and the ones it wrote again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { tick: args => (args.includes('--let-go') ? { let_go: true } : QUIET) })
+  const own = 'C:\\Users\\u\\.claude\\plans'
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.classic.PostToolUse(wrote('Write', `${own}\\made-here.md`, 'create'))
+  await $.classic.PostToolUse(wrote('Edit', `${own}\\made-here.md`))
+  await $.classic.PostToolUse(wrote('Edit', '/home/u/.claude/plans/made-elsewhere.md'))
+  await $.classic.PostToolUse(wrote('Write', '/home/u/.claude/plans/written-again.md', 'update'))
+  await $.session.end(EXIT)
+
+  expect(seen.ran.at(-1)).toEqual([
+    'tick',
+    '--let-go',
+    '--plan',
+    `${own}\\made-here.md`,
+    '--plan-edited',
+    '/home/u/.claude/plans/made-elsewhere.md',
+    '--plan-edited',
+    '/home/u/.claude/plans/written-again.md',
+  ])
+})
+
+test('a file outside a folder named plans, one a folder deeper, one that is no markdown and one only read are not handed on', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { tick: args => (args.includes('--let-go') ? { let_go: true } : QUIET) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.classic.PostToolUse(wrote('Write', '/work/project/docs/plan.md', 'create'))
+  await $.classic.PostToolUse(wrote('Write', '/home/u/.claude/plans/notes.txt', 'create'))
+  await $.classic.PostToolUse(wrote('Write', '/home/u/.claude/plans/deep/er.md', 'create'))
+  await $.classic.PostToolUse(wrote('Read', '/home/u/.claude/plans/read.md'))
+  await $.classic.PostToolUse({ tool_name: 'Bash', tool_input: { command: 'ls' }, tool_response: 'x', tool_use_id: 'u-b' })
+  await $.session.end(EXIT)
+
+  expect(seen.ran.at(-1)).toEqual(['tick', '--let-go'])
+})

@@ -17,7 +17,9 @@ scratchpad, and the others are never cleared whole.
 plans/ holds the project's plan files, where Claude Code writes them itself once the settings keeper of p4conf.py
 has written `plansDirectory`. A plan file takes a cookie as any other file does, and a cache rule on `plans` clears
 the plans past its age or size. Without either a plan stays, where Claude Code's own folder clears one after
-`cleanupPeriodDays`.
+`cleanupPeriodDays`. The key holds from the session after the one whose start wrote it, so `tick` copies the plan
+files the hooks module names with `--plan` and `--plan-edited` from Claude Code's own folder into plans/, by
+keep_plans, and leaves each original.
 
 No lifetime ends with a session. A file that goes when its session goes belongs in that session's scratchpad
 directory, which Claude Code makes for the session and deletes with its transcript, by
@@ -477,14 +479,74 @@ def let_go(args):
     return True
 
 
-def tick(root, to_let_go=False):
+def own_plans():
+    """Claude Code's own folder of plan files. settings-reference.md, `plansDirectory`: unset, "Claude Code uses
+    `~/.claude/plans`", which is `plans` in its configuration folder."""
+    return os.path.join(p4conf._config_dir(), "plans")
+
+
+def keep_plans(root, made, edited=()):
+    """Copy plan files out of Claude Code's own plans folder into the store's plans/ -> the lines saying so. They
+    are there because `plansDirectory` holds from the session after the one whose start wrote it. `made` are the
+    files this process's sessions created, and `edited` the ones they wrote again, as the hooks module names them
+    at the last sweep.
+
+    The original stays where it is. Seen on Claude Code 2.1.328: a session that was resumed after its plan file had
+    been moved still wrote to `~/.claude/plans/<slug>.md`, did not find it, and made it anew, so a move takes a file
+    a later process of the same session still uses. Claude Code's own cleanup removes the original with the
+    session's transcript.
+
+    Nothing is copied unless the project's local settings file holds the key as the keeper writes it for this store.
+    A file is copied only when it is a plain `.md` file directly in Claude Code's own plans folder. One this process
+    created is copied where the store holds none of its name, and any of the two kinds is copied over the store's
+    file of its name where it is the newer, so a resumed session's edit reaches the copy. A file that was only
+    edited and that the store holds no copy of is left alone: another project's session may have made it."""
+    p4 = store_of(root)
+    target = p4conf.settings_file(root)
+    want = p4conf.plans_dir(p4, target)
+    have = (p4conf.read_json(target) or {}).get("plansDirectory")
+    paths = dict.fromkeys(edited, False) | dict.fromkeys(made, True)
+    if not paths or not want or not isinstance(have, str) or not p4conf._same_value("plansDirectory", have, want):
+        return []
+    own = os.path.normcase(os.path.realpath(own_plans()))
+    to = os.path.join(p4, *p4conf.PLANS.split("/"))
+    copied = []
+    for path, is_made in paths.items():
+        name = os.path.basename(path)
+        plain = os.path.isfile(path) and not p4conf.is_link(path) and name.lower().endswith(".md")
+        if not plain or os.path.normcase(os.path.dirname(os.path.realpath(path))) != own:
+            continue
+        kept = os.path.join(to, name)
+        if os.path.lexists(kept):
+            if p4conf.is_link(kept) or not os.path.isfile(kept) or os.path.getmtime(path) <= os.path.getmtime(kept):
+                continue                                # the store's file is no older: it stays as it is
+        elif not is_made:
+            continue
+        try:
+            os.makedirs(to, exist_ok=True)
+            shutil.copy2(path, kept)
+        except OSError:
+            continue                                    # this plan stays where it is, and the sweep goes on
+        copied.append(name)
+    if not copied:
+        return []
+    return [f"copied the plan{'s' if len(copied) > 1 else ''} {', '.join(copied)} from Claude Code's own plans "
+            f"folder into {p4conf.PLANS}/, where plansDirectory keeps this project's plans from the next session on."]
+
+
+def tick(root, to_let_go=False, made=(), edited=()):
     """The module's sweep for the project at `root` -> what it prints as one JSON line. With `to_let_go` the sweep
-    runs in a process let go of, and here only when none could be started. A failure is said, never raised."""
-    if to_let_go and let_go(["tick"]):
+    runs in a process let go of, and here only when none could be started. `made` and `edited` are the plan files
+    the process's sessions created and wrote again in a folder named `plans`, which keep_plans copies into the store
+    before the sweep, in the process that sweeps. A failure is said, never raised."""
+    named = [word for path in made for word in ("--plan", path)]
+    named += [word for path in edited for word in ("--plan-edited", path)]
+    if to_let_go and let_go(["tick", *named]):
         return {"let_go": True}
     p4 = store_of(root)
     try:
-        said = [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
+        said = keep_plans(root, made, edited)
+        said += [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
         return {"said": said, "wait_s": round(next_wait(p4), 3), "compact_at": compact_at(p4)}
     except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises
         return {"said": [f"the retention sweep degraded: {type(e).__name__}: {e}"], "wait_s": MOST_WAIT_S}
@@ -525,7 +587,9 @@ def main():
     args = sys.argv[1:]
     sub = args[0] if args else ""
     if sub == "tick":                   # the module's: it reads no stdin, and the project is CLAUDE_PROJECT_DIR
-        print(json.dumps(tick(project_root({}), "--let-go" in args[1:]), ensure_ascii=False))
+        made = [args[i + 1] for i, word in enumerate(args[:-1]) if word == "--plan"]
+        edited = [args[i + 1] for i, word in enumerate(args[:-1]) if word == "--plan-edited"]
+        print(json.dumps(tick(project_root({}), "--let-go" in args[1:], made, edited), ensure_ascii=False))
         return 0
     import argparse
     ap = argparse.ArgumentParser(prog="lifetime.py", description="p4-temportal: cookie and cache lifetimes")

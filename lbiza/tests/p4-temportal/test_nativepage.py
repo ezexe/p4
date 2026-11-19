@@ -172,6 +172,16 @@ class Page(unittest.TestCase):
         # what one run did not show: its project began with both keys in its settings file
         self.assertNotIn("the settings keeper wrote both keys", text)
 
+    def test_the_first_sessions_plan_is_copied_into_the_store(self):
+        """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
+        original stays, and what the live checks showed of a move and of the copy."""
+        row = rows(page())["plans"]
+        for said in ("The plan of that first session reaches the store all the same", "copies the ones in",
+                     "The original stays", "the same bytes as the original",
+                     "A move was tried first and taken back", "made it anew",
+                     "the store's copy held the edit"):
+            self.assertIn(said, row, said)
+
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()
         set_out = text.split('id="set-out"', 1)[1].split("</section>", 1)[0]

@@ -175,6 +175,15 @@ let isFresh = false
 // The first reading after a compaction was already at or past the line, so compacting does not reach under it.
 let isHeld = false
 
+// The plan files a session of this process created in a folder named `plans`, and the ones it wrote again, MOST_PLANS
+// of each at most. Claude Code names a plan file `<slug>.md` in `~/.claude/plans` until `plansDirectory` is in force,
+// and the key the settings keeper writes at a project's first start holds from the session after it. lifetime.py
+// decides which of these are in Claude Code's own plans folder and copies those into the store at the last sweep.
+const made = new Set<string>()
+const edited = new Set<string>()
+const MOST_PLANS = 20
+const PLAN = /[\\/]plans[\\/][^\\/]+\.md$/i
+
 // What was said to the debug log, each line once.
 const said = new Set<string>()
 
@@ -378,11 +387,16 @@ async function sweep($: EngineInterface): Promise<void> {
 
 // The last sweep of a session, started in a process that lifetime.py lets go of, since every `session.end` hook
 // shares one short bound and a sweep cut at it would leave files half cleared. `left` is what the bound has left.
+// It is handed the plan files this process's sessions created and wrote again, which lifetime.py copies into the
+// store's plans folder before it sweeps. The original stays: seen on Claude Code 2.1.328, a session resumed after
+// its plan file was moved still looked for it where it had written it.
 async function lastSweep($: EngineInterface, left: number): Promise<void> {
   try {
     const within = Number.isFinite(left) ? Math.min(left, END_MS) : END_MS
     if (within < 1) return
-    await ask($, ['tick', '--let-go'], Math.round(within))
+    const again = [...edited].filter(path => !made.has(path))
+    const named = [...[...made].flatMap(path => ['--plan', path]), ...again.flatMap(path => ['--plan-edited', path])]
+    await ask($, [...['tick', '--let-go'], ...named], Math.round(within))
   } catch (error) {
     note($, `the last retention sweep did not start: ${reason(error)}`)
   }
@@ -589,6 +603,23 @@ export const register: Register = on => {
     const settings = await settingsRead($)
 
     return next(settings === undefined ? e : ({ ...e, [HANDED]: settings } as typeof e))
+  })
+
+  // After a tool call: a file the Write tool created in a folder named `plans` is remembered for the last sweep as
+  // made here, and one that Write or Edit wrote again as edited, since another session may have made that one.
+  on('classic.PostToolUse', async ($, e, next) => {
+    try {
+      const wrote = isRecord(e.tool_response) ? e.tool_response : {}
+      const path = wrote.filePath
+      if ((e.tool_name === 'Write' || e.tool_name === 'Edit') && typeof path === 'string' && PLAN.test(path)) {
+        const into = e.tool_name === 'Write' && wrote.type === 'create' ? made : edited
+        if (into.size < MOST_PLANS) into.add(path)
+      }
+    } catch (error) {
+      note($, `a written plan file was not remembered: ${reason(error)}`)
+    }
+
+    return next(e)
   })
 
   // The session does not wait for its first sweep, and it does wait for the command, which is then listed from the
