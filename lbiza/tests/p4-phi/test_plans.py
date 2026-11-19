@@ -1205,6 +1205,40 @@ class ParentEffort(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
 
+    def test_a_step_whose_item_names_its_session_is_handed_out_to_nobody(self):
+        """An item of `update_plan` has the field `session`, by the tool's own text "When you delegated this step to
+        a session you started: that session's short name". p4-phi kept a step's words and status alone, so its line
+        after each task list told an orchestrator to start a session for a step a session was already doing. A step
+        keeps the field, and such a step stays where it is with that as the reason: the line hands out the other
+        work steps alone, no step once every work step names its session, and the nudge on an edit is quiet."""
+        t, p = self.t, self.t.proj
+        port = f"Port the exporter in {p}/src/export/flush.py to the new writer"
+        parse = f"Rewrite the parser in {p}/src/parse.py for the new grammar"
+        ctx = self.plan(TOP, {"scope": "first_task", "items": [
+            {"content": port, "status": "in_progress", "session": " exporter-port "},
+            {"content": parse, "status": "pending"}, {"content": "Commit and push", "status": "pending"}]})
+        self.assertIn("(a) step 2 \"Rewrite the parser", ctx)
+        handed, stays = ctx.split("Staying here: ", 1)
+        self.assertNotIn("step 1 \"", handed, "the step a session does is no child's to start")
+        self.assertNotIn("Port the exporter", handed)
+        self.assertIn("1, its `session` field names the session doing it, `exporter-port`", stays)
+        kept = plans.load(t.p4, TOP)
+        self.assertEqual([st.get("session") for st in kept["steps"]], ["exporter-port", None, None])
+        self.assertIsNone(phi.nudge_step(t.p4, relay._session(t.p4, TOP)), "no nudge to hand step 1 to a worker")
+        self.plan(TOP, {"advance": True})
+        self.assertEqual(plans.load(t.p4, TOP)["steps"][0].get("session"), "exporter-port", "kept through an advance")
+        steps = [{"addr": "1", "content": port, "status": "in_progress", "session": "exporter-port"},
+                 {"addr": "2", "content": parse, "status": "pending", "session": "parser"}]
+        self.assertEqual(plans.top_groups({"steps": steps}, p)[0], [], "every work step names its session")
+        self.assertEqual(plans.judge({"steps": steps}, p)[0], [])
+        self.assertEqual(plans.top_advice(t.p4, {**relay._session(t.p4, TOP), "splitAdvised": []}, {"steps": steps},
+                                          True, ""), "")
+        self.assertEqual(plans.split_advice(t.p4, {**relay._session(t.p4, TOP), "splitAdvised": []}, {"steps": steps},
+                                            True, ""), "")
+        bare = [{k: v for k, v in st.items() if k != "session"} for st in steps]
+        self.assertEqual(len(plans.top_groups({"steps": bare}, p)[0]), 2, "with no session named, each is a child's")
+        self.assertEqual(len(plans.judge({"steps": bare}, p)[0]), 2)
+
     def test_a_start_call_for_a_build_step_from_a_starter_at_medium_names_no_effort_above_medium(self):
         p = self.t.proj
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",

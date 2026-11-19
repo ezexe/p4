@@ -105,6 +105,8 @@ def apply(plan, inp, root):
             if isinstance(it, dict):
                 new.append({"addr": addr(root, i), "content": str(it.get("content") or ""),
                             "status": str(it.get("status") or "pending")})
+                if isinstance(it.get("session"), str) and it["session"].strip():
+                    new[-1]["session"] = it["session"].strip()[:80]    # the session this step was handed to
         if before:
             # a step is matched by its words before its address: removing step 2 moves step 3 to 2, unchanged
             after = {x["addr"]: x["content"] for x in new}
@@ -449,14 +451,26 @@ CARD_EACH = (f"Give each to `mcp__ccd_session__start_session`, `context` `fresh`
              "and `effort` named beside its step")
 
 
+def handed(st):
+    """Why a step is handed out to nobody, or '': its item names the session it was delegated to. The app's own
+    text gives an item of `update_plan` the field `session`, "When you delegated this step to a session you started:
+    that session's short name", and the app shows that session's state on the step. Such a step is a session's
+    already, so no line of p4-phi's asks for one to be started for it."""
+    name = str((st or {}).get("session") or "").strip()
+    return f"its `session` field names the session doing it, `{name}`" if name else ""
+
+
 def judge(plan, cwd):
     """Judges the open steps. Returns those that can each run on their own, and the address and the reason of each
-    step that stays."""
+    step that stays. A step whose item names its session stays, handed."""
     steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
     paths = {st["addr"]: relay.paths_in(st.get("content"), cwd) for st in steps}
     free, kept = [], []
     for st in steps:
         a, text = st["addr"], st.get("content", "")
+        if handed(st):
+            kept.append((a, handed(st)))
+            continue
         dep = DEPENDS.search(text)
         shared = [(o["addr"], p) for o in steps if o["addr"] != a for p in paths[a]
                   if any(relay.overlap(p, q) for q in paths[o["addr"]])]
@@ -602,7 +616,7 @@ def top_groups(plan, cwd):
     groups, kept, run = [], [], []
     for st in steps:
         text = st.get("content", "")
-        why = top_stays(text)
+        why = handed(st) or top_stays(text)       # a step a session already does is no child's to start
         if why:
             kept.append((st["addr"], why))
         else:

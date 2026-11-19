@@ -1949,8 +1949,8 @@ def nudge_step(home, s):
     plan = plans.load(home, s["sessionId"])
     st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
     text = str((st or {}).get("content") or "")
-    if not st or st.get("status") == "completed" or plans.top_stays(text):    # the advice's own answer
-        return None
+    if not st or st.get("status") == "completed" or plans.handed(st) or plans.top_stays(text):
+        return None                                # the advice's own answer
     return None if nudge_key(st) in (s.get("nudged") or []) else st
 
 
