@@ -143,6 +143,27 @@ class Page(unittest.TestCase):
         self.assertNotIn("only when a release is cut", read(os.path.join(REPO, "dox", "index.html")))
         self.assertNotIn("only when a release is cut", read(os.path.join(os.path.dirname(SRC), "README.md")))
 
+    def test_the_auto_update_pass_is_set_out_as_seen_and_no_longer_as_not_confirmed(self):
+        """The pass moved both installed copies after the landing of 92c34f7, with no update command, while only
+        desktop app sessions ran. So rule 2 holds what `installed_plugins.json`, the cache and the app's records
+        showed, and "Not confirmed" lists neither that no pass was seen nor whether an app session runs one."""
+        page = read(PAGE)
+        rule = page.split("<h3>2. A landing's version bump reaches the installed copy by auto-update</h3>", 1)[1]
+        rule = rule.split("<h3>", 1)[0]
+        for said in ("bumped p4-phi to 0.11.48 and p4-temportal to 0.3.23",
+                     "the <code>gitCommitSha</code> 92c34f7 and a <code>lastUpdated</code> of 08:04:54 UTC",
+                     "with <code>installedAt</code> still at 07:37 UTC",
+                     "<code>0.11.48</code> and <code>0.3.23</code> beside <code>0.11.46</code> and <code>0.3.22</code>",
+                     "A session of the desktop app runs the pass.",
+                     "created at 07:55:38 UTC and at 08:04:44 UTC",
+                     "no session ran an update command"):
+            self.assertIn(said, rule, said)
+        open_still = page.split('id="not-confirmed"', 1)[1]
+        for gone in ("has not been seen on ezexe's machine yet", "no pass has had a newer one to take",
+                     "Whether a session of the desktop app runs the auto-update pass"):
+            self.assertNotIn(gone, page, gone)
+        self.assertNotIn("auto-update pass", open_still)
+
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)
         ids = set(re.findall(r'\bid="([^"]+)"', page))
