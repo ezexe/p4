@@ -445,9 +445,9 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("stop before any tool runs", ctx)
         self.assertIn("; source: commit ccc333", ctx, "the note is still handed on, in full")
 
-    def test_thirty_sibling_notes_stay_under_the_cap_and_come_once(self):
-        """A session with 30 sibling notes pending gets hook text under the cap, the remainder named by count and
-        page, and none of the same notes on the prompt after."""
+    def test_thirty_sibling_notes_stay_in_the_relays_room_and_come_once(self):
+        """A session with 30 sibling notes pending gets them within the room phi.py gives the relay's text, the
+        remainder named by count and page, and none of the same notes on the prompt after."""
         import phi
         t = self.t
         filler = "The exporter's ports table moved to the store and the old flush path is gone. " * 12
@@ -459,7 +459,10 @@ class ThreeSessions(unittest.TestCase):
                                    "--source", f"commit near{k}").returncode, 0)
         t.stop(A, "thirty notes", uuid="a30")
         ctx = context(t.say(B, "next"))
-        self.assertLessEqual(len(ctx), phi.PROMPT_CHARS, "under the cap")
+        notes = [p for p in ctx.split("\n\n") if "deprecated or replaced since" in p or "notes not shown" in p]
+        self.assertEqual(len(notes), 2, ctx)
+        self.assertLessEqual(sum(len(p) + 2 for p in notes), phi.RELAY_CHARS, "within the relay's room")
+        self.assertLessEqual(len(ctx), phi.APP_CAP, "and the whole text under the app's cap")
         for k in range(3):
             self.assertIn(f"; source: commit near{k}", ctx, "what touches its task is given in full")
         self.assertNotIn("commit far", ctx, "what does not is not shown")
@@ -473,18 +476,21 @@ class ThreeSessions(unittest.TestCase):
         t.stop(A, "one more turn", [("Edit", {"file_path": self.x("docs", "d.md")}, "ok")], uuid="a31")
         self.assertNotIn("replaces:", context(t.say(B, "third")), "nor when the sibling changes again")
 
-    def test_thirty_warnings_stay_under_the_cap_and_the_rest_is_held(self):
-        """An orchestrator too: what does not fit is named by count and kept on held.md, once."""
+    def test_thirty_warnings_are_given_whole_once_and_none_is_held(self):
+        """An orchestrator too: every warning is given whole and leads the text, none is kept on a page of p4-phi's
+        own, since a text past the app's cap goes to the app's own file, and none comes again."""
         import phi
         t = self.t
         for k in range(30):
             relay.warn(t.p4, TOP, f"note:{k}", f"warning {k:02d} of thirty: " + "a sibling changed the layout. " * 10)
         ctx = context(t.say(TOP, "what now?"))
-        self.assertLessEqual(len(ctx), phi.PROMPT_CHARS)
-        self.assertIn("warning 00 of thirty", ctx)
-        self.assertRegex(ctx, r"\d+ more did not fit here and are whole on ")
-        held = open(os.path.join(t.p4, "phi", "sessions", TOP, "held.md"), encoding="utf-8").read()
-        self.assertIn("warning 29 of thirty", held)
+        line = [p for p in ctx.split("\n\n") if p.startswith(relay.STOP_HEAD)]
+        self.assertEqual(len(line), 1, ctx[:400])
+        for k in range(30):
+            self.assertIn(f"({k + 1}) warning {k:02d} of thirty: " + "a sibling changed the layout. " * 9, line[0])
+        self.assertLess(ctx.index(relay.STOP_HEAD), 400, "the warnings lead")
+        self.assertNotIn("did not fit", ctx)
+        self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", "sessions", TOP, "held.md")))
         self.assertNotIn("of thirty", context(t.say(TOP, "and now?")), "none of them again")
 
     def test_a_mark_is_handed_on_once(self):

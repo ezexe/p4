@@ -18,7 +18,7 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_e
   rebase  at every message a session is given, including the app's side-session events: when its parent's anchor
           is newer than the version it last saw, the other sessions' deprecations and replacements that touch its
           task, owned paths or open steps, in full, the rest by count and the pages that hold them, then their other
-          deltas, cut evenly to what is left of the hook's room. A first look takes what is there as seen, and a
+          deltas, cut evenly to the room phi.py gives this text. A first look takes what is there as seen, and a
           fork that declared owned paths is given only what touches them. Before any tool runs, a warning for each
           of its uncommitted files or owned paths that a newer deprecation or replacement names, and for each of its
           uncommitted files inside another session's owned paths: stop that work and message that session. Nothing
@@ -682,36 +682,15 @@ def scratch(home, sid, f):
 
 
 FAR_WHOLE = 400                  # notes that do not touch a session are still shown when all of them are this short
-HELD_BYTES = 256 * 1024          # of a session's held.md, the newest kept
-HELD_HEAD = "# Held for this session\n\nWhat p4-phi had for this session beyond the room beside one prompt, newest last.\n"
+STOP_HEAD = "phi (p4-phi): stop before any tool runs. "      # the head of the warnings, which lead a session's text
 
 
-def held_path(home, sid):
-    return os.path.join(_dir(home, sid), "held.md").replace("\\", "/")
-
-
-def hold(home, sid, pieces, now=""):
-    """Keeps what did not fit beside a prompt whole on the session's held.md and returns the page's path."""
-    path = held_path(home, sid)
-    pieces = [str(p) for p in pieces if p]
-    if not pieces:
-        return path
-    try:
-        with open(path, encoding="utf-8") as f:
-            old = f.read()
-    except (OSError, UnicodeDecodeError):
-        old = ""
-    body = (old[len(HELD_HEAD):] if old.startswith(HELD_HEAD) else old) + "".join(
-        f"\n## {now or time.strftime('%Y-%m-%d %H:%M')}\n\n{p}\n" for p in pieces)
-    if len(body.encode("utf-8", "replace")) > HELD_BYTES:
-        body = body[-HELD_BYTES // 2:]
-        body = body[body.find("\n## "):] if "\n## " in body else body
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(HELD_HEAD + body)
-    os.replace(tmp, path)
-    return path
+def stop_line(text):
+    """rebase's text as its warnings and the rest: the warnings ask the session to act, so phi.py puts them first."""
+    if not text.startswith(STOP_HEAD):
+        return "", text
+    line, _, rest = text.partition("\n\n")
+    return line, rest
 
 
 def page_of(home, nid):
@@ -730,8 +709,10 @@ def touching(s, m, touches, edited=()):
 def rebase(home, sid, room, fair_cut, touches=None):
     """Returns the text a session is given at this message, '' when nothing changed, and whether its session.json
     changed. With `touches`, a sibling's deprecation or replacement is given in full only when it touches this
-    session's task, owned paths or open steps; the rest is a count and the pages that hold them. Whatever passes
-    `room` is named by count and kept on a page, and none of it comes again."""
+    session's task, owned paths or open steps; the rest is a count and the pages that hold them. The warnings are
+    given whole, each once, since a hook's text past the app's cap goes to the app's own file. What the other
+    sessions changed is cut to `room`, the rest named by count and by their sessions' pages, and none of it comes
+    again."""
     path = os.path.join(_dir(home, sid), "session.json")
     with locked(path) as lk:                      # the warnings are emptied under the lock relay.warn holds
         return _rebase(home, sid, room, fair_cut, touches, path, lk.held)
@@ -837,19 +818,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
         return "", fresh
     parts, used = [], 0
     if warnings:
-        head = "phi (p4-phi): stop before any tool runs. "
-        shown, over = [], []
-        for w in warnings:
-            (shown if not over and len(head) + sum(len(x) + 5 for x in shown) + len(w) + 5 <= max(600, room - 260)
-             else over).append(w)
-        held = list(over)
-        if not shown:
-            shown, over = [_short(over[0], max(300, room - 400))], over[1:]
-        line = head + " ".join(f"({k + 1}) {w}" for k, w in enumerate(shown))
-        if held:
-            page = hold(home, sid, ["Warnings that did not fit beside one prompt:\n" + "\n".join(f"- {w}" for w in held)])
-            line += (f" {len(over)} more did not fit here and are whole on {page}: read them before "
-                     f"going on." if over else f" It is whole on {page}.")
+        line = STOP_HEAD + " ".join(f"({k + 1}) {w}" for k, w in enumerate(warnings))
         parts.append(line)
         used += len(line) + 2
     if marks:
@@ -1146,8 +1115,8 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/.cache/",
            # the open issues a puppeteer's watcher last listed from GitHub, listed again at its next slow look
            "phi/sessions/*/open-issues.json",
-           # what did not fit beside a prompt, and the standing instructions an earlier p4-phi wrote: pages of this
-           # machine
+           # the page an earlier p4-phi kept of what did not fit beside a prompt, and the standing instructions an
+           # earlier p4-phi wrote: pages of this machine
            "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
            # the sessions waiting to be archived, made again from the records
            "phi/ready-to-archive.md",

@@ -17,9 +17,8 @@ The hooks, each in its h_ function:
   summary keeps the conversation, so it gives the address book's changed entries with the path of book.md.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the address book's
-  changes and what the sessions beside it changed. A start and a first message pass whole, the lines that ask
-  the session to act first, past the app's cap to its own file; at a later message what does not fit in PROMPT_CHARS
-  is held whole on held.md.
+  changes and what the sessions beside it changed. A start and every message pass whole, the lines that ask
+  the session to act first, past the app's cap to its own file.
 - Stop keeps the turn and appends it to the parent session's reports, sends the turn back while steps the session
   tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
   tells the orchestrator to push issue-closing commits and makes the anchors.
@@ -29,7 +28,7 @@ Commands: note, done, task, shard, show, tree, background, detach, reparent, dis
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
-`background_chars`, `reports_chars`, `prompt_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
+`background_chars`, `reports_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
@@ -66,14 +65,20 @@ REPORTS = True
 TURNS = True
 BOOK = True
 RULES = True
-# hooks.md, "additionalContext": a hook's text past 10,000 characters is written "to a file in the session directory"
-# and Claude is passed "the file path with a preview of up to the first 2,000 characters instead". p4-phi leaves
-# that cap and its overflow file to the app and cuts no text of its own at a session's start or first message: it
-# puts the lines that ask the session to act first, so they fall inside the app's preview, and the rest follows
-# whole.
-HELD_HEAD = 90                   # of a piece that did not fit, shown beside the prompt so it is known for what it is
+# hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
+# plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
+# saves the output to a file in the session directory. It replaces the output with the file path and a preview of up
+# to the first 2,000 characters." p4-phi leaves that cap and its overflow file to the app: it keeps no ceiling of its
+# own on what it adds beside a start or a prompt and no page for what would pass one. The same section says "Claude
+# Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap", which is what
+# the app's cut at a character count lacks. So acting_first puts the lines that ask the session to act first, inside
+# the preview, the rest follows whole, and READ_ALL leads when those lines alone pass the preview.
+APP_CAP = 10000
+APP_PREVIEW = 2000
+READ_ALL = ("phi (p4-phi): the lines below that ask this session to act run past the 2,000 characters the app shows "
+            "of a hook's text over its cap of 10,000. Read the file the app names for this text before going on.")
+RELAY_CHARS = 4000               # of what the sessions beside this one changed, beside one prompt: relay.rebase's room
 PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
-PROMPT_CHARS = 4000              # the ceiling on what p4-phi adds beside one prompt; the rest is held on a page
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
@@ -88,8 +93,7 @@ TRANSCRIPT_BYTES = 8 * 1024 * 1024
 WAIT_S = 2.0                     # how long a handed-over first message waits for the app's record
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
-            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
-            "prompt_chars": "PROMPT_CHARS"}
+            "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -2124,38 +2128,20 @@ def started_by(me, payload):
     return me
 
 
-def fit(parts, room, home, sid, keep=()):
-    """The parts that fit in `room`, in their order, each whole; with no `room`, every part, the ones in `keep`
-    first, so past the app's own cap they fall inside its preview. What does not fit in a room is kept whole on the
-    session's held.md and named by count, by that page and by how each begins. No piece is shown cut, since a cut
-    piece, such as a list of start requests, is of no use in part. A piece in `keep` asks the session to act at this
-    message, so it is never held: the room goes to those first, and the other pieces fit in what is left."""
+def acting_first(parts, keep=()):
+    """Every part whole, the ones in `keep` first and the rest in their order. A part in `keep` asks the session to
+    act at this message, so it leads: past the app's cap of APP_CAP characters Claude is passed only the first
+    APP_PREVIEW of them with the path of the file that holds the text. No part is cut or kept back, since that file
+    is the app's to write. When the text passes the cap and the parts in `keep` alone pass the preview, READ_ALL
+    leads them, since the app does not ask Claude to read its file."""
     parts = [p for p in parts if p]
     kept = {id(p) for p in keep if p}
-    if room is None:                               # the app's own cap and file: the notices first, then the rest
-        return "\n\n".join([p for p in parts if id(p) in kept] + [p for p in parts if id(p) not in kept])
-    if sum(len(p) + 2 for p in parts) - 2 <= room:
-        return "\n\n".join(parts)
-    tail = 260 + len(relay.held_path(home, sid)) + 3 * (HELD_HEAD + 8)    # the lines that name what is held
-    free = room - tail - sum(len(p) + 2 for p in parts if id(p) in kept)
-    out, over, used = [], [], 0
-    for p in parts:
-        if id(p) in kept:
-            out.append(p)
-        elif used + len(p) + 2 <= free:
-            out.append(p)
-            used += len(p) + 2
-        else:
-            over.append(p)
-    page = relay.hold(home, sid, over, now())
-    RAN["held"] = len(over)
-    heads = ['"' + cut(clean(PHI_LEAD.sub("", p)), HELD_HEAD) + '"' for p in over[:3]]
-    line = (f"phi (p4-phi): {len(over)} of the pieces p4-phi had for this prompt, {sum(len(p) for p in over)} "
-            f"characters, did not fit in its {room} beside one prompt and are whole on {page}. Read that page "
-            f"before going on when one of them asks something of this session. They begin: " + "; ".join(heads)
-            + (f"; and {len(over) - 3} more" if len(over) > 3 else "") + ".")
-    out.append(line)
-    return "\n\n".join(out)
+    first = [p for p in parts if id(p) in kept]
+    text = "\n\n".join(first + [p for p in parts if id(p) not in kept])
+    if len(text) > APP_CAP and sum(len(p) + 2 for p in first) + len(READ_ALL) > APP_PREVIEW:
+        RAN["read_all"] = True
+        return READ_ALL + "\n\n" + text
+    return text
 
 
 def touches_of(home, s):
@@ -2233,12 +2219,10 @@ def h_user_prompt_submit(payload):
                                    s.get("cwd") or payload.get("cwd") or "", "brief")   # from its brief
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
     handed = given(s, me, me.home)
-    room = None if handed else PROMPT_CHARS       # the first message passes whole, past the app's cap to its file
     parts = [live_rules(s, me.store),
              pin_of(me.home, s), handed]
     if REPORTS:
-        text, seen = reports_text(me.home, s, room * 3 // 5 if room else None, me.store,
-                                  said=str(payload.get("prompt") or ""))
+        text, seen = reports_text(me.home, s, None, me.store, said=str(payload.get("prompt") or ""))
         s["reportsSeen"] = seen
         parts.append(text)
     save_session(me.home, s)
@@ -2246,7 +2230,7 @@ def h_user_prompt_submit(payload):
     s = load_session(me.home, s["sessionId"]) or s
     if step:
         parts.append(step)
-    keep = []                                      # the notices that ask the session to act now: never held
+    keep = []                                      # the notices that ask the session to act now: they lead
 
     def notice(text):
         keep.append(text)
@@ -2315,13 +2299,12 @@ def h_user_prompt_submit(payload):
     split = split_text(me.home, s, payload.get("prompt")) if not route else ""
     last = route or "\n\n".join(x for x in (book_line, split) if x)
     save_session(me.home, s)
-    # the rebase check, on every message: what the sessions beside this one changed, and the warnings, first
-    used = sum(len(p) + 2 for p in parts + [last] if p)
-    share = max(room // 3, room - used) if room else PROMPT_CHARS
-    text, _ = relay.rebase(me.home, s["sessionId"], share, fair_cut, touches_of(me.home, s))
+    # the rebase check, on every message: its warnings lead, then the notices, then what the sessions beside this
+    # one changed and the rest, whole
+    text, _ = relay.rebase(me.home, s["sessionId"], RELAY_CHARS, fair_cut, touches_of(me.home, s))
     RAN["relay"] = len(text)
-    lead = [text] if room is None else []        # with no room the rebase's stop warnings still lead
-    return fit([text, last] + parts, room, me.home, s["sessionId"], lead + keep)
+    stop, changed = relay.stop_line(text)
+    return acting_first([stop, changed, last] + parts, [stop] + keep)
 
 
 def pair_parts(me, s, req, changed="", notice=lambda text: text):

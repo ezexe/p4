@@ -963,10 +963,10 @@ class NewTask(unittest.TestCase):
         self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
 
     def test_the_detach_notice_reaches_a_new_orchestrator_whose_brief_names_the_plugin_at_a_long_path(self):
-        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now is never
-        the piece held for want of room. A new orchestrator's brief names phi.py where a landing clone keeps the
-        plugin, 106 characters deep, so its first message gets the new-task instruction and a start draft that fill
-        the room, and the detach notice still reaches it whole."""
+        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now leads
+        them. A new orchestrator's brief names phi.py where a landing clone keeps the plugin, 106 characters deep, so
+        its first message gets the new-task instruction and a start draft, and the detach notice reaches it whole,
+        inside the 2,000 characters the app shows of a text past its cap."""
         land = "E:/projects/p4-phi/.claude/p4/temportal/tmp/83e32f0d-9d33-427a-93fc-f0c8db9acc23/land/lbiza/plugins/p4-phi"
         script = os.path.join(HERE, "phi.py").replace("\\", "/")
         brief = phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act().replace(script, land + "/scripts/phi.py")
@@ -975,10 +975,12 @@ class NewTask(unittest.TestCase):
         self.say(TOP, "also, the fence colour?")
         told = self.say(KID, "Task:\nPick the fence colour and update the fence. ezexe's words: \"the fence colour?\" "
                         + brief)                         # a work word of the brief's own, not of the plugin's path
-        self.assertIn("did not fit", told, "the room is full, so pieces are held")
-        self.assertIn("p4-phi detached it to top level at this first message. Now call "
-                      "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else", told)
-        self.assertLessEqual(len(told), phi.PROMPT_CHARS)
+        self.assertNotIn("did not fit", told, "no piece is held: the app's own cap and file take a long text")
+        notice = ("p4-phi detached it to top level at this first message. Now call "
+                  "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else")
+        self.assertIn(notice, told)
+        self.assertLessEqual(told.index(notice) + len(notice), phi.APP_PREVIEW, "inside the app's preview")
+        self.assertFalse(os.path.exists(os.path.join(self.t.dir(KID), "held.md")))
 
     def test_the_harness_speaking_gets_no_line(self):
         self.say(TOP, TASK)
@@ -1330,28 +1332,44 @@ class Rules(unittest.TestCase):
         self.assertNotIn("act-don't-wait", self.start(TOP, "resume"))
         self.assertIn("act-don't-wait", self.start(TOP, "compact"))
 
-    def test_pieces_past_the_cap_are_held_on_a_page_and_named_by_count(self):
-        """The text beside one prompt has a hard ceiling; what does not fit is named by count and page."""
-        home = self.t.p4
+    def test_no_ceiling_or_page_of_p4_phis_own_and_the_acting_lines_lead_past_the_apps_cap(self):
+        """Audit candidate 10. hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and
+        `initialUserMessage` strings, and its plain stdout, are capped at 10,000 characters", and over the limit
+        "Claude Code saves the output to a file in the session directory. It replaces the output with the file path
+        and a preview of up to the first 2,000 characters." So p4-phi keeps no ceiling beside a prompt and no page
+        for what would pass one: every piece passes whole. What the app's cut lacks, by the same section, "Claude
+        Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap": the
+        lines that ask the session to act lead, and one line asks for the file only when they pass the preview."""
+        for mod, names in ((phi, ("fit", "PROMPT_CHARS", "HELD_HEAD")), (relay, ("hold", "held_path", "HELD_HEAD",
+                                                                                 "HELD_BYTES"))):
+            for name in names:
+                self.assertFalse(hasattr(mod, name), f"{mod.__name__}.{name}")
+        self.assertNotIn("prompt_chars", phi.SETTINGS)
+        self.assertEqual((phi.APP_CAP, phi.APP_PREVIEW), (APP_CAP, 2000))
+        parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "act: third piece " + "c" * 900,
+                 "last line " + "d" * 6000]
+        text = phi.acting_first(parts, [parts[2]])
+        self.assertEqual(text, "\n\n".join([parts[2], parts[0], parts[1], parts[3]]),
+                         "every piece whole, the acting one first and the rest in their order")
+        self.assertGreater(len(text), APP_CAP, "past the app's cap, which is the app's to cut and keep")
+        self.assertLessEqual(text.index(parts[2]) + len(parts[2]), phi.APP_PREVIEW, "the acting line in the preview")
+        self.assertEqual(phi.acting_first(["x", "", "y"]), "x\n\ny")
+        long_acts = ["act one " + "e" * 1200, "act two " + "f" * 1200]
+        text = phi.acting_first(parts + long_acts, long_acts)
+        self.assertTrue(text.startswith(phi.READ_ALL + "\n\n" + long_acts[0]),
+                        "the acting lines alone pass the preview: the line that asks for the app's file leads them")
+        short = phi.acting_first(long_acts + ["rest"], long_acts)
+        self.assertLessEqual(len(short), APP_CAP)
+        self.assertNotIn(phi.READ_ALL, short, "under the cap the app shows all of it")
         self.t.say(TOP, TASK)
-        parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "third piece " + "c" * 2500, "last line"]
-        text = phi.fit(parts, phi.PROMPT_CHARS, home, TOP)
-        self.assertLessEqual(len(text), phi.PROMPT_CHARS)
-        self.assertIn("first piece", text)
-        self.assertIn("last line", text, "a short piece after a long one still fits")
-        self.assertIn("2 of the pieces p4-phi had for this prompt", text)
-        self.assertIn("They begin: \"second piece bbbb", text, "each held piece is named by how it begins")
-        self.assertIn("\"third piece cccc", text)
-        self.assertNotIn("b" * 200, text, "no piece is shown cut")
-        asks = "phi (p4-phi): start requests from sessions whose turns ezexe did not begin: " + "x" * 5000
-        text = phi.fit(["a short line", asks], phi.PROMPT_CHARS, home, TOP)
-        self.assertLessEqual(len(text), phi.PROMPT_CHARS)
-        self.assertIn("They begin: \"start requests from sessions whose turns ezexe did not begin", text)
-        self.assertIn("Read that page before going on", text)
-        held = read(os.path.join(self.t.dir(TOP), "held.md"))
-        self.assertIn("b" * 3000, held)
-        self.assertIn("c" * 2500, held)
-        self.assertEqual(phi.fit(["x", "y"], 100, home, TOP), "x\n\ny", "what fits is untouched")
+        for k in range(40):
+            relay.warn(self.t.p4, TOP, f"note:{k}", f"warning {k:02d} of forty: " + "a sibling changed the layout. " * 10)
+        ctx = context(self.t.say(TOP, "what now?"))
+        self.assertGreater(len(ctx), APP_CAP)
+        self.assertTrue(ctx.startswith(phi.READ_ALL + "\n\n" + relay.STOP_HEAD + "(1) warning 00 of forty"), ctx[:300])
+        self.assertIn("(40) warning 39 of forty", ctx, "every warning whole")
+        self.assertNotIn("did not fit", ctx)
+        self.assertFalse(os.path.exists(os.path.join(self.t.dir(TOP), "held.md")), "no page of p4-phi's own")
 
     def test_the_built_in_rules_come_beside_the_background(self):
         self.t.say(TOP, TASK)
@@ -1381,7 +1399,9 @@ class Rules(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")), "no page of p4-phi's own")
         self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
                         first.index("background for this session"), "the act line leads, inside the app's preview")
-        self.assertLessEqual(len(context(t.say(KID, "go on"))), phi.PROMPT_CHARS, "a later prompt keeps its room")
+        later = context(t.say(KID, "go on"))
+        self.assertNotIn("did not fit", later, "a later prompt has no ceiling of p4-phi's own either")
+        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")))
         start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1"))
         self.assertGreater(len(start), 9500)
         self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
@@ -1934,7 +1954,7 @@ ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|lo
 UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])([^\s`'\"(]*\.claude/[^\s`'\")]*)")
 # The pages p4-phi's own scripts write in the store, which a session reads and never writes: a line may say they are
 # kept or rewritten there. A state page or a decisions file is not among them, since a session writes those.
-OWN_PAGES = ("book.md", "session.md", "sessions.md", "standing.md", "held.md", "board.md", "rules.md", "ledger.md")
+OWN_PAGES = ("book.md", "session.md", "sessions.md", "standing.md", "board.md", "rules.md", "ledger.md")
 
 
 def writes_under_claude(text, plugin=ROOT):

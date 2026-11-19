@@ -165,7 +165,6 @@ Every key is optional, and the file need not exist.
 | `background`, `reports`, `turns`, `book`, `rules`, `puppeteer` | `true` |
 | `background_chars` | 3000 |
 | `reports_chars` | 6000 |
-| `prompt_chars` | 4000 |
 | `wait_s` | 2.0 |
 
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.

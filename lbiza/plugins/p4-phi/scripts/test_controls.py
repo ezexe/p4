@@ -239,10 +239,11 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("a boundary", ctx)
         self.assertNotIn(self.COMPLETE, context(t.say(PUP, "and now?")), "named once")
 
-    def test_the_complete_line_is_never_the_piece_held_when_the_ended_turn_lines_fill_the_room(self):
-        """ezexe/p4#68, by 8bf3e26: a notice that asks a session to act now is never held. Five reports whose first
-        lines run to the 200 characters a line quotes overflow the default 4000; the line naming the complete
-        sessions is there whole, and an informational piece goes to held.md."""
+    def test_the_complete_line_leads_whole_when_five_ended_turn_lines_come_with_it(self):
+        """ezexe/p4#68, by 8bf3e26: a notice that asks a session to act now leads the text. Five reports whose first
+        lines run to the 200 characters a line quotes pass 4,000 characters with it; the line naming the complete
+        sessions is there whole, inside the 2,000 characters the app shows of a text past its cap, and no piece is
+        held on a page of p4-phi's own."""
         t = self.t
         t.record(TOP4, title="Build the ports table")
         t.record(TOP5, title="Build the moon format reader")
@@ -252,15 +253,18 @@ class Supervisor(unittest.TestCase):
         t.say(PUP, "Control the five trees")
         t.cli(PUP, "controls", *five)
         ctx = context(t.say(PUP, "five reports came in"))
-        self.assertIn("did not fit in its 4000 beside one prompt", ctx, "the room overflows")
-        line = ctx.split("p4-phi's records hold these sessions this puppeteer controls complete", 1)[1].split("\n")[0]
+        self.assertGreater(len(ctx), 4000)
+        self.assertNotIn("did not fit", ctx, "no piece is held")
+        head = "p4-phi's records hold these sessions this puppeteer controls complete"
+        line = ctx.split(head, 1)[1].split("\n")[0]
         for sid in five:
             self.assertIn(f"`{sid}`", line)
         self.assertIn("approval card", line, "the line whole")
-        with open(relay.held_path(t.p4, PUP), encoding="utf-8") as f:
-            held = f.read()
-        self.assertNotIn("this puppeteer controls complete", held, "the line is not held")
-        self.assertTrue(any(m in held for m in ("ended turns. Each is one line", "set these sessions' effort")), held)
+        self.assertLessEqual(ctx.index(head) + len(head) + len(line), 2000, "inside the app's preview")
+        self.assertFalse(os.path.exists(os.path.join(t.dir(PUP), "held.md")), "no page of p4-phi's own")
+        after = ctx.split(head, 1)[1]
+        self.assertTrue(any(m in after for m in ("ended turns. Each is one line", "set these sessions' effort")),
+                        "the informational pieces follow it, whole and beside the prompt")
 
     def test_what_p4_phis_records_hold_against_a_controlled_session_is_printed_and_never_refuses_an_archive(self):
         t = self.t
