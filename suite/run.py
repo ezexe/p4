@@ -29,8 +29,9 @@ What a test file must be for the command to load it:
      tempfile.tempdir or in the temp folder, the command puts back and names in its report, an import a test makes
      itself included.
   5. It needs nothing of the caller's: each worker has a temp folder, a home folder and app data folders of its own,
-     git reads only the settings the command writes in that home, the temp folder has no repository above it and is
-     the working folder, and every variable whose name starts with a prefix suite.json strips is removed, but for
+     git reads only the settings the command writes in that home, the temp folder has no repository above it, is
+     the working folder and is named as the file system holds it, with no 8.3 short name and no link above it,
+     and every variable whose name starts with a prefix suite.json strips is removed, but for
      those it keeps, which point a test at fixtures. So a live test behind a P4_ switch skips and a run spends nothing.
   6. Each test, and the teardowns a worker runs when it ends, end within the timeout suite.json names, or the worker
      is stopped, the run fails, and another worker takes the tests left. A worker lost in any job fails the run.
@@ -973,7 +974,10 @@ def main(argv=None):
     print(f"suite/run.py: {many(len(run.scripts) + len(run.uncollected), 'test file')} on {many(run.n, 'worker')}",
           file=sys.stderr, flush=True)
     status = OK
-    run.base = tempfile.mkdtemp(prefix="p4s-")
+    # Named as the file system holds it, with no 8.3 short name of Windows and no link above it: a GitHub runner's TEMP
+    # is C:\Users\RUNNER~1\AppData\Local\Temp, and git and os.path.realpath name a folder under it in full, so a test
+    # that compares a path it made with one the code under test resolved would meet two spellings of one folder.
+    run.base = os.path.realpath(tempfile.mkdtemp(prefix="p4s-"))
     try:
         run.start()
         run.loop()

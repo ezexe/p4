@@ -366,6 +366,37 @@ class Command(Repo):
         self.assertTrue(os.path.isdir(fixtures),
                         "test_phi.py's fixtures did not go to the folder P4_PHI_TEST_TMP names")
 
+    def test_a_workers_temp_folder_is_named_as_the_file_system_holds_it(self):
+        """A caller's temp folder spelled another way than the file system holds it reaches no test: by an 8.3 short
+        name on Windows, as a GitHub runner's TEMP is C:\\Users\\RUNNER~1\\AppData\\Local\\Temp, or through a link
+        elsewhere. git and os.path.realpath name a folder in full, so a test that compares a path it made with one the
+        code under test resolved would meet two spellings of one folder."""
+        held = os.path.join(os.path.realpath(tempfile.mkdtemp(prefix="suite-temp-")), "a temp folder with a long name")
+        self.addCleanup(run.remove, os.path.dirname(held))
+        os.mkdir(held)
+        if os.name == "nt":
+            import ctypes
+            buf = ctypes.create_unicode_buffer(1024)
+            n = ctypes.windll.kernel32.GetShortPathNameW(held, buf, len(buf))
+            other = buf.value if 0 < n < len(buf) else held
+            if os.path.normcase(other) == os.path.normcase(held):
+                self.skipTest("this volume makes no 8.3 short names")
+        else:
+            other = os.path.join(os.path.dirname(held), "link")
+            os.symlink(held, other)
+        self.make({"a/test_temp.py": '''
+            import os, tempfile, unittest
+
+            class Temp(unittest.TestCase):
+                def test_named_in_full(self):
+                    tmp = tempfile.gettempdir()
+                    self.assertEqual(tmp, os.path.realpath(tmp))
+                    self.assertEqual(os.getcwd(), tmp)
+        '''})
+        code, out, err = command(self.root, "--workers", "1", TEMP=other, TMP=other, TMPDIR=other)
+        self.assertEqual(code, run.OK, out + err)
+        self.assertEqual(lines_of(out)["a/test_temp.py::Temp::test_named_in_full"][0], "ok", out)
+
     def test_two_files_of_one_name_both_run_and_a_module_of_other_contents_by_one_name_fails_its_folder(self):
         pad = "# " + "x" * 60 + "\n"
         self.make({"a/test_same.py": "def test_from_a():\n    pass\n",
