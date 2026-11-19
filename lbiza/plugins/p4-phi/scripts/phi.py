@@ -1111,6 +1111,10 @@ MAX_CHILDREN = 8              # nor one that has this many live children already
 #   questions when it needs a decision or a clarification."
 # - the desktop app's turn-end tool, `mcp__ccd_turn__wrap_up`, whose own text puts a decision that waits on ezexe as
 #   one question with buttons, the pick first.
+# - headless.md, "Turn off permission prompts in unattended runs": "Claude Code removes the tools that need an answer
+#   from a person, such as `AskUserQuestion`, so Claude can't call them." A `claude -p` run and an eval run have
+#   neither tool, and what leaves such a run is its reply, "the text result in the `result` field" of the same page,
+#   so the rule names the reply for a session that has neither.
 # Every other sentence stays. Some are what that text lacks: the decisions file, the session tree as what settles a
 # next step, the push of green issue-closing commits, a child's question to its parent session, and the go a
 # project's rules ask for. The rule asks a worker for no line to its starter at a turn's end: the plugin's hooks
@@ -1128,7 +1132,8 @@ BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task,
             "siblings' work and the project's rules can settle is decided and done, with one line saying what was "
             "chosen and why. "
             "Only a matter of ezexe's authority goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or "
-            "`AskUserQuestion`: permissions or security settings, credentials, spending, and actions that cannot be "
+            "`AskUserQuestion`, or in the reply of a session that has neither tool: permissions or security "
+            "settings, credentials, spending, and actions that cannot be "
             "undone or publish outward, but for the push of green issue-closing commits, which p4-phi orders at "
             "once. A child asks its parent "
             "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "

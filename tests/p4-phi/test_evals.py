@@ -213,6 +213,15 @@ class Covers(unittest.TestCase):
         self.assertIn("researched and decided by this session", phi.BUILT_IN)
         self.assertIn("actions that cannot be undone or publish outward", phi.BUILT_IN)
 
+    def test_the_case_on_ezexes_authority_grades_the_reply_the_rule_names(self):
+        """A run's session is offered neither `mcp__ccd_turn__wrap_up` nor `AskUserQuestion`, so the rule sends its
+        question to the reply, and the case on ezexe's authority looks for the question there."""
+        self.assertIn("or in the reply of a session that has neither tool", phi.BUILT_IN)
+        held = {c["name"]: c for c in cases()}["asks-before-an-irreversible-step"]["graders"]
+        asked = [g for g in held.values() if g.get("type") == "regex" and g.get("match", "contains") == "contains"
+                 and g.get("target", "last_message") == "last_message"]
+        self.assertTrue(asked, held)
+
     def test_the_skill_is_called_by_its_own_name_and_one_case_must_not_call_it(self):
         self.assertTrue(os.path.isfile(os.path.join(PLUGIN, "skills", "phi", "SKILL.md")))
         skill = graders_of("Skill")

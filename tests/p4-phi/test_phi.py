@@ -1124,7 +1124,8 @@ class NewTask(unittest.TestCase):
         for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
                      "typed text only", "no click can carry"):
             self.assertNotIn(gone, phi.BUILT_IN)
-        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`:", phi.BUILT_IN)
+        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`, or in the "
+                      "reply of a session that has neither tool:", phi.BUILT_IN)
         for kept in (phi.DECIDE, "decisions.md in the scratchpad directory the app names",
                      "a question reaches ezexe only once those cannot settle it",
                      "the parent's task list and notes, siblings' work and the project's rules can settle",
@@ -1133,6 +1134,22 @@ class NewTask(unittest.TestCase):
                      "A child asks its parent session with SendMessage",
                      "that go is ezexe's to give, by a button"):
             self.assertIn(kept, phi.BUILT_IN)
+
+    def test_the_built_in_rule_names_the_reply_for_a_session_with_neither_question_tool(self):
+        """headless.md, "Turn off permission prompts in unattended runs": "Claude Code removes the tools that need
+        an answer from a person, such as `AskUserQuestion`, so Claude can't call them." A `claude -p` run and an
+        eval run have neither that tool nor the desktop app's `wrap_up`, and what leaves such a run is its reply,
+        "the text result in the `result` field" of the same page. So the rule names the reply for such a session,
+        in one clause after the two tools, and with the clause out it reads as it did before."""
+        clause = ", or in the reply of a session that has neither tool"
+        self.assertEqual(phi.BUILT_IN.count(clause), 1)
+        before = phi.BUILT_IN.replace(clause, "")
+        self.assertIn("Only a matter of ezexe's authority goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` "
+                      "or `AskUserQuestion`: permissions or security settings, credentials, spending, and actions "
+                      "that cannot be undone or publish outward, but for the push of green issue-closing commits, "
+                      "which p4-phi orders at once. A child asks its parent session with SendMessage", before)
+        self.assertEqual(phi.BUILT_IN.count("reply"), 1, "the rule says where the question goes and no more of it")
+        self.assertEqual(phi.BUILT_IN.count(". "), before.count(". "), "a clause, and no sentence of its own")
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
