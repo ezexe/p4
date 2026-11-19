@@ -42,8 +42,6 @@ the session runs, and at the session's end.
   tick --let-go            starts that sweep in a process of its own and returns at once. The module runs it at a
                            session's end, where the `session.end` hooks share 1.5 seconds and, as the API's types
                            say of SessionEndInput, "only a process a command let go of outlives it".
-  sweep, session-end       what a session started on an older hooks.json still runs at its start and its end: the
-                           same move and sweep, `sweep` printing their lines and `session-end` silent.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
                            one is read from the working folder, and from temportal/ when the working folder holds
                            none there, which is how `list` prints a cookie. The lifetime is `30m`, `12h`, `7d`, `2w`
@@ -53,10 +51,12 @@ the session runs, and at the session's end.
   clear <path>             removes a cookie and keeps the file, reading a relative path as `set` reads it.
   now                      the retention sweep, run by hand.
 
-The module registers these four as the slash command `/lifetime`, and runs each as this script's command of the same
-name.
+The module registers these four as the slash command `/lifetime` and as the tool `lifetime` for the model, and runs
+each as this script's command of the same name.
 
-A failure in a hook prints a one-line notice and exits 0.
+No command hook runs this script. `sweep` and `session-end`, which the command hooks ran at a session's start and end
+before the module did, are gone, and so is the option `--session` of `set`: an installed version runs the scripts of
+its own folder in Claude Code's plugin cache, so no session of an older version reaches this file.
 """
 
 import json
@@ -85,13 +85,10 @@ SESSION = "session"                     # the lifetime an earlier version took, 
 NO_SESSION = ("no lifetime ends with a session: a file that goes when its session goes belongs in that session's "
               "scratchpad directory, which Claude Code deletes with its transcript")
 FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no rule clears it
-NAME = "p4-temportal: "                 # what a line printed for a command hook starts with
+NAME = "p4-temportal: "                 # what a line of the sweep starts with, which `now` prints and `tick` leaves off
 LEAST_WAIT_S = 60.0                     # the module's timer never sweeps sooner after a sweep than this
 MOST_WAIT_S = 3600.0                    # nor later: a cache rule counts days, so an hour is soon enough for one
 COMPACT_AT = 70                         # percent of a session's context at which the module compacts it when quiet
-
-
-payload_from_stdin = hookio.payload_from_stdin
 
 
 project_root = hookio.project_root
@@ -524,16 +521,6 @@ def main():
     if sub == "tick":                   # the module's: it reads no stdin, and the project is CLAUDE_PROJECT_DIR
         print(json.dumps(tick(project_root({}), "--let-go" in args[1:]), ensure_ascii=False))
         return 0
-    if sub in ("sweep", "session-end"):
-        payload = payload_from_stdin()
-        try:
-            lines = start_sweep(store_of(project_root(payload)))
-            if sub == "sweep" and lines:
-                print("\n".join(lines))
-        except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
-            # a systemMessage reaches ezexe on SessionEnd too, where plain stdout reaches nobody
-            print(json.dumps({"systemMessage": f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}"}))
-        return 0
     import argparse
     ap = argparse.ArgumentParser(prog="lifetime.py", description="p4-temportal: cookie and cache lifetimes")
     ap.add_argument("--p4", default=None, help="the store, <project>/.claude/p4, by default from CLAUDE_PROJECT_DIR")
@@ -541,8 +528,6 @@ def main():
     s = sp.add_parser("set", help="give a file or folder under temportal/ an expiry")
     s.add_argument("path")
     s.add_argument("lifetime", help="30m, 12h, 7d, 2w or an ISO date")
-    # what a session that loaded an older skill page still passes with the lifetime `session`, which is refused
-    s.add_argument("--session", default="", help=argparse.SUPPRESS)
     c = sp.add_parser("clear", help="remove a file's expiry, keeping the file")
     c.add_argument("path")
     sp.add_parser("list", help="every cookie and cache rule")

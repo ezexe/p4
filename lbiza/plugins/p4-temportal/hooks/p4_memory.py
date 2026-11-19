@@ -11,9 +11,9 @@ p4-phi's settings writer, ezexe/p4#246, writes that key. Until it is there, Clau
              saving memory there: the store lies outside the working directory, no user or managed additionalDirectories
              entry holds it, and a repository settings file chose the folder.
 
-`mirror` and `sweep` were the PostToolUse and Stop commands that moved memory into the store. A session started
-before they were retired still runs them, so they exit 0 and print nothing. Every failure prints a one-line notice
-and exits 0.
+Every failure prints a one-line notice and exits 0. `migrate` is the script's one command: `mirror` and `sweep`, the
+PostToolUse and Stop commands that moved memory into the store, are gone, since Claude Code writes the memory there
+itself, and an installed version runs the scripts of its own folder in Claude Code's plugin cache.
 """
 
 import json
@@ -29,7 +29,6 @@ import p4conf  # noqa: E402 - the settings file, .claude/p4/p4.json
 import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scripts share
 
 MEMORY = "memory"
-RETIRED = ("mirror", "sweep")   # run by sessions started before Claude Code wrote the store's memory itself
 
 
 payload_from_stdin = hookio.payload_from_stdin
@@ -255,8 +254,6 @@ def main():
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
     payload = payload_from_stdin()
     try:
-        if sub in RETIRED:
-            return 0
         if sub == "migrate":
             if auto_memory_off(project_root(payload)):
                 return 0                # auto memory is off: Claude Code saves none, so no block keeps it from saving

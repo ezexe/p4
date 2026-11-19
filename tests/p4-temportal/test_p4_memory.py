@@ -141,15 +141,18 @@ class NativeMemory(unittest.TestCase):
         self.assertEqual(run("migrate", self.root, self.store), "", "a start printed what Claude Code loads natively")
         self.assertEqual(tree(self.store), before)
 
-    def test_a_session_started_before_this_change_calls_mirror_and_sweep_in_silence(self):
-        """An open session keeps the hooks it started with, so the two retired commands still exit 0 and say
-        nothing, and change nothing."""
+    def test_the_commands_of_the_mirror_are_gone(self):
+        """`mirror` and `sweep` were kept for sessions of older versions, which run the scripts of their own folder in
+        Claude Code's plugin cache and never reach this file. Each is an unknown subcommand now, said in a
+        systemMessage as every other is, and it changes nothing."""
         put(os.path.join(self.app, "b.md"), "fact b\n")
         w = {"tool_name": "Write", "tool_input": {"file_path": os.path.join(self.app, "b.md")}}
         app_before, store_before = tree(self.app), tree(self.store)
         for sub, payload in (("mirror", w), ("sweep", {})):
-            self.assertEqual(run(sub, self.root, self.app, payload), "", sub)
+            said = json.loads(run(sub, self.root, self.app, payload))
+            self.assertEqual(said, {"systemMessage": f"p4_memory.py: unknown subcommand {sub!r}"}, sub)
         self.assertEqual((tree(self.app), tree(self.store)), (app_before, store_before))
+        self.assertFalse(hasattr(p4_memory, "RETIRED"))
 
     def test_the_runner_exits_0_on_an_unknown_subcommand_and_on_a_missing_script(self):
         sh = shutil.which("sh")

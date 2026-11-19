@@ -18,9 +18,9 @@ transcript, and no command here moves, links, stages, commits or removes one.
                  link is removed as a link, the store's folder is left as it is, and a real folder is never touched.
                  It prints one line when it unlinked something.
 
-`tmp-link` was the start command that made those links; a session started on 0.3.9 still runs it, and it now unlinks
-as tmp-unlink does. `tmp-sweep` and `tmp-close` kept each session's scratchpad in the store; a session started before
-they were retired still runs them, so they exit 0 and print nothing.
+`tmp-link`, the start command of 0.3.9 that made those links, is gone, and so are `tmp-sweep` and `tmp-close`, which
+kept each session's scratchpad in the store: an installed version runs the scripts of its own folder in Claude Code's
+plugin cache, so no session of an older version reaches this file.
 
 repo-uses is off unless p4.json's scratchpad.asks is true or a person set P4_SCRATCHPAD_ASKS to 1 or true:
 
@@ -29,10 +29,9 @@ repo-uses is off unless p4.json's scratchpad.asks is true or a person set P4_SCR
                  belongs there. It only reads, with one `git grep`, and is silent outside a git repository or without
                  git.
 
-`ask` was a PreToolUse ask on code written to a temp folder or the notebook. Claude Code does that itself with an ask
-rule on an `Edit` path, which covers Write, Edit and NotebookEdit, as https://code.claude.com/docs/en/permissions.md
-says: "`Edit` rules apply to all built-in tools that edit files." So it is retired, and a session that loaded an older
-hooks.json still runs it, so it exits 0 and prints nothing.
+`ask`, a PreToolUse ask on code written to a temp folder or the notebook, is gone. Claude Code does that itself with
+an ask rule on an `Edit` path, which covers Write, Edit and NotebookEdit, as
+https://code.claude.com/docs/en/permissions.md says: "`Edit` rules apply to all built-in tools that edit files."
 
 Every failure prints a one-line systemMessage and exits 0."""
 
@@ -77,9 +76,6 @@ project_root = hookio.project_root
 
 
 ASKS = False                # p4.json scratchpad.asks, with P4_SCRATCHPAD_ASKS ahead of it by p4conf.configure
-# the commands a session started before they were retired still runs: the two that kept each session's scratchpad in
-# the store, at its start, its turn ends and its end, and the PreToolUse ask
-RETIRED = ("tmp-sweep", "tmp-close", "ask")
 
 
 def configure(payload, write=True, root=None):
@@ -378,9 +374,7 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     sub = sys.argv[1] if len(sys.argv) > 1 else ""
-    if sub in RETIRED:
-        return 0
-    if sub in ("tmp-unlink", "tmp-link") and (len(sys.argv) > 2 or sys.stdin is None or sys.stdin.isatty()):
+    if sub == "tmp-unlink" and (len(sys.argv) > 2 or sys.stdin is None or sys.stdin.isatty()):
         try:                                           # run by hand: the project named or the working folder, no stdin
             return cmd_tmp_unlink({}, os.path.abspath(sys.argv[2]) if len(sys.argv) > 2 else os.getcwd())
         except Exception as e:  # noqa: BLE001
@@ -395,7 +389,7 @@ def main():
             return cmd_notebook_out(payload)
         if sub == "repo-uses":
             return cmd_repo_uses(payload)
-        if sub in ("tmp-unlink", "tmp-link"):          # tmp-link: what a session started on 0.3.9 still runs
+        if sub == "tmp-unlink":
             return cmd_tmp_unlink(payload)
         print(json.dumps({"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}))
         return 0

@@ -25,12 +25,6 @@ case "$part" in
   *) notice "p4-temportal: unknown part '$part'; nothing was done"; exit 0 ;;
 esac
 
-# `scratchpad ask` was a PreToolUse ask that Claude Code's own ask rules on Edit paths replaced. A session that loaded
-# an older hooks.json still runs it before each write, so it ends here with no python started.
-if [ "$part" = scratchpad ] && [ "${1:-}" = ask ]; then
-  exit 0
-fi
-
 f="${CLAUDE_PLUGIN_ROOT}/hooks/find-python.sh"   # a missing finder ends in the message below, never in exit 2
 known="${CLAUDE_PLUGIN_ROOT}/.python"
 if [ -r "$f" ]; then

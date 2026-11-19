@@ -103,31 +103,24 @@ def run(*args, stdin="", cwd=None, **env):
     return inproc("lifetime", args, stdin, e, cwd)
 
 
-class FailureNotice(unittest.TestCase):
-    """A failure on SessionEnd, where plain stdout reaches nobody, is printed as a systemMessage that ezexe sees."""
+class NoCommandHook(unittest.TestCase):
+    """No command hook runs lifetime.py: the hooks module sweeps by `tick`, whose failure is a line of its JSON, which
+    Tick holds. `sweep` and `session-end`, the commands of the SessionStart and SessionEnd hooks before the module,
+    are gone, since an installed version runs the scripts of its own folder in Claude Code's plugin cache."""
 
-    def test_a_degraded_sweep_prints_a_system_message(self):
-        import contextlib
-        import io
-        import lifetime
-        root = tempfile.mkdtemp(prefix="p4-temportal-fail-")
-        old = (lifetime.sweep, sys.argv, sys.stdin)
-        def broken(*a, **k):
-            raise OSError("disk gone")
-        try:
-            lifetime.sweep = broken
-            for sub, event in (("session-end", "SessionEnd"), ("sweep", "SessionStart")):
-                sys.argv = ["lifetime.py", sub]
-                sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps({"cwd": root, "hook_event_name": event}).encode()))
-                out = io.StringIO()
-                with contextlib.redirect_stdout(out):
-                    lifetime.main()
-                msg = json.loads(out.getvalue())["systemMessage"]
-                self.assertIn(f"lifetime {sub} degraded", msg)
-                self.assertIn("disk gone", msg)
-        finally:
-            lifetime.sweep, sys.argv, sys.stdin = old
-            wipe(root)
+    def test_the_commands_of_the_command_hooks_are_gone(self):
+        root = tempfile.mkdtemp(prefix="p4-temportal-gone-")
+        self.addCleanup(wipe, root)
+        due = put(os.path.join(root, ".claude", "p4", "temportal", "notebook", "due.md"))
+        lifetime.write_expires(os.path.join(root, ".claude", "p4"), {"notebook/due.md": {"expires": 1.0}})
+        for sub in ("sweep", "session-end"):
+            r = run(sub, stdin=json.dumps({"cwd": root}), CLAUDE_PROJECT_DIR=root)
+            self.assertEqual((r.returncode, r.stdout, os.path.exists(due)), (2, "", True), sub)
+            self.assertIn("invalid choice", r.stderr, sub)
+        with open(os.path.join(SRC, "lifetime.py"), encoding="utf-8") as f:
+            code = f.read().split('"""', 2)[2]
+        for gone in ('"sweep"', '"session-end"', "--session", "payload_from_stdin", "systemMessage"):
+            self.assertNotIn(gone, code, gone)
 
 
 class Tick(unittest.TestCase):
@@ -423,19 +416,19 @@ class Lifetime(unittest.TestCase):
 
     def test_a_copy_set_aside_at_a_start_survives_the_sweep_of_that_start(self):
         """A copy last changed 40 days ago that the layout move of a start sets aside in temportal/.layout-conflicts/
-        and in phi/.layout-conflicts/ is still there after the retention sweep the same hook runs next. The line of the
-        move that says it was kept is all the hook prints."""
+        and in phi/.layout-conflicts/ is still there after the retention sweep the same tick runs next. The line of the
+        move that says it was kept is all the tick says."""
         put(os.path.join(self.t, "memory", "a.md"), "new\n")
         put(os.path.join(self.p4, "memory", "a.md"), "old\n", age_days=40)
         put(os.path.join(self.p4, "phi", "store", "facts.md"), "new\n")
         put(os.path.join(self.p4, "store", "facts.md"), "old\n", age_days=40)
-        r = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
+        r = run("tick", CLAUDE_PROJECT_DIR=self.root)
         kept = [os.path.join(self.t, ".layout-conflicts", "memory", "a.md"),
                 os.path.join(self.p4, "phi", ".layout-conflicts", "store", "facts.md")]
-        self.assertEqual((r.stdout, [read(p) if os.path.exists(p) else "gone" for p in kept]),
-                         ("p4-temportal: moved memory/ to temportal/memory/, differing files: 1, kept in "
-                          "temportal/.layout-conflicts/; moved store/ to phi/store/, differing files: 1, kept in "
-                          "phi/.layout-conflicts/.\n", ["old\n", "old\n"]))
+        self.assertEqual((json.loads(r.stdout)["said"], [read(p) if os.path.exists(p) else "gone" for p in kept]),
+                         (["moved memory/ to temportal/memory/, differing files: 1, kept in "
+                           "temportal/.layout-conflicts/; moved store/ to phi/store/, differing files: 1, kept in "
+                           "phi/.layout-conflicts/."], ["old\n", "old\n"]))
 
     def test_a_copy_whose_file_and_folder_are_past_the_rule_is_cleared(self):
         """A copy in temportal/.layout-conflicts/ or phi/.layout-conflicts/ whose file and folder both last changed
@@ -523,33 +516,37 @@ class Lifetime(unittest.TestCase):
         due = put(os.path.join(self.t, "notebook", "due.md"))
         put(os.path.join(self.t, lifetime.EXPIRES), json.dumps(
             {"notebook/bad.md": {"expires": "soon"}, "notebook/due.md": {"expires": 1.0}, "notebook/odd.md": 7}))
-        swept = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
+        swept = run("tick", CLAUDE_PROJECT_DIR=self.root)
         listed = run("--p4", self.p4, "list")
-        self.assertEqual((swept.stdout, os.path.exists(due), listed.returncode, listed.stderr),
-                         ("p4-temportal: cleared expired files: 1, notebook/due.md.\n", False, 0, ""))
+        self.assertEqual((json.loads(swept.stdout)["said"], os.path.exists(due), listed.returncode, listed.stderr),
+                         (["cleared expired files: 1, notebook/due.md."], False, 0, ""))
         self.assertIn("cookie  notebook/bad.md  unreadable", listed.stdout)
         self.assertIn("cookie  notebook/odd.md  unreadable", listed.stdout)
 
     def test_no_lifetime_ends_with_a_session(self):
-        """`set <path> session` is refused with a line that names the session's scratchpad directory, written as an
-        older skill page gives it, with --session, and no cookie is kept."""
+        """`set <path> session` is refused with a line that names the session's scratchpad directory, and no cookie
+        is kept. `--session`, which an older skill page passed beside it, is no option of `set` any more."""
         f = put(os.path.join(self.t, "notebook", "state.md"))
-        r = run("--p4", self.p4, "set", f, "session", "--session", "abc", CLAUDE_CODE_SESSION_ID="abc")
+        r = run("--p4", self.p4, "set", f, "session", CLAUDE_CODE_SESSION_ID="abc")
         self.assertEqual((r.returncode, r.stdout, lifetime.read_expires(self.p4)), (2, "", {}))
         self.assertIn("no lifetime ends with a session", r.stderr)
         self.assertIn("scratchpad directory", r.stderr)
         with self.assertRaises(ValueError):
             lifetime.parse_lifetime("Session")
+        old = run("--p4", self.p4, "set", f, "7d", "--session", "abc")
+        self.assertEqual((old.returncode, old.stdout, lifetime.read_expires(self.p4)), (2, "", {}))
+        self.assertIn("unrecognized arguments: --session abc", old.stderr)
 
     def test_a_cookie_an_earlier_version_set_for_a_session_is_never_cleared(self):
         """An entry of expires.json that an earlier version set to end with a session stays with its file through
-        the sweep at that session's end, `list` says what it is, and `set` gives it a lifetime."""
+        the module's sweep, as the one at that session's end is, `list` says what it is, and `set` gives it a
+        lifetime."""
         f = put(os.path.join(self.t, "notebook", "state.md"))
         lifetime.write_expires(self.p4, {"notebook/state.md": {"session": "abc12345-rest"}})
-        ended = run("session-end", stdin=json.dumps({"session_id": "abc12345-rest"}), CLAUDE_PROJECT_DIR=self.root)
+        ended = run("tick", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CODE_SESSION_ID="abc12345-rest")
         swept = lifetime.sweep(self.p4, now=time.time() + 400 * DAY)
         listed = lifetime.listing(self.p4)[0]
-        self.assertEqual((ended.stdout, swept, os.path.exists(f)), ("", "", True))
+        self.assertEqual((json.loads(ended.stdout)["said"], swept, os.path.exists(f)), ([], "", True))
         self.assertEqual(listed, "cookie  notebook/state.md  set by an earlier version to end with session abc12345, "
                                  "so never cleared: set a lifetime on it or clear it")
         lifetime.set_cookie(self.p4, f, "1h")
@@ -618,14 +615,6 @@ class Lifetime(unittest.TestCase):
     def test_a_path_outside_temportal_is_refused(self):
         with self.assertRaises(ValueError):
             lifetime.set_cookie(self.p4, os.path.join(self.p4, "p4.json"), "1d")
-
-    def test_the_start_hook_prints_the_layout_move_it_made(self):
-        """When the retention sweep's hook is the first at a start to take the layout lock, it prints the lines of
-        the move, as the memory and scratchpad hooks print them."""
-        put(os.path.join(self.p4, "memory", "a.md"))
-        r = run("sweep", stdin="{}", CLAUDE_PROJECT_DIR=self.root)
-        self.assertEqual((r.stdout, os.path.isfile(os.path.join(self.t, "memory", "a.md"))),
-                         ("p4-temportal: moved memory/ to temportal/memory/.\n", True))
 
     def test_the_cli(self):
         f = put(os.path.join(self.t, "notebook", "n.md"))

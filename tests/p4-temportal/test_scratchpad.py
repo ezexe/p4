@@ -526,22 +526,25 @@ class RetiredAsk(unittest.TestCase):
         for name in ("cmd_ask", "written_paths", "in_temp", "in_notebook", "in_harness_scratchpad", "WRITE_RES"):
             self.assertFalse(hasattr(sp, name), name)
 
-    def test_a_session_that_still_runs_the_ask_gets_nothing(self):
-        """A session that loaded an older hooks.json still runs `scratchpad ask` before each write: with the asks on,
-        the runner ends it with no python started and scratchpad.py's main() prints nothing."""
+    def test_the_commands_of_the_copies_are_gone(self):
+        """`ask`, `tmp-sweep`, `tmp-close` and `tmp-link` were kept for sessions of older versions, which run the
+        scripts of their own folder in Claude Code's plugin cache and never reach this file. Each is an unknown
+        subcommand now, said in a systemMessage with exit 0 as every other is, and the runner holds no line for one."""
         payload = {"tool_name": "Write", "cwd": "E:/projects/x", "tool_input": {"file_path": "/tmp/x.py", "content": "x"}}
-        self.assertEqual(run_sub("ask", payload, ON), "")
-        if not shutil.which("sh"):
-            self.skipTest("no sh on PATH")
-        proj = tempfile.mkdtemp(prefix="p4-temportal-runner-ask-")
-        self.addCleanup(wipe, proj)
-        os.makedirs(os.path.join(proj, ".claude", "p4"))
-        with open(os.path.join(proj, ".claude", "p4", "p4.json"), "w", encoding="utf-8") as f:
-            f.write('{"scratchpad": {"asks": true}}')
-        env = env_with(ON, CLAUDE_PLUGIN_ROOT=os.path.join(proj, "no-plugin"), CLAUDE_PROJECT_DIR=proj)
-        r = subprocess.run([shutil.which("sh"), os.path.join(SRC, "run-hook.sh"), "scratchpad", "ask"],
-                           input=json.dumps(dict(payload, cwd=proj)).encode(), env=env, capture_output=True, cwd=proj)
-        self.assertEqual((r.returncode, r.stdout), (0, b""), "the runner reached python, whose missing finder speaks")
+        for sub in ("ask", "tmp-sweep", "tmp-close", "tmp-link"):
+            said = json.loads(run_sub(sub, payload, ON))
+            self.assertEqual(said, {"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}, sub)
+        if SRC not in sys.path:
+            sys.path.insert(0, SRC)
+        import scratchpad as sp
+        self.assertFalse(hasattr(sp, "RETIRED"))
+        with open(os.path.join(SRC, "run-hook.sh"), encoding="utf-8") as f:
+            runner = f.read()
+        self.assertNotIn("ask", runner)
+        with open(os.path.join(SRC, "scratchpad.py"), encoding="utf-8") as f:
+            code = f.read().split('"""', 2)[2]
+        for sub in ("tmp-sweep", "tmp-close", "tmp-link"):
+            self.assertNotIn(sub, code, sub)
 
     def test_repo_uses_lists_no_notebook(self):
         if SRC not in sys.path:
