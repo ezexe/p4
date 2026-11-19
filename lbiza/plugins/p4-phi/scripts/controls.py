@@ -328,7 +328,9 @@ RULE = (
     "is ezexe's. Work ezexe gives it on a controlled session's topic goes straight to that orchestrator in one "
     "SendMessage holding {restate}, a `Files:` line and what done looks like, and that session briefs and starts a "
     "worker of its own for it. A topic none covers gets a new orchestrator that this session starts and files in "
-    "its environment's section with `mcp__ccd_sidebar__move_sessions`, never in \"{section}\". Every other task "
+    "its environment's section with `mcp__ccd_sidebar__move_sessions`, which takes the section's id as "
+    "`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in \"{section}\". "
+    "Every other task "
     "goes to its one standing worker, which it starts under itself with the line `{worker}` in the brief: archive "
     "checks, never the archiving, store record corrections, landing checks, counts, audits, and the issues that "
     "flow up, which the worker's issues coworker drafts and publishes, handing each number up for this session to "
@@ -1238,7 +1240,9 @@ def requests_text(home, s):
             "began. Each call passes `cwd`, and the start tool's text has `mcp__ccd_session__list_start_targets` "
             "list the valid names, so call that first, once: a folder it does not list is named to ezexe in one "
             "line and never guessed. For each either start it with exactly the call given and then file it with "
-            "`mcp__ccd_sidebar__move_sessions` where named, never in the section this session is filed in, or decline "
+            "`mcp__ccd_sidebar__move_sessions` where named, which takes the section's id as "
+            "`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in the section "
+            "this session is filed in, or decline "
             f"it with `{PHI.commands()} controls --decline <request id> \"<why>\"` and one line to ezexe. p4-phi "
             "records a started one as controlled at this session's next hook:\n" + "\n".join(lines))
 

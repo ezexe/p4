@@ -100,6 +100,7 @@ The module hooks no `tool.call`: a subagent may call any tool, and a hook there 
 It hooks no function at `classic.PreToolUse` either, whose input holds no agent id, which phi.py's checks of a subagent's call read.
 The check does not obey `P4_PHI=0`: retrieval's check runs, and phi.py's own checks read the switch themselves.
 The `Agent` entry of `PreToolUse` stays a command hook, and so do the `lookup-record` and `lookup-record-async` entries of `PostToolUse` and `PostToolUseFailure`, which start a shell after every call.
+A call a plugin's hooks module makes itself, with `$.tool.call` or `$.session.send`, runs those entries too, under an id that begins `toolu_plugin_`: the shell ends at once for such an id, and no lookup row and no record of `phi.py` is kept of it, since no model reads its result.
 Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin beside a probe mod from a scratch project: no shell started before any of four Bash calls, `tool.check` settled in 44.5 ms and 28.2 ms for two plain commands with no python started and in 523.3 ms for `git status`, where `hook.py lookup-check` ran, a `tool.check` hook's `deny` reached the model as `Permission to use Bash denied by plugins p4-four-probe, p4-phi, cc-plugin-privacy: <reason>`, and context a function hook added at `classic.PostToolUse` reached the model beside the result.
 Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was handed the tool, the call's id and the tool's arguments and no agent id, and in a `claude -p` run a subagent's call carried `agentId` at `tool.check` and none at `classic.PreToolUse`.
 
@@ -292,6 +293,8 @@ Every key is optional, and the file need not exist.
 `app_tools` set to `true` has the hooks module ask the desktop app's own tools for the session and the sessions linked to it after a look, once a minute at most and never while a turn of the session runs, and write the answers to `app.json` beside the prompt's origin.
 `phi.py` then reads a session's title, folders, archive state, permission mode, branch and named starter from that file while it is under five minutes old, and from the app's record file for a session the file does not hold and for everything the tools do not answer: the CLI session ids, a session with no starter named, and the worktree path.
 With it unset no tool of the app is called and the record files are read as before.
+`phi.py app_tools on` and `phi.py app_tools off` write the key as `goal on` writes its own, and `phi.py app_tools` alone prints how it stands.
+Seen in the desktop app on Claude Code 2.1.326: the calls reach the four tools from the module, mid-turn and idle, leave no row in the transcript and move no token count, and the page [`dox/plugin-development.html`](../../../dox/plugin-development.html) holds what each answered.
 That the module's call reaches those tools in a desktop session is not yet seen, which is why the setting is off unless a project turns it on.
 
 ### Environment variables

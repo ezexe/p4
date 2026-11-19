@@ -1423,6 +1423,29 @@ class NativeCalls(unittest.TestCase):
         self.assertLess(got.index("`mcp__ccd_session__list_start_targets`"), got.index("exactly the call given"))
         self.assertIn("never guessed", got)
 
+    def test_the_rule_and_the_request_line_say_where_a_sections_id_comes_from_as_the_filing_line_does(self):
+        """`move_sessions` takes a section's id and no name, and the app's `list_sections` and `list_groups` answer
+        the ids, so each of the three lines that has a puppeteer file a session names the two beside it in the same
+        words: the rule, the line of the requests and the line for an orchestrator it started."""
+        from unittest import mock
+        how = ("which takes the section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` "
+               "answers it, never in")
+        self.assertIn("its environment's section with `mcp__ccd_sidebar__move_sessions`, " + how + " \"{section}\"",
+                      controls.RULE)
+        row = {"id": "rq-1", "title": "the exporter", "requester": KID, "store": "x"}
+        with mock.patch.object(controls, "requests_for", lambda s: [row]), \
+                mock.patch.object(controls, "request_call", lambda r: {"cwd": "D:/proj", "title": r["title"]}), \
+                mock.patch.object(controls, "full_title", lambda sid, s=None: "The kid"), \
+                mock.patch.object(controls, "filing", lambda store, s: "the section \"work\""):
+            got = controls.requests_text("", {"sessionId": TOP})
+        self.assertIn("then file it with `mcp__ccd_sidebar__move_sessions` where named, " + how
+                      + " the section this session is filed in", got)
+        source = read(os.path.join(SRC, "controls.py"))
+        named = [m.start() for m in re.finditer("`mcp__ccd_sidebar__move_sessions`", source)]
+        self.assertEqual(len(named), 3, "the three lines that name the tool")
+        for at in named:                           # and none of them names it alone
+            self.assertIn("`mcp__ccd_sidebar__list_groups`", source[at:at + 260], source[at:at + 80])
+
     def test_a_line_that_says_something_waits_on_ezexe_names_the_push_notification(self):
         """PushNotification's text: "Keep the message under 200 characters, one line, no markdown", and the tools
         reference has it send "a desktop notification from a local session"."""

@@ -564,6 +564,15 @@ class Me:
         self.store = self.store or self.home
         if self.home and self.id and not session:  # where the module writes them for a project with no store
             APP_AT["folder"] = session_dir(self.home, self.id)
+            # That file was not known while the records above were read, so this session's and its starter's came
+            # from their record files. Seen in the desktop app: a session in a worktree, whose project has no store,
+            # read all three sessions above it from the files beside a fresh answer of each. So what the answers
+            # hold is read from them from here on, as in a project whose served folder is known from the start.
+            held = app_answers()[0]
+            for sid in [k for k, v in RECORDS.items() if k in held and not isinstance(v, AppRow)]:
+                del RECORDS[sid]
+            if self.id in held:
+                self.rec = app_record(self.id)
         if self.title and self.id:
             GIVEN_TITLES[self.id] = self.title
         if host and not session and not own_host(self, host, payload):
@@ -2958,14 +2967,34 @@ def goal_switch(home, on):
     """`phi.py goal on` and `goal off`: writes `goal` in the store's phi/phi.json, where configure reads it, keeping
     the file's other keys, and returns the line that says how it stands as read back. A session writes nothing under
     `.claude` with its own tools, so this command is how the key is set. A file that does not parse is left as it is."""
+    stands, path = switch(home, "goal", on)
+    return f"goal is {stands} in {path}"
+
+
+def switch(home, key, on):
+    """Writes one true-or-false key of the store's phi/phi.json, keeping the file's other keys, and returns how the
+    key stands as read back, `on` or `off`, with the file's path. A file that does not parse is left as it is."""
     path = os.path.join(home, "phi", "phi.json")
     d = read_json(path)
     if not d and os.path.exists(path) and os.path.getsize(path) > 2:
         raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
-    d["goal"] = bool(on)
+    d[key] = bool(on)
     write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
-    stands = "on" if read_json(path).get("goal") is True else "off"
-    return f"goal is {stands} in {path.replace(chr(92), '/')}"
+    return "on" if read_json(path).get(key) is True else "off", path.replace(chr(92), "/")
+
+
+def app_tools_switch(home, on=None):
+    """`phi.py app_tools on` and `app_tools off`: writes `app_tools` in the store's phi/phi.json, as `goal on` writes
+    its key, and returns the line that says how it stands as read back. With neither it writes nothing and says how
+    the key stands, and whether P4_PHI_APP_TOOLS sets it for this run."""
+    path = os.path.join(home, "phi", "phi.json")
+    if on is None:
+        stands, path = "on" if read_json(path).get("app_tools") is True else "off", path.replace(chr(92), "/")
+    else:
+        stands, path = switch(home, "app_tools", on)
+    run = os.environ.get("P4_PHI_APP_TOOLS")
+    return f"app_tools is {stands} in {path}" + (f", and P4_PHI_APP_TOOLS is {run} for this run"
+                                                  if run in ("0", "1") else "")
 
 
 def goal_text(s):
@@ -3722,7 +3751,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal"):
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3741,6 +3770,10 @@ def main(argv=None):
                            help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
                                 "that the goal command set the goal; none prints how the session's native goal "
                                 "stands")
+        if name == "app_tools":
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
+                           help="on and off write `app_tools` in the store's phi.json, which has the hooks module "
+                                "ask the desktop app's own tools for sessions; none prints how the key stands")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
@@ -3801,6 +3834,9 @@ def main(argv=None):
                 sys.stdout.write(json.dumps({"set": goal_set(me.home, safe_id(me.id))}) + "\n")
             else:
                 print(goal_text(load_session(me.home, safe_id(me.id)) if me.id else {}))
+            return 0
+        if a.cmd == "app_tools":                   # the project's setting, which needs no session and makes no folder
+            print(app_tools_switch(me.home, a.act == "on" if a.act else None))
             return 0
         if a.cmd in puppeteer.COMMANDS:
             return puppeteer.command(a, me)

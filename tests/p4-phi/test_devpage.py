@@ -8,8 +8,8 @@ that a development session uses, shows the development project's local settings,
 section of what they do not confirm, and describes nothing p4-phi builds in their place; the evals suite's command
 and a row for each of its cases in place of a prompt piped by hand, both installed plugins off, the marketplace as it
 is registered and the installed copy as a copy in Claude Code's cache that auto-update moves, what seven live probes
-showed of Claude Code's goal and plan and which of p4-phi's pieces a goal covers, and every link of the page leading
-somewhere.
+showed of Claude Code's goal and plan and which of p4-phi's pieces a goal covers, what the live checks of the hooks
+module showed in the desktop app with what they showed wrong, and every link of the page leading somewhere.
 """
 
 import os
@@ -223,6 +223,55 @@ class Page(unittest.TestCase):
         open_still = page.split('id="not-confirmed"', 1)[1]
         self.assertNotIn("What the desktop app's Plan pane holds.", open_still, "a look at the pane settled it")
         self.assertIn("Whether a forked session's first prompt runs as a command", open_still)
+
+    def test_live_checks_holds_what_each_check_of_the_hooks_module_showed(self):
+        """The parts of the hooks module that were built with no desktop session have a row each for what a live
+        check showed, with the Claude Code version, and the page says what the checks showed wrong, what changed for
+        each and why every read of the app's record files stays. What a check saw is no longer listed as not
+        confirmed, and what the page says of the code holds in the code."""
+        page = read(PAGE)
+        self.assertIn('<a href="#live-checks">Live checks</a>', page)
+        live = page.split('<section id="live-checks"', 1)[1].split("</section>", 1)[0]
+        for said in ("Claude Code 2.1.326", "on 2.1.328", "<code>a-live-probe</code>", "<code>z-live-probe</code>",
+                     "<code>~/.claude/dev-mods/</code>",
+                     "it can only start sessions where this one runs, in this project.",
+                     "Start sessions only on the user's own words to you here",
+                     "<h3>What each check showed</h3>",
+                     "<code>mcp__ccd_session_mgmt__get_session</code> took <code>session_id</code> <code>\"self\"</code>",
+                     "<code>no tool named \"mcp__ccd_session_mgmt__get_session\" in this session</code>",
+                     "<code>result</code> is a list of one text block",
+                     "Whether such a call leaves a row in the transcript, spends tokens or disturbs a turn in flight",
+                     "None of the three.",
+                     "Another plugin's hooks saw all three and the calling plugin's own hooks saw none.",
+                     "<code>toolu_plugin_</code> and 32 hex digits",
+                     "wrote <code>app.json</code> with <code>at</code>, <code>self</code> and <code>sessions</code>",
+                     "<code>mcp__ccd_session_mgmt__search_session_transcripts</code>", "called it five times",
+                     "<h3>What the checks showed wrong, and what changed</h3>",
+                     "A plugin's own call was recorded as the session's.",
+                     "A session whose project has no store read itself from the record files.",
+                     "<code>phi.py app_tools on</code> and <code>phi.py app_tools off</code>",
+                     "<h3>Which reads of the app's record files stay</h3>", "Every one stays, and none was deleted."):
+            self.assertIn(said, live, said)
+        self.assertEqual(live.count("<tr><td>"), live.count("</td></tr>"))
+        self.assertGreaterEqual(live.count("<tr><td>"), 6, "a row a check")
+        open_still = page.split('id="not-confirmed"', 1)[1]
+        self.assertNotIn("No desktop session has made the call yet", open_still, "a desktop session has made it")
+        # what the section says of the code, held against the code
+        hook = read(os.path.join(SRC, "hook.py"))
+        self.assertIn('PLUGIN_CALL = "toolu_plugin_"', hook)
+        self.assertEqual(hook.count("if plugins_own(payload):"), 3, "the three record handlers")
+        self.assertIn("toolu_plugin_", read(os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")))
+        phi = read(os.path.join(SRC, "phi.py"))
+        self.assertIn("def app_tools_switch(home, on=None):", phi)
+        self.assertIn("app_tools", phi_settings())
+        for name in ("cliSessionId", "lastAssistantCliSessionId", "startChain", "forkedFromSessionId",
+                     "lastTurnStopped"):                # each key the page says the record alone holds is still read
+            self.assertIn(f"<code>{name}</code>", live, name)
+            self.assertTrue(any(name in read(os.path.join(SRC, f)) for f in ("phi.py", "starts.py", "node.py")), name)
+        for reader in ("puppeteer.app_index", "node.record_tree", "controls.started_by", "controls.sections"):
+            module, _, function = reader.partition(".")
+            self.assertIn(f"<code>{reader}</code>", live, reader)
+            self.assertIn(f"def {function}(", read(os.path.join(SRC, module + ".py")), reader)
 
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)

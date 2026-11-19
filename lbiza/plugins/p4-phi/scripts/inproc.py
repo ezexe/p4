@@ -197,6 +197,10 @@ KEEP = re.compile(rb"mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|temportal
                   rb"unterminated", re.S)
 
 
+# recall-hook.sh's rule for a call a plugin's hooks module made itself, by its id: nothing runs for it.
+OWN = re.compile(rb'"tool_use_id":\s?"toolu_plugin_')
+
+
 def detaches(payload, env):
     """recall-hook.sh's rule for lookup-record: True when the python runs behind the call, its output dropped."""
     return env.get("P4_RECALL_SYNC", "0") != "1" and not KEEP.search(payload)
@@ -342,7 +346,9 @@ def _here(args, p, kw, clock, stand_ins):
         out = f"p4-temportal: unknown part '{(rest[:1] or [''])[0]}'; nothing was done\n".encode()
     elif kind == "recall-hook" and (rest[:1] or [""])[0] in ("lookup-check", "lookup-record"):
         payload = data.rstrip(b"\n")                                # payload=$(cat)
-        if rest[0] == "lookup-record" and detaches(payload, envu):
+        if rest[0] == "lookup-record" and OWN.search(payload):
+            pass                                                    # exit 0 ahead of the python
+        elif rest[0] == "lookup-record" and detaches(payload, envu):
             _call(script, rest, payload, env, kw.get("cwd"), clock, stand_ins)
         else:
             _, out, err = _call(script, rest, payload, env, kw.get("cwd"), clock, stand_ins)

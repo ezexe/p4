@@ -27,6 +27,7 @@ os.environ["P4_PHI"] = "0"          # phi.py's routed checks stay out of these t
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "lbiza", "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
+import hook  # noqa: E402
 import lookups as lk  # noqa: E402
 import p4conf  # noqa: E402
 from test_hooks import HOOKS_JSON, make_project, run_hook, transcript  # noqa: E402
@@ -381,6 +382,27 @@ class Check(Base):
         r = run_hook("lookup-record", post("Bash", {"command": "ls"}, {"stdout": "x"}, S1, self.proj, "t5"), self.proj)
         self.assertEqual(r.returncode, 0)
 
+    def test_a_call_a_plugins_module_made_itself_gets_no_row(self):
+        """Seen with a probe mod in the desktop app on Claude Code 2.1.326 and in a scripted run on 2.1.328: a hooks
+        module's own `$.tool.call` runs the PostToolUse command hooks as a session's own call does, under an id that
+        begins `toolu_plugin_`, and thirteen such calls of the app's session tools were written into a store's lookup
+        rows. No model reads such a call's result, so it is no lookup of the session's: clean or failed, it gets no
+        row, and the same call under a model's id gets one."""
+        own = "toolu_plugin_377de02ec20c43d186269255387f91dd"
+        tool, said = "mcp__ccd_session_mgmt__get_session", {"result": '{"sessionId": "local_1", "title": "a"}'}
+        self.assertTrue(hook.plugins_own({"tool_use_id": own}))
+        self.assertFalse(hook.plugins_own({"tool_use_id": "toolu_01ABCplugin"}))
+        self.assertFalse(hook.plugins_own({}))
+        self.assertIsNone(self.out(run_hook("lookup-record", post(tool, {"session_id": "self"}, said, S1, self.proj,
+                                                                  own), self.proj)))
+        self.assertIsNone(self.out(run_hook("lookup-record", post(tool, {"session_id": "self"}, "denied", S1,
+                                                                  self.proj, own + "f", "PostToolUseFailure"),
+                                            self.proj)))
+        self.assertFalse(os.path.exists(lk.db_path(self.p4)) and self.rows(), "no row, and no database made for one")
+        self.out(run_hook("lookup-record", post(tool, {"session_id": "self"}, said, S1, self.proj, "toolu_01A"),
+                          self.proj))
+        self.assertEqual([r["id"] for r in self.rows()], ["toolu_01A"])
+
 
 class Lines(Base):
     def test_every_lookup_line_is_the_plugins_own(self):
@@ -554,6 +576,19 @@ class HooksJson(unittest.TestCase):
             failed = {"hook_event_name": "PostToolUseFailure", "error": "Exit code 1"}
             self.assertEqual(ran("lookup-record", "Bash", failed), ["lookup-record"], "a failure is answered whole")
             self.assertEqual(ran("lookup-record-async", "Bash", failed), [])
+            # a call a plugin's hooks module made itself, by its id: no python starts for it, clean or failed
+            own = {"tool_use_id": "toolu_plugin_377de02ec20c43d186269255387f91dd"}
+            app = "mcp__ccd_session_mgmt__list_sessions"
+            self.assertEqual(ran("lookup-record", app, dict(clean, **own)), [])
+            self.assertEqual(ran("lookup-record-async", app, dict(clean, **own)), [], "no row for a plugin's call")
+            self.assertEqual(ran("lookup-record", app, dict(failed, **own)), [])
+            self.assertEqual(ran("lookup-record", "Write", dict(clean, **own)), [], "phi.py keeps nothing of it")
+            compact = json.dumps({"tool_name": app, **clean, **own}, separators=(",", ":"))
+            if os.path.exists(log):
+                os.remove(log)
+            subprocess.run(["sh", runner, "lookup-record-async"], input=compact, text=True, capture_output=True, env=env)
+            self.assertFalse(os.path.exists(log), "the id is read with no space after its colon too, as the app writes it")
+            self.assertEqual(ran("lookup-record-async", app, dict(clean, tool_use_id="toolu_01A")), ["lookup-row"])
 
     def test_a_clean_call_waits_on_nothing_and_its_row_is_written_in_the_background(self):
         """ezexe/p4#150: the entry the call waits on ends at once for a clean call and writes no row; the async entry

@@ -26,6 +26,11 @@ clean=0
 if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   payload=$(cat)
   piped=1
+  # A call a plugin's hooks module made itself, by its id: no lookup of the session's, so no python starts for it,
+  # as hook.py's plugins_own says.
+  case "$payload" in
+    *'"tool_use_id":"toolu_plugin_'*|*'"tool_use_id": "toolu_plugin_'*) exit 0 ;;
+  esac
   if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result

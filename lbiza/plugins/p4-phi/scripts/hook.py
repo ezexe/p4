@@ -725,6 +725,18 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
 # nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
 PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
 
+# A call a plugin's hooks module made itself, with `$.tool.call`, carries an id that begins so. Seen with a probe mod
+# on Claude Code 2.1.326 in the desktop app and on 2.1.328 in a scripted run: the PreToolUse and PostToolUse command
+# hooks run for it as for a session's own call, it leaves no row in the transcript and no model reads its result. So
+# it is no lookup of the session's: the record hooks write no row for it and phi.py keeps nothing of it. p4-phi's own
+# module makes such calls where a store turns `app_tools` on, once a minute at most.
+PLUGIN_CALL = "toolu_plugin_"
+
+
+def plugins_own(payload):
+    """Whether a tool call is one a plugin's hooks module made itself, by its id."""
+    return str(payload.get("tool_use_id") or "").startswith(PLUGIN_CALL)
+
 
 def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
@@ -769,6 +781,8 @@ def h_lookup_phi(payload):
     """After a clean call the app does not wait on for its lookup row: phi.py's records alone, which must be in
     place before the next call, run here in the entry the call waits on. Its answer is returned for a Write or an
     Edit, as h_lookup_record returns it."""
+    if plugins_own(payload):
+        return None
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("Write", "Edit", "MultiEdit"):
         return out
@@ -777,6 +791,8 @@ def h_lookup_phi(payload):
 
 def h_lookup_row(payload):
     """A clean call's lookup row, written in the background by the async entry; nothing printed."""
+    if plugins_own(payload):
+        return None
     phi_route(payload, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it
     import lookups
     p4 = ready(payload)
@@ -789,7 +805,10 @@ def h_lookup_record(payload):
     """After a tool ran or failed, phi.py's
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
     task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
-    call's row, and a failure other sessions already met is told what they did about it."""
+    call's row, and a failure other sessions already met is told what they did about it. A call a plugin's hooks
+    module made itself gets none of it."""
+    if plugins_own(payload):
+        return None
     phi_route(payload, PHI_TIE)                    # as h_lookup_row does behind a clean call: one of the two runs
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",

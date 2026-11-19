@@ -2543,6 +2543,36 @@ class AppTools(unittest.TestCase):
         self.assertNotIn("app_tools", self.look(P4_PHI_APP_TOOLS="0"))
         self.assertIs(phi.APP_TOOLS, False, "off unless a project turns it on")
 
+    def test_app_tools_on_and_off_write_the_key_a_look_reads_and_say_how_it_stands(self):
+        """A session writes nothing under `.claude` with its own tools, so `phi.py app_tools on` and `app_tools off`
+        set the key in the store's phi/phi.json, as `goal on` sets its own: the file's other keys are kept, the line
+        says how the key stands as read back, and a look answers `app_tools` from then on. With neither word the
+        command writes nothing and says how the key stands, and a file that does not parse is left as it is."""
+        path = os.path.join(self.t.p4, "phi", "phi.json")
+        write(path, json.dumps({"goal": True}))
+        r = self.t.cli(TOP, "app_tools")
+        self.assertEqual((r.returncode, r.stdout.strip().split(" in ")[0]), (0, "app_tools is off"), r.stderr)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"goal": True}, "asking how it stands writes nothing")
+        r = self.t.cli(TOP, "app_tools", "on")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        said = r.stdout.strip()
+        self.assertTrue(said.startswith("app_tools is on in ") and said.endswith("/phi/phi.json"), said)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"goal": True, "app_tools": True})
+        self.assertIs(self.look().get("app_tools"), True, "no variable is set: the store's own key turns it on")
+        self.assertEqual(self.t.cli(TOP, "app_tools").stdout.strip(), said)
+        r = self.t.cli(TOP, "app_tools", "off")
+        self.assertTrue(r.stdout.strip().startswith("app_tools is off in "), r.stdout)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"goal": True, "app_tools": False})
+        self.assertNotIn("app_tools", self.look())
+        write(path, "{not json")
+        r = self.t.cli(TOP, "app_tools", "on")
+        self.assertEqual(r.returncode, 2, "a file that does not parse is left as it is")
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{not json")
+
     def test_a_session_is_read_from_the_tools_answer_and_the_rest_from_its_record(self):
         self.t.record(KID, TOP, title="the record's title")
         self.answers(KID, own={"sessionId": KID, "title": "the tool's title", "cwd": self.t.proj,
@@ -2589,6 +2619,27 @@ class AppTools(unittest.TestCase):
         self.answers(KID, own={"sessionId": KID, "title": "the tool's title", "parentSessionId": TOP},
                      linked=[{"sessionId": KID2, "title": "a sibling", "startedBy": TOP}], folder=self.t.dir(KID))
         self.assertEqual(self.read(KID, KID2, "title"), "a sibling")
+
+    def test_a_project_with_no_served_folder_reads_itself_and_its_starter_from_that_file_too(self):
+        """Seen in the desktop app on Claude Code 2.1.326, in a session in a worktree whose project has no store: the
+        module wrote the answers into the session's folder in the tree's store, and python still read the session
+        and the session that started it from their record files, since it reads both to find that folder and kept
+        what it read. Once the folder is known, what the answers hold is read from them, and a key the tools do not
+        answer still comes from the record file."""
+        self.t.record(KID, TOP, title="the record's title")
+        self.t.say(KID, BRIEF)
+        self.answers(KID, own={"sessionId": KID, "title": "the tool's title", "parentSessionId": TOP},
+                     linked=[{"sessionId": TOP, "title": "the tool's title of the starter"}], folder=self.t.dir(KID))
+        self.assertEqual(self.read(KID, KID, "title"), "the tool's title")
+        self.assertEqual(self.read(KID, TOP, "title"), "the tool's title of the starter")
+        self.assertEqual(self.read(KID, KID, "cliSessionId"), CLI[KID], "the tools name no CLI session")
+        code = ("import json, sys, phi\nme = phi.Me()\n"
+                "print(json.dumps([type(me.rec).__name__, me.rec.get('title'), phi.spawned_from(me.rec)]))")
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c", "import sys\nsys.path.insert(0, sys.argv.pop(1))\n"
+                            + code, SRC], capture_output=True, text=True, env=self.t.env(KID), cwd=self.t.proj,
+                           timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout.strip().splitlines()[-1]), ["AppRow", "the tool's title", TOP])
 
     def test_a_hook_takes_the_session_and_its_starter_from_the_tools_with_no_record_file(self):
         self.answers(KID, own={"sessionId": KID, "title": "port the flush", "cwd": self.t.proj,
