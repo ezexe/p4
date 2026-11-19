@@ -1877,6 +1877,66 @@ class NativeGoal(unittest.TestCase):
         self.stop("Ported.", "u1", **self.ON)
         self.assertNotIn("goal", self.phi("look", **self.ON))
 
+    OWN = "rows 1 to 6 are each on origin/main with their named checks shown passing, or named as left."
+
+    def top(self, *args, **env):
+        """One command of phi.py as the hooks module runs it for the session nobody started -> the finished run."""
+        return inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), *args],
+                          capture_output=True, text=True, cwd=self.t.proj, timeout=60,
+                          env=self.t.env(TOP, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0", **env))
+
+    def test_a_session_nobody_started_gets_the_goal_it_asks_for_with_the_setting_off(self):
+        """`phi.py goal ask <condition>`, which the tool `mcp__p4-phi__goal` runs: a session states its own
+        condition, and the next look answers it once, as it answers a worker's line. It needs no starter, no line
+        `Done looks like:` and no `goal` in phi.json, which is for the goal a worker is given unasked. From the
+        module's word that the command set it, the Stop hook sends no turn of the session back, and the verdict
+        Claude Code leaves in the transcript ends it."""
+        t = self.t
+        r = self.top("goal", "ask", "--", "  " + self.OWN.replace(", ", ",\n") + " ")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), phi.GOAL_ASKED)
+        self.assertEqual(t.session(TOP)["goalAsk"]["condition"], self.OWN, "kept as one line")
+        self.assertNotIn("goal", t.session(TOP))
+        self.assertEqual(self.top("goal").stdout.strip(), "goal asked for and not set: " + self.OWN)
+        self.assertNotIn("goal", json.loads(self.top("look", "--folder").stdout), "the folder question answers none")
+        self.assertEqual(json.loads(self.top("look").stdout).get("goal"), self.OWN)
+        self.assertNotIn("goal", json.loads(self.top("look").stdout), "answered once")
+        goal = t.session(TOP)["goal"]
+        self.assertEqual((goal["condition"], goal["own"], "set" in goal), (self.OWN, True, False))
+        self.assertNotIn("goalAsk", t.session(TOP))
+        self.assertEqual(json.loads(self.top("goal", "set").stdout), {"set": True})
+        self.assertEqual(self.top("goal").stdout.strip(), "goal set: " + self.OWN)
+        # a turn with an open step ends, and the Stop hook sends nothing back: the evaluator does
+        r = t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                 "tool_input": items("Land row 1", "Land row 2", at=0), "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = t.stop(TOP, "Build the two plugins", (), report="Row 1 is on main.", uuid="o1")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), r.stderr)
+        self.assertTrue(t.session(TOP).get("transcript"), "where the verdict is read, kept with the setting off")
+        with open(os.path.join(t.tmp, TOP + "o1.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "attachment", "attachment": {
+                "type": "goal_status", "condition": self.OWN, "met": True, "reason": "Each row is on main."}}) + "\n")
+        self.assertNotIn("goal", json.loads(self.top("look").stdout))
+        self.assertEqual(t.session(TOP)["goal"].get("over"), "met")
+        self.assertEqual(self.top("goal").stdout.strip(), "goal over, met: " + self.OWN + "\nEach row is on main.")
+
+    def test_an_ask_takes_the_place_of_a_goal_and_a_word_that_clears_one_is_refused(self):
+        """goal.md, "Set a goal": "If a goal is already active, the new one replaces it." So a worker whose brief
+        gave it a goal may ask for another, and the look answers the new condition. A condition shorter than
+        plans.GOAL_LEAST is refused, so `clear` or one of its aliases is never sent as one, and so is one past the
+        4,000 characters a condition holds."""
+        self.given_a_goal()
+        for bad, said in (("clear", phi.GOAL_SHORT), ("", phi.GOAL_SHORT), ("x" * 4001, phi.GOAL_LONG)):
+            r = self.t.cli(KID, "goal", "ask", "--", bad)
+            self.assertEqual((r.returncode, r.stderr.strip()), (2, "phi: " + said), bad[:8])
+        self.assertNotIn("goalAsk", self.t.session(KID))
+        self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN).returncode, 0)
+        self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN + " Or stop after 20 turns.").returncode, 0)
+        self.assertEqual(self.phi("look").get("goal"), self.OWN + " Or stop after 20 turns.", "the later ask")
+        goal = self.t.session(KID)["goal"]
+        self.assertEqual((goal["own"], "set" in goal), (True, False), "the one before it is replaced, and not yet set")
+        self.assertNotIn("goal", self.phi("look", **self.ON), "the brief's line is not answered again")
+
     def test_while_the_goal_is_set_the_stop_hook_sends_no_turn_back(self):
         self.given_a_goal()
         self.assertTrue(self.t.session(KID)["goal"].get("set"))

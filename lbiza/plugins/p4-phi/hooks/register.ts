@@ -10,11 +10,12 @@
 // each prompt, which no command hook is given, for the UserPromptSubmit hooks of that prompt to read. And it is the
 // guard around a tool call: it tells by plain tests which calls python has a check for, and starts python for
 // those alone, so no process starts before a call that has none. And where a project turns `goal` on it gives a
-// worker Claude Code's own goal, which no command hook and no other session can. And it gives a session three of
-// phi.py's commands as tools, `note`, `done` and `tree`, which it runs itself, so a session keeps a finding with
-// no shell line. And it is a pane beside the chat, which no command hook can draw: a puppeteer's board, the ledger
-// of ezexe's requests and an orchestrator's ledger of its sessions, as python wrote them into the session's
-// folder, opened by the command `/phi-pane` and read anew after each look while it is open.
+// worker Claude Code's own goal, which no command hook and no other session can, and it gives any session the goal
+// that session asks for with a condition it states. And it gives a session four of phi.py's commands as tools,
+// `note`, `done`, `tree` and `goal`, which it runs itself, so a session keeps a finding with no shell line. And it
+// is a pane beside the chat, which no command hook can draw: a puppeteer's board, the ledger of ezexe's requests
+// and an orchestrator's ledger of its sessions, as python wrote them into the session's folder, opened by the
+// command `/phi-pane` and read anew after each look while it is open.
 // And unless a project turns `app_tools` off it asks the desktop app's own tools for the session and the sessions
 // linked to it, which no command hook can call, and keeps the answers for python.
 
@@ -113,7 +114,8 @@ const MOST_TOLD = 256
 
 // The commands of phi.py a session calls as tools, each `mcp__p4-phi__<name>`: what the model reads of it, and the
 // input it takes. `note` and `done` are in a session's tool list from its start, since every session is asked for
-// both, and `tree` waits behind ToolSearch as an MCP server's tool does.
+// both, and `tree` and `goal` wait behind ToolSearch as an MCP server's tool does. `goal` is the one that sets
+// nothing by itself: phi.py keeps the condition, the next look answers it, and setGoal runs the command.
 const TOOLS = [
   {
     name: 'note',
@@ -140,6 +142,15 @@ const TOOLS = [
     description:
       'p4-phi: every session of this tree that is not archived, with its state, as `phi.py tree` prints it.',
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'goal',
+    description:
+      "p4-phi: ask for Claude Code's own goal for this session, as `phi.py goal ask` does. `condition` is what " +
+      'holds when the work is done and what shows it in the conversation, in up to 4,000 characters. p4-phi sets ' +
+      'it with the command `/goal` once the session is idle, in place of a goal already set, and from then on a ' +
+      'model checks the condition after every turn and sends the session back until it holds.',
+    inputSchema: { type: 'object', properties: { condition: { type: 'string' } }, required: ['condition'] },
   },
 ] as const
 // How long one of those commands may run.
@@ -185,7 +196,8 @@ const APP_CALL_MS = 5_000
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
 // `rules` is what `phi.py rules` prints alone: the text of the system prompt's section. `goal` is the condition of
-// the native goal this session is to be given, answered once and only where a store's phi.json turns `goal` on.
+// the native goal this session is to be given, answered once: the one the session asked for with the tool `goal`,
+// or a worker's from its brief where a store's phi.json turns `goal` on.
 // `app_tools` is true unless that file turns `app_tools` off: the app's own tools are asked after such a look.
 // `app_sections` is true with it for a puppeteer: the sidebar's sections are asked for too.
 type Answer = {
@@ -593,7 +605,9 @@ function wake($: EngineInterface, text: string): void {
 // <condition>`, which `$.command.run` queues until the session is idle and which starts a turn with the condition
 // as its directive. Seen in the desktop app on Claude Code 2.1.326, in a session another session started: the goal
 // was set with no dialog, where `SetGoal` is no tool of the session. Python is told once the command answered that
-// the goal is set, and from then on its Stop hook sends no turn back. Nothing waits on the call.
+// the goal is set, and from then on its Stop hook sends no turn back. Nothing waits on the call. The condition is
+// a worker's from its brief, or the one a session asked for itself with the tool `goal`, a session nobody started
+// too: the ask is made inside a turn, and the look at that turn's end answers it.
 function setGoal($: EngineInterface, condition: string): void {
   $.command.run({ command: 'goal', args: condition }).then(
     ran => {
@@ -846,7 +860,7 @@ function toldOf(toolUseId: string): string[] {
   return words === undefined ? [] : [words]
 }
 
-// Declares the three tools, at a session's start and at each reload of the module. A session with P4_PHI=0 gets
+// Declares the four tools, at a session's start and at each reload of the module. A session with P4_PHI=0 gets
 // none, since phi.py keeps nothing for it.
 async function offer($: EngineInterface): Promise<void> {
   try {
@@ -1184,6 +1198,12 @@ export const register: Register = on => {
   on('tool.run', { tool: 'mcp__p4-phi__tree' }, $ => served($, ['tree'])).catch(() => ({
     deny: 'p4-phi could not run `phi.py tree`.',
   }))
+
+  // The session's own ask for a goal. Python keeps the condition and the look at this turn's end answers it, so
+  // the goal is set by the same call as a worker's, once the session is idle.
+  on('tool.run', { tool: 'mcp__p4-phi__goal' }, ($, e) =>
+    served($, ['goal', 'ask', '--', field(e, 'condition')]),
+  ).catch(() => ({ deny: 'p4-phi could not run `phi.py goal ask`.' }))
 
   // The command a person types to see the pane. Nothing runs beneath, since the command is nothing but this.
   on('command.run', { command: 'phi-pane' }, async $ => ({ text: await openPane($) })).catch(() => ({

@@ -29,12 +29,12 @@ The hooks, each in its h_ function:
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
 own: it prints the text of the system prompt's section as one JSON line. `goal` prints how a session's native goal
-stands, `goal on` and `goal off` write the setting, and `goal set` is the hooks module's word that the goal command
-set it.
+stands, `goal on` and `goal off` write the setting, `goal ask` keeps the condition a session states as the goal it
+asks for, and `goal set` is the hooks module's word that the goal command set it.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
-`background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal and is off
-unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
+`background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
+off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
@@ -2683,7 +2683,7 @@ def h_stop(payload):
         # the worker got no goal. The line is taken where the task is, from the turn's whole request.
         if GOAL and spawned_from(s) and plans.done_line(turn.get("prompt")):
             s["doneLine"] = plans.done_line(turn.get("prompt"))
-    if GOAL and payload.get("transcript_path"):
+    if (GOAL or s.get("goal") or s.get("goalAsk")) and payload.get("transcript_path"):
         s["transcript"] = str(payload["transcript_path"])   # where goal_verdict reads the goal's last row
     save_session(me.home, s)
     replay(me, s, payload.get("transcript_path") or "")
@@ -2885,16 +2885,52 @@ def last_turn_row(home, sid):
     return rows[-1] if rows else {}
 
 
-# --- a worker's native goal: the condition the hooks module sets, and the verdict Claude Code leaves -------------------
+# --- a session's native goal: the condition the hooks module sets, and the verdict Claude Code leaves ------------------
+
+GOAL_ASKED = ("kept: p4-phi sets this condition as this session's goal once the session is idle, by Claude Code's "
+              "own command, and a goal that is already set is replaced. Claude Code then starts a turn with the "
+              "condition as its directive and has a model check it after every turn, which sends the session back "
+              "until the condition holds. End this turn, and let each later turn show in its own words what the "
+              "condition names, since that model reads the conversation alone and runs nothing.")
+GOAL_SHORT = "state the goal's condition as a whole sentence: what holds when the work is done, and what shows it"
+GOAL_LONG = "a goal's condition holds 4,000 characters at most"
+
+
+def goal_ask(home, s, condition):
+    """`phi.py goal ask <condition>`, which the tool `mcp__p4-phi__goal` runs: keeps the condition a session states
+    as the goal it asks for, on session.json as `goalAsk`, for the next look to answer. Any session may ask, one no
+    session started too, and whatever phi.json's `goal` says, since that key is for the goal a worker is given
+    unasked. A later ask takes the place of one not yet answered. goal.md, "Write an effective condition": "The
+    condition can be up to 4,000 characters." A condition shorter than plans.GOAL_LEAST is refused, so `clear` or
+    one of its aliases is never sent as one."""
+    line = " ".join(str(condition or "").split())
+    if len(line) < plans.GOAL_LEAST:
+        raise ValueError(GOAL_SHORT)
+    if len(line) > plans.GOAL_CHARS:
+        raise ValueError(GOAL_LONG)
+    s["goalAsk"] = {"condition": line, "asked": now()}
+    save_session(home, s)
+    return GOAL_ASKED
+
 
 def goal_due(home, sid):
-    """The condition the hooks module sets as the session's native goal, or '': the line `Done looks like:` of the
-    brief of a session another session started, once its first turn has ended, where phi.json turns `goal` on. It is
-    answered once for a session, and kept on session.json as `goal` with when it was asked for."""
-    s = load_session(home, sid) if GOAL and sid else {}
-    if not s.get("sessionId") or not spawned_from(s) or s.get("goal") or not s.get("doneLine"):
+    """The condition the hooks module sets as the session's native goal, or ''. First the condition the session
+    asked for itself, goal_ask, which any session gets whatever phi.json says, and which takes the place of a goal
+    it has. Else the line `Done looks like:` of the brief of a session another session started, once its first turn
+    has ended, where phi.json turns `goal` on, answered once for a session. Either is kept on session.json as `goal`
+    with when it was asked for, and one the session asked for with `own`."""
+    s = load_session(home, sid) if sid else {}
+    if not s.get("sessionId") or s.get("doneRetired") or s.get("archived"):
         return ""
-    if s.get("doneRetired") or s.get("archived") or not last_turn_row(home, s["sessionId"]):
+    ask = s.get("goalAsk") if isinstance(s.get("goalAsk"), dict) else {}
+    if ask.get("condition"):
+        s.pop("goalAsk", None)
+        s["goal"] = {"condition": ask["condition"], "asked": ask.get("asked") or now(), "own": True}
+        save_session(home, s)
+        return ask["condition"]
+    if not GOAL or not spawned_from(s) or s.get("goal") or not s.get("doneLine"):
+        return ""
+    if not last_turn_row(home, s["sessionId"]):
         return ""
     s["goal"] = {"condition": s["doneLine"], "asked": now()}
     save_session(home, s)
@@ -2939,15 +2975,17 @@ def goal_verdict(home, sid):
         for node in (above, s["sessionId"]):       # the parent's anchor and both pages say done from here
             relay.make_anchor(home, node, last.get("time") or now())
         render_page(home, s["sessionId"])
-        render_page(home, above)
+        if above:                                  # a session nobody started has no page above it
+            render_page(home, above)
     return over
 
 
 def goal_look(a, me):
-    """`phi.py look` where phi.json turns `goal` on or leaves `app_tools` on: puppeteer.look's answer, and with it `goal`, the
-    condition the hooks module sets as the session's native goal, where one is due, and `app_tools`, which has the
-    module ask the app's own tools for sessions, with `app_sections` for a puppeteer, which has it ask the sidebar's
-    sections too. The verdict of a goal already set is read first, at every look."""
+    """`phi.py look`: puppeteer.look's answer, and with it `goal`, the condition the hooks module sets as the
+    session's native goal, where one is due, and `app_tools`, which has the module ask the app's own tools for
+    sessions unless phi.json turns them off, with `app_sections` for a puppeteer, which has it ask the sidebar's
+    sections too. The verdict of a goal already set is read first, at every look, whatever phi.json's `goal` says,
+    since a session may have asked for its own, goal_ask."""
     out = puppeteer.look(me.home, me.id, net=a.net, folder_only=False)
     due = ""
     if APP_TOOLS and not out.get("off"):
@@ -2957,7 +2995,7 @@ def goal_look(a, me):
                 out["app_sections"] = True
         except Exception as e:  # noqa: BLE001
             log_failure("app_sections", {}, e)
-    if GOAL and not out.get("off"):
+    if not out.get("off"):
         try:
             goal_verdict(me.home, safe_id(me.id))
             due = goal_due(me.home, safe_id(me.id))
@@ -3007,6 +3045,9 @@ def app_tools_switch(home, on=None):
 def goal_text(s):
     """What `phi.py goal` prints: how the session's native goal stands, with its condition."""
     g = s.get("goal") if isinstance(s.get("goal"), dict) else None
+    ask = s.get("goalAsk") if isinstance(s.get("goalAsk"), dict) else {}
+    if ask.get("condition"):                       # asked for by the session, and no look has answered it yet
+        g = {"condition": ask["condition"]}
     if not g:
         return "no goal was set for this session" + ("" if GOAL else ": `goal` is off in the store's phi.json")
     state = f"over, {g['over']}" if g.get("over") else ("set" if g.get("set") else "asked for and not set")
@@ -3773,10 +3814,11 @@ def main(argv=None):
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "goal":
-            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set"),
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set", "ask"),
                            help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
-                                "that the goal command set the goal; none prints how the session's native goal "
-                                "stands")
+                                "that the goal command set the goal; ask keeps the condition this session states "
+                                "as the goal it asks for; none prints how the session's native goal stands")
+            p.add_argument("condition", nargs="?", default="", help="with ask: what holds when the work is done")
         if name == "app_tools":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on and off write `app_tools` in the store's phi.json, which is on unless set off "
@@ -3833,8 +3875,16 @@ def main(argv=None):
         return 2
     configure(me.home)
     try:
-        if a.cmd == "look" and (GOAL or APP_TOOLS) and not a.folder:   # a worker's native goal rides its look's answer
+        if a.cmd == "look" and not a.folder:       # a session's native goal rides its look's answer
             return goal_look(a, me)
+        if a.cmd == "goal" and a.act == "ask":     # the session's own ask, which the tool `mcp__p4-phi__goal` runs
+            if not me.id:
+                print("phi: this is not a session, since the environment holds no session id; pass --session",
+                      file=sys.stderr)
+                return 2
+            print(goal_ask(me.home, ensure_session(me.home, me.id, me.rec, "" if a.session else me.cli),
+                           a.condition))
+            return 0
         if a.cmd == "goal":                        # ahead of ensure_session: it makes no session's folder either
             if a.act in ("on", "off"):             # the project's setting, which needs no session
                 print(goal_switch(me.home, a.act == "on"))

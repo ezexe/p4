@@ -225,10 +225,10 @@ function machine(on: On, has: Machine): Seen {
       if (args[0] === 'rules') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ rules: has.rules ?? '' })}\n`
-      } else if (args[0] === 'goal') {
+      } else if (args[0] === 'goal' && args[1] !== 'ask') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ set: true })}\n`
-      } else if (args[0] === 'note' || args[0] === 'done' || args[0] === 'tree') {
+      } else if (args[0] === 'note' || args[0] === 'done' || args[0] === 'tree' || args[0] === 'goal') {
         seen.asked.push([...args])
         const ended = has.runs?.(args) ?? {}
         stdout = ended.stdout ?? ''
@@ -1587,7 +1587,7 @@ test('with no python found a call goes on unjudged', async ($, on) => {
   expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })
 
-test("note, done and tree are declared as tools at a session's start, and P4_PHI=0 declares none", async ($, on) => {
+test("note, done, tree and goal are declared as tools at a session's start", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   const seen = machine(on, {})
@@ -1599,8 +1599,14 @@ test("note, done and tree are declared as tools at a session's start, and P4_PHI
     ['note', false],
     ['done', false],
     ['tree', undefined],
+    ['goal', undefined],
   ])
-  expect(seen.tools.map(tool => (tool.inputSchema as { required?: string[] }).required)).toEqual([['claim', 'source'], ['text'], undefined])
+  expect(seen.tools.map(tool => (tool.inputSchema as { required?: string[] }).required)).toEqual([
+    ['claim', 'source'],
+    ['text'],
+    undefined,
+    ['condition'],
+  ])
   expect(seen.logged).toEqual([])
 })
 
@@ -1654,6 +1660,53 @@ test('done and tree run their commands, and what phi.py says on a failure is the
   })
   expect(await $.tool.run({ tool: 'mcp__p4-phi__done', text: 'ok' } as never)).toEqual({ deny: short })
   expect(seen.asked).toEqual([['done', '--', 'pytest -q passed, 12 of 12'], ['tree'], ['done', '--', 'ok']])
+})
+
+// What phi.goal_ask answers a condition it kept, and what it says of one too short to be a condition.
+const ASKED = "kept: p4-phi sets this condition as this session's goal once the session is idle"
+const TOO_SHORT = "phi: state the goal's condition as a whole sentence"
+
+test("a session's own ask is kept by phi.py, and the look at its turn's end has the goal command run", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  // A session nobody started: its look names no starter. Python answers the condition at the look after the ask.
+  let asked = ''
+  const seen = machine(on, {
+    look: () => {
+      const answer = asked === '' ? ORCHESTRATOR : { ...ORCHESTRATOR, goal: asked }
+      asked = ''
+
+      return answer
+    },
+    runs: args => {
+      if (args.at(-1) === 'clear') return { exitCode: 2, stderr: `${TOO_SHORT}\n` }
+      asked = args.at(-1) ?? ''
+
+      return { stdout: `${ASKED}\n` }
+    },
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  await $.turn.start({ text: 'land the six rows', turnId: 't1' })
+  await clock.advance(6_000)
+
+  // The call sets nothing by itself: the command is run for what a look answers, as it is for a worker.
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__goal', condition: ` ${CONDITION} ` } as never)).toEqual({ result: ASKED })
+  expect(seen.asked).toEqual([['goal', 'ask', '--', CONDITION]])
+  expect(seen.calls.at(-1)?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
+  expect(seen.ran).toEqual([])
+
+  await $.turn.complete(TURN)
+  await clock.advance(5_000)
+  expect(seen.ran).toEqual([{ command: 'goal', args: CONDITION }])
+  expect(seen.asked.at(-1)).toEqual(['goal', 'set'])
+  expect(seen.sent).toEqual([])
+
+  // A condition phi.py refuses is the call's error, and no command runs for it.
+  expect(await $.tool.run({ tool: 'mcp__p4-phi__goal', condition: 'clear' } as never)).toEqual({ deny: TOO_SHORT })
+  await clock.advance(600_000)
+  expect(seen.ran.length).toBe(1)
 })
 
 test('with no python found a tool says so, and starts nothing', async ($, on) => {

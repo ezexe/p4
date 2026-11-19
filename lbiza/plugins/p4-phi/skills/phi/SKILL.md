@@ -37,9 +37,10 @@ A hand `git pull` or `git push` inside a store is asked first with that command 
 ## Commands
 
 Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pass `--session <sessionId>` or `--p4 <store>` to act for another session or store.
-`note`, `done` and `tree` are also tools of the session, which the plugin's hooks module runs as those commands with no shell line: `mcp__p4-phi__note` requires `claim` and `source` and takes `kind`, `mcp__p4-phi__done` requires `text`, and `mcp__p4-phi__tree` takes nothing and is loaded through ToolSearch before its first call.
+`note`, `done`, `tree` and `goal ask` are also tools of the session, which the plugin's hooks module runs as those commands with no shell line: `mcp__p4-phi__note` requires `claim` and `source` and takes `kind`, `mcp__p4-phi__done` requires `text`, `mcp__p4-phi__tree` takes nothing, and `mcp__p4-phi__goal` requires `condition`.
+The last two are loaded through ToolSearch before their first call.
 A tool's result is what its command prints, and a call the command refuses ends in the command's own error.
-The shell line stays for a session whose tool list holds none of the three, and for acting for another session or store, since no tool takes `--session` or `--p4`.
+The shell line stays for a session whose tool list holds none of them, and for acting for another session or store, since no tool takes `--session` or `--p4`.
 `/phi-pane` is a command ezexe types, which no session can run: it opens a pane beside the chat that shows this session's `board.md`, `asks.md` and `ledger.md`, whichever of them its folder holds, read anew after each look of the watcher while the pane is open.
 The three pages stay the files a session reads, and the pane writes none of them.
 
@@ -61,7 +62,7 @@ The three pages stay the files a session reads, and the pane writes none of them
 - `meta` runs the meta pass over every orchestrator's ledger and prints `meta-ledger.md`.
 - `settle <session> "<what took it up>"` clears a row of unfinished work a session left at its archive.
 - `upkeep on` and `upkeep off` set `phi.upkeep` in the store's `p4.json` and run the settings keeper at once, `upkeep` alone prints whether it is on with every act due and every item closed, `upkeep wait "<the step>" --on <sessionId>` keeps a step that waits on a session this one started, and `upkeep close <id>` closes an open item or wait with `--commit <sha>`, `--note "<why it is left>"` or `--ezexe "<ezexe's words>"`.
-- `goal on` and `goal off` write `goal` in the store's `phi/phi.json`, keeping the file's other keys, and print how it stands. `goal` alone prints how this session's native goal stands, asked for, set, or over as met, failed or cleared, with its condition. `goal set` is the hooks module's own word that the goal command set the goal, and no session runs it.
+- `goal on` and `goal off` write `goal` in the store's `phi/phi.json`, keeping the file's other keys, and print how it stands. `goal` alone prints how this session's native goal stands, asked for, set, or over as met, failed or cleared, with its condition. `goal ask <condition>` keeps the condition this session states as the goal it asks for, as "A goal a session asks for" below says. `goal set` is the hooks module's own word that the goal command set the goal, and no session runs it.
 - `app_tools on` and `app_tools off` write `app_tools` in the store's `phi/phi.json` the same way, and `app_tools` alone prints how the key stands. It is on unless a store sets it off, and with it on the hooks module asks the desktop app's own session tools after a look and `phi.py` reads their answers ahead of the app's record files.
 
 ## Delegation
@@ -190,7 +191,7 @@ The worker is the sender the message's wrapper names, by its `from-session` attr
 `goal on` and `goal off` set it and print how it stands, since a session writes nothing under `.claude` with its own tools.
 With it off, a turn with open steps is sent back by p4-phi's Stop hook alone, as everywhere above.
 
-- The condition is the line `Done looks like:` of the brief a worker was started with, whole, to 4,000 characters. A session nobody started gets no goal, and neither does a worker whose brief has no such line.
+- The condition is the line `Done looks like:` of the brief a worker was started with, whole, to 4,000 characters. A session nobody started gets no goal unasked, and neither does a worker whose brief has no such line.
 - The plugin's hooks module sets the goal once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`. That is the one route seen to set a goal with nobody at the prompt: `SetGoal` is no tool of a session, a brief that begins with `/goal` runs no command, and a `/goal` in another session's message arrives as text.
 - Claude Code then judges the condition after each turn with its small fast model, from the conversation alone, and sends the turn back while it is not met. So write the line as something the worker's own output can show: the test that passes, by name, or the commit on the default branch.
 - While the goal is set p4-phi's Stop hook sends no turn back for an open step, since the two would share Claude Code's one count of eight continuations in a row with no tool call.
@@ -198,6 +199,17 @@ With it off, a turn with open steps is sent back by p4-phi's Stop hook alone, as
 - The done mark reads the goal's verdict. Claude Code writes the verdict to the transcript after the Stop hooks have answered, so the look that follows the turn's end reads it: a goal met marks the turn done with the evaluator's reason, on the worker's row and on the row its starter reads.
 - A goal met, judged impossible or cleared with `/goal clear` is over, and from then on the Stop hook sends turns back again.
 - A worker that waits on ezexe under a goal is sent back until Claude Code's cap ends the loop, with the goal still set, and the next message to the session, ezexe's or another session's, starts the evaluation again.
+
+## A goal a session asks for
+
+Any session may ask for a goal of its own, an orchestrator too, whatever `goal` in `phi.json` says, since that key is for the goal a worker is given unasked.
+
+- Ask with the tool `mcp__p4-phi__goal` and a `condition`, or with `phi.py goal ask -- "<condition>"` where the tool list holds no such tool. The condition is one statement of what holds when the work is done and what shows it, from 12 to 4,000 characters.
+- The call sets nothing by itself. `phi.py` keeps the condition, the look at the end of that turn answers it once, and the hooks module runs `/goal <condition>`, which Claude Code holds until the session is idle. So end the turn after asking.
+- Claude Code then starts a turn with the condition as its directive, and from there everything of "A worker's goal" holds: the evaluator sends the turn back, p4-phi's Stop hook sends none, and a goal met marks the turn done.
+- An ask takes the place of a goal the session has, a worker's from its brief too, since by `goal.md` "If a goal is already active, the new one replaces it."
+- Write a condition this session can reach by its own turns. The evaluator reads this conversation alone, so a condition that waits on other sessions is judged from what their reports say here, and an unmet one sends the session back at each wake, until Claude Code's cap on continuations in a row with no tool call ends the loop with the goal still set. Add a clause such as `or stop after 20 turns` to bound it.
+- A word that clears a goal, `clear`, `stop`, `off`, `reset`, `none` or `cancel`, is refused as too short to be a condition, so the tool never clears one. `/goal clear` is ezexe's to type.
 
 ## Upkeep of a session tree
 

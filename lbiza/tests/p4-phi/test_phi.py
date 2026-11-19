@@ -1832,7 +1832,9 @@ class Wiring(unittest.TestCase):
         native = {"goal", "GOAL", "goal met: ", "goal ", "goal is ", "no goal was set for this session",
                   ": `goal` is off in the store's phi.json",
                   "on and off write `goal` in the store's phi.json; set is the hooks module's word that the goal "
-                  "command set the goal; none prints how the session's native goal stands"}
+                  "command set the goal; ask keeps the condition this session states as the goal it asks for; "
+                  "none prints how the session's native goal stands",
+                  phi.GOAL_ASKED, phi.GOAL_SHORT, phi.GOAL_LONG}
         for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
                      "gaps.py"):
             tree, skip = ast.parse(read(os.path.join(SRC, name))), set()
@@ -2473,6 +2475,16 @@ class ToolCommands(unittest.TestCase):
         r = self.t.cli(TOP, "note", "--", "The ports table is written by flush_rows")
         self.assertEqual(r.returncode, 2)
         self.assertIn("a note needs its source", r.stderr)
+
+    def test_goal_ask_keeps_a_condition_that_opens_with_a_dash(self):
+        """The fourth tool, `mcp__p4-phi__goal`, runs `phi.py goal ask -- <condition>`: the condition is kept for the
+        next look whatever it opens with, and what the command prints is the tool's result."""
+        condition = "--strict passes on the catalog, and the commit is on origin/main"
+        r = self.t.cli(TOP, "goal", "ask", "--", condition)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, phi.GOAL_ASKED), r.stderr)
+        self.assertEqual(self.t.session(TOP)["goalAsk"]["condition"], condition)
+        r = self.t.cli(TOP, "goal", "ask", "--", "off")
+        self.assertEqual((r.returncode, r.stderr.strip()), (2, "phi: " + phi.GOAL_SHORT))
 
     def test_done_takes_its_text_after_the_separator_and_refuses_a_short_one(self):
         r = self.t.cli(TOP, "done", "--", "-q run of pytest passed, 12 of 12")

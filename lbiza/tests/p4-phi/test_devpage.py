@@ -219,6 +219,15 @@ class Page(unittest.TestCase):
                      "is not yet seen"):
             self.assertIn(said, built, said)
         self.assertIn("goal", phi_settings(), "the key the page names is one phi.json's settings hold")
+        asked = section.split('<h3 id="a-goal-a-session-asks-for">A goal a session asks for</h3>', 1)[1]
+        for said in ("<code>mcp__p4-phi__goal</code>", "<code>$.tool.register</code>", "<code>phi.py goal ask</code>",
+                     "<code>goalAsk</code>", "a session no other session started too",
+                     "The ask needs no <code>goal</code> in <code>phi.json</code>",
+                     "\"If a goal is already active, the new one replaces it.\"", "shorter than 12 characters",
+                     "Claude Code 2.1.328", "names no starter", "<code>Goal set:</code>",
+                     "<code>{ kind: 'plugin', name: 'p4-phi' }</code>", "over as <code>met</code>",
+                     "The same ask in a session of the desktop app is not yet seen."):
+            self.assertIn(said, asked, said)
         self.assertIn("which the Plan pane does not show", covers)
         open_still = page.split('id="not-confirmed"', 1)[1]
         self.assertNotIn("What the desktop app's Plan pane holds.", open_still, "a look at the pane settled it")
