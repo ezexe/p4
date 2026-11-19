@@ -61,6 +61,7 @@ import time
 import p4conf
 import plans
 import relay
+import store as st
 
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
 
@@ -73,6 +74,8 @@ ITEMS = 12                       # items taken from one report
 ITEM_CHARS = 400                 # of one item
 OPEN_MOST = 60                   # open items one session keeps
 FIT_WORDS = 3                    # content words a step shares with a live worker's task before it goes there
+# Words that make no fit: the words every brief of this project carries, and everyday words no task has to itself.
+EVERYDAY = plans.SIBLING_STOP | st.COMMON | frozenset("own owns owned itself".split())
 NO_ASK = ("auto", "bypassPermissions")   # the permission modes the app archives in without its card
 
 
@@ -310,13 +313,15 @@ def live(sid, s):
 
 
 def fit(home, sid, text, store="", skip=()):
-    """The live session this one started whose task covers `text`, as (id, session), or ('', {})."""
+    """The live session this one started whose task covers `text`, as (id, session), or ('', {}). A word of
+    EVERYDAY counts for nothing, so a step fits on the names of a session's files and the words of its task alone."""
+    said = plans.words(text) - EVERYDAY
     best = ("", {}, 0)
     for k, ks in started(home, sid).items():
         if k in skip or not short_context(home, k, store):
             continue
         own = " ".join([str(ks.get("task") or "")] + [str(x) for x in ks.get("fileSet") or []])
-        n = len(plans.words(text) & plans.words(own))
+        n = len(said & plans.words(own))
         if n >= FIT_WORDS and n > best[2]:
             best = (k, ks, n)
     return best[0], best[1]

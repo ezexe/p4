@@ -365,6 +365,23 @@ class Waits(Base):
         self.assertNotIn(f"with `to` `{KID}`", due)
         self.assertIn("no live session's task covers it", due)
 
+    def test_a_due_step_does_not_go_by_message_to_a_session_it_shares_only_everyday_words_with(self):
+        """Seen live: a step reached an unrelated session on the three words `nothing`, `own` and `session`, which
+        every brief of this project carries or any task may hold. Such words make no fit."""
+        self.turn_on()
+        self.t.record(KID2, TOP, KID2_TITLE)
+        self.t.say(KID2, handed("Write the exporter's retry in a session of its own, and change nothing else"))
+        self.t.stop(KID2, "Write the retry", report="Ready for the retry.", uuid="k2")
+        step = "Start a session of its own for the walrus importer's schema, with nothing before it"
+        self.assertEqual(phi.plans.words(step) & phi.plans.words(self.t.session(KID2).get("task")),
+                         {"nothing", "own", "session"}, "the step shares the live case's three words, and no other")
+        self.t.cli(TOP, "upkeep", "wait", step, "--on", KID)
+        self.commit()
+        self.finish(report="The last row is written now.")
+        due = flat(self.lines(self.said(), "due:")[0])
+        self.assertNotIn(f"with `to` `{KID2}`", due)
+        self.assertIn("no live session's task covers it", due)
+
 
 class Leftovers(Base):
     def test_after_an_archive_the_clean_worktree_and_the_merged_branch_go_by_gits_own_commands(self):
