@@ -1,3 +1,3 @@
 <div align="center">
-<img width="400" height="251" alt="HappyBigLebowskiGIF" src="https://github.com/user-attachments/assets/042e2a46-c011-408b-98ae-40720228ec35" />
+<img width="480" height="480" alt="VibingSuperBowlGIFbyStateFarm" src="https://github.com/user-attachments/assets/d16022db-2a90-4df9-a4c5-796c5317d5e1" />
 </div>
