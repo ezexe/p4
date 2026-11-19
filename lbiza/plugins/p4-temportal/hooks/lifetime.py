@@ -29,14 +29,23 @@ A link under temportal/ is removed as a link: `remove` unlinks it without enteri
 Each session's scratchpad directory is Claude Code's own, under the system temp directory, and no lifetime here
 clears it.
 
-  sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
-                           cleared something. Before it, as every hook of a start does, it moves files left in an
-                           earlier place of the store's layout, and prints that move's line when this hook made it.
-  session-end              the retention sweep at SessionEnd, silently.
+The hooks module, register.ts, runs the retention sweep inside Claude Code: at a session's start, on its timer while
+the session runs, and at the session's end.
+
+  tick                     the retention sweep as the module runs it. Before it, as every hook of a start does, it
+                           moves files left in an earlier place of the store's layout. It prints one JSON line:
+                           `said`, the line of the move when this run made it and the line of what the sweep
+                           cleared, and `wait_s`, the seconds until the next sweep is due, which is the next
+                           cookie's expiry, a minute at least and an hour at most.
+  tick --let-go            starts that sweep in a process of its own and returns at once. The module runs it at a
+                           session's end, where the `session.end` hooks share 1.5 seconds and, as the API's types
+                           say of SessionEndInput, "only a process a command let go of outlives it".
+  sweep, session-end       what a session started on an older hooks.json still runs at its start and its end: the
+                           same move and sweep, `sweep` printing their lines and `session-end` silent.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
                            one is read from the working folder. The lifetime is `30m`, `12h`, `7d`, `2w` or an ISO
                            date or time.
-  list                    every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
+  list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
                            be read is listed as unreadable, and the retention sweep leaves it as it is.
   clear <path>             removes a cookie and keeps the file, reading a relative path from the working folder.
   now                      the retention sweep, run by hand.
@@ -70,6 +79,9 @@ SESSION = "session"                     # the lifetime an earlier version took, 
 NO_SESSION = ("no lifetime ends with a session: a file that goes when its session goes belongs in that session's "
               "scratchpad directory, which Claude Code deletes with its transcript")
 FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no rule clears it
+NAME = "p4-temportal: "                 # what a line printed for a command hook starts with
+LEAST_WAIT_S = 60.0                     # the module's timer never sweeps sooner after a sweep than this
+MOST_WAIT_S = 3600.0                    # nor later: a cache rule counts days, so an hour is soon enough for one
 
 
 payload_from_stdin = hookio.payload_from_stdin
@@ -151,11 +163,8 @@ def write_expires(p4, d):
         except OSError:
             pass
         return
-    os.makedirs(home(p4), exist_ok=True)
-    tmp = p + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(d, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
-    os.replace(tmp, p)
+    # through a temp file of this write's own: the sweeps of two sessions' timers can write at the same moment
+    p4conf.replace_text(p, json.dumps(d, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
 
 
 def refusal(p4, path):
@@ -397,7 +406,59 @@ def sweep(p4, now=None):
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
         parts.append(f"expired files: {len(cookies)}, {shown}")
-    return "p4-temportal: cleared " + "; ".join(parts) + "."
+    return NAME + "cleared " + "; ".join(parts) + "."
+
+
+def start_sweep(p4):
+    """What a start runs: the move of files left in an earlier place of the store's layout, then the retention
+    sweep -> the lines to print, the move's first, each starting with NAME."""
+    moved = p4conf.migrate_layout(p4)
+    line = sweep(p4)
+    return ([NAME + "; ".join(moved) + "."] if moved else []) + ([line] if line else [])
+
+
+def next_wait(p4, now=None):
+    """Seconds until the module's timer sweeps again: when the next cookie expires, LEAST_WAIT_S at least and
+    MOST_WAIT_S at most. A cookie already past due counts for nothing: the sweep before this either cleared it or
+    left it as `set` would refuse it."""
+    now = time.time() if now is None else now
+    waits = [MOST_WAIT_S]
+    for v in read_expires(p4).values():
+        try:
+            left = float(v["expires"]) - now
+        except (TypeError, ValueError, KeyError):
+            continue
+        if left > 0:
+            waits.append(left)
+    return max(LEAST_WAIT_S, min(waits))
+
+
+def let_go(args):
+    """Start this script with `args` in a process of its own and return at once -> True when it started. The process
+    outlives the one that asked and holds none of its handles: on Windows it has a console of its own that shows no
+    window, which the git it runs shares, and a process group of its own, and elsewhere a session of its own."""
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    try:
+        subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.abspath(__file__), *args],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=flags if os.name == "nt" else 0, start_new_session=os.name != "nt",
+                         close_fds=True)
+    except OSError:
+        return False
+    return True
+
+
+def tick(root, to_let_go=False):
+    """The module's sweep for the project at `root` -> what it prints as one JSON line. With `to_let_go` the sweep
+    runs in a process let go of, and here only when none could be started. A failure is said, never raised."""
+    if to_let_go and let_go(["tick"]):
+        return {"let_go": True}
+    p4 = store_of(root)
+    try:
+        said = [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
+        return {"said": said, "wait_s": round(next_wait(p4), 3)}
+    except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises
+        return {"said": [f"the retention sweep degraded: {type(e).__name__}: {e}"], "wait_s": MOST_WAIT_S}
 
 
 def listing(p4, now=None):
@@ -434,17 +495,15 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:]
     sub = args[0] if args else ""
+    if sub == "tick":                   # the module's: it reads no stdin, and the project is CLAUDE_PROJECT_DIR
+        print(json.dumps(tick(project_root({}), "--let-go" in args[1:]), ensure_ascii=False))
+        return 0
     if sub in ("sweep", "session-end"):
         payload = payload_from_stdin()
         try:
-            p4 = store_of(project_root(payload))
-            moved = p4conf.migrate_layout(p4)
-            line = sweep(p4)
-            if sub == "sweep":
-                if moved:
-                    print("p4-temportal: " + "; ".join(moved) + ".")
-                if line:
-                    print(line)
+            lines = start_sweep(store_of(project_root(payload)))
+            if sub == "sweep" and lines:
+                print("\n".join(lines))
         except Exception as e:  # noqa: BLE001 — a hook degrades, never raises
             # a systemMessage reaches ezexe on SessionEnd too, where plain stdout reaches nobody
             print(json.dumps({"systemMessage": f"p4-temportal lifetime {sub} degraded: {type(e).__name__}: {e}"}))

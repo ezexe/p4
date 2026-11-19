@@ -233,8 +233,9 @@ def event_hooks(event):
 
 def parallel_hooks_cases():
     """The SessionStart hooks run at once, as Claude Code runs the hooks of one event, on a store with the older layout
-    leave one moved layout, no layout lock and one p4.json that parses; the SessionEnd hooks run at once on that small
-    store finish within the 1.5-second budget of a SessionEnd."""
+    leave one moved layout, no layout lock and one p4.json that parses. No command hook runs at SessionEnd, where
+    such hooks share 1.5 seconds: the hooks module starts the last sweep in a process let go of, which
+    test_lifetime.py runs."""
     sh = shutil.which("sh")
     if not sh or not shutil.which("git"):
         print("test_scratchpad.py: parallel hooks cases skipped, no sh or git on PATH")
@@ -272,21 +273,8 @@ def parallel_hooks_cases():
         assert not os.path.exists(os.path.join(p4, ".layout.lock")), "the layout lock was left"
         with open(os.path.join(p4, "p4.json"), encoding="utf-8") as f:
             json.load(f)
-        # the same runner started as often at once with a part that does nothing: what this machine's load costs a hook
-        idle = [c.rsplit(" ", 1)[0] + " nothing-here" for c in event_hooks("SessionEnd")]
-        start = time.monotonic()
-        procs = [subprocess.Popen([sh, "-c", c], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, env=env) for c in idle]
-        for p in procs:
-            p.communicate(stdin, timeout=120)
-        floor = time.monotonic() - start
-        start = time.monotonic()
-        at_once("SessionEnd")
-        took = time.monotonic() - start
-        limit = max(1.5, 3 * floor)       # the 1.5 s budget, widened only when even an idle start is slow here
-        print(f"test_scratchpad.py: the SessionEnd hooks at once took {took * 1000:.0f} ms, as many idle starts "
-              f"{floor * 1000:.0f} ms, limit {limit * 1000:.0f} ms")
-        assert took <= limit, f"the SessionEnd hooks took {took:.2f} s, over {limit:.2f} s"
+        with open(HOOKS_JSON, encoding="utf-8") as f:
+            assert "SessionEnd" not in json.load(f)["hooks"], "a SessionEnd command hook shares 1.5 s with every other"
     finally:
         wipe(root)
     print("test_scratchpad.py: parallel hooks cases green")
@@ -374,10 +362,16 @@ class AppScratchpad(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "")
 
     def test_a_session_end_commits_and_removes_nothing(self):
+        """No command hook runs at a session's end, and the sweep the hooks module starts there, `lifetime.py tick`,
+        has nothing to clear in a store with no cookie and no file past a cache rule."""
         self.hooks("SessionStart")
         self.hooks("Stop")
         head = self.git("rev-parse", "HEAD")
         self.hooks("SessionEnd", "other")
+        env = env_with(None, CLAUDE_PROJECT_DIR=self.root, TEMP=self.temp, TMP=self.temp, TMPDIR=self.temp)
+        tick = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(HERE, "lifetime.py"), "tick"],
+                              capture_output=True, timeout=120, env=env)
+        self.assertEqual((tick.returncode, json.loads(tick.stdout)["said"]), (0, []), tick)
         self.assertEqual(self.git("rev-parse", "HEAD"), head, "a session end made a commit in the store")
         self.assertTrue(os.path.isfile(os.path.join(self.pad, "note.md")), "a session end removed the note")
 

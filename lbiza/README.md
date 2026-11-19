@@ -36,13 +36,24 @@ p4-phi also reads `phi/phi.json`, and some environment variables set a value for
 The `claude` section of `p4.json` names the Claude Code settings a store wants beyond the defaults, and is never written by a plugin.
 The copies of `p4conf.py` in the two plugins are identical.
 
+## p4-temportal's hooks module
+
+p4-temportal's `hooks/register.ts` is a hooks module, whose functions run inside Claude Code, named in `hooks/hooks.json` beside the command hooks.
+It runs the retention sweep, `lifetime.py tick`, at a session's start, again when the next cookie is due, a minute at least and an hour at most after the sweep before, and once more at the session's end.
+The sweep at the end runs in a process that `lifetime.py tick --let-go` starts and lets go of, since the `session.end` hooks of every module share the SessionEnd budget, 1.5 seconds by default, by https://code.claude.com/docs/en/plugins/mods/reference.md, "Limits".
+What a sweep moved or cleared is a dim line of the transcript, which the model does not read.
+No command hook runs the sweep, so where the module does not load nothing is cleared until `lifetime.py now` is run by hand.
+The module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
+
 ## Windows
 
-Every hook of both plugins is a shell command that starts `sh`, which on Windows is Git Bash's.
+Every command hook of both plugins is a shell command that starts `sh`, which on Windows is Git Bash's.
 Without Git Bash, Claude Code runs the command in PowerShell, where `sh` is missing and the hook does not run.
 Installing Git for Windows, or setting `CLAUDE_CODE_GIT_BASH_PATH` to a Git Bash Claude Code does not find, lets the hooks run.
 Each hook of both plugins on which `onFailure` acts sets it to `continue`, so a hook that cannot start never blocks a call.
+Each plugin's hooks module starts python itself, with no `sh`, so p4-temportal's retention sweep runs without Git Bash.
 
 ## Tests
 
 Each test file runs on its own from its folder with `python -I -X utf8 <file>`: p4-temportal's in `plugins/p4-temportal/hooks/` and p4-phi's in `plugins/p4-phi/scripts/`.
+The tests of a plugin's hooks module are in `hooks/register.test.ts`, and `claude plugin test <plugin folder>` runs them.

@@ -24,7 +24,7 @@ Two kinds of lifetime clear what is no longer relevant, the way a browser handle
 - **Cache:** a rule per folder in `.claude/p4/p4.json` under `temportal.cache`, with `max_age_days` and `max_mb`, and by default `notebook/.out` keeps 14 days and at most 500 MB and `.layout-conflicts` keeps 30 days.
 - **Cookie:** one file or folder under `temportal/` with its own expiry, for something p4 keeps that should outlive the session but not stay for good, such as a downloaded page or a probe's output.
 
-The retention sweep clears what is past its lifetime at each session start and session end.
+The retention sweep clears what is past its lifetime at a session's start, while the session runs, and at its end.
 
 Set a cookie:
 

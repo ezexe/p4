@@ -128,6 +128,111 @@ class FailureNotice(unittest.TestCase):
             wipe(root)
 
 
+class Tick(unittest.TestCase):
+    """`tick`, the retention sweep as the hooks module runs it: at a session's start, on its timer, and let go of at
+    the session's end."""
+    maxDiff = None
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="p4-temportal-tick-")
+        self.p4 = os.path.join(self.root, ".claude", "p4")
+        self.t = os.path.join(self.p4, "temportal")
+        os.makedirs(self.t)
+
+    def tearDown(self):
+        wipe(self.root)
+
+    def test_a_tick_clears_what_is_due_and_says_when_the_next_sweep_is(self):
+        """One JSON line: what the sweep cleared, without the plugin's name, which the module's log line carries, and
+        the seconds until the next cookie expires."""
+        due = put(os.path.join(self.t, "notebook", "due.md"))
+        later = put(os.path.join(self.t, "notebook", "later.md"))
+        now = time.time()
+        lifetime.write_expires(self.p4, {"notebook/due.md": {"expires": now - 1},
+                                         "notebook/later.md": {"expires": now + 600}})
+        r = run("tick", CLAUDE_PROJECT_DIR=self.root)
+        answer = json.loads(r.stdout)
+        self.assertEqual((r.stdout.count("\n"), answer["said"], os.path.exists(due), os.path.exists(later)),
+                         (1, ["cleared expired files: 1, notebook/due.md."], False, True))
+        self.assertTrue(590 < answer["wait_s"] <= 600, answer)
+
+    def test_the_wait_is_the_next_cookie_a_minute_at_least_and_an_hour_at_most(self):
+        now = 1_000_000.0
+        waits = {}
+        for name, entries in (("no cookie", {}), ("due in five seconds", {"a": {"expires": now + 5}}),
+                              ("due in a quarter of an hour, and in two", {"a": {"expires": now + 900},
+                                                                           "b": {"expires": now + 7200}}),
+                              ("due tomorrow", {"a": {"expires": now + DAY}}),
+                              ("past due and left", {"memory/a.md": {"expires": now - 5}}),
+                              ("unreadable", {"a": {"expires": "soon"}, "b": 7, "c": {"session": "abc"}})):
+            lifetime.write_expires(self.p4, entries)
+            waits[name] = lifetime.next_wait(self.p4, now)
+        self.assertEqual(waits, {"no cookie": 3600.0, "due in five seconds": 60.0,
+                                 "due in a quarter of an hour, and in two": 900.0, "due tomorrow": 3600.0,
+                                 "past due and left": 3600.0, "unreadable": 3600.0})
+
+    def test_a_tick_makes_the_layout_move_a_start_makes(self):
+        put(os.path.join(self.p4, "memory", "a.md"))
+        r = run("tick", CLAUDE_PROJECT_DIR=self.root)
+        self.assertEqual((json.loads(r.stdout)["said"], os.path.isfile(os.path.join(self.t, "memory", "a.md"))),
+                         (["moved memory/ to temportal/memory/."], True))
+
+    def test_a_tick_in_a_project_with_no_store_writes_nothing(self):
+        bare = os.path.join(self.root, "bare")
+        os.makedirs(bare)
+        r = run("tick", CLAUDE_PROJECT_DIR=bare)
+        self.assertEqual((json.loads(r.stdout), os.listdir(bare)), ({"said": [], "wait_s": 3600.0}, []))
+
+    def test_a_tick_that_fails_says_so_in_its_json_line(self):
+        old = lifetime.sweep
+        def broken(*a, **k):
+            raise OSError("disk gone")
+        try:
+            lifetime.sweep = broken
+            answer = lifetime.tick(self.root)
+        finally:
+            lifetime.sweep = old
+        self.assertEqual(answer, {"said": ["the retention sweep degraded: OSError: disk gone"], "wait_s": 3600.0})
+
+    def test_a_tick_let_go_returns_at_once_and_its_sweep_runs_in_a_process_of_its_own(self):
+        """`tick --let-go` answers before any file is cleared, and the process it started clears the due cookie. It
+        is a real process, as the module starts it at a session's end."""
+        due = put(os.path.join(self.t, "notebook", "due.md"))
+        lifetime.write_expires(self.p4, {"notebook/due.md": {"expires": 1.0}})
+        calls = []
+        real = subprocess.Popen
+        def popen(argv, **kw):
+            calls.append((argv[1:4] + argv[5:], sorted(k for k, v in kw.items() if v)))
+            return real(argv, **dict(kw, env=dict(os.environ, CLAUDE_PROJECT_DIR=self.root)))
+        import warnings
+        try:
+            subprocess.Popen = popen
+            with warnings.catch_warnings():     # the process is let go of while it runs, which is the point
+                warnings.simplefilter("ignore", ResourceWarning)
+                answer = lifetime.tick(self.root, to_let_go=True)
+        finally:
+            subprocess.Popen = real
+        for _ in range(200):
+            if not os.path.exists(due):
+                break
+            time.sleep(0.05)
+        own = "creationflags" if os.name == "nt" else "start_new_session"
+        self.assertEqual((answer, os.path.exists(due), calls),
+                         ({"let_go": True}, False,
+                          [(["-I", "-X", "utf8", "tick"], sorted(["close_fds", own, "stderr", "stdin", "stdout"]))]))
+
+    def test_with_no_process_to_let_go_of_the_sweep_runs_in_the_one_that_asked(self):
+        due = put(os.path.join(self.t, "notebook", "due.md"))
+        lifetime.write_expires(self.p4, {"notebook/due.md": {"expires": 1.0}})
+        old = lifetime.let_go
+        try:
+            lifetime.let_go = lambda args: False
+            answer = lifetime.tick(self.root, to_let_go=True)
+        finally:
+            lifetime.let_go = old
+        self.assertEqual((answer["said"], os.path.exists(due)), (["cleared expired files: 1, notebook/due.md."], False))
+
+
 class Lifetime(unittest.TestCase):
     maxDiff = None
 

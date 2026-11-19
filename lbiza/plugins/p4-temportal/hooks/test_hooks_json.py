@@ -3,7 +3,9 @@ import json
 import unittest
 from pathlib import Path
 
-HOOKS = json.loads((Path(__file__).resolve().parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+HERE = Path(__file__).resolve().parent
+FILE = json.loads((HERE / "hooks.json").read_text(encoding="utf-8"))
+HOOKS = FILE["hooks"]
 
 
 def runs(event, source):
@@ -50,6 +52,43 @@ class AppScratchpadTest(unittest.TestCase):
                for c in runs(e, s) if "scratchpad tmp-" in c and "scratchpad tmp-unlink" not in c]
         self.assertEqual(sorted(set(tmp)), [])
 
+
+
+class ModuleTest(unittest.TestCase):
+    """The hooks module runs the retention sweep, so no command hook does. By
+    https://code.claude.com/docs/en/plugins/mods/reference.md, "Files", hooks/hooks.json holds "`modules`: an array
+    with one path, relative to this file, to the hooks module" and "Can also hold settings hooks under `hooks`", and
+    the module "Exports `register(on, options)`"."""
+
+    def test_hooks_json_names_the_module_beside_the_command_hooks(self):
+        self.assertEqual(FILE.get("modules"), ["./register.ts"], "one path, relative to hooks.json")
+        text = (HERE / "register.ts").read_text(encoding="utf-8")
+        self.assertRegex(text, r"(?m)^export const register: Register = ")
+        self.assertTrue((HERE / "register.test.ts").is_file(), "its tests, for `claude plugin test`")
+
+    def test_no_command_hook_runs_the_retention_sweep(self):
+        """The module sweeps at a session's start, on its timer and at the session's end, and it runs lifetime.py with
+        no `sh`. A SessionEnd command hook shares 1.5 seconds with every other one, which a plugin's `timeout` does
+        not raise, by https://code.claude.com/docs/en/hooks.md, "SessionEnd input"."""
+        self.assertEqual([c for c in every_command() if " lifetime " in c], [])
+        self.assertNotIn("SessionEnd", HOOKS)
+        text = (HERE / "register.ts").read_text(encoding="utf-8")
+        for call in ("['tick']", "['tick', '--let-go']", "on('session.start'", "on('session.end'", "$.clock.every("):
+            self.assertIn(call, text)
+        self.assertNotRegex(text, r"""['"]sh['"]""")
+
+    def test_the_module_runs_the_commands_lifetime_py_takes(self):
+        """`tick` and its `--let-go` are what lifetime.py's main reads, and the waits of the two files agree."""
+        import sys
+        if str(HERE) not in sys.path:
+            sys.path.insert(0, str(HERE))
+        import lifetime
+        text = (HERE / "register.ts").read_text(encoding="utf-8")
+        main =(HERE / "lifetime.py").read_text(encoding="utf-8")
+        self.assertIn('if sub == "tick":', main)
+        self.assertIn('"--let-go" in args[1:]', main)
+        self.assertIn(f"const LEAST_WAIT_MS = {int(lifetime.LEAST_WAIT_S * 1000):_}", text)
+        self.assertIn(f"const MOST_WAIT_MS = {int(lifetime.MOST_WAIT_S * 1000):_}", text)
 
 
 class NoGitBashTest(unittest.TestCase):

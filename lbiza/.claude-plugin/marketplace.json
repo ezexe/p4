@@ -11,7 +11,7 @@
       "name": "p4-temportal",
       "source": "./plugins/p4-temportal",
       "description": "Keeps the project's auto memory in its .claude/p4 store, where Claude Code writes it itself by autoMemoryDirectory, leaves each session's scratchpad to the app, and clears what is no longer relevant by lifetimes.",
-      "version": "0.3.18",
+      "version": "0.3.19",
       "category": "productivity",
       "keywords": [
         "memory",
