@@ -297,7 +297,7 @@ class Venv(unittest.TestCase):
         self.assertEqual(calls, [], "nothing ran, so no .venv was made")
 
     def test_the_known_floor_is_that_of_the_ezexe_phi_beside_this_checkout(self):
-        phi = self._root.parent / "phi"
+        phi = self._root.parent / "phi" / v.PHI_FOLDER
         if not (phi / "pyproject.toml").is_file():
             self.skipTest(f"no ezexe/phi checkout at {phi}")
         self.assertEqual(v.python_floor(phi, True), v.PHI_PYTHON)
