@@ -216,6 +216,25 @@ class Linear(Base):
         self.assertNotIn("test_z.py", prompt)
         self.assertNotIn("its regression test passing", prompt)
 
+    def test_a_draft_takes_no_slash_command_for_a_path(self):
+        """A message that names Claude Code's commands `/goal` and `/plan` got a draft whose `Area:` and `Files:`
+        lines held the folders `e:/goal` and `e:/plan`, since relay.paths_in joined each to the project's folder as
+        a path. A slash command is no path, relay.command_word, so such a draft names no area and no files, and a
+        message that names a file beside the commands gets that file alone."""
+        t = self.t
+        write(os.path.join(t.proj, "lib", "x.py"), "x = 1\n")
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        said = RETRY + ", and give its session a /goal as /plan would"
+        prompt = call_in(context(t.say(TOP, said)))["prompt"]
+        self.assertNotIn("Area:", prompt)
+        self.assertNotIn("Files:", prompt)
+        self.assertNotRegex(prompt, r"`[^`\n]*/(goal|plan)`")
+        prompt = call_in(context(t.say(TOP, said + ", in `lib/x.py`")))["prompt"]
+        files = next(x for x in prompt.splitlines() if x.startswith("Files: "))
+        self.assertRegex(files, r"^Files: `[^`]*lib/x\.py`$", "the file it names, and no command")
+        self.assertRegex(prompt, r"(?m)^Area: `[^`]*lib/x\.py`\.$")
+
     def test_a_python_files_tests_are_found_in_the_tests_folders_above_it_too(self):
         """A project that keeps its tests in a `tests` folder, at its top or beside the code, as pytest's good
         practices lay a project out, has them named too: the folder nearest the file first, in each the file named

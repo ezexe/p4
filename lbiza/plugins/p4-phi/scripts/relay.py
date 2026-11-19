@@ -279,15 +279,32 @@ def overlap(a, b):
     return covers(a, b) or covers(b, a) or covers(ra, rb) or covers(rb, ra)
 
 
+# A slash command as a message writes it: `/goal`, `/plan`, a plugin's `/p4-phi:readings`, a connector's
+# `/mcp__github__list_prs`. commands.md: "Commands control Claude Code from inside a session", and "Type `/` to see
+# the commands available to you, or type `/` followed by letters to filter". skills.md has a plugin's as
+# `/plugin-name:skill-name`, and mcp.md a connector's prompt as `/mcp__servername__promptname`. Each is one slash and
+# one name with no dot and no second slash, which is also how a folder at a filesystem's root is written.
+COMMAND_RE = re.compile(r"/[A-Za-z_][\w-]*(?::[\w-]+)*")
+
+
+def command_word(p, n):
+    """True when the words `p` are a slash command and no path: one slash and one name, with nothing on disk at
+    `n`, the path those words would be. `/goal` and `/plan` in a message name Claude Code's commands, and joined to
+    a base on a machine with drive letters they read as the folders `e:/goal` and `e:/plan`. A folder that is there,
+    such as `/tmp` or Git Bash's `/e`, stays a path."""
+    return bool(COMMAND_RE.fullmatch(p)) and not (drive_ok(n) and os.path.lexists(n))
+
+
 def paths_in(text, base=""):
-    """The paths a note names: in backticks, or written with a slash."""
+    """The paths a note names: in backticks, or written with a slash. A slash command is no path, command_word."""
     out = []
     text = re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", str(text or ""))       # a URL is not a path
     for m in PATH_RE.finditer(text):
         p = m.group(1) or m.group(2)
         if p and ("/" in p or "\\" in p or "." in p) and not p.startswith(("http:", "https:")):
-            n = norm(p.rstrip(".,;:)"), base)
-            if n and n not in out and drive_ok(n):
+            p = p.rstrip(".,;:)")
+            n = norm(p, base)
+            if n and n not in out and drive_ok(n) and not command_word(p, n):
                 out.append(n)
     return out
 

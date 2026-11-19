@@ -71,6 +71,25 @@ class Paths(unittest.TestCase):
         native = relay.norm("/w/lib/x.py")                  # this machine's own rule, with nothing set
         self.assertEqual(native, "w:/lib/x.py" if os.name == "nt" else "/w/lib/x.py")
 
+    def test_a_slash_command_is_no_path(self):
+        """`/goal` and `/plan` in a message are Claude Code's commands, commands.md, and a plugin's is written
+        `/plugin-name:skill-name`, skills.md. Joined to a base on a machine with drive letters each read as a folder
+        at the drive's root, `e:/goal`, and a start draft named it as its area and its files. One slash and one name
+        with nothing on disk there is a command; a folder that is there, and every path with a second part, stays."""
+        with tempfile.TemporaryDirectory() as base:
+            base = base.replace("\\", "/")
+            said = ("Give this session a /goal of its own, like `/plan` and /p4-phi:readings and "
+                    "`/mcp__github__list_prs`, then fix lib/x.py and /goal/notes.md.")
+            got = relay.paths_in(said, base)
+            self.assertEqual(got, [relay.norm("lib/x.py", base), relay.norm("/goal/notes.md", base)])
+            for word in ("/goal", "/plan", "/p4-phi:readings", "/p4-phi", "/mcp__github__list_prs"):
+                self.assertTrue(relay.command_word(word, relay.norm(word, base)), word)
+            for word in ("lib/goal", "/goal/x", "/goal.md", "./goal", "goal"):
+                self.assertFalse(relay.command_word(word, relay.norm(word, base)), word)
+            self.assertEqual(relay.paths_in("/goal", ""), [], "with no base too")
+            with mock.patch.object(relay.os.path, "lexists", lambda p: True):   # a folder of that name is there
+                self.assertEqual(relay.paths_in("look in /goal", base), [relay.norm("/goal", base)])
+
     def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
         """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each
         session's scratchpad itself, and every write under .claude asks ezexe."""
