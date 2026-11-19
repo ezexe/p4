@@ -55,6 +55,21 @@ class ListTest(unittest.TestCase):
             self.assertIn(field(entry, "kind"), ("asked", "seen", "by hand"), name)
             self.assertIn("fits:", entry, name)
 
+    def test_the_start_probe_reads_the_prompt_that_began_the_turn(self):
+        """A prompt delivered into a running turn carries the turn's id and began no turn, as the API types say of
+        `turnId`: "Absent for a prompt submitted while the session was idle". Seen in the desktop app on Claude Code
+        2.1.326: a task's notice arrived in the middle of a turn ezexe's own message began, and a start later in
+        that turn was told as one on an unattended turn. The turn after such a prompt has no origin told."""
+        hook = MODULE.split("on('prompt.submit'", 1)[1].split("\n  })", 1)[0]
+        self.assertIn("if (e.turnId === undefined) origin = e.origin?.kind", hook)
+        self.assertIn("else isJoined = true", hook)
+        self.assertNotIn("\n    origin = e.origin?.kind", hook)
+        end = MODULE.split("on('turn.complete'", 1)[1].split("\n  })", 1)[0]
+        self.assertIn("if (e.agentId === undefined && isJoined) {\n      isJoined = false\n      origin = undefined", end)
+        test = (PLUGIN / "hooks" / "register.test.ts").read_text(encoding="utf-8")
+        self.assertIn("a start after a task notice came into a turn a person began leaves the condition as it was", test)
+        self.assertIn("reads the origin of the prompt that began the turn", README)
+
     def test_a_probe_the_module_does_not_ask_names_its_check(self):
         for name, entry in BY_ID.items():
             if field(entry, "kind") != "asked":

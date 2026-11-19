@@ -159,8 +159,11 @@ let isDue = false
 let hasNotices = false
 // The probes that wait for the end of the turn, and whether their run stamps the version.
 let owed: Probe[] = []
-// The origin of the prompt that began the turn under way.
+// The origin of the prompt that began the turn under way, and nothing where that is not told: a prompt that came
+// into a running turn may be read inside it or begin the turn after it, and `turn.start` names no origin.
 let origin: string | undefined
+// A prompt came into the turn under way.
+let isJoined = false
 // The session id whose first turn of the main conversation was seen.
 let turnOf: string | undefined
 
@@ -796,10 +799,14 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // A prompt of the main conversation: its origin is kept for the turn, and it carries the notices that wait, each
-  // told once.
+  // A prompt of the main conversation: it carries the notices that wait, each told once, and the origin of one
+  // submitted while the session was idle is kept for the turn it begins. One that carries a `turnId` was typed
+  // over a running turn or delivered into it, as a background task's notice is, and began no turn: its origin is
+  // not the turn's. Seen in the desktop app on Claude Code 2.1.326: a task's notice arrived in the middle of a turn
+  // ezexe's own message began, and a start later in that turn was read as one on an unattended turn.
   on('prompt.submit', async ($, e, next) => {
-    origin = e.origin?.kind
+    if (e.turnId === undefined) origin = e.origin?.kind
+    else isJoined = true
     const notices = hasNotices ? await take($).catch(() => []) : []
     const lines = [...notices, ...waiting]
     waiting = []
@@ -829,6 +836,10 @@ export const register: Register = (on, options) => {
   // and the hook waits for them, which happens once for a version.
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
+    if (e.agentId === undefined && isJoined) {
+      isJoined = false
+      origin = undefined
+    }
     if (e.agentId === undefined && owed.length > 0) await pay($)
     if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)
     if (e.agentId === undefined && wants.hints && !e.isAborted) {
