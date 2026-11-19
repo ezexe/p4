@@ -29,7 +29,8 @@ The hooks, each in its h_ function:
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
 own: it prints the text of the system prompt's section as one JSON line. `goal` prints how a session's native goal
-stands, and `goal set` is the hooks module's word that the goal command set it.
+stands, `goal on` and `goal off` write the setting, and `goal set` is the hooks module's word that the goal command
+set it.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal and is off
@@ -2793,6 +2794,20 @@ def goal_look(a, me):
     return 0
 
 
+def goal_switch(home, on):
+    """`phi.py goal on` and `goal off`: writes `goal` in the store's phi/phi.json, where configure reads it, keeping
+    the file's other keys, and returns the line that says how it stands as read back. A session writes nothing under
+    `.claude` with its own tools, so this command is how the key is set. A file that does not parse is left as it is."""
+    path = os.path.join(home, "phi", "phi.json")
+    d = read_json(path)
+    if not d and os.path.exists(path) and os.path.getsize(path) > 2:
+        raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
+    d["goal"] = bool(on)
+    write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    stands = "on" if read_json(path).get("goal") is True else "off"
+    return f"goal is {stands} in {path.replace(chr(92), '/')}"
+
+
 def goal_text(s):
     """What `phi.py goal` prints: how the session's native goal stands, with its condition."""
     g = s.get("goal") if isinstance(s.get("goal"), dict) else None
@@ -3562,9 +3577,10 @@ def main(argv=None):
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "goal":
-            p.add_argument("act", nargs="?", default="", choices=("", "set"),
-                           help="set is the hooks module's word that the goal command set the goal; none prints how "
-                                "the session's native goal stands")
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set"),
+                           help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
+                                "that the goal command set the goal; none prints how the session's native goal "
+                                "stands")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
@@ -3619,7 +3635,9 @@ def main(argv=None):
         if a.cmd == "look" and GOAL and not a.folder:   # a worker's native goal rides the answer of its look
             return goal_look(a, me)
         if a.cmd == "goal":                        # ahead of ensure_session: it makes no session's folder either
-            if a.act == "set":
+            if a.act in ("on", "off"):             # the project's setting, which needs no session
+                print(goal_switch(me.home, a.act == "on"))
+            elif a.act == "set":
                 sys.stdout.write(json.dumps({"set": goal_set(me.home, safe_id(me.id))}) + "\n")
             else:
                 print(goal_text(load_session(me.home, safe_id(me.id)) if me.id else {}))

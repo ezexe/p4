@@ -211,7 +211,8 @@ class Page(unittest.TestCase):
             self.assertIn(said, covers, said)
         built = section.split('<h3 id="the-goal-behind-its-setting">The goal behind its setting</h3>', 1)[1]
         for said in ("<code>goal</code> in the store's <code>phi/phi.json</code>, false unless set true",
-                     "<code>P4_PHI_GOAL</code>", "<code>Done looks like:</code>",
+                     "<code>P4_PHI_GOAL</code>", "<code>phi.py goal on</code>", "<code>phi.py goal off</code>",
+                     "<code>Done looks like:</code>",
                      "<code>$.command.run({ command: 'goal', args })</code>", "<code>phi.py goal set</code>",
                      "<code>plans.keep_going</code> sends no turn back", "stay the Stop hook they are",
                      "<code>goal_status</code>", "<code>goal met:</code>", "With <code>goal</code> unset",

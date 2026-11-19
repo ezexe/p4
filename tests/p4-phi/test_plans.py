@@ -1811,6 +1811,32 @@ class NativeGoal(unittest.TestCase):
         self.assertEqual(self.phi("goal", "set"), {"set": False}, "no goal was asked for, so none is marked set")
         self.assertEqual(self.stop("Still porting.", "u2").get("decision"), "block")
 
+    def test_goal_on_and_off_write_the_key_the_hooks_read_and_say_how_it_stands(self):
+        """A session writes nothing under `.claude` with its own tools, so `phi.py goal on` and `goal off` set the
+        key in the store's phi/phi.json, keep the file's other keys, and print how it stands as read back."""
+        path = os.path.join(self.t.p4, "phi", "phi.json")
+        write(path, json.dumps({"book": False}))
+        r = self.t.cli(KID, "goal", "on")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        said = r.stdout.strip()
+        self.assertTrue(said.startswith("goal is on in ") and said.endswith("/phi/phi.json"), said)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"book": False, "goal": True})
+        self.brief()                               # no variable is set: the store's own key turns it on
+        self.assertEqual(self.t.session(KID).get("doneLine"), self.LINE)
+        r = self.t.cli(KID, "goal", "off")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(r.stdout.strip().startswith("goal is off in "), r.stdout)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"book": False, "goal": False})
+        self.assertEqual(self.stop("I ported half the flush.", "u1").get("decision"), "block", "off again")
+        self.assertNotIn("goal", self.phi("look"), "and the look answers none")
+        write(path, "{not json")
+        r = self.t.cli(KID, "goal", "on")
+        self.assertEqual(r.returncode, 2, "a file that does not parse is left as it is")
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "{not json")
+
     def test_the_done_line_is_the_goal_the_look_answers_once_the_first_turn_has_ended(self):
         self.brief(**self.ON)
         self.assertEqual(self.t.session(KID).get("doneLine"), self.LINE)

@@ -1829,10 +1829,10 @@ class Wiring(unittest.TestCase):
         that. It is also Claude Code's own word for its goal, https://code.claude.com/docs/en/goal.md, so phi.py may
         hold it in the strings listed here, each of which names that goal, and in no other."""
         import ast
-        native = {"goal", "GOAL", "goal met: ", "goal ", "no goal was set for this session",
+        native = {"goal", "GOAL", "goal met: ", "goal ", "goal is ", "no goal was set for this session",
                   ": `goal` is off in the store's phi.json",
-                  "set is the hooks module's word that the goal command set the goal; none prints how the session's "
-                  "native goal stands"}
+                  "on and off write `goal` in the store's phi.json; set is the hooks module's word that the goal "
+                  "command set the goal; none prints how the session's native goal stands"}
         for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
                      "gaps.py"):
             tree, skip = ast.parse(read(os.path.join(SRC, name))), set()

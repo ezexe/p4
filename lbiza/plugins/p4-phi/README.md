@@ -283,6 +283,7 @@ Every key is optional, and the file need not exist.
 
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.
 `goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition, and stands the Stop hook's send-back down while that goal is set.
+`phi.py goal on` and `phi.py goal off` write the key and print how it stands, since a session writes nothing under `.claude` with its own tools.
 
 ### Environment variables
 

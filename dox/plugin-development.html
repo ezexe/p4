@@ -363,7 +363,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 </ul>
 <h3 id="the-goal-behind-its-setting">The goal behind its setting</h3>
 <ul>
-<li>Since a probe showed a goal set with no click, p4-phi sets one where a project asks for it: <code>goal</code> in the store's <code>phi/phi.json</code>, false unless set true, with <code>P4_PHI_GOAL</code> as <code>0</code> or <code>1</code> for one run. With it off nothing below happens and the Stop send-back works as before.</li>
+<li>Since a probe showed a goal set with no click, p4-phi sets one where a project asks for it: <code>goal</code> in the store's <code>phi/phi.json</code>, false unless set true, with <code>P4_PHI_GOAL</code> as <code>0</code> or <code>1</code> for one run. <code>phi.py goal on</code> and <code>phi.py goal off</code> write the key and print how it stands, since a session writes nothing under <code>.claude</code> with its own tools. With it off nothing below happens and the Stop send-back works as before.</li>
 <li>The condition is the line <code>Done looks like:</code> of a worker's brief, kept whole from its first message. A session nobody started gets no goal, and neither does a brief with no such line.</li>
 <li>The worker's hooks module sets the goal once its first turn has ended: the look that turn's end asks for answers the condition once, the module runs <code>$.command.run({ command: 'goal', args })</code>, and when the command answers <code>Goal set</code> it tells <code>phi.py goal set</code>.</li>
 <li>While the goal is set <code>plans.keep_going</code> sends no turn back, since the goal's evaluator does and the two share the one count of eight. A goal the command did not set stands nothing down.</li>

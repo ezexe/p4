@@ -58,7 +58,7 @@ The shell line stays for a session whose tool list holds none of the three, and 
 - `meta` runs the meta pass over every orchestrator's ledger and prints `meta-ledger.md`.
 - `settle <session> "<what took it up>"` clears a row of unfinished work a session left at its archive.
 - `upkeep on` and `upkeep off` set `phi.upkeep` in the store's `p4.json` and run the settings keeper at once, `upkeep` alone prints whether it is on with every act due and every item closed, `upkeep wait "<the step>" --on <sessionId>` keeps a step that waits on a session this one started, and `upkeep close <id>` closes an open item or wait with `--commit <sha>`, `--note "<why it is left>"` or `--ezexe "<ezexe's words>"`.
-- `goal` prints how this session's native goal stands, asked for, set, or over as met, failed or cleared, with its condition. `goal set` is the hooks module's own word that the goal command set the goal, and no session runs it.
+- `goal on` and `goal off` write `goal` in the store's `phi/phi.json`, keeping the file's other keys, and print how it stands. `goal` alone prints how this session's native goal stands, asked for, set, or over as met, failed or cleared, with its condition. `goal set` is the hooks module's own word that the goal command set the goal, and no session runs it.
 
 ## Delegation
 
@@ -180,6 +180,7 @@ The worker is the sender the message's wrapper names, by its `from-session` attr
 ## A worker's goal
 
 `goal` in the store's `phi/phi.json` turns this on for a project, and it is off by default.
+`goal on` and `goal off` set it and print how it stands, since a session writes nothing under `.claude` with its own tools.
 With it off, a turn with open steps is sent back by p4-phi's Stop hook alone, as everywhere above.
 
 - The condition is the line `Done looks like:` of the brief a worker was started with, whole, to 4,000 characters. A session nobody started gets no goal, and neither does a worker whose brief has no such line.
