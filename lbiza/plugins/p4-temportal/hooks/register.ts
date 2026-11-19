@@ -147,6 +147,10 @@ const SOURCES = ['user', 'project', 'local', 'policy'] as const
 const WHOLE = ['autoMemoryDirectory', 'plansDirectory', 'autoMemoryEnabled'] as const
 const PERMISSIONS = ['blockWritesOutsideWorkingDirectories', 'additionalDirectories'] as const
 
+// p4-native's capability map, from the project's root: the file that plugin's README gives as the one way to read
+// what the host is.
+const MAP = '.claude/p4/native/host.json'
+
 // What `lifetime.py tick` prints: the lines of what it moved and cleared, the seconds until the next sweep, and
 // the line `temportal.compact_at`.
 type Answer = { said?: unknown; wait_s?: unknown; let_go?: unknown; compact_at?: unknown }
@@ -233,10 +237,32 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
+// The operating system of this session as p4-native's capability map holds it, which that plugin asks of the
+// engine by `$.session.info`: `windows`, `macos`, `linux` or `wsl`. The map is the file MAP in the project's store,
+// with this session's entry under `sessions.<session id>`. None where p4-native is not installed, where the project
+// has no store, where the entry is not written yet, since that plugin's start does not wait for it, and where the
+// entry says `unknown`. Another session's entry is never read: one folder can be open on Windows and under WSL.
+async function mappedPlatform($: EngineInterface): Promise<string | undefined> {
+  try {
+    const id = await $.session.id()
+    const map: unknown = JSON.parse(await $.fs.read(`${slashed(await $.session.root())}/${MAP}`))
+    const sessions = isRecord(map) ? map.sessions : undefined
+    const entry = isRecord(sessions) ? sessions[id] : undefined
+    const platform = isRecord(entry) ? entry.platform : undefined
+
+    return typeof platform === 'string' && platform !== '' && platform !== 'unknown' ? platform : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // With nothing kept, the search of find-python.sh: the launcher first on Windows, where `python3` can be the Store's
 // stub, and `python3` first elsewhere. Each candidate is proven by one run, since a module has no `command -v`.
+// Whether this is Windows is read from p4-native's capability map first, and from the shape of the plugin's own
+// folder where the map has no entry for this session.
 async function provenPython($: EngineInterface): Promise<string | undefined> {
-  const isWindows = /^[A-Za-z]:[\\/]/.test($.plugin.root)
+  const mapped = await mappedPlatform($)
+  const isWindows = mapped === undefined ? /^[A-Za-z]:[\\/]/.test($.plugin.root) : mapped === 'windows'
   const order = isWindows ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python'], ['py', '-3']]
   for (const head of order) {
     try {

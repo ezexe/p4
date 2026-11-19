@@ -191,6 +191,7 @@ function machine(on: On, has: Machine): Seen {
   })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/work/project' }))
+  on('session.id', () => ({ value: 'cli-0001' }))
   on('ui.log', (_, e) => {
     const lines = e.to === 'debug' ? seen.debugged : seen.shown
     lines.push(e.text)
@@ -1097,3 +1098,77 @@ test('where the settings cannot be read the input goes down as it came, and the 
   expect(said[0]).toContain("so the plugin's python reads the settings files")
   expect(said[0]).toContain('the settings are closed to this plugin')
 })
+
+// p4-native's capability map in the store of the machine's project, with one entry for each session id given.
+const MAP = '/work/project/.claude/p4/native/host.json'
+function mapOf(sessions: Record<string, { platform?: string }>): string {
+  const entry = { at: '2026-11-19T14:37:03.384Z', host: 'terminal', run: 'scripted', claude: '2.1.328' }
+  const entries = Object.entries(sessions).map(([id, more]) => [id, { ...entry, ...more }])
+
+  return JSON.stringify({ sessions: Object.fromEntries(entries) })
+}
+
+// The order in which the search of a python tries its names on Windows, and anywhere else.
+const WINDOWS_FIRST = ['py', 'python', 'python3']
+const ELSEWHERE_FIRST = ['python3', 'python', 'py']
+
+test("with p4-native's map holding this session as windows, the search tries the launcher first", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { [MAP]: mapOf({ 'cli-0001': { platform: 'windows' } }) }, pythons: {} })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
+  expect(seen.read).toContain(MAP)
+})
+
+test("with p4-native's map holding this session as wsl, as linux or macos, the search tries python3 first", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { [MAP]: mapOf({ 'cli-0001': { platform: 'wsl' } }) }, pythons: {} })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(ELSEWHERE_FIRST)
+})
+
+test('with no map the search reads the shape of its own folder, as it did before', async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: {}, pythons: {} })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.read).toContain(MAP)
+  expect([WINDOWS_FIRST, ELSEWHERE_FIRST]).toContainEqual(seen.tried.map(argv => argv[0]))
+})
+
+// A map that holds no platform for this session: each leaves the module's own reading, which the map of the test
+// would turn round if it were read.
+for (const [what, map] of [
+  ['an entry of another session', (other: string) => mapOf({ 'cli-0002': { platform: other } })],
+  ['an entry that says unknown', () => mapOf({ 'cli-0001': { platform: 'unknown' } })],
+  ['an entry with no platform', () => mapOf({ 'cli-0001': {} })],
+  ['a map that is no JSON', () => '{"sessions": '],
+] as const) {
+  test(`${what} leaves the search its own reading of the folder`, async ($, on) => {
+    mock.env(on, {})
+    const clock = mock.clock(on)
+    const files: Record<string, string> = {}
+    const seen = machine(on, { files, pythons: {} })
+    await $.session.start(START)
+    await clock.settle()
+    const own = seen.tried.map(argv => argv[0])
+    expect(own.length).toBe(3)
+
+    // The timer's next search, with the map in place.
+    files[MAP] = map(own[0] === 'py' ? 'linux' : 'windows')
+    await clock.advance(600_000)
+
+    expect(seen.tried.map(argv => argv[0]).slice(3, 6)).toEqual(own)
+  })
+}

@@ -89,6 +89,20 @@ class ModuleTest(unittest.TestCase):
         for word in ("classic.SessionStart", "$.settings.read", names["HANDED_KEY"]):
             self.assertIn(word, FILE["description"])
 
+    def test_the_module_reads_p4_natives_map_before_its_own_reading_of_the_host(self):
+        """p4-native's README gives `<project>/.claude/p4/native/host.json` as the one way to read what the host is,
+        with a session's entry under `sessions.<session id>`. The module's search for a python asks it whether this
+        is Windows, and keeps its own reading for a session the map has no entry for."""
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        self.assertIn("const MAP = '.claude/p4/native/host.json'", text)
+        native = (SRC.parents[1] / "p4-native" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("`<project>/.claude/p4/native/host.json`", native)
+        self.assertIn("`sessions.<session id>`", native)
+        search = text.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("const mapped = await mappedPlatform($)", search)
+        self.assertIn("mapped === undefined ? /^[A-Za-z]:", search)
+        self.assertIn("p4-native", FILE["description"])
+
     def test_no_command_hook_runs_the_retention_sweep(self):
         """The module sweeps at a session's start, on its timer and at the session's end, and it runs lifetime.py with
         no `sh`. A SessionEnd command hook shares 1.5 seconds with every other one, which a plugin's `timeout` does

@@ -118,6 +118,14 @@ class Page(unittest.TestCase):
         self.assertIn("a field a module adds to the input", open_still)
         self.assertIn("<code>$.settings.read</code>", open_still)
 
+    def test_the_host_is_read_from_p4_natives_map_first(self):
+        """The lifetimes row says which reading of the host goes to p4-native's capability map first, what it falls
+        back to, and which readings were left with the reason for each."""
+        row = rows(page())["lifetimes"]
+        for said in ("p4-native", "<code>.claude/p4/native/host.json</code>", "search for a python",
+                     "no entry for the session", "ask their own interpreter", "written after the start hooks ran"):
+            self.assertIn(said, row, said)
+
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()
         set_out = text.split('id="set-out"', 1)[1].split("</section>", 1)[0]
