@@ -5,6 +5,19 @@ The marketplace `p4-marketplace` holds two Claude Code plugins, each with hooks,
 - **p4-temportal**, whose skill `plugins/p4-temportal/skills/temportal/SKILL.md` says what it does.
 - **p4-phi**, whose README `plugins/p4-phi/README.md` says what it does and how it is set.
 
+## Install
+
+The marketplace's catalog is `.claude-plugin/marketplace.json` at the root of ezexe/p4, the folder above this one, so add the marketplace by the repository's name, then install each plugin by its own from your shell:
+
+```bash
+claude plugin marketplace add ezexe/p4
+claude plugin install p4-phi@p4-marketplace
+claude plugin install p4-temportal@p4-marketplace
+```
+
+Each install is a copy in Claude Code's plugin cache, `~/.claude/plugins/cache/p4-marketplace/<plugin>/<version>/`, at user scope unless `--scope project` or `--scope local` says otherwise.
+This folder holds no catalog of its own.
+
 ## Where each plugin keeps its files
 
 A project's store is the folder `<project>/.claude/p4/`, a git repository of its own.

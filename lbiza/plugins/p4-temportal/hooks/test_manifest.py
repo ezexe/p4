@@ -1,12 +1,12 @@
 """The marketplace maps p4-temportal's former names to it, by the renames map Claude Code reads, and its README names
-the python the tests run with."""
+the python the tests run with. The marketplace's one catalog is at the repository's root."""
 import json
 import re
 import unittest
 from pathlib import Path
 
 LBIZA = Path(__file__).resolve().parents[3]
-MARKETPLACE = LBIZA / ".claude-plugin" / "marketplace.json"
+MARKETPLACE = LBIZA.parent / ".claude-plugin" / "marketplace.json"
 README = LBIZA / "README.md"
 PLUGIN = LBIZA / "plugins" / "p4-temportal" / ".claude-plugin" / "plugin.json"
 

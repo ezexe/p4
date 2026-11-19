@@ -41,8 +41,9 @@ jobs:
           npm install -g @anthropic-ai/claude-code@latest
           claude --version
       - name: Validate the catalog
+        # The repository's root holds the marketplace's one catalog, .claude-plugin/marketplace.json.
         if: ${{ !cancelled() }}
-        run: claude plugin validate lbiza --strict
+        run: claude plugin validate . --strict
       - name: Validate p4-phi
         if: ${{ !cancelled() }}
         run: claude plugin validate lbiza/plugins/p4-phi --strict

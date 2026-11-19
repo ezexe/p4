@@ -6,17 +6,18 @@ This page holds how to install p4-phi, the docs sentences its delegation rests o
 
 ## Install
 
-The marketplace `p4-marketplace` is the folder `lbiza/` of a checkout of ezexe/p4, so add it by that folder's path, then install each plugin by name from your shell:
+The marketplace `p4-marketplace` is the repository ezexe/p4, whose root holds the catalog `.claude-plugin/marketplace.json`, so add it by the repository's name, then install each plugin by its own from your shell:
 
 ```bash
-claude plugin marketplace add ./p4/lbiza
+claude plugin marketplace add ezexe/p4
 claude plugin install p4-phi@p4-marketplace
 claude plugin install p4-temportal@p4-marketplace
 ```
 
-`./p4` is the checkout, and each install is at user scope unless `--scope project` or `--scope local` says otherwise.
-Claude Code updates installed plugins only from a marketplace whose auto-update is on, and it is off by default for a marketplace like this one: ezexe turns it on in a session with `/plugin`, the **Marketplaces** tab, `p4-marketplace`, **Enable auto-update**, or updates by hand with `claude plugin update <plugin>@p4-marketplace`.
-Source: https://code.claude.com/docs/en/plugins/install.md, Keep plugins updated.
+Each install is a copy in Claude Code's plugin cache, `~/.claude/plugins/cache/p4-marketplace/<plugin>/<version>/`, at user scope unless `--scope project` or `--scope local` says otherwise.
+Claude Code updates installed plugins only from a marketplace whose auto-update is on, and it is off by default for a marketplace like this one: turn it on in a session with `/plugin`, the **Marketplaces** tab, `p4-marketplace`, **Enable auto-update**, or update by hand with `claude plugin update <plugin>@p4-marketplace`.
+With auto-update on, a new version reaches the installed copy at the pass Claude Code runs after a session's first message, and a session that is running keeps the version it loaded until `/reload-plugins` or its next start.
+Source: https://code.claude.com/docs/en/plugins/install.md, Keep plugins updated, and https://code.claude.com/docs/en/plugins/loading.md, When auto-update runs.
 
 ## Delegation
 
@@ -229,7 +230,7 @@ Each is for one run, a test or one machine's unusual layout.
 ## Developing p4-phi while it is installed
 
 A session that edits p4-phi runs with Claude Code's own features, and p4-phi builds nothing in their place.
-The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, and `claude plugin update` run only when a release is cut.
+The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, and the installed copy moved by Claude Code's own auto-update after a landing bumps a version, with `claude plugin update` as the move by hand.
 What the plugin makes a model do is checked by the cases in `evals/`, run by hand from this folder with `claude plugin eval . --scaffold --trust-plugin --model claude-sonnet-5-5 --judge-model claude-haiku-5-5 --no-publish --max-cost-usd 5`, which gates no landing.
 
 ## What depends on the machine

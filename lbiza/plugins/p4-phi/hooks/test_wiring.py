@@ -7,8 +7,8 @@ Every entry runs twice, in a project with no store and in a project whose store 
 Each run must exit 0, write nothing on stderr, and print nothing or one JSON object whose `hookSpecificOutput` names
 the entry's own event.
 The gate of recall-hook.sh runs against a stand-in python that only says it ran, and each runner runs with no python
-on PATH at all, the marketplace's catalog is held to each plugin's own plugin.json, and every plugin folder to an entry
-of that catalog.
+on PATH at all, the marketplace's catalog at the repository's root is held to each plugin's own plugin.json, and every
+plugin folder to an entry of that catalog.
 
 Run: python3 test_wiring.py
 """
@@ -289,32 +289,55 @@ class Matchers(unittest.TestCase):
 
 
 class Manifests(unittest.TestCase):
-    """The marketplace's catalog against each plugin's own plugin.json: Claude Code warns when an entry's version and
-    its plugin.json's differ, platform row P16."""
+    """The marketplace's one catalog, `.claude-plugin/marketplace.json` at the repository's root, against each plugin's
+    own plugin.json. A plugin's version lives in its plugin.json alone, so no entry of the catalog can differ from it:
+    https://code.claude.com/docs/en/plugins/loading.md, "How Claude Code computes the version", has "The `version`
+    field in the plugin's manifest comes first", and Claude Code warns when an entry's version and its plugin.json's
+    differ, platform row P16."""
 
-    def test_each_marketplace_entry_has_its_plugins_name_and_version(self):
-        lbiza = os.path.dirname(os.path.dirname(ROOT))
-        with open(os.path.join(lbiza, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+    def test_each_marketplace_entry_has_its_plugins_name_and_leaves_the_version_to_its_plugin_json(self):
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
+        with open(os.path.join(repo, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
             market = json.load(f)
         self.assertTrue(market["plugins"])
         for entry in market["plugins"]:
-            with open(os.path.join(lbiza, entry["source"], ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
+            with open(os.path.join(repo, entry["source"], ".claude-plugin", "plugin.json"), encoding="utf-8") as f:
                 plugin = json.load(f)
             self.assertEqual(plugin["name"], entry["name"], entry["source"])
-            self.assertEqual(plugin.get("version"), entry.get("version"), entry["name"])
+            self.assertNotIn("version", entry, entry["name"])
+            self.assertRegex(plugin.get("version") or "", r"^\d+\.\d+\.\d+$", entry["name"])
 
     def test_every_plugin_folder_has_a_marketplace_entry(self):
         """A plugin folder the catalog does not list cannot be installed from the marketplace, platform row P14."""
         lbiza = os.path.dirname(os.path.dirname(ROOT))
-        with open(os.path.join(lbiza, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+        repo = os.path.dirname(lbiza)
+        with open(os.path.join(repo, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
             market = json.load(f)
-        listed = {os.path.normcase(os.path.normpath(os.path.join(lbiza, e["source"])))
+        listed = {os.path.normcase(os.path.normpath(os.path.join(repo, e["source"])))
                   for e in market["plugins"] if isinstance(e.get("source"), str)}
         plugins = os.path.join(lbiza, "plugins")
         for name in sorted(os.listdir(plugins)):
             folder = os.path.join(plugins, name)
             if os.path.isfile(os.path.join(folder, ".claude-plugin", "plugin.json")):
                 self.assertIn(os.path.normcase(os.path.normpath(folder)), listed, name)
+
+    def test_each_readme_gives_the_commands_that_install_from_the_repository(self):
+        """The repository's README, the marketplace folder's and p4-phi's each give the line that adds the marketplace
+        by the repository's name and one install line for each plugin of the catalog, and none adds it by a folder's
+        path: `lbiza/` holds no catalog, and an install from GitHub is a copy in Claude Code's cache."""
+        lbiza = os.path.dirname(os.path.dirname(ROOT))
+        repo = os.path.dirname(lbiza)
+        with open(os.path.join(repo, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
+            market = json.load(f)
+        for readme in (os.path.join(repo, "README.md"), os.path.join(lbiza, "README.md"),
+                       os.path.join(ROOT, "README.md")):
+            with open(readme, encoding="utf-8") as f:
+                lines = [line.strip() for line in f]
+            self.assertIn("claude plugin marketplace add ezexe/p4", lines, readme)
+            for entry in market["plugins"]:
+                self.assertIn(f"claude plugin install {entry['name']}@{market['name']}", lines, readme)
+            self.assertEqual([line for line in lines if line.startswith("claude plugin marketplace add ")],
+                             ["claude plugin marketplace add ezexe/p4"], readme)
 
 
 def marker_name(agent_id):

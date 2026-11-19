@@ -65,7 +65,7 @@ Whichever orchestrator receives ezexe's message runs the meta pass over every or
 The pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed, and it seeds the next generation of topics from what is left open.
 An orchestrator told of a finding settles a duplicate or a conflict with the other orchestrator through `SendMessage` and names a session whose work is over to ezexe as a link to open and archive, and only a conflict the two cannot settle goes to ezexe as a question.
 
-The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [p4-phi's README](lbiza/plugins/p4-phi/README.md) gives the commands that install them.
+The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](#install) gives the commands that install them.
 The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
 
 <div align="center">
@@ -73,6 +73,18 @@ The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.
 _"Puppeteer... the final frontier. These are the operations of Prompty Enterprise. Its current mission: to navigate propmty-prompter-pioneer-puppateer throught prompts only written - not build functions that ionjue the neural pathways of ai through a cheese grater; to seek out clear logic and safe deployments; to Puppeteer a Prompt to where no prompt encoding has Prompted a pioneer puppet into a pupateer before._
 
 </div>
+
+## Install
+
+The repository's root holds the marketplace's catalog, [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json), so the marketplace is added by the repository's name and each plugin is installed by its own, from your shell:
+
+```bash
+claude plugin marketplace add ezexe/p4
+claude plugin install p4-phi@p4-marketplace
+claude plugin install p4-temportal@p4-marketplace
+```
+
+Each install is a copy in Claude Code's plugin cache, at user scope unless `--scope project` or `--scope local` says otherwise.
 
 ## Python environment
 
@@ -94,8 +106,10 @@ The script stops before it makes or tops up `.venv` when the Python that will ru
 ## Releasing a change to a plugin
 
 Claude Code copies a plugin installed from a marketplace it clones into its plugin cache, `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so a change to the plugin's code or its `hooks/hooks.json` reaches such an install only with a new version.
-Each such change bumps the version in two files together: the plugin's own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json` and its entry in the catalog `lbiza/.claude-plugin/marketplace.json`.
-`test_wiring.py` in `lbiza/plugins/p4-phi/hooks/` holds the two equal for every plugin of the catalog, and `claude plugin validate` warns when they differ.
-The `suite` check of [`.github/workflows/suite.yml`](.github/workflows/suite.yml) runs both on every pull request and every push to `main`: every test of the repository through `python -X utf8 suite/run.py`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
-A marketplace added from a local folder, as [p4-phi's README](lbiza/plugins/p4-phi/README.md#install) installs it, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.
+A plugin's version lives in one file, its own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json`, and each such change bumps it there.
+No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `test_wiring.py` in `lbiza/plugins/p4-phi/hooks/` holds every entry of the catalog to that.
+The `suite` check of [`.github/workflows/suite.yml`](.github/workflows/suite.yml) runs on every pull request and every push to `main`: every test of the repository through `python -X utf8 suite/run.py`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
+An install takes the new version at Claude Code's next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` where it is off, as it is by default for a marketplace like this one.
+A session that is running keeps the version it loaded until `/reload-plugins` or its next start.
+A marketplace added from a local folder, by `claude plugin marketplace add` with the path of a checkout's root, runs the plugins in place, so the machine that holds that folder sees a change at its next session start or `/reload-plugins` without a version change.
 The rules are on Anthropic's [plugin loading page](https://code.claude.com/docs/en/plugins/loading.md).
