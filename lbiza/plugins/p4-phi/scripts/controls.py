@@ -10,7 +10,10 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                preferences.epitaxyPrefs["dframe-group-scopes"], each scope with `groups`, each group an `id` and a
                `name`, and `assignments`, which maps `code:<sessionId>` to a group id. p4-phi reads the filing there
                each time it matters and keeps no copy of its own. A file that is missing or shaped otherwise makes
-               nobody a puppeteer. Nothing stops a session from filing itself, since the app asks nobody:
+               nobody a puppeteer. Where phi.json turns `app_tools` on, the plugin's hooks module asks the app's own
+               tools, and a session's section is read first from what they answered: phi.app_group, from `group` of
+               `get_session` and `list_sessions`, and phi.section_id, from `list_sections` or `list_groups`. The file
+               is read for a session they did not answer. Nothing stops a session from filing itself, since the app asks nobody:
                the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it
                saw the session there, and tells every session it lists which session controls it.
   the record   `controls` on the puppeteer's session.json lists the sessions it controls, each with the
@@ -122,7 +125,10 @@ def sections():
 
 
 def section_of(sid):
-    return sections().get(str(sid or ""), "")
+    """The sidebar section a session is filed in, '' for none: as the app's own tools answered the hooks module,
+    where they did, else as the app's file assigns it."""
+    held = PHI.app_group(sid)
+    return held["name"] if held is not None else sections().get(str(sid or ""), "")
 
 
 def is_puppeteer(s, store=""):
@@ -789,7 +795,9 @@ def filing(store, s):
     """Where a new orchestrator of an environment is filed: the section its controlled siblings are in."""
     for e in controlled(s):
         if e.get("store") == store and section_of(e["sessionId"]):
-            return f"the section \"{section_of(e['sessionId'])}\""
+            name = section_of(e["sessionId"])
+            gid = PHI.section_id(name, e["sessionId"])     # known where the hooks module asked the app's tools
+            return f"the section \"{name}\"" + (f" of the id `{gid}`" if gid else "")
     return "the ungrouped list under its project"
 
 
@@ -807,8 +815,9 @@ def take_started(home, s):
         rows.append({"sessionId": sid, "store": store, "time": PHI.now(), "started": True})
         have.add(sid)
         lines.append(f"\"{full_title(sid, k)}\" `{sid}` is an orchestrator this puppeteer started, so it "
-                     f"is controlled. File it in {where} with `mcp__ccd_sidebar__move_sessions`, never in "
-                     f"\"{section_of(s['sessionId'])}\".")
+                     f"is controlled. File it in {where} with `mcp__ccd_sidebar__move_sessions`, which takes the "
+                     f"section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers "
+                     f"it, never in \"{section_of(s['sessionId'])}\".")
     if lines:
         _set(s, rows)
     return lines

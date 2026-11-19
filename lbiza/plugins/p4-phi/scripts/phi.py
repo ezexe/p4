@@ -300,11 +300,16 @@ def app_roots():
 # names none for a session moved to top level, where the record still does, in 170 rows, and started_by waits on
 # the record of a session just started, which the app writes its starter into after the session's first hook.
 # `worktreePath` differed in 11 answers of 13 and is left to the record too.
+#
+# Both tools answer a session's sidebar `group`, and for a puppeteer the module asks the sidebar's own tools too,
+# `mcp__ccd_sidebar__list_sections` and, where that answers nothing, `mcp__ccd_sidebar__list_groups`, kept as
+# `sections`. controls.py reads a filing from app_group and section_id first, and from the app's
+# `claude_desktop_config.json` for a session the answers do not hold.
 APP_FILE = "app.json"            # in rows.origin_dir of the CLI session, else in the session's folder in the tree's store
 APP_FRESH_S = 300.0              # how long the file is believed after the module wrote it
 APP_SAME = ("sessionId", "title", "cwd", "originCwd", "isArchived", "permissionMode", "branch")
 APP_AT = {"cli": "", "project": "", "folder": ""}   # whose file is read: Me sets it, and the environment says it before
-ANSWERS = {}                     # APP_FILE's path -> (each session it holds by its id, the id of `self`), read once a process
+ANSWERS = {}                     # APP_FILE's path -> (its sessions by id, the id of `self`, its sections), read once a process
 
 
 class AppRow(dict):
@@ -349,8 +354,8 @@ def app_files():
 
 def app_answers():
     """What the app's tools answered the hooks module, from the first file that is there and fresh: each session it
-    holds by its id, as the tool gave it, and the id of the session the file is of. ({}, '') where no such file
-    is."""
+    holds by its id, as the tool gave it, the id of the session the file is of, and the sidebar's sections where
+    the module asked for them. ({}, '', []) where no such file is."""
     for path in app_files():
         if path not in ANSWERS:
             held, own = {}, ""
@@ -365,16 +370,44 @@ def app_answers():
                 sid = str(row.get("sessionId") or "")
                 if sid.startswith("local_") and sid not in held:
                     held[sid] = row
-            ANSWERS[path] = (held, str(mine.get("sessionId") or "") if mine.get("sessionId") in held else "")
-        if ANSWERS[path][0]:
+            listed = [r for r in (d.get("sections") if isinstance(d.get("sections"), list) else [])
+                      if isinstance(r, dict)]
+            ANSWERS[path] = (held, str(mine.get("sessionId") or "") if mine.get("sessionId") in held else "", listed)
+        if ANSWERS[path][0] or ANSWERS[path][2]:
             return ANSWERS[path]
-    return {}, ""
+    return {}, "", []
 
 
 def app_answer(sid):
     """A session as the app's tools answered it, an AppRow, or None where the module left no fresh answer of it."""
     row = app_answers()[0].get(str(sid or ""))
     return AppRow(sid, from_tools(row)) if row else None
+
+
+def app_group(sid):
+    """The sidebar section a session is filed in, as the app's tools answered the hooks module: its `id` and `name`,
+    both '' for a session filed in none. None where they did not say: no fresh answer of the session, or one with no
+    `group`, which the tools leave out "while the app window has not reported groups yet"."""
+    row = app_answers()[0].get(str(sid or ""))
+    if not row or "group" not in row:
+        return None
+    g = row["group"] if isinstance(row["group"], dict) else {}
+    return {"id": str(g.get("id") or ""), "name": str(g.get("name") or "")}
+
+
+def section_id(name, sid=""):
+    """The id `mcp__ccd_sidebar__move_sessions` takes for the section named `name`, or '': that of the group the
+    session `sid` is filed in where the tools answered it under that name, else that of the section of that name
+    in what `list_sections` or `list_groups` answered, where a built-in section has no name and a custom one is of
+    the kind `manual`."""
+    want = str(name or "").strip().lower()
+    held = app_group(sid) if sid else None
+    if want and held and held["name"].strip().lower() == want:
+        return held["id"]
+    for row in app_answers()[2] if want else []:
+        if str(row.get("name") or "").strip().lower() == want and row.get("kind", "manual") == "manual":
+            return str(row.get("id") or "")
+    return ""
 
 
 RECORDS = {}
@@ -2898,11 +2931,17 @@ def goal_verdict(home, sid):
 def goal_look(a, me):
     """`phi.py look` where phi.json turns `goal` or `app_tools` on: puppeteer.look's answer, and with it `goal`, the
     condition the hooks module sets as the session's native goal, where one is due, and `app_tools`, which has the
-    module ask the app's own tools for sessions. The verdict of a goal already set is read first, at every look."""
+    module ask the app's own tools for sessions, with `app_sections` for a puppeteer, which has it ask the sidebar's
+    sections too. The verdict of a goal already set is read first, at every look."""
     out = puppeteer.look(me.home, me.id, net=a.net, folder_only=False)
     due = ""
     if APP_TOOLS and not out.get("off"):
         out["app_tools"] = True
+        try:                                       # a puppeteer's filing needs the sidebar's sections too
+            if controls.is_puppeteer(load_session(me.home, safe_id(me.id)), me.store):
+                out["app_sections"] = True
+        except Exception as e:  # noqa: BLE001
+            log_failure("app_sections", {}, e)
     if GOAL and not out.get("off"):
         try:
             goal_verdict(me.home, safe_id(me.id))

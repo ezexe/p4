@@ -128,6 +128,7 @@ A `Finding:` on a held file or an owned issue goes straight to its holder, named
 ## A puppeteer
 
 A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
+The line that has it file an orchestrator it started names the section, and `mcp__ccd_sidebar__move_sessions` takes that section's id, which `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers: the line gives the id itself where the store's `phi.json` sets `app_tools` true and the plugin's hooks module asked those tools.
 Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
 Claude Code compacts a session by itself, so a boundary carries no compact question and no line for ezexe to type, and after a compaction, typed or automatic, the SessionStart entry hands a puppeteer its board's path first.
 When a controlled tree closes or a controlled session reports done, a puppeteer is handed one line naming the open issues of the repositories its controlled sessions work in that no live session's record holds as its issue, each once.

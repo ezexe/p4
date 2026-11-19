@@ -526,8 +526,9 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(PUP, "and now?"))
         self.assertIn(f"\"the retry\" `{NEW}` is an orchestrator this puppeteer started, so it is "
                       f"controlled", ctx)
-        self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, never in "
-                      "\"puppeteers\"", ctx)
+        self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, which takes the "
+                      "section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers "
+                      "it, never in \"puppeteers\"", ctx)
         self.assertIn(NEW, [e["sessionId"] for e in t.session(PUP)["controls"]])
         self.assertIn("This session is controlled by a puppeteer", context(t.say(NEW, "carry on",
                                                                                           proj=self.other)))
@@ -1458,6 +1459,122 @@ class NativeCalls(unittest.TestCase):
                       "only once ezexe has said to discard that session's leftover work",
                       "never on `phi.upkeep` alone"):
             self.assertIn(words, upkeep.KEPT)
+
+
+class SidebarTools(unittest.TestCase):
+    """Where phi.json turns `app_tools` on, the plugin's hooks module asks the desktop app's own tools and leaves
+    the answers in app.json: the sidebar group of the session and of each session linked to it, from `get_session`
+    and `list_sessions`, and for a puppeteer the sections with their ids, from `list_sections` or `list_groups`.
+    The filing is read from those answers first, and from the app's own file, `claude_desktop_config.json`, for a
+    session they do not answer. With the setting off the file is read as before."""
+
+    SECTIONS = [{"id": "pinned", "kind": "builtin", "name": "", "order": 0},
+                {"id": "sessions", "kind": "builtin", "name": "", "order": 1},
+                {"id": "cg-9", "kind": "manual", "name": "importers", "order": 2, "session_count": 1, "shown": True}]
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = t = Tree(self._tmp.name)
+        self.other = os.path.join(t.tmp, "other")
+        self.store2 = os.path.join(self.other, ".claude", "p4")
+        os.makedirs(self.store2)
+        t.record(PUP, title="Run the trees")
+        t.record(TOP2, title="Build the importer", cwd=self.other)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def answers(self, group=..., linked=None, sections=None):
+        """What the module writes for the puppeteer's CLI session: its own answer of `get_session` with `group`, the
+        rows of `list_sessions`, and the sections of the sidebar."""
+        os.makedirs(phi.p4conf.sub(self.t.p4, "models"), exist_ok=True)
+        own = {"sessionId": PUP, "title": "Run the trees", "cwd": self.t.proj, **({} if group is ... else {"group": group})}
+        d = {"at": 0, "self": own, **({"sessions": linked} if linked is not None else {}),
+             **({"sections": sections} if sections is not None else {})}
+        write(os.path.join(phi.rows.origin_dir(self.t.proj, CLI[PUP]), phi.APP_FILE), json.dumps(d) + "\n")
+
+    def file(self, **sections):
+        """The app's own file: each session filed in the section its keyword names."""
+        groups = [{"id": f"cg-f{k}", "name": name} for k, name in enumerate(sorted(set(sections.values())))]
+        ids = {g["name"]: g["id"] for g in groups}
+        write(os.path.join(self.t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
+            "dframe-group-scopes": {"acct/org": {"groups": groups, "assignments": {
+                "code:" + sid: ids[name] for sid, name in sections.items()}}}}}}))
+
+    def look(self, host, **env):
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look"],
+                       capture_output=True, text=True, cwd=self.t.proj, timeout=60,
+                       env=self.t.env(host, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0", **env))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1])
+
+    def test_a_puppeteer_is_known_by_the_group_the_tools_answered_with_no_file_of_the_apps(self):
+        t = self.t
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "nothing says where it is filed")
+        self.answers(group={"id": "cg-1", "name": "Puppeteers"})
+        self.assertEqual(t.cli(PUP, "controls").returncode, 0)
+        self.answers(group={"id": "cg-2", "name": "wrappin up"})
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "another section marks nothing")
+
+    def test_a_group_the_tools_answered_stands_over_the_file_and_one_they_left_out_is_the_files(self):
+        t = self.t
+        self.file(**{PUP: "puppeteers"})
+        self.answers(group=None)
+        self.assertEqual(t.cli(PUP, "controls").returncode, 2, "the tools answered it filed in no section")
+        self.answers()
+        self.assertEqual(t.cli(PUP, "controls").returncode, 0, "no `group` in the answer: the app's file says")
+        self.answers(group=None, linked=[])
+        self.assertEqual(t.cli(TOP2, "controls", proj=self.other).returncode, 2,
+                         "and a session of another CLI id reads no answer of this one's")
+
+    def test_a_look_asks_for_the_sections_only_for_a_puppeteer_with_the_setting_on(self):
+        t = self.t
+        self.file(**{PUP: "puppeteers"})
+        t.say(PUP, "Run the trees")
+        t.record(TOP, title="top")
+        t.say(TOP, "Build the exporter")
+        on = {"P4_PHI_APP_TOOLS": "1"}
+        self.assertNotIn("app_sections", self.look(PUP))
+        self.assertIs(self.look(PUP, **on).get("app_sections"), True)
+        self.assertIs(self.look(TOP, **on).get("app_tools"), True)
+        self.assertNotIn("app_sections", self.look(TOP, **on), "an orchestrator filed nowhere")
+
+    def started(self):
+        """The puppeteer controls an orchestrator of the other project and starts a new one there -> its lines."""
+        t = self.t
+        t.say(PUP, "Run the trees")
+        t.say(TOP2, "Build the importer", proj=self.other)
+        self.assertEqual(t.cli(PUP, "controls", TOP2).returncode, 0)
+        t.record(NEW, started_by=PUP, title="the retry", cwd=self.other)
+        t.say(NEW, "Task:\n" + BRIEF + "\n" + phi.NEW_TOP_BRIEF, proj=self.other)
+        return context(t.say(PUP, "and now?"))
+
+    def test_the_filing_line_names_the_sections_id_as_a_linked_sessions_group_gives_it(self):
+        self.answers(group={"id": "cg-1", "name": "puppeteers"},
+                     linked=[{"sessionId": TOP2, "title": "Build the importer", "cwd": self.other,
+                              "group": {"id": "cg-7", "name": "importers"}}])
+        ctx = self.started()
+        self.assertIn(f"\"the retry\" `{NEW}` is an orchestrator this puppeteer started, so it is controlled", ctx)
+        self.assertIn("File it in the section \"importers\" of the id `cg-7` with `mcp__ccd_sidebar__move_sessions`, "
+                      "which takes the section's id as `mcp__ccd_sidebar__list_sections` or "
+                      "`mcp__ccd_sidebar__list_groups` answers it, never in \"puppeteers\"", ctx)
+
+    def test_the_filing_line_names_the_id_the_sections_list_gives_for_a_section_the_file_names(self):
+        self.file(**{TOP2: "importers"})
+        self.answers(group={"id": "cg-1", "name": "puppeteers"}, sections=self.SECTIONS)
+        self.assertIn("File it in the section \"importers\" of the id `cg-9` with", self.started())
+
+    def test_the_groups_list_serves_for_the_sections_and_no_list_leaves_the_id_to_the_two_tools(self):
+        self.file(**{TOP2: "importers"})
+        self.answers(group={"id": "cg-1", "name": "puppeteers"},
+                     sections=[{"id": "cg-4", "name": "Importers", "session_count": 1, "order": 0}])
+        self.assertIn("File it in the section \"importers\" of the id `cg-4` with", self.started())
+
+    def test_with_no_answer_of_the_tools_the_line_names_the_section_and_the_two_tools(self):
+        self.file(**{PUP: "puppeteers", TOP2: "importers"})
+        self.assertIn("File it in the section \"importers\" with `mcp__ccd_sidebar__move_sessions`, which takes the "
+                      "section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers "
+                      "it, never in \"puppeteers\"", self.started())
 
 
 if __name__ == "__main__":

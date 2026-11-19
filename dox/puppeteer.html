@@ -291,6 +291,8 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <li>Each scope there has <code>groups</code>, each with an <code>id</code> and a <code>name</code>, and <code>assignments</code>, which map <code>code:&lt;sessionId&gt;</code> to a group id.</li>
           <li>A session is a puppeteer when no session started it and that file assigns it to a group named “puppeteers”. A worker filed there is not one.</li>
           <li>A file that is missing or shaped otherwise makes nobody a puppeteer.</li>
+          <li>The plugin's hooks module can call the app's tools. Where the store's <code>phi/phi.json</code> sets <code>app_tools</code> true it asks <code>mcp__ccd_session_mgmt__get_session</code> and <code>mcp__ccd_session_mgmt__list_sessions</code>, whose answers hold each session's <code>group</code>, and for a puppeteer <code>mcp__ccd_sidebar__list_sections</code>, or <code>mcp__ccd_sidebar__list_groups</code> where that answers nothing. p4-phi then reads a session's section from those answers first, and from the file for a session they do not hold. That the module's call reaches those tools in a desktop session is not yet seen, so the setting is off unless a project turns it on.</li>
+          <li>The line that has a puppeteer file an orchestrator it started names <code>mcp__ccd_sidebar__list_sections</code> and <code>mcp__ccd_sidebar__list_groups</code> as the tools that answer the section's id for <code>mcp__ccd_sidebar__move_sessions</code>, and gives the id itself where the module's answers hold it.</li>
           <li>Nothing stops a session from filing itself, since the app asks nobody. The rule rests on ezexe's filing: p4-phi says once, in the session and on its record as <code>puppeteerSeen</code>, that it saw the session there, and tells each session it lists which session controls it.</li>
         </ul>
       </div>
@@ -564,7 +566,7 @@ function hook(byEzexe,route){
   var lines=[];
   S.order.forEach(function(k){var n=N(k);
     if(n.started&&!n.controlled&&!n.archived){n.controlled=true;n.told=false;
-      lines.push("\""+n.title+"\" `"+n.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+filing(n.env)+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".")}});
+      lines.push("\""+n.title+"\" `"+n.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+filing(n.env)+" with `mcp__ccd_sidebar__move_sessions`, which takes the section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in \""+SECTION+"\".")}});
   S.order.forEach(function(k){var n=N(k);
     if(!n.par&&n.env&&!n.controlled&&!n.announced&&!n.archived&&n.direct&&controlled().some(function(c){return N(c).env===n.env})){n.announced=true;
       lines.push("\""+n.title+"\" `"+n.id+"` is a new orchestrator in "+storeOf(n)+" that this puppeteer does not control: `"+PHI+" controls "+n.id+"` takes it under control.")}});
@@ -663,7 +665,7 @@ var EX={
     why:"The puppeteer starts the session as the orchestrator of its own topic, in the project of the session that asked, and then files it where that environment's controlled orchestrators are. It is never filed in "+q(SECTION)+".",
     steps:[{side:"app",by:"The puppeteer makes exactly the call p4-phi handed it.",code:call("mcp__ccd_session__start_session",puppCall(e.r))},
            {side:"app",by:"It files the new session in "+e.where+".",code:"mcp__ccd_sidebar__move_sessions",note:"The new session's own first act is detach to top level, in the app and in p4-phi."},
-           {side:"phi",by:"At the puppeteer's next hook the session is controlled, with no command.",out:"phi (p4-phi): \""+e.r.title+"\" `"+e.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+e.where+" with `mcp__ccd_sidebar__move_sessions`, never in \""+SECTION+"\".",
+           {side:"phi",by:"At the puppeteer's next hook the session is controlled, with no command.",out:"phi (p4-phi): \""+e.r.title+"\" `"+e.id+"` is an orchestrator this puppeteer started, so it is controlled. File it in "+e.where+" with `mcp__ccd_sidebar__move_sessions`, which takes the section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in \""+SECTION+"\".",
             note:"p4-phi finds it by the app's record, which names the puppeteer as its parent session. The new session is told of its puppeteer at its next message, as any controlled session is."}],
     app:"A new orchestrator in <"+e.env+">, filed in "+e.where+".",
     phi:"The new session keeps its record in "+e.store+", its own environment's store, and not in the puppeteer's. controls on the puppeteer's record gains it, marked started."}},
