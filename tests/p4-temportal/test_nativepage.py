@@ -88,6 +88,19 @@ class Page(unittest.TestCase):
         for name in ("memory", "scratchpad", "lifetimes"):
             self.assertIn("deleted", rows(text)[name], name)
             self.assertNotIn("still answers", rows(text)[name], name)
+
+    def test_plan_files_are_left_with_what_was_seen_and_why(self):
+        """dox/claude-settings.html holds that p4 does not write plansDirectory. The row says so, says what the live
+        check saw, and is marked as left, and the order holds no part for it."""
+        text = page()
+        row = rows(text)["plans"]
+        self.assertIn('<td class="n">left</td>', row)
+        for said in ('href="claude-settings.html"', "does not write <code>plansDirectory</code>", "2.1.328",
+                     "neither asked about nor refused", "ezexe's to decide"):
+            self.assertIn(said, row, said)
+        self.assertEqual(set(re.findall(r'<li id="part-(\d+)">', text)), set(LANDED))
+        self.assertIn("No, no plugin moves a plan", (DOX / "claude-settings.html").read_text(encoding="utf-8"))
+        self.assertIn('<p id="left">Left: plan files.', text)
         for word in ("/memory", "/rewind", "/resume", "/export", "/context", "/compact", "/autocompact"):
             self.assertIn(f"<code>{word}</code>", rows(text)["commands"], word)
 
