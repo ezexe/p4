@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it as below."
 type: software
 title: "p4"
-abstract: "Two Claude Code plugins: p4-phi, which keeps what linked sessions hand each other and retrieval from the project's own history; and p4-temportal, which keeps what stands in for a default of Anthropic's own system: the auto memory directory, the session scratchpad directory, temp files and their lifetimes."
+abstract: "Two Claude Code plugins: p4-phi, which keeps what linked sessions hand each other and retrieval from the project's own history; and p4-temportal, which keeps the project's auto memory in its store by Claude Code's own autoMemoryDirectory, leaves each session's scratchpad to the app, and gives the store's files lifetimes."
 authors:
   - alias: ezexe
     website: "https://github.com/ezexe"
