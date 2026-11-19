@@ -188,8 +188,9 @@ class Page(unittest.TestCase):
         rows = section.split("<tbody>", 1)[1].split("</tbody>", 1)[0].split("</tr>")[:-1]
         self.assertEqual(len(rows), 7, "one row for each probe the report lists")
         for row, said in zip(rows, (
-                ("Plan pane", "Not settled by a session", "<code>Showing the plan pane.</code>",
-                 "<code>Plan shown (2 steps).</code>"),
+                ("Plan pane", "From plan mode's plan file", "<code>step one of the probe plan</code>",
+                 "<code>Probe step one</code>", "neither step of the list",
+                 "<code>Showing the plan pane.</code>", "<code>Plan shown (2 steps).</code>"),
                 ("<code>$.command.run</code>", "Yes, with no dialog", "<code>Goal set: &lt;condition&gt;</code>",
                  "idle and never typed into", "<code>turn.complete</code>", "it was rejected"),
                 ("<code>SetGoal</code>", "No.", '<code>no tool named "SetGoal" in this session</code>'),
@@ -217,7 +218,10 @@ class Page(unittest.TestCase):
                      "is not yet seen"):
             self.assertIn(said, built, said)
         self.assertIn("goal", phi_settings(), "the key the page names is one phi.json's settings hold")
-        self.assertIn("What the desktop app's Plan pane holds.", page.split('id="not-confirmed"', 1)[1])
+        self.assertIn("which the Plan pane does not show", covers)
+        open_still = page.split('id="not-confirmed"', 1)[1]
+        self.assertNotIn("What the desktop app's Plan pane holds.", open_still, "a look at the pane settled it")
+        self.assertIn("Whether a forked session's first prompt runs as a command", open_still)
 
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)
