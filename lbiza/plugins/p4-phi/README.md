@@ -204,6 +204,8 @@ What the app and Claude Code already do is configured or called, and p4-phi buil
 - The turn for upkeep that is due while every started session is idle is `$.prompt.submit` of the hooks module, the call that already starts the turn after a wait, inside the same `phi.keep_going_max`.
 
 The session runs every command itself, so its own permission rules hold for each: p4-phi asks git only what is true and removes nothing in its own process.
+Where a step or an item wants a new session on a turn no person began, which the app refuses a start on, upkeep has the session start a worker in the Terminal panel in place of the app's card: a scripted `claude -p` run in a worktree of its own, whose prompt is `/goal` with a condition that names its brief, with p4's plugins off and its messages accepted by its settings file, in a session that runs in auto or bypass permissions mode.
+Such a worker has no row in the sidebar, no Changes card and no archive, and once its run has ended and its work is on the default branch upkeep names the close of its tab, the unlock of its worktree and their removal.
 The skill page lists what upkeep cannot do, a start on a turn no person began among them.
 
 ## A puppeteer and the sessions it controls

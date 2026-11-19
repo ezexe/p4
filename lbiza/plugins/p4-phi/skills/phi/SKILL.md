@@ -212,13 +212,32 @@ In any other turn it names no start, since the app refuses one: the app's instru
 That refusal covers a start that would run at once, and it is read in the start tool's own result where a session tries one.
 It does not cover a message, which goes through to a live session on any turn, or a proposal, of which the start tool's text says "the user sees a card and nothing runs until they start it".
 So in such a turn the work goes by `SendMessage` to a live session this one started whose task shares three content words with it and whose context is short, and otherwise it is shown as the app's card, `mcp__ccd_session__start_session` with `initiation` `own_initiative`, with one line to ezexe that the card waits.
+With `phi.upkeep` on, that card gives way to a worker in the Terminal panel, a scripted Claude Code run, where the session runs in auto or bypass permissions mode and its folder is in a git repository whose remote has a default branch.
+The card stays in a mode that asks, since https://code.claude.com/docs/en/headless.md says of a scripted run that "a call that needs approval is denied unless something approves it", and a higher mode than the session's own is ezexe's to give.
+The upkeep lines then end with the form of such a worker, said once: three files the session writes into the folder `terminal-workers` of its shared notes folder, and one call for each worker.
+
+- `worker-settings.json` holds `crossSessionInbound` `accept` and `enabledPlugins` with `p4-phi@p4-marketplace` and `p4-temportal@p4-marketplace` both false.
+- `brief-<name>.md` holds the work, what done looks like, and that the worker reports by one `SendMessage` to the session that started it and by the note `report-<name>.md` beside the brief.
+- `start-<name>.ps1`, or `start-<name>.sh` outside Windows, clears the variables a desktop session's shell hands down, moves to the repository's main checkout and runs `claude -p '/goal Carry out the brief in the file <brief>. This is met when <its end>.' --permission-mode <the session's own mode> --worktree <name> --settings '<the settings file>'`.
+- The call is `mcp__terminal__run_in_terminal` with `title` the worker's name, `cwd` the session's own folder and `command` `& '<folder>\start-<name>.ps1'`, since that tool types one literal line and refuses a variable read, a pipe and a second line.
+
+The prompt is `/goal` because a scripted run is gone when its turn ends, and a goal keeps it running until its condition, which names the brief, is met.
+The installed plugins are turned off in such a worker: https://code.claude.com/docs/en/headless.md has `claude -p` without `--bare` load installed plugins "as an interactive session would", the run's folder is the worktree `--worktree` made, where p4's hooks would set up a second store, and p4-phi knows a worker by the app's record of it, which a scripted run has none of.
+It is never started with `--bare`, which binds no inbox, so no message would reach it.
+The `accept` is what https://code.claude.com/docs/en/cross-session-messaging.md, "Non-interactive sessions", names for it: "To let a `-p` worker take messages unattended, start it with `crossSessionInbound` set to `accept` in its `--settings` value."
+The first such worker, started on 2026-11-19 on Claude Code 2.1.328 with that settings file while the user settings turn both plugins on, heard no hook of either plugin, kept its goal to the end, and held git's lock on its worktree.
+`--worktree <name>` puts it in `.claude/worktrees/<name>` at the repository's root on the branch `worktree-<name>`, and https://code.claude.com/docs/en/worktrees.md says "Non-interactive runs with `-p` skip the trust check", so no trust screen stops it.
+What such a worker lacks: no row in the sidebar, no Changes card, no archive, and no live check in the desktop app, so p4-phi's records hold nothing of it, and its message, its note and its tab are all that tell of it.
+Once its run has ended, which upkeep reads from the process the lock on its worktree names, as Claude Code 2.1.328 writes it, and its worktree is clean with its work on the default branch, the upkeep line names the close of its tab, `mcp__terminal__stop_terminal_tab` with `close: true`, then `git worktree unlock "<worktree>"`, `git worktree remove "<worktree>"` with no force and `git branch -d worktree-<name>`.
+The unlock is there because a scripted run leaves its lock: https://code.claude.com/docs/en/worktrees.md, "Clean up worktrees", says "Claude Code leaves the lock it took on each one at creation in place until a later session's stale-lock sweep releases it", and "if git refuses because the worktree is locked, run `git worktree unlock` on it first".
+One whose run ended with uncommitted changes, or with commits that are not on the default branch, is named once and left, with its report note to read, since a scripted run takes no message once it has ended.
 
 When every session it started is idle and an act is due that no message carried yet, the hooks module starts one turn for it, whose prompt opens `phi (p4-phi): upkeep is due`.
 Each such turn counts against `phi.keep_going_max`, together with the module's turns after a wait, the count starts over only when ezexe's own message begins a turn, and no act starts a second turn, so two sessions that answer each other never wake each other without end.
 
 What upkeep cannot do:
 
-- It cannot start a session on a turn no person began, the turn the hooks module starts among them, as the paragraph above says.
+- It cannot start a session of the desktop app on a turn no person began, the turn the hooks module starts among them, as the paragraphs above say: what it has started there is a worker in the Terminal panel, which the app lists in no sidebar and archives by no tool.
 - It cannot archive without the app's approval card in a session that runs in neither auto nor bypass permissions mode: that card is the app's own rule and a permission mode is ezexe's to set.
 - It cannot archive a session the app refuses: by the archive tool's text that is one still working, mid-turn or with live background work, one that is pinned and, outside bypass permissions mode, one open on ezexe's screen.
 - It cannot close a terminal tab ezexe typed in, which the app refuses.
