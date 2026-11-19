@@ -38,11 +38,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv"
 PACKAGES = ("anthropic>=2.6",)      # p4's own needs beyond ezexe/phi and torch: the SDK p4-phi's teacher.py calls
-PHI_GIT = "git+https://github.com/ezexe/phi"
+PHI_FOLDER = "lbiza"      # the folder of ezexe/phi that holds its pyproject.toml, its packages and its tests
+PHI_GIT = "git+https://github.com/ezexe/phi#subdirectory=" + PHI_FOLDER
 TORCH_CPU = "https://download.pytorch.org/whl/cpu"
 CHECK = ("torch", "numpy", "phi_prune", "phi_rank", "phi_store", "phi_model", "anthropic")
 NEED_TORCH = ("torch", "phi_prune", "phi_rank")     # what cannot import on a machine with no torch build
-PHI_PYPROJECT = "https://raw.githubusercontent.com/ezexe/phi/HEAD/pyproject.toml"     # of what PHI_GIT installs
+PHI_PYPROJECT = f"https://raw.githubusercontent.com/ezexe/phi/HEAD/{PHI_FOLDER}/pyproject.toml"     # of what PHI_GIT installs
 PHI_PYTHON = (3, 11, 0)     # ezexe/phi's requires-python, in its place when GitHub's file gives none
 LOWER = re.compile(r"(>=|~=|==|>)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")     # a version specifier that sets a lower bound
 
@@ -72,14 +73,17 @@ def missing(py: Path):
 
 
 def phi_source(given):
-    """An editable ezexe/phi checkout, the given one alone when one is given, else ../phi beside this checkout, or else
-    the GitHub URL."""
+    """The folder of an ezexe/phi checkout to install editable, which is the checkout's lbiza/, where its
+    pyproject.toml is: of the given checkout alone when one is given, else of ../phi beside this checkout, or else the
+    GitHub URL, which names the same folder. A path that names that folder itself is taken as it is."""
     for cand in [Path(given)] if given else [ROOT.parent / "phi"]:
-        if (cand / "pyproject.toml").is_file() and 'name = "phi-prune"' in (cand / "pyproject.toml").read_text(encoding="utf-8"):
-            return cand.resolve(), True
+        for folder in (cand / PHI_FOLDER, cand):
+            file = folder / "pyproject.toml"
+            if file.is_file() and 'name = "phi-prune"' in file.read_text(encoding="utf-8"):
+                return folder.resolve(), True
     if given:
-        raise SystemExit(f"make_venv.py: {given} is not an ezexe/phi checkout, since no pyproject.toml there names "
-                         "phi-prune")
+        raise SystemExit(f"make_venv.py: {given} is not an ezexe/phi checkout, since no pyproject.toml there or in "
+                         f"its {PHI_FOLDER}/ names phi-prune")
     return PHI_GIT, False
 
 

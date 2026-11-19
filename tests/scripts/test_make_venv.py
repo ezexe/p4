@@ -33,16 +33,25 @@ class Venv(unittest.TestCase):
         v.ROOT, v.VENV = self._root, self._venv
 
     def phi(self, where):
-        where.mkdir(parents=True)
-        (where / "pyproject.toml").write_text('[project]\nname = "phi-prune"\n', encoding="utf-8")
-        return where
+        """An ezexe/phi checkout at `where`, as its folder lbiza/, which holds its pyproject.toml."""
+        folder = where / v.PHI_FOLDER
+        folder.mkdir(parents=True)
+        (folder / "pyproject.toml").write_text('[project]\nname = "phi-prune"\n', encoding="utf-8")
+        return folder
 
     def test_phi_from_the_sibling_checkout_else_github(self):
         self.assertEqual(v.phi_source(None), (v.PHI_GIT, False))
         sib = self.phi(self.tmp / "phi")
         self.assertEqual(v.phi_source(None), (sib.resolve(), True))
         other = self.phi(self.tmp / "elsewhere" / "phi")
-        self.assertEqual(v.phi_source(str(other)), (other.resolve(), True))
+        self.assertEqual(v.phi_source(str(other.parent)), (other.resolve(), True), "a named checkout gives its lbiza/")
+        self.assertEqual(v.phi_source(str(other)), (other.resolve(), True), "the folder itself is taken as it is")
+
+    def test_github_names_the_folder_of_ezexe_phi_that_holds_its_pyproject(self):
+        """ezexe/phi keeps pyproject.toml in lbiza/, so pip is given that folder and the floor is read from it."""
+        self.assertEqual(v.PHI_FOLDER, "lbiza")
+        self.assertEqual(v.PHI_GIT, "git+https://github.com/ezexe/phi#subdirectory=lbiza")
+        self.assertEqual(v.PHI_PYPROJECT, "https://raw.githubusercontent.com/ezexe/phi/HEAD/lbiza/pyproject.toml")
 
     def test_each_test_removes_its_tree(self):
         case = Venv("test_interpreter_path_per_platform")
@@ -257,8 +266,7 @@ class Venv(unittest.TestCase):
                  '# requires-python = ">=3.12"\nrequires-python = ">=3.10"': (3, 10, 0), "": None}
         for line, floor in forms.items():
             self.assertEqual(v.python_floor(self.requires(line), True), floor, line)
-            (self.tmp / "phi" / "pyproject.toml").unlink()
-            (self.tmp / "phi").rmdir()
+            shutil.rmtree(self.tmp / "phi")
         real = getattr(v, "github_pyproject", None)
         self.addCleanup(setattr, v, "github_pyproject", real)
         v.github_pyproject = lambda: None
