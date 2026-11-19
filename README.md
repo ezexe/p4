@@ -45,11 +45,12 @@ prompty → prompter ─┼─ pioneer_b ─┼─ puppeteer
 ```
 
 Here the message is under-determined, and one draft would have to guess between distinct readings of it.
-A message that names its readings itself, as in "either A or B", is drafted as one worker for each reading when no code owner matches and the depth and count caps leave room, and `phi.py readings` does the same for readings the session names.
-The orchestrator starts each worker beside the others with the exact call the gate hands it.
-Each reading's brief tells its worker to change no tracked file and commit nothing, and to end its report with a `Result:` line.
-p4-phi merges the group once every reading has a result, and tells the orchestrator beside its next message: a reading shown done with `phi.py done` is merged from that text, and one archived with no result is marked lost so its group still closes.
-Readings that converge collapse to one result. A fork that survives the merge is settled by the session tree where it can be, with `phi.py merge <group> --result`, and otherwise goes to ezexe as one `AskUserQuestion` with options and a default.
+Routing finds a message that names its readings itself, as in "either A or B", when no code owner matches, and writes the readings.
+p4-phi starts no session for a reading: it hands the orchestrator one line that names the workflow the plugin ships, `/p4-phi:readings`, with the readings as its `args`, and the session names the readings itself the same way.
+Claude Code runs that workflow: one agent for each reading, a reading that writes files in a git worktree of its own, and a script that compares what they came to.
+The run returns `collapsed` with the one result the readings came to, or `forked` with an option for each reading and a default.
+A run takes no input from a person, so a reading that cannot go on without ezexe returns its question as data.
+Only a fork goes to ezexe, as one `AskUserQuestion` the session asks after the run, and the chosen reading then goes on as an ordinary worker session.
 
 ## Meta-Prompting
 

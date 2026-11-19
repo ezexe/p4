@@ -53,7 +53,7 @@ import plans  # noqa: E402  each session's task list with step addresses, which 
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
-import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, readings, meta pass
+import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, the meta pass
 
 puppeteer.PHI = sys.modules[__name__]   # phi.py runs as a script, so puppeteer.py is handed this module, not a copy
 import controls  # noqa: E402  a puppeteer filed in the sidebar section, and the sessions it controls
@@ -2183,8 +2183,8 @@ def h_user_prompt_submit(payload):
                 pass
             s = load_session(me.home, s["sessionId"])
         starts.started(me.home, rid, s["sessionId"])
-    if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(me.home, s, payload.get("prompt")):
-        RAN["drafted"] = s.get("draft") or (s.get("reading") or {}).get("group", "")   # its start draft or reading
+    if not load_turns(me.home, s["sessionId"]) and puppeteer.arrived(s, payload.get("prompt")):
+        RAN["drafted"] = s.get("draft")             # its start draft
     req = request_of(payload.get("prompt"))
     s["turnBy"] ="user" if req else (
         "session" if re.search(r"<cross-session-message\b", str(payload.get("prompt") or "")) else "event")
@@ -2419,11 +2419,6 @@ def h_stop(payload):
     if not s.get("task"):
         s["task"], s["taskAt"] = row["prompt"], row["time"]
     save_session(me.home, s)
-    if above and isinstance(s.get("reading"), dict):
-        try:                                       # a reading reported: the orchestrator above merges its group
-            RAN["merged"] = len(puppeteer.merge_all(me.home, above))
-        except Exception:  # noqa: BLE001
-            pass
     replay(me, s, payload.get("transcript_path") or "")
     s = load_session(me.home, s["sessionId"]) or s
     if isinstance(s.get("stale"), dict) and s["stale"].get("told"):

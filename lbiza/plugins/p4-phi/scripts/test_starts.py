@@ -102,7 +102,6 @@ class StartRequests(unittest.TestCase):
         self.assertIn("`use_worktree: false`", phi.new_top_route())
         draft = {"title": "the flush", "context": "fresh", "brief": port, "background": "x" * 90, "parent": TOP}
         self.assertIs(puppeteer.call_of(draft)["use_worktree"], True, "a worker's draft")
-        self.assertIs(puppeteer.call_of({**draft, "reading": {"k": 1}})["use_worktree"], False, "a reading")
         self.assertIs(puppeteer.call_of({**draft, "parent": ""})["use_worktree"], False, "a new orchestrator")
 
     def writer(self, sid="local_wrt00009", files="src/flush.py"):

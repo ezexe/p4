@@ -9,8 +9,8 @@
            orchestrator where none does, and the one session that publishes for that tree, which
            controls.publisher names, publishes what needs an issue. A read-only child, such as a check, an audit,
            a question or a message to pass on, takes no issue and is handed the same line at its first message, for
-           the repository its brief names or the one it runs in. A reading and a repository with no GitHub remote
-           get neither. A shell call that runs `gh issue create` in any other session than that publisher is
+           the repository its brief names or the one it runs in. A repository with no GitHub remote
+           gets neither. A shell call that runs `gh issue create` in any other session than that publisher is
            refused by phi.py's issue guard, which `publishes` reads the call for.
   commits  at each step boundary, a commit made since the issue was taken that closes no issue gets one line.
   proof    before the child counts as finished, its task list names the regression test that proves the issue fixed:
@@ -409,8 +409,6 @@ def ensure(home, s, text, base, where):
         return ""
     if s.get("issue") or s.get("findingsTold"):
         return ""
-    if isinstance(s.get("reading"), dict):
-        return ""                                  # a reading explores and commits nothing: no issue record
     looked = list(s.get("issueLooked") or [])
     if where in looked:
         return ""

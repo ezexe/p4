@@ -23,9 +23,13 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
              and its children are archived with their outcome kept. Routing scores a message against the registered
              routes before a start draft is made; a route whose issue was reopened or whose commit was reverted is
              withdrawn.
-  parallel   an under-determined message becomes one child for each distinct reading. Each ends its report with a
-             `Result:` line, and the orchestrator merges them: readings that converge collapse to one result, and
-             only a fork that survives the merge goes to ezexe, as one question with options and a default.
+  parallel   an under-determined message leaves two or more distinct readings open. Routing writes the readings, and
+             the session is told to run the workflow the plugin ships, workflows/readings.js, as `/p4-phi:readings`:
+             one agent for each reading, their results compared in the script, and either the one result they
+             came to or the fork with its options and a default. Claude Code runs the agents and holds their
+             results, by workflows.md, so p4-phi keeps no group of readings, starts no session for one and merges
+             nothing itself. A run takes no input from a person, by the same page's "Behavior and limits", so only
+             a fork goes to ezexe, as one question the session asks after the run.
   meta       the orchestrator that receives ezexe's message first runs a meta pass over every
              orchestrator's ledger and writes <home>/phi/meta-ledger.md: duplicate topics, orchestrators in conflict
              over the same files or issue, stale topics, and what is left open for the next generation.
@@ -34,8 +38,8 @@ The hooks that hand a session its lines are command hooks, which start no sessio
 verdict is the exact call for the session to make, and the session, which can tell a question from work, makes it or
 leaves it.
 
-Commands, through phi.py: `ledger`, `look`, `draft "<words>"`, `pioneer <draft id>`, `routes`, `readings "<a>"
-"<b>" ... --words "<the message>"`, `merge <group> --result "<text>"`, `meta`, `settle <session> "<what took it up>"`.
+Commands, through phi.py: `ledger`, `look`, `draft "<words>"`, `pioneer <draft id>`, `routes`, `meta`,
+`settle <session> "<what took it up>"`.
 Settings: `puppeteer` set to false in phi/phi.json turns off the watcher and the prompt hook's steps, and
 P4_PHI_PUPPETEER=0 or 1 overrides it for one run. P4_PHI_WATCH=0 runs no look, P4_PHI_WATCH_S sets the
 watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps a look from reading GitHub, and P4_PHI_APP_SESSIONS names
@@ -84,8 +88,10 @@ there their them they have has should would could will want need like into from 
 using one two all any each every not and for the are was were been being its it's can may must more most some such
 than too very what which who how why where while after before over under again new old""".split())
 DRAFT_RE = re.compile(r"phi draft (drf-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
-READING_RE = re.compile(r"phi reading (grp-[0-9a-f]{10}) (\d+) of (\d+) for (\S+?)\.?(?:\s|$)")
-RESULT_RE = re.compile(r"(?im)^\W*result\W*:\s*(.+?)\s*$")
+READINGS = "p4-phi:readings"     # the workflow the plugin ships in workflows/readings.js, which runs as /p4-phi:readings
+# the folder a workflow run gives an agent it isolates, as a run in the desktop app on Claude Code 2.1.326 made it:
+# <repository>/.claude/worktrees/wf_<run id>-<n>, on the branch worktree-wf_<run id>-<n>
+WORKFLOW_TREE = re.compile(r"[/\\]\.claude[/\\]worktrees[/\\]wf_[^/\\]+(?:[/\\]|$)")
 EITHER = re.compile(r"\beither\b\s+(.{6,200}?)\s*,?\s+\bor\b\s+(.{6,200}?)(?=[.?!;\n]|$)", re.I | re.S)
 OR_MAYBE = re.compile(r"([^.?!;\n]{6,200}?)\s*,?\s+\bor (?:maybe|perhaps|else|instead)\b\s+([^.?!;\n]{6,200})", re.I)
 
@@ -501,7 +507,7 @@ def _stat(p):
 def signature(home, top, roots):
     """One hash over the modification times of everything a ledger is made from: every session.json, since any of
     them can join the subtree, the other files of the sessions in it, the start requests, the issue states last
-    read, the readings, and the app's session records."""
+    read, and the app's session records."""
     base = os.path.join(home, "phi", "sessions")
     parts = [_stat(base), _stat(starts.path_of(home)), _stat(states_path(home))]
     try:
@@ -514,7 +520,6 @@ def signature(home, top, roots):
         ids.add(sid)
         d = relay._dir(home, sid)
         parts += [_stat(os.path.join(d, f)) for f in SOURCES[1:]]
-        parts += [_stat(p) for p in sorted(glob.glob(os.path.join(d, "readings", "*.json")))]
     # of the app's records: those of the subtree's sessions as they change, and the others by name, so a new one
     # counts once and another tree's activity leaves this ledger alone
     for p, m, size in app_look(roots):
@@ -531,8 +536,10 @@ def outcome_kept(home, parent, sid):
 
 def build(home, top, net=False):
     """The ledger of an orchestrator as data: its reconcile lines, a row for each session of its subtree, their open
-    background tasks, the start requests waiting, the issues tied to them, the readings being merged, and the work
-    closed sessions left unfinished."""
+    background tasks, the start requests waiting, the issues tied to them, and the work closed sessions left
+    unfinished. A subagent that wrote files is a level miss, but for an agent of a workflow run that wrote only in
+    the git worktree the run gave it: the readings workflow gives a reading that writes such a worktree, and
+    workflows.md, "Behavior and limits", has the agents be what reads, writes and runs commands."""
     phi = _phi()
     every = relay._sessions(home)
     tree = subtree(home, top, every)
@@ -582,17 +589,17 @@ def build(home, top, net=False):
                      "name": (rec or {}).get("name", ""), "working": working(home, sid),
                      "turns": len(turns), "lastTurn": str(last.get("time") or ""), "done": bool(last.get("done")),
                      "report": _short(last.get("report"), 160),
-                     "result": (RESULT_RE.findall(str(last.get("report") or "")) or [""])[-1],
                      "step": {"addr": cur.get("addr"), "content": _short(cur.get("content"), 90)} if cur else None,
                      "stepsDone": sum(1 for x in steps if x.get("status") == "completed"), "steps": len(steps),
                      "open": [_short(x.get("content"), 90) for x in steps if x.get("status") != "completed"][:8],
                      "issue": f"{slug}#{n}" if n else "", "issueState": state,
                      "shard": relay.shard_of(s)[:6], "files": relay.edited_files(home, sid)[:40],
-                     "task": _short(s.get("task"), 300), "reading": s.get("reading") or None})
+                     "task": _short(s.get("task"), 300)})
         for st, t in plans._tasks(plan):
-            if t.get("agent") and t.get("wrote"):
+            wrote = [x for x in t.get("wrote") or [] if not WORKFLOW_TREE.search(str(x))]
+            if t.get("agent") and wrote:
                 misses.append({"id": str(t.get("id")), "sessionId": sid, "title": title,
-                               "step": (st or {}).get("addr", ""), "wrote": list(t["wrote"])[:8]})
+                               "step": (st or {}).get("addr", ""), "wrote": wrote[:8]})
         for t in plans.in_flight(s):               # hooks.md, Stop input: still running at its last turn's end
             tasks.append({"id": str(t.get("id")), "tool": str(t.get("type") or ""), "sessionId": sid,
                           "title": title, "step": "", "what": _short(t.get("description") or t.get("command"), 120),
@@ -610,14 +617,13 @@ def build(home, top, net=False):
         how = ("shown as a suggested task card" if (r.get("claimed") or {}).get("card")
                else "claimed" if r.get("claimed") else "pending")
         asked.append({"id": r["id"], "title": r.get("title", ""), "requester": r.get("requester"), "state": how})
-    groups = [g for sid in sorted(live) for g in load_groups(home, sid)]
-    left = [{"sessionId": sid, "title": phi.title_of(s), "time": s["unfinishedAtArchive"].get("time", ""),
+    left =[{"sessionId": sid, "title": phi.title_of(s), "time": s["unfinishedAtArchive"].get("time", ""),
              "items": list(s["unfinishedAtArchive"].get("items") or [])}
             for sid, depth, s in tree if depth and isinstance(s.get("unfinishedAtArchive"), dict)
             and not s["unfinishedAtArchive"].get("settled")]            # read from the records, with no git here
     return {"top": top, "title": phi.title_of(every.get(top, {})), "parent": relay._parent(every.get(top, {})),
             "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "misses": misses, "requests": asked,
-            "issues": tied, "groups": groups, "unfinished": left}
+            "issues": tied, "unfinished": left}
 
 
 def render(m):
@@ -652,8 +658,6 @@ def render(m):
             bits.append(f"issue {r['issue']} {r['issueState'] or 'state not read'}")
         if r["shard"]:
             bits.append("owned paths " + ", ".join(r["shard"]))
-        if r["reading"]:
-            bits.append(f"reading {r['reading'].get('k')} of {r['reading'].get('group')}")
         if r["report"]:
             bits.append(f"reported \"{r['report']}\"")
         name = f", {r['name']}" if r["name"] else ""
@@ -679,10 +683,6 @@ def render(m):
         out += ["", "## Issues", ""]
         out += [f"- {k}: {v['state'] or 'state not read'}, of {', '.join(v['sessions'])}"
                 for k, v in sorted(m["issues"].items())]
-    if m["groups"]:
-        out += ["", "## Readings", ""]
-        for g in m["groups"]:
-            out.append(f"- {g['id']} \"{_short(g.get('words'), 100)}\": {group_line(g)}")
     return "\n".join(out) + "\n"
 
 
@@ -729,14 +729,10 @@ def model(home, top):
 # answers.
 
 def tick(home, top, net=True, slow=True):
-    """One look of the watcher: the readings merged, the closed sessions checked for unfinished work, the ledger,
-    and, when the ledger changed or the look is a slow one, the landed topics registered as routes and the registered
-    routes checked. `net` lets the look read GitHub, and a slow look that reads it lists, for a puppeteer, the open
-    issues no live session holds."""
-    try:
-        merge_all(home, top)
-    except Exception:  # noqa: BLE001
-        pass
+    """One look of the watcher: the closed sessions checked for unfinished work, the ledger, and, when the ledger
+    changed or the look is a slow one, the landed topics registered as routes and the registered routes checked.
+    `net` lets the look read GitHub, and a slow look that reads it lists, for a puppeteer, the open issues no live
+    session holds."""
     try:
         archive_checks(home, top)                   # once for each session, when it closes
     except Exception:  # noqa: BLE001
@@ -1179,17 +1175,17 @@ def load_draft(home, sid, did):
     return relay._read_json(os.path.join(drafts_dir(home, sid), f"{did}.json")) if sid and did else {}
 
 
-RUN_WORDS = 8                    # words in a row of a message that a brief handed to another session may not hold
+def arrived(s, prompt):
+    """A started session's first message: the draft its brief names is kept on it, which changes s."""
+    m = DRAFT_RE.search(str(prompt or ""))
+    if m and not s.get("draft"):
+        s["draft"] = m.group(1)
+    return bool(s.get("draft"))
+
+
 # the line a worker's brief carries, since its start passes `use_worktree: true`: where it works and who lands it
 WORKTREE_LINE = ("This session works in a git worktree of its own, on a branch of its own: commit there. Its tree's "
                  "orchestrator merges that branch into the default branch and pushes, and this session does neither.")
-
-
-def shares_run(sent, text, n=RUN_WORDS):
-    """True when `text` holds a run of `n` words of `sent`, compared word by word with case and punctuation dropped."""
-    words = lambda x: re.findall(r"[a-z0-9']+", str(x).lower())
-    have, w = " " + " ".join(words(text)) + " ", words(sent)
-    return any(" " + " ".join(w[k:k + n]) + " " in have for k in range(len(w) - n + 1))
 
 
 def topic_of(req):
@@ -1236,7 +1232,7 @@ def test_files(base, paths):
     return out
 
 
-def prompter(home, s, req, read, base, reading=None):
+def prompter(home, s, req, read, base):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
     session, its parent session and the issue it closes when the message names one. The brief states the task by
     its title, its files, what done looks like, and the model and effort the call adds; it quotes no sentence of the
@@ -1247,12 +1243,7 @@ def prompter(home, s, req, read, base, reading=None):
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
     route = read["routes"][0] if read["routes"] else None
-    title = topic_of(reading["title"] if reading else req)
-    own = bool(reading) and not shares_run(req, reading["text"])
-    if reading and own:                             # the session's own words for its reading
-        title = f"Reading {reading['k']}: " + relay.clause_cut(reading["title"], 46).strip(" .,;:")
-    elif reading:                                   # cut from the message: named by number, quoting none of it
-        title = f"Reading {reading['k']} of {reading['n']}"
+    title = topic_of(req)
     repo = next(iter(issues.repos_named(req, base)), ("", ""))
     here = relay.repo_of(base) if base else ""
     slug = repo[1] or (issues.github_of(here) if here else "")
@@ -1261,12 +1252,6 @@ def prompter(home, s, req, read, base, reading=None):
     if full and not named:                          # the words name the issue whole, in whichever repository
         slug, named = full.group(1), int(full.group(2))
     lines = [f"# {title}", "", f"Task: {title}.", ""]
-    if reading:
-        lines += [f"This session takes one reading of the task, reading {reading['k']} of {reading['n']}"
-                  + (f": {reading['text']}" if own else ", which its parent session states below as its own "
-                     "instruction."),
-                  "Work only that reading, and end your report with one line `Result: <what this reading comes to>`, "
-                  "which its parent session merges with the other readings.", ""]
     if route:
         lines += [f"A route that landed before fits this task: \"{route['topic']}\", {route['issue']}, a "
                   f"{route['context']} session, {(route.get('shape') or {}).get('parent', 'a child')}.",
@@ -1274,55 +1259,44 @@ def prompter(home, s, req, read, base, reading=None):
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
         lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
-    if reading:                                     # a reading changes no file
-        lines += ["Files: none", ""]
-    elif paths:                                     # what a worker's brief says it covers; one that names none has none
+    if paths:                                       # what a worker's brief says it covers; one that names none has none
         lines += ["Files: " + ", ".join(f"`{p}`" for p in paths[:8]), ""]
-    if reading:
-        lines += ["A reading explores: change no tracked file and commit nothing, since the readings beside this one "
-                  "share the checkout. Its parent session lands the reading that survives the merge.", "",
-                  phi.DECIDE, "",
-                  "Done looks like: the reading worked through, and its `Result:` line reported.", "Report when done."]
+    if named:
+        lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
+    elif slug:
+        lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
+                  f"`Finding:` line, which the parent session passes up unchanged.", ""]
+    if parent:
+        lines += [WORKTREE_LINE, ""]
+    tests = test_files(base, paths)
+    lines += [phi.RESEARCH, "", phi.DECIDE, ""]
+    if tests:                                       # the tests the change touches, and no whole suite
+        lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
+                  "Done looks like: the change made, those test files passing, committed and reported.",
+                  "Report when done."]
     else:
-        if named:
-            lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
-        elif slug:
-            lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
-                      f"`Finding:` line, which the parent session passes up unchanged.", ""]
-        if parent:
-            lines += [WORKTREE_LINE, ""]
-        tests = test_files(base, paths)
-        lines += [phi.RESEARCH, "", phi.DECIDE, ""]
-        if tests:                                   # the tests the change touches, and no whole suite
-            lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
-                      "Done looks like: the change made, those test files passing, committed and reported.",
-                      "Report when done."]
-        else:
-            lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
-                      "Report when done."]
+        lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
+                  "Report when done."]
     if not parent:
         lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
     context = "fresh"
-    did = "drf-" + hashlib.sha1(f"{sid}\n{req}\n{(reading or {}).get('text', '')}".encode("utf-8", "replace")
-                                ).hexdigest()[:10]
+    did = "drf-" + hashlib.sha1(f"{sid}\n{req}\n".encode("utf-8", "replace")).hexdigest()[:10]
     lines += ["", f"phi draft {did} for {parent or 'root'}."]
-    if reading:
-        lines += [f"phi reading {reading['group']} {reading['k']} of {reading['n']} for {sid}."]
     background = (f"The session \"{phi.title_of(s)}\" `{sid}` drafted this start; its ledger is "
                   f"{ledger_path(home, sid)}.")
     return {"id": did, "time": now(), "words": req, "title": title, "brief": "\n".join(lines), "parent": parent,
             "context": context, "issue": f"{slug}#{named}" if named else "", "repo": slug, "paths": paths,
             "route": (route or {}).get("id", ""), "background": starts.background_of(home, sid, background),
-            "reading": reading or None, "drafter": sid}
+            "drafter": sid}
 
 
 def call_of(d):
     """The exact start_session input that starts a draft. A worker's draft writes, so it passes `use_worktree: true`
-    and the worker gets a git worktree and a branch of its own. A reading changes no file and shares this checkout,
-    and a new orchestrator lands in it, so each passes false, as starts.use_worktree says."""
+    and the worker gets a git worktree and a branch of its own. A new orchestrator lands in this checkout, so it
+    passes false, as starts.use_worktree says."""
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"]}
     if d["context"] == "fresh":
-        call.update(use_worktree=bool(d.get("parent")) and not d.get("reading"), background=d["background"])
+        call.update(use_worktree=bool(d.get("parent")), background=d["background"])
     # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
     # decide-by-research line every brief carries is no word of its kind of work
     brief = d["brief"].replace(_phi().DECIDE, "")
@@ -1352,7 +1326,7 @@ def pioneer(home, s, d, read, net=True):
         gate.append("its files are in no GitHub repository, so it carries no issue")
     cap = phi.caps_text(home, s)
     owner = read.get("owner")
-    if owner and not d.get("reading"):
+    if owner:
         verdict = "route"
         gate.append(f"its area has a live code owner, \"{owner['title']}\" `{owner['sessionId']}`: {owner['why']}")
     elif cap:
@@ -1389,232 +1363,48 @@ def verdict_text(home, s, d):
             "travelled." + tail)
 
 
-# --- parallel: one child for each reading, merged ---------------------------------------------------------------------
+# --- parallel: the readings of an under-determined message, as one workflow run ------------------------------------------
+#
+# Routing still finds the message under-determined and writes its readings: no docs page offers that. What works the
+# readings is Claude Code's own. The opening of workflows.md names drafting a hard plan from several independent
+# angles, before committing to one, as a use of a dynamic workflow, and its "Distribute a workflow in a plugin" has a
+# script in a plugin's `workflows/` folder run as `/<plugin>:<name>`. So the plugin ships workflows/readings.js and
+# this module hands the session one line that names it. What the workflow lacks is stated on the same page,
+# "Behavior and limits": "No mid-run user input". A reading that cannot go on without ezexe therefore returns its
+# question as data, and the session asks once, after the run.
+#
+# Seen in a desktop session on Claude Code 2.1.326: the session listed `p4-phi:readings` among its skills and ran it
+# by the Workflow tool with that `name`; SubagentStart and SubagentStop fired for each agent of the run with
+# `agent_type` `workflow-subagent`, so plans.agent_bind made each a task of the step in progress, and no PreToolUse
+# of the Agent tool came before one, so hook.py held no lines for its start; and a reading that wrote ran in
+# <repository>/.claude/worktrees/wf_<run id>-<n> on the branch worktree-wf_<run id>-<n>, both of which stayed after
+# the run. The reading reads that branch from git and returns it, which is how the session finds it.
 
-def groups_dir(home, sid):
-    return os.path.join(relay._dir(home, sid), "readings")
-
-
-def load_groups(home, sid):
-    return [g for g in (relay._read_json(p) for p in sorted(glob.glob(os.path.join(groups_dir(home, sid), "*.json"))))
-            if g.get("id")]
-
-
-def save_group(home, g):
-    _write_json(os.path.join(groups_dir(home, g["parent"]), f"{g['id']}.json"), g)
-
-
-def explore(home, s, req, texts, base):
-    """Drafts an under-determined message as one sibling child for each distinct reading, and returns the group and
-    its drafts. The depth and count caps hold: no more readings than this session may still start."""
-    phi = _phi()
-    sid = s["sessionId"]
-    texts = list(dict.fromkeys(" ".join(str(t).split()) for t in texts if str(t).strip()))
-    if len(texts) < 2:
-        raise ValueError("an under-determined message has two or more distinct readings")
-    if phi.depth_of(home, s) >= phi.MAX_DEPTH:
-        raise ValueError(phi.caps_text(home, s))
-    room = phi.MAX_CHILDREN - len(plans._children(home, sid))
-    if room < 2:
-        raise ValueError(phi.caps_text(home, s) or "this session has no room for two more sessions")
-    texts = texts[:room]
-    gid = "grp-" + hashlib.sha1(f"{sid}\n{req}\n{'|'.join(texts)}".encode("utf-8", "replace")).hexdigest()[:10]
-    read = prompty(home, s, req, base)
-    read["owner"] = None                            # the readings are this orchestrator's to merge: none is routed away
-    drafts = []
-    for k, t in enumerate(texts, 1):
-        d = prompter(home, s, req, read, base, reading={"group": gid, "k": k, "n": len(texts), "text": t, "title": t})
-        d["parent"] = sid
-        drafts.append(pioneer(home, s, d, read, net=False))
-    g = {"id": gid, "parent": sid, "time": now(), "words": req, "state": "open",
-         "readings": [{"k": k, "text": t, "draft": d["id"], "child": ""} for (k, t), d in
-                      zip(enumerate(texts, 1), drafts)]}
-    held = next((x for x in load_groups(home, sid) if x["id"] == gid), None)
-    if held:
-        return held, drafts
-    save_group(home, g)
-    return g, drafts
+def readings_run(texts):
+    """How a session runs the readings workflow on `texts`: the tool, the workflow's name and the `args` it takes.
+    The message is the session's to pass whole, and a reading that writes is the session's to mark."""
+    args = json.dumps({"words": "<the message, whole>", "readings": list(texts)}, ensure_ascii=False)
+    return (f"run the plugin's workflow `/{READINGS}`, the `Workflow` tool with `name` `{READINGS}` and `args` "
+            f"{args}, giving a reading whose working through changes files as "
+            f"{{\"text\": \"<the reading>\", \"writes\": true}}, so its agent writes in a git worktree of its own")
 
 
-def explore_text(home, s, g, drafts):
-    lines = [f"- reading {r['k']}, \"{_short(r['text'], 120)}\": `mcp__ccd_session__start_session` with "
-             + json.dumps(call_of(d), ensure_ascii=False) for r, d in zip(g["readings"], drafts)]
-    return (f"phi (p4-phi): this message of ezexe's is under-determined, with {len(drafts)} distinct "
-            f"readings, and one draft would have to guess between them. Start one child for each reading, siblings "
-            f"under this session, each with exactly the call given; this session then merges their `Result:` lines "
-            f"as group {g['id']}, and only a fork that survives the merge goes to ezexe, as one `AskUserQuestion`. "
-            f"A brief whose reading is cut from the message names it by number only: before that call, restate the "
-            f"reading under the brief as your own instruction to the child, what it is to try and why, quoting no "
-            f"message:\n"
-            + "\n".join(lines))
+def readings_after():
+    """The one line for after a readings run: what each state it returns asks of the session."""
+    return (f"After the run: `collapsed` carries its `result` on as the answer, with no question to ezexe; `forked` "
+            f"puts its one `question` to ezexe with `AskUserQuestion`, an option for each of its `options` and its "
+            f"`default` first, and the chosen reading then goes on as an ordinary child session, by the call "
+            f"`{_phi().commands()} draft \"<the chosen reading>\"` prints, with `source_branch` set to the `branch` "
+            f"that reading returned where it changed files.")
 
 
-def arrived(home, s, prompt):
-    """A started session's first message: the draft and the reading its brief names are kept on it, which changes
-    s."""
-    text = str(prompt or "")
-    m = DRAFT_RE.search(text)
-    if m and not s.get("draft"):
-        s["draft"] = m.group(1)
-    m = READING_RE.search(text)
-    if m and not s.get("reading"):
-        s["reading"] = {"group": m.group(1), "k": int(m.group(2)), "n": int(m.group(3)), "parent": m.group(4)}
-        g = relay._read_json(os.path.join(groups_dir(home, m.group(4)), f"{m.group(1)}.json"))
-        for r in g.get("readings") or []:
-            if r.get("k") == int(m.group(2)) and r.get("child") != s["sessionId"]:
-                rebind(g, r, s["sessionId"])       # a rerun's session replaces the earlier child
-                save_group(home, g)
-    return bool(s.get("draft") or s.get("reading"))
-
-
-def rebind(g, r, sid):
-    """A reading given to the latest session that carries its line; the child before it is kept as `earlier`. A
-    group that closed with this reading lost is opened again."""
-    if r.get("child"):
-        r["earlier"] = (list(r.get("earlier") or []) + [r["child"]])[-8:]
-    r["child"] = sid
-    was_lost = bool(r.pop("lost", None))
-    r.pop("result", None)
-    if g.get("state") == "lost" or (was_lost and g.get("state") != "open"):
-        for k in ("result", "default", "question", "mergedAt", "lost"):
-            g.pop(k, None)
-        g["state"] = "open"
-
-
-def carriers(home, g, r):
-    """The sessions that carry a reading's line, newest last, read from each session's own `reading` as well as the
-    group's child, so a rerun its group file never recorded is found too."""
-    out = []
-    for sid, s in relay._sessions(home).items():
-        rd = s.get("reading") if isinstance(s.get("reading"), dict) else {}
-        if rd.get("group") == g["id"] and rd.get("k") == r.get("k") and relay._parent(s) == g.get("parent"):
-            out.append((str(s.get("createdAt") or ""), sid))
-    return [sid for _, sid in sorted(out)]
-
-
-def result_of(home, sid):
-    """A reading's result: the `Result:` line of its last finished turn that has one, else what it showed with
-    `phi.py done`, and an empty string while it has neither."""
-    turns = _phi().load_turns(home, sid)
-    for t in reversed(turns):
-        got = RESULT_RE.findall(f"{t.get('said') or ''}\n{t.get('report') or ''}")
-        if got:
-            return " ".join(got[-1].split())
-    for t in reversed(turns):
-        if str(t.get("done") or "").strip():
-            return " ".join(str(t["done"]).split())
-    return ""
-
-
-def lost(home, sid):
-    """True when a reading's session is archived, or kept its last turn as it archived itself, with no result."""
-    if not sid or result_of(home, sid):
-        return False
-    s = relay._session(home, sid)
-    turns = _phi().load_turns(home, sid)
-    return bool(relay.gone(home, s) or (turns and turns[-1].get("atArchive")))
-
-
-def same_result(a, b):
-    if " ".join(a.lower().split()).strip(" .") == " ".join(b.lower().split()).strip(" ."):
-        return True
-    n, part = share(a, b)
-    return n >= 2 and part >= 0.8 and abs(len(words(a)) - len(words(b))) <= 2
-
-
-def merge(home, g):
-    """One group of readings merged once every reading has a result: readings that converge collapse to one
-    result, and a fork becomes one question with options and a default. Returns True when its state changed."""
-    if g.get("state") != "open":
-        return False
-    got, gone, changed = [], [], False
-    for r in g["readings"]:
-        held = [x for x in carriers(home, g, r) if x != r.get("child")]
-        res = result_of(home, r["child"]) if r.get("child") else ""
-        if not res and held:                        # a rerun the group file never heard of: the newest with a result
-            pick = next((x for x in reversed(held) if result_of(home, x)), "")
-            if pick or (r.get("child") and lost(home, r["child"]) and not lost(home, held[-1])):
-                rebind(g, r, pick or held[-1])
-                changed = True
-                res = result_of(home, r["child"])
-        if res:
-            r["result"] = res
-            r.pop("lost", None)
-            got.append((r, res))
-        elif r.get("child") and lost(home, r["child"]):
-            r["lost"] = True                        # archived with no result: the group closes without it
-            gone.append(r)
-        else:
-            if changed:
-                save_group(home, g)
-            return False
-    if gone:
-        g["lost"] = [r["k"] for r in gone]
-    if not got:
-        g.update(state="lost", mergedAt=now())
-    elif all(same_result(got[0][1], x) for _, x in got[1:]):
-        g.update(state="collapsed", result=got[0][1], mergedAt=now())
-    else:
-        shown = [r["k"] for r, _ in got if (_phi().load_turns(home, r["child"]) or [{}])[-1].get("done")]
-        g.update(state="forked", default=shown[0] if shown else got[0][0]["k"], mergedAt=now(),
-                 question=f"Which reading of \"{_short(g['words'], 160)}\" is meant?")
-    save_group(home, g)
-    return True
-
-
-def lost_words(g):
-    ks = [str(k) for k in g.get("lost") or []]
-    if not ks:
-        return ""
-    return (f"reading {ks[0]} was" if len(ks) == 1 else f"readings {', '.join(ks)} were") + \
-        " archived with no result and " + ("is" if len(ks) == 1 else "are") + " lost"
-
-
-def group_line(g):
-    gone = f"; {lost_words(g)}" if g.get("lost") else ""
-    have = [r for r in g["readings"] if not r.get("lost")]
-    if g.get("state") == "lost":
-        return f"closed with no result: {lost_words(g)}"
-    if g.get("state") == "collapsed":
-        return (f"{len(have)} reading{'s' if len(have) != 1 else ''} converged on "
-                f"\"{_short(g.get('result'), 160)}\"; their rows are closed{gone}")
-    if g.get("state") == "forked":
-        return (f"the readings fork, so one `AskUserQuestion` goes to ezexe, default reading {g.get('default')}: "
-                + "; ".join(f"reading {r['k']} \"{_short(r['text'], 60)}\" came to \"{_short(r.get('result'), 80)}\""
-                            for r in have) + gone)
-    started = sum(1 for r in g["readings"] if r.get("child"))
-    return f"open, {started} of {len(g['readings'])} readings started, results awaited"
-
-
-def merge_text(g):
-    gone = f" Of its {len(g['readings'])} readings, {lost_words(g)}." if g.get("lost") else ""
-    have = [r for r in g["readings"] if not r.get("lost")]
-    if g.get("state") == "lost":
-        return (f"phi (p4-phi): the readings of \"{_short(g['words'], 120)}\" gave no result:{gone} The "
-                f"group {g['id']} is closed. Start the readings again if the answer is still wanted; a new session "
-                f"carrying a reading's line takes that reading and opens the group again.")
-    if g.get("state") == "collapsed":
-        return (f"phi (p4-phi): the {len(have)} reading{'s' if len(have) != 1 else ''} of "
-                f"\"{_short(g['words'], 120)}\" that gave a result "
-                f"converged on one result: \"{_short(g.get('result'), 300)}\".{gone} They collapse to it: carry it on "
-                f"as the answer and put no question to ezexe.")
-    opts = "; ".join(f"reading {r['k']} \"{_short(r['text'], 80)}\", which came to \"{_short(r.get('result'), 140)}\""
-                     for r in have) + ("." + gone if gone else "")
-    return (f"phi (p4-phi): the readings of \"{_short(g['words'], 120)}\" fork after the merge. If the session "
-            f"tree can settle it, settle it and say why in one line, then `{_phi().commands()} merge {g['id']} "
-            f"--result \"<the result>\"`. Otherwise put one question to ezexe, \"{g.get('question')}\", in one "
-            f"`AskUserQuestion` with these options and reading {g.get('default')} as the default: {opts}.")
-
-
-def merge_all(home, sid):
-    """Merges every open group of an orchestrator where it can be. The orchestrator is told once, beside its next
-    message: p4-phi wires no `asyncRewake` hook, which could wake an idle session with it at once."""
-    out = []
-    for g in load_groups(home, sid):
-        if merge(home, g):
-            relay.warn(home, sid, f"merge:{g['id']}:{g['state']}", merge_text(g))
-            out.append(g)
-    return out
+def readings_text(texts):
+    """What the session is handed for a message routing found under-determined: the workflow to run, in place of
+    one start_session call for each reading, and the line for after the run."""
+    lines = "\n".join(f"- reading {k}: \"{_short(t, 200)}\"" for k, t in enumerate(texts, 1))
+    return (f"phi (p4-phi): this message of ezexe's is under-determined, with {len(texts)} distinct readings, and one "
+            f"draft would have to guess between them:\n{lines}\nStart no session for it: {readings_run(texts)}. The "
+            f"run works each reading in an agent of its own and compares what they came to. {readings_after()}")
 
 
 # --- at a session's archive: what it left unfinished ------------------------------------------------------------------
@@ -1882,24 +1672,19 @@ def on_prompt(home, s, req, base):
             or (relay._parent(s) and not read["within"]):       # a child hands another topic up; it drafts none
         return "\n\n".join(p for p in parts if p), ""
     if len(read["readings"]) >= 2 and not read["owner"]:
-        try:
-            g, drafts = explore(home, s, req, read["readings"], base)
-            parts.append(explore_text(home, s, g, drafts))
-            return "\n\n".join(p for p in parts if p), "explore"
-        except ValueError:
-            pass
+        parts.append(readings_text(read["readings"]))
+        return "\n\n".join(p for p in parts if p), "readings"
     d = pioneer(home, s, prompter(home, s, req, read, base), read)
     parts.append(verdict_text(home, s, d))
     if d["verdict"] == "start":
         parts.append(f"If one draft would have to guess between distinct readings of the message, start none of it: "
-                     f"`{_phi().commands()} readings \"<reading one>\" \"<reading two>\" --words \"<the message>\"` "
-                     f"drafts one child for each reading, for this session to merge.")
+                     + readings_run(["<reading one>", "<reading two>"]) + ". " + readings_after())
     return "\n\n".join(p for p in parts if p), d["verdict"]
 
 
 # --- the commands -----------------------------------------------------------------------------------------------------
 
-COMMANDS = ("ledger", "look", "draft", "pioneer", "routes", "readings", "merge", "meta", "settle")
+COMMANDS = ("ledger", "look", "draft", "pioneer", "routes", "meta", "settle")
 
 
 def command(a, me):
@@ -1946,8 +1731,7 @@ def command(a, me):
     if a.cmd == "draft":
         read = prompty(home, s, a.text, base)
         if len(read["readings"]) >= 2 and not read["owner"]:
-            g, drafts = explore(home, s, a.text, read["readings"], base)
-            print(explore_text(home, s, g, drafts))
+            print(readings_text(read["readings"]))
             return 0
         d = pioneer(home, s, prompter(home, s, a.text, read, base), read)
         print(verdict_text(home, s, d))
@@ -1957,10 +1741,6 @@ def command(a, me):
         if not d:
             raise ValueError(f"no draft {a.draft} in this session")
         print(verdict_text(home, s, d))            # the gate's verdict for a kept draft, as it was handed
-        return 0
-    if a.cmd == "readings":
-        g, drafts = explore(home, s, a.words or " / ".join(a.texts), a.texts, base)
-        print(explore_text(home, s, g, drafts))
         return 0
     if a.cmd == "settle":
         path = os.path.join(relay._dir(home, a.child), "session.json")
@@ -1972,17 +1752,6 @@ def command(a, me):
         d["unfinishedAtArchive"].update(settled=" ".join(a.text.split())[:300], settledBy=sid, settledAt=now())
         relay._write_json(path, d)
         print(f"{a.child}: its unfinished work is settled, and its row leaves the ledger")
-        return 0
-    if a.cmd == "merge":
-        g = next((x for x in load_groups(home, sid) if x["id"] == a.group), None)
-        if not g:
-            raise ValueError(f"no group {a.group} in this session")
-        if a.result:
-            g.update(state="collapsed", result=" ".join(a.result.split()), mergedAt=now(), settledBy="the puppeteer")
-            save_group(home, g)
-        else:
-            merge(home, g)
-        print(f"{g['id']}: {group_line(g)}")
         return 0
     return 2
 
@@ -2004,12 +1773,6 @@ def add_parsers(sub, common):
         if name == "routes":
             p.add_argument("--register", action="store_true", help="register every landed topic the records back")
             p.add_argument("--why", default="", help="a sessionId: say what its route still lacks")
-        if name == "readings":
-            p.add_argument("texts", nargs="+", help="each distinct reading")
-            p.add_argument("--words", default="", help="ezexe's message")
         if name == "settle":
             p.add_argument("child", help="the session whose unfinished work was taken up")
             p.add_argument("text", help="what took it up")
-        if name == "merge":
-            p.add_argument("group")
-            p.add_argument("--result", default="", help="the result the session tree settled the fork on")

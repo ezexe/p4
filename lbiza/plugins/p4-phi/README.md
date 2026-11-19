@@ -31,6 +31,8 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Ships that one agent in `agents/`, named `p4-phi:check` | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
 | Sets `model`, `effort`, `maxTurns`, `tools` and `background` on it, and none of `hooks`, `mcpServers` or `permissionMode` | `plugins/components.md`, "Frontmatter fields in plugin agents" | "Supported fields: `name`, `description`, `model`, `effort`, `maxTurns`, ... `tools`, ... `background`" and "Ignored fields: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`" |
 | Keeps that agent in the background | `sub-agents.md`, "Supported frontmatter fields" | "Set to `true` to keep this subagent in the background even when Claude asks to wait for it." |
+| Runs the readings of an under-determined message as one workflow it ships in `workflows/`, named `p4-phi:readings`, and keeps no explore or merge of its own | `workflows.md`, its opening and "Distribute a workflow in a plugin" | The page names drafting a hard plan from several independent angles as a use of a workflow, and has a script in a `workflows/` folder at the plugin root run as `/<plugin>:<name>`. |
+| Has a reading return its question as data, for the session to ask once after the run | `workflows.md`, "Behavior and limits", and `sub-agents.md`, "Available tools" | A run takes no input from a person while it runs, and `AskUserQuestion` is taken from every subagent. |
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
 | Ships no agent that runs a command, since the session reads the command's output file itself | `interactive-mode.md`, "How backgrounding works" | "Output is written to a file and Claude can retrieve it using the Read tool" |
 | Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
@@ -93,6 +95,37 @@ p4-phi has no setting for a subagent's model or effort, since Claude Code sets b
 Agent teams run in the terminal `claude` command and not in the desktop app, so a desktop session that wants one starts a terminal session to lead it, from the app's Terminal panel, and talks to that lead by message.
 The skill's section "A team in a terminal session" gives the line to type and its conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
 p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
+
+## The readings of an unclear message
+
+A message that leaves two or more distinct readings open gets no start draft, since one draft would have to guess between them.
+Routing writes the readings, and p4-phi hands the session one line that names the workflow the plugin ships in `workflows/readings.js`, which runs as `/p4-phi:readings`.
+The session passes it `args`: `{"words": "<the message, whole>", "readings": ["<a reading>", {"text": "<a reading>", "writes": true}]}`.
+Claude Code runs the script: one agent for each of up to four readings, a reading marked `writes` in a git worktree of its own, each with a result schema, and their results compared in the script.
+p4-phi starts no session for a reading, keeps no group of readings and merges nothing itself.
+
+| The run returns | What the session does |
+| :- | :- |
+| `collapsed`, with the `result` the readings came to | Carries the result on as the answer, and puts no question to ezexe |
+| `forked`, with one `question`, an option for each reading and a `default` | Puts that one question to ezexe with `AskUserQuestion`, then starts the chosen reading as an ordinary child session, with the call `phi.py draft "<the chosen reading>"` prints |
+| `lost` | Runs the readings again if the answer is still wanted, since no agent gave a result |
+
+What the workflow lacks, each by the page that says so:
+
+- A run takes no input from a person, by `workflows.md`, "Behavior and limits", and a subagent has no `AskUserQuestion`, by `sub-agents.md`, "Available tools". A reading that cannot go on without ezexe returns its question in the field `question`, and the session asks once after the run.
+- A hook cannot start a run. The session makes the `Workflow` call, and outside bypass permissions the app shows its approval card until ezexe picks Always, by `workflows.md`, "Approve the plan before it runs".
+- A reading is an agent and no session, so it has no row in the sidebar or the ledger and no issue. The chosen reading goes on as a session for that reason.
+- A worktree a run makes is cut from the default branch on the remote unless `worktree.baseRef` is `head`, by `worktrees.md`, "Choose the base branch". A reading that writes therefore does not see the session's unpushed commits by default.
+- A worktree a reading changed stays on disk with its branch until Claude Code's sweep removes it, by `worktrees.md`, "Clean up subagent and background-session worktrees".
+
+Seen in a desktop session on Claude Code 2.1.326, in a scratch project that loaded a copy of p4-phi at 7669deb with the workflow added:
+
+- The session listed `p4-phi:readings` among its skills and ran it by the `Workflow` tool with that `name`, and the `args` reached the script as an object.
+- `SubagentStart` and `SubagentStop` fired for each agent of the run, with `agent_type` `workflow-subagent`. p4-phi bound each agent to the session's step in progress and closed it at its stop.
+- No `PreToolUse` of the Agent tool comes before such an agent, so p4-phi hands it no lines at its start.
+- A reading that wrote ran in `<repository>/.claude/worktrees/wf_<run id>-<n>` on the branch `worktree-wf_<run id>-<n>`, and both stayed after the run.
+- The reading reads its branch from git and returns it in the field `branch`, which is how the session finds it: it passes that branch as `source_branch` when it starts the chosen reading.
+- The ledger counts no level miss for a file such an agent wrote inside that worktree.
 
 ## A puppeteer and the sessions it controls
 
@@ -204,4 +237,5 @@ What the plugin makes a model do is checked by the cases in `evals/`, run by han
 - `python` 3, `sh` and `git` must be on PATH. On Windows, `sh` comes with Git.
 - The issue loop needs `gh`, signed in, and a repository whose `origin` is on GitHub. Without them it does nothing.
 - The session tree is read from the Claude desktop app's records. In a plain terminal session every session is an orchestrator.
+- The readings workflow needs dynamic workflows on. They are on for every paid plan, on Pro from the Dynamic workflows row in `/config`, and `disableWorkflows` or `CLAUDE_CODE_DISABLE_WORKFLOWS` turns them off. Source: https://code.claude.com/docs/en/workflows.md.
 - The hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, or where `disableAllHooks` is set. Source: https://code.claude.com/docs/en/plugins/mods/create.md. Where it does not load no watcher runs, and a ledger is rewritten at ezexe's message to its orchestrator and by `phi.py ledger`. No report is sent to a starter there and no turn is started for a wait, so a starter reads its workers' reports beside its next message.

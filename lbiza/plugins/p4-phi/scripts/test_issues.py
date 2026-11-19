@@ -187,18 +187,7 @@ class Loop(unittest.TestCase):
                                          "No Finding: here\n> Finding: a; source: b; test: c; files: d"),
                          ["Finding: a; source: b; test: c; files: d", "Finding: e f"], "each line once, at a line start")
 
-    def test_a_reading_gets_no_issue_record(self):
-        """A reading explores and commits nothing, so it gets no issue record."""
-        brief = (f"# Reading 2: count the rows\n\nThis session takes one reading of those words, reading 2 of 2: fix "
-                 f"the count in {self.work}/lib/x.py\nA reading explores: change no tracked file and commit nothing, "
-                 f"since the readings beside this one share the checkout.\nArchive when done.\n\n"
-                 f"phi draft drf-0123456789 for {TOP}.\nphi reading grp-0123456789 2 of 2 for {TOP}.")
-        ctx = context(self.t.say(A, brief))
-        self.assertNotIn("#7", ctx)
-        self.assertNotIn("issue", self.t.session(A))
-        self.plan(A, items("Fix the count in lib/x.py", "Report the result"))
-        self.assertNotIn("issue", self.t.session(A), "nor at its task list")
-        self.assertFalse([c for c in self.calls() if c[:2] == ["issue", "create"]])
+    def test_a_brief_that_changes_no_file_is_no_writing_brief(self):
         self.assertFalse(issues.writing("Fix x.py. A reading explores: change no tracked file and commit nothing."))
 
     def test_the_repository_the_brief_names_wins_over_the_checkouts_origin(self):

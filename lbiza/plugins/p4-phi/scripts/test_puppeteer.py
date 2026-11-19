@@ -13,8 +13,10 @@ session whose owned paths hold its area; a question is left alone.
 recursive: a landed topic registers its route only once its issue is closed, a commit closing it is pushed and its
 session is archived with its outcome kept; a later message with matching words is drafted from that route; a route
 whose issue was reopened is withdrawn.
-parallel: an under-determined message becomes one child for each reading; readings whose results agree collapse, and
-readings that fork become one question with options and a default, which the orchestrator can settle itself.
+parallel: an under-determined message is handed one line that names the workflow the plugin ships,
+`/p4-phi:readings`, with its readings as the `args`, and the line for after the run; no session is started for a
+reading, no group of readings is kept, and each name of the explore and merge machinery is gone. A workflow's
+agent that wrote only in the git worktree its run gave it is no level miss.
 meta: a message of ezexe's to an orchestrator runs the meta pass over every orchestrator's ledger into
 meta-ledger.md, with the duplicate topic, the conflict over one file and the stale topic it finds.
 """
@@ -365,6 +367,32 @@ class WorkerSplit(Base):
         self.assertIn("agw01", miss)
         self.assertIn("src/export/flush.py", miss)
         self.assertIn("the flush port", miss)
+
+    def test_a_workflows_agent_that_wrote_in_the_worktree_its_run_gave_it_is_no_level_miss(self):
+        """The hook input is the one a run of /p4-phi:readings raised on Claude Code 2.1.326: SubagentStart and
+        SubagentStop fire for a workflow's agent with `agent_type` `workflow-subagent`, and no Agent call comes
+        before them. A reading that writes runs in the folder `.claude/worktrees/wf_<run id>-<n>`."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer. Report when done."))
+        self.plan(KID, {"items": [{"content": "Port the flush", "status": "in_progress"}], "scope": "first_task"})
+        tree = os.path.join(t.proj, ".claude", "worktrees", "wf_9bd8d43e-c60-1")
+        for agent, path in (("agwf1", os.path.join(tree, "src", "export", "flush.py")),
+                            ("agwf2", os.path.join(t.proj, "src", "export", "table.py"))):
+            self.recall(KID, "subagent-start", {"hook_event_name": "SubagentStart", "agent_id": agent,
+                                                "agent_type": "workflow-subagent"})
+            log = os.path.join(t.tmp, f"agent-{agent}.jsonl")
+            transcript(log, "work the reading", [("Write", {"file_path": path, "content": "x"}, "ok")], "done")
+            self.recall(KID, "subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": agent,
+                                               "agent_type": "workflow-subagent", "agent_transcript_path": log})
+        tasks = {x["id"]: x for st in jload(self.path(KID, "plan.json"))["steps"] for x in st.get("tasks", [])}
+        self.assertEqual({k: v["status"] for k, v in tasks.items()}, {"agwf1": "completed", "agwf2": "completed"},
+                         "each agent of the run is bound to the step in progress and closed at its stop")
+        text, _ = self.ledger()
+        miss = text.split("## Level misses")[1]
+        self.assertNotIn("agwf1", miss, "a write inside the worktree the run gave the agent is no miss")
+        self.assertIn("agwf2", miss, "a write in the session's own checkout still is")
+        self.assertIn("table.py", miss)
 
 
 class TermsAndGuides(Base):
@@ -861,176 +889,113 @@ class Scorers(Base):
 
 
 class Parallel(Base):
+    """The readings of an under-determined message run as the workflow the plugin ships, workflows/readings.js.
+    p4-phi hands the line that names it and keeps nothing of a reading: no group, no session, no merge."""
+
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")
+    GONE = ("explore", "explore_text", "groups_dir", "load_groups", "save_group", "rebind", "carriers", "result_of",
+            "lost", "same_result", "merge", "lost_words", "group_line", "merge_text", "merge_all", "READING_RE",
+            "RESULT_RE", "shares_run")
 
-    def start(self):
+    def args_in(self, text):
+        """The `args` a line gives the Workflow tool, read as the JSON it is."""
+        return json.JSONDecoder().raw_decode(text.split("and `args` ")[1])[0]
+
+    def test_an_under_determined_message_is_handed_the_workflow_and_no_start(self):
         t = self.t
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
-        t.record(KID2, TOP, title="the other reading")
         ctx = context(t.say(TOP, self.EITHER))
         self.assertIn("under-determined, with 2 distinct readings", ctx)
-        calls = [call_in(ctx, 0), call_in(ctx, 1)]
-        self.assertIn("reading 1 of 2", calls[0]["prompt"])
-        self.assertIn("reading 2 of 2", calls[1]["prompt"])
-        for call in calls:                  # a reading's brief and title hand the child no run of the message's words
-            self.assertEqual(runs_of(self.EITHER, call["prompt"] + " " + call["title"]), [], call)
-        self.assertIn("Result: <what this reading comes to>", calls[0]["prompt"])
-        self.assertIn(phi.DECIDE, calls[0]["prompt"], "a reading decides by research too")
-        for kid, call in zip((KID, KID2), calls):
-            t.say(kid, handed(call["prompt"]))
-        gid = t.session(KID)["reading"]["group"]
-        g = jload(os.path.join(t.dir(TOP), "readings", gid + ".json"))
-        self.assertEqual([r["child"] for r in g["readings"]], [KID, KID2], "one child for each reading, siblings")
-        self.assertEqual({t.started_by(KID)[0], t.started_by(KID2)[0]}, {TOP})
-        return gid
+        self.assertIn("run the plugin's workflow `/p4-phi:readings`", ctx)
+        self.assertIn("the `Workflow` tool with `name` `p4-phi:readings`", ctx)
+        self.assertEqual(self.args_in(ctx), {"words": "<the message, whole>", "readings": [
+            "buffer the rows in memory until the table closes", "write each row straight to the store"]})
+        self.assertIn('{"text": "<the reading>", "writes": true}', ctx, "a reading that writes is marked for a worktree")
+        self.assertIn("Start no session for it", ctx)
+        self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no start_session call for a reading")
+        self.assertNotIn("Result:", ctx, "no reading is asked for a Result line")
+        self.assertFalse(os.path.exists(os.path.join(t.dir(TOP), "readings")), "no group of readings is kept")
+        self.assertFalse(os.path.exists(os.path.join(t.dir(TOP), "drafts")), "and no draft is made for a reading")
+        rows = [json.loads(x) for x in read(os.path.join(t.dir(TOP), "log.jsonl")).splitlines() if x.strip()]
+        self.assertEqual([r.get("puppeteer") for r in rows if r.get("hook") == "user-prompt-submit"][-1],
+                         "readings", "the prompt hook's row says what routing did")
 
-    def test_readings_that_converge_collapse_to_one_result(self):
-        t, gid = self.t, self.start()
-        t.stop(KID, "reading 1", report="Tried it.\nResult: write each row straight to the store, a crash loses none")
-        self.assertIn("results awaited", self.ledger()[0])
-        t.stop(KID2, "reading 2", report="Done.\n\nResult: Write each row straight to the store, a crash loses none.")
-        ctx = context(t.say(TOP, "And?"))
-        self.assertIn("converged on one result", ctx)
-        self.assertIn("put no question to ezexe", ctx)
-        self.assertIn(f"{gid} ", self.ledger()[0])
-        self.assertIn("2 readings converged", self.ledger()[0])
-
-    def test_a_fork_that_survives_the_merge_is_one_question_with_a_default(self):
-        t, gid = self.t, self.start()
-        t.stop(KID, "reading 1", report="Result: buffering is faster by a third and loses rows on a crash")
-        t.stop(KID2, "reading 2", report="Result: straight writes are slower and never lose a row")
-        ctx = context(t.say(TOP, "And?"))
-        self.assertIn("fork after the merge", ctx)
-        self.assertIn("put one question to ezexe", ctx)
-        self.assertIn("reading 1 as the default", ctx)
-        self.assertEqual(ctx.count("Which reading of"), 1, "one question")
-        r = t.cli(TOP, "merge", gid, "--result", "straight writes: losing a row is not acceptable")
-        self.assertIn("converged on \"straight writes", r.stdout)
-
-    def group(self, gid):
-        return jload(os.path.join(self.t.dir(TOP), "readings", gid + ".json"))
-
-    def archived_stop(self, kid):
-        """A reading that archives itself with an empty report: its turn is kept as it goes."""
-        path = transcript(os.path.join(self.t.tmp, kid + "arch.jsonl"), "reading", (), "", "arch")
-        r = self.t.hook("stop", kid, {"hook_event_name": "Stop", "transcript_path": path,
-                                      "last_assistant_message": "", "_atArchive": True})
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-    def test_a_result_given_through_done_is_read(self):
-        """Both readings answer with `phi.py done` and an empty report, and the merge reads the done texts."""
-        t, gid = self.t, self.start()
-        self.assertEqual(t.cli(KID, "done", "buffering was tried and it loses rows on a crash").returncode, 0)
-        t.stop(KID, "reading 1", report="")
-        self.assertEqual(self.group(gid)["state"], "open")
-        self.assertEqual(t.cli(KID2, "done", "straight writes were tried and never lose a row").returncode, 0)
-        t.stop(KID2, "reading 2", report="")
-        g = self.group(gid)
-        self.assertEqual(g["state"], "forked", "the merge took each reading's done text")
-        self.assertEqual(g["readings"][0]["result"], "buffering was tried and it loses rows on a crash")
-        self.assertIn("put one question to ezexe", context(t.say(TOP, "And?")))
-
-    def test_a_result_line_wins_over_the_done_text(self):
-        t, gid = self.t, self.start()
-        t.cli(KID, "done", "ran the buffer test and it passed")
-        t.stop(KID, "reading 1", report="Result: write each row straight to the store, a crash loses none")
-        t.stop(KID2, "reading 2", report="Result: write each row straight to the store, a crash loses none")
-        g = self.group(gid)
-        self.assertEqual(g["state"], "collapsed")
-        self.assertIn("straight to the store", g["result"])
-
-    def test_a_reading_archived_with_no_result_is_lost_and_the_group_closes(self):
-        """An archived reading with no result is lost, and its group closes on what the other readings gave."""
-        t, gid = self.t, self.start()
-        self.archived_stop(KID)
-        self.assertEqual(self.group(gid)["state"], "open", "the other reading is still awaited")
-        t.stop(KID2, "reading 2", report="Result: straight writes never lose a row")
-        g = self.group(gid)
-        self.assertEqual(g["state"], "collapsed", "it closes on what the other gave")
-        self.assertEqual(g["lost"], [1])
-        self.assertIn("reading 1 was archived with no result and is lost", self.ledger()[0])
-        ctx = context(t.say(TOP, "And?"))
-        self.assertIn("reading 1 was archived with no result and is lost", ctx)
-        self.assertIn("straight writes never lose a row", ctx)
-
-    def test_every_reading_lost_closes_the_group_and_says_so(self):
-        t, gid = self.t, self.start()
-        for kid in (KID, KID2):
-            s = t.session(kid)
-            s["archived"] = "2026-11-13 00:02"
-            write(os.path.join(t.dir(kid), "session.json"), json.dumps(s))
-        self.assertEqual(t.cli(TOP, "merge", gid).returncode, 0)
-        g = self.group(gid)
-        self.assertEqual(g["state"], "lost")
-        self.assertIn("closed with no result: readings 1, 2 were archived with no result and are lost", self.ledger()[0])
-
-    def test_a_rerun_session_replaces_the_earlier_child(self):
-        """A second pair of sessions carrying the same reading lines takes the first pair's place in the group."""
-        t, gid = self.t, self.start()
-        self.archived_stop(KID)
-        self.archived_stop(KID2)
-        self.assertEqual(self.group(gid)["state"], "lost")
-        for kid in ("local_kid00003", "local_kid00004"):
-            CLI.setdefault(kid, kid.replace("local_kid", "ffff") + "-0000-4000-8000-000000000000")
-            t.record(kid, TOP, title="a rerun")
-        for kid, old in zip(("local_kid00003", "local_kid00004"), (KID, KID2)):
-            brief = jload(os.path.join(t.dir(TOP), "drafts", t.session(old)["draft"] + ".json"))["brief"]
-            t.say(kid, handed(brief))
-        g = self.group(gid)
-        self.assertEqual([r["child"] for r in g["readings"]], ["local_kid00003", "local_kid00004"])
-        self.assertEqual([r["earlier"] for r in g["readings"]], [[KID], [KID2]])
-        self.assertEqual(g["state"], "open", "open again for the rerun")
-        t.stop("local_kid00003", "reading 1", report="Result: straight writes never lose a row")
-        t.stop("local_kid00004", "reading 2", report="Result: straight writes never lose a row.")
-        self.assertEqual(self.group(gid)["state"], "collapsed")
-
-    def test_a_rerun_the_group_never_heard_of_is_found_at_the_merge(self):
-        """The group names the first pair while the results are on a second pair it never recorded."""
-        t, gid = self.t, self.start()
-        self.archived_stop(KID)
-        g = self.group(gid)
-        for k, kid in enumerate(("local_kid00003", "local_kid00004"), 1):
-            write(os.path.join(t.dir(kid), "session.json"), json.dumps({
-                "sessionId": kid, "createdAt": "2026-11-13 00:0%d" % (5 + k), "spawnedFrom": {"sessionId": TOP},
-                "archived": "2026-11-13 00:07", "reading": {"group": gid, "k": k, "n": 2, "parent": TOP}}))
-            write(os.path.join(t.dir(kid), "turns.jsonl"), json.dumps({
-                "id": "t1", "report": "", "atArchive": True,
-                "done": "listed the folder: 61 sessions" if k == 1 else "phi.py tree printed 10 sessions"}) + "\n")
-        self.assertEqual(t.cli(TOP, "merge", gid).returncode, 0)
-        g = self.group(gid)
-        self.assertEqual(g["state"], "forked")
-        self.assertEqual([r["child"] for r in g["readings"]], ["local_kid00003", "local_kid00004"])
-        self.assertEqual(g["readings"][0]["result"], "listed the folder: 61 sessions")
-
-    def test_a_readings_title_ends_at_a_clause(self):
-        """A reading's title ends at a clause, never in the middle of one at a word count."""
+    def test_the_line_for_after_the_run_asks_ezexe_once_on_a_fork_and_starts_the_chosen_reading(self):
         t = self.t
         t.say(TOP, TASK)
-        r = t.cli(TOP, "readings",
-                  "count only the sessions that the command python -I phi.py tree prints, which leaves archived out",
-                  "count every session folder under E:/projects/p4-phi/.claude/p4/phi/sessions, archived ones included",
-                  "--words", "How many sessions does the store hold right now?")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn('"title": "Reading 1: count only the sessions"', r.stdout)
-        self.assertIn('"title": "Reading 2: count every session folder"', r.stdout)
+        t.stop(TOP, TASK, report="planned")
+        ctx = context(t.say(TOP, self.EITHER))
+        after = ctx.split("After the run: ")[1]
+        self.assertIn("`collapsed` carries its `result` on as the answer, with no question to ezexe", after)
+        self.assertIn("`forked` puts its one `question` to ezexe with `AskUserQuestion`", after)
+        self.assertEqual(after.count("AskUserQuestion"), 1, "one question")
+        self.assertIn("its `default` first", after)
+        self.assertIn("the chosen reading then goes on as an ordinary child session", after)
+        self.assertIn(f'{phi.commands()} draft "<the chosen reading>"', after)
+        self.assertIn("`source_branch` set to the `branch` that reading returned", after)
+        chosen = t.cli(TOP, "draft", "Make the narwhal exporter write each row of the flush straight to the store")
+        self.assertIn("Start it now: `mcp__ccd_session__start_session` with ", chosen.stdout,
+                      "the chosen reading is an ordinary draft: " + chosen.stderr)
 
-    def test_the_session_can_name_the_readings_itself_and_the_caps_still_hold(self):
+    def test_the_draft_command_hands_the_same_line(self):
         t = self.t
         t.say(TOP, TASK)
-        r = t.cli(TOP, "readings", "keep the table in the store", "keep the table in a file beside it", "--words",
-                  "Make the exporter keep its table somewhere safe")
-        self.assertEqual(r.stdout.count("`mcp__ccd_session__start_session` with "), 2, r.stderr)
-        call = call_in(r.stdout)
-        self.assertTrue(call["title"].startswith("Reading 1: keep the table in the store"), call["title"])
-        self.assertIn("change no tracked file and commit nothing", call["prompt"])
-        did = puppeteer.DRAFT_RE.search(call["prompt"]).group(1)
-        kept = t.cli(TOP, "pioneer", did, "--request")       # a clean draft has no request: its card holds it
-        self.assertEqual(kept.returncode, 2, "pioneer takes no --request")
-        self.assertEqual(starts.state(t.p4), {}, "no start request is kept for a draft no writer holds")
-        self.assertIn("`mcp__ccd_session__start_session` with ", t.cli(TOP, "pioneer", did).stdout)
-        self.assertIn("message has two or more distinct readings", t.cli(TOP, "readings", "only one").stderr)
+        r = t.cli(TOP, "draft", self.EITHER)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("run the plugin's workflow `/p4-phi:readings`", r.stdout)
+        self.assertEqual(len(self.args_in(r.stdout)["readings"]), 2)
+        self.assertNotIn("`mcp__ccd_session__start_session` with {", r.stdout)
+
+    def test_a_start_draft_names_the_workflow_for_when_one_draft_would_guess(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        ctx = context(t.say(TOP, RETRY))
+        hint = ctx.split("If one draft would have to guess between distinct readings of the message")[1]
+        self.assertIn("run the plugin's workflow `/p4-phi:readings`", hint)
+        self.assertEqual(self.args_in(hint), {"words": "<the message, whole>",
+                                               "readings": ["<reading one>", "<reading two>"]})
+        self.assertIn("After the run: ", hint)
+        self.assertNotIn(" readings \"<reading one>\"", ctx, "no command of phi.py drafts readings")
+
+    def test_the_line_names_the_workflow_the_plugin_ships(self):
+        plugin = os.path.dirname(HERE)
+        name = json.loads(read(os.path.join(plugin, ".claude-plugin", "plugin.json")))["name"]
+        script = read(os.path.join(plugin, "workflows", "readings.js"))
+        meta = re.search(r"name: '([^']+)'", script.split("}", 1)[0]).group(1)
+        self.assertEqual(puppeteer.READINGS, f"{name}:{meta}", "workflows.md: a plugin workflow runs as /<plugin>:<name>")
+
+    def test_the_explore_and_merge_machinery_is_gone(self):
+        t = self.t
+        for name in self.GONE:
+            self.assertFalse(hasattr(puppeteer, name), name)
+        for cmd in ("readings", "merge"):
+            self.assertNotIn(cmd, puppeteer.COMMANDS)
+        t.say(TOP, TASK)
+        r = t.cli(TOP, "readings", "keep the table in the store", "keep the table in a file beside it")
+        self.assertEqual(r.returncode, 2, "phi.py has no readings command")
+        self.assertIn("invalid choice", r.stderr)
+        r = t.cli(TOP, "merge", "grp-0123456789")
+        self.assertEqual(r.returncode, 2, "phi.py has no merge command")
+        for name in ("phi.py", "puppeteer.py", "issues.py"):
+            source = read(os.path.join(HERE, name))
+            for gone in ("Result: <", "phi reading ", '"readings", "*.json"', '.get("reading")'):
+                self.assertNotIn(gone, source, f"{name} holds {gone!r}")
+
+    def test_a_first_message_keeps_its_draft_and_no_reading(self):
+        """A brief an earlier version drafted for a reading still carries its line. The draft it names is kept, and
+        the session is no reading: nothing reads that line any more."""
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed(f"# Reading 1 of 2\n\nReport when done.\n\nphi draft drf-0123456789 for {TOP}.\n"
+                          f"phi reading grp-0123456789 1 of 2 for {TOP}."))
+        self.assertEqual(t.session(KID)["draft"], "drf-0123456789")
+        self.assertNotIn("reading", t.session(KID))
+        text, _ = self.ledger()
+        self.assertNotIn("## Readings", text)
+        self.assertNotIn("reading 1 of", text)
 
 
 class Meta(Base):
