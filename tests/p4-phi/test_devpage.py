@@ -7,8 +7,9 @@ Checked: the page is linked from the index and the README, says the commands and
 that a development session uses, shows the development project's local settings, cites its sources and keeps a
 section of what they do not confirm, and describes nothing p4-phi builds in their place; the evals suite's command
 and a row for each of its cases in place of a prompt piped by hand, both installed plugins off, the marketplace as it
-is registered and the installed copy as a copy in Claude Code's cache that auto-update moves, and every link of the
-page leading somewhere.
+is registered and the installed copy as a copy in Claude Code's cache that auto-update moves, what seven live probes
+showed of Claude Code's goal and plan and which of p4-phi's pieces a goal covers, and every link of the page leading
+somewhere.
 """
 
 import os
@@ -163,6 +164,45 @@ class Page(unittest.TestCase):
                      "Whether a session of the desktop app runs the auto-update pass"):
             self.assertNotIn(gone, page, gone)
         self.assertNotIn("auto-update pass", open_still)
+
+    def test_goal_and_plan_holds_what_each_probe_showed_and_what_a_goal_covers(self):
+        """The section sets what the docs say of Claude Code's goal and plan beside what seven live probes showed,
+        each with the Claude Code version it ran on, and names which of p4-phi's pieces a goal covers. The answer the
+        build rests on is there in words: a hooks module's `$.command.run` set a goal in a started session with no
+        dialog, and `SetGoal` is no tool of such a session."""
+        page = read(PAGE)
+        self.assertIn('href="#goal-and-plan"', page.split("</nav>", 1)[0])
+        section = page.split('<section id="goal-and-plan"', 1)[1].split("</section>", 1)[0]
+        for said in ("Claude Code 2.1.328", "Claude Code 2.1.326", "2026-11-19", "<code>p4-goal-probe</code>",
+                     "<code>goal.md</code>", "<code>hooks-guide.md</code>", "<code>plugins/mods/api.md</code>",
+                     "<code>permission-modes.md</code>", "<code>settings-reference.md</code>",
+                     "<code>desktop.md</code>", "<code>plugins/loading.md</code>",
+                     "<code>mcp__ccd_turn__update_plan</code>"):
+            self.assertIn(said, section, said)
+        rows = section.split("<tbody>", 1)[1].split("</tbody>", 1)[0].split("</tr>")[:-1]
+        self.assertEqual(len(rows), 7, "one row for each probe the report lists")
+        for row, said in zip(rows, (
+                ("Plan pane", "Not settled by a session", "<code>Showing the plan pane.</code>",
+                 "<code>Plan shown (2 steps).</code>"),
+                ("<code>$.command.run</code>", "Yes, with no dialog", "<code>Goal set: &lt;condition&gt;</code>",
+                 "idle and never typed into", "<code>turn.complete</code>", "it was rejected"),
+                ("<code>SetGoal</code>", "No.", '<code>no tool named "SetGoal" in this session</code>'),
+                ("first prompt begins with <code>/goal</code>", "No.", "<code>Task:</code>", "A fork was not tried",
+                 "<code>peer</code>"),
+                ("achieved entry", "<code>goal_status</code>", '<code>"met":true</code>',
+                 '<code>"met":false,"failed":true</code>', '<code>"met":true,"sentinel":true</code>',
+                 "after the Stop hooks of its Stop have answered", "<code>stopReason</code>"),
+                ("worker's message", "Yes.", "<code>A hook blocked the turn from ending 9 consecutive times</code>",
+                 "eight more continuations"),
+                ("one count of eight", "Yes.", "the goal's two blocks and the module's six"))):
+            for part in said:
+                self.assertIn(part, row, part)
+        covers = section.split("What a goal covers of p4-phi, and what it does not</h3>", 1)[1]
+        for said in ("The Stop send-back is the piece a goal covers", "<code>plans.keep_going</code>",
+                     "The done mark is covered in part", "The wake after a wait is covered in part",
+                     "stays a Stop hook", "Nothing else of p4-phi is covered", "The plan copies nothing p4-phi builds"):
+            self.assertIn(said, covers, said)
+        self.assertIn("What the desktop app's Plan pane holds.", page.split('id="not-confirmed"', 1)[1])
 
     def test_every_link_of_the_page_leads_somewhere(self):
         page = read(PAGE)
