@@ -39,6 +39,8 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 `note`, `done` and `tree` are also tools of the session, which the plugin's hooks module runs as those commands with no shell line: `mcp__p4-phi__note` requires `claim` and `source` and takes `kind`, `mcp__p4-phi__done` requires `text`, and `mcp__p4-phi__tree` takes nothing and is loaded through ToolSearch before its first call.
 A tool's result is what its command prints, and a call the command refuses ends in the command's own error.
 The shell line stays for a session whose tool list holds none of the three, and for acting for another session or store, since no tool takes `--session` or `--p4`.
+`/phi-pane` is a command ezexe types, which no session can run: it opens a pane beside the chat that shows this session's `board.md`, `asks.md` and `ledger.md`, whichever of them its folder holds, read anew after each look of the watcher while the pane is open.
+The three pages stay the files a session reads, and the pane writes none of them.
 
 - `note "<claim>" --source "<where it was checked>"` keeps a finding for every session below this one, and `--kind` labels it with a free word, such as `decision`, `waiting` or `parked`.
 - `done "<what was run and what it showed>"` keeps this turn as done.

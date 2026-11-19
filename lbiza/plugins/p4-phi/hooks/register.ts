@@ -12,14 +12,18 @@
 // those alone, so no process starts before a call that has none. And where a project turns `goal` on it gives a
 // worker Claude Code's own goal, which no command hook and no other session can. And it gives a session three of
 // phi.py's commands as tools, `note`, `done` and `tree`, which it runs itself, so a session keeps a finding with
-// no shell line.
+// no shell line. And it is a pane beside the chat, which no command hook can draw: a puppeteer's board, the ledger
+// of ezexe's requests and an orchestrator's ledger of its sessions, as python wrote them into the session's
+// folder, opened by the command `/phi-pane` and read anew after each look while it is open.
 
+import { atom, read, update } from 'claude-code'
 import type {
   AgentSpawnInput,
   EngineInterface,
   PromptComposeResult,
   PromptOrigin,
   Register,
+  RenderElement,
   SessionContextUsage,
   SessionRateLimit,
   Timer,
@@ -28,6 +32,8 @@ import type {
   ToolCheckResult,
   TurnCompleteReason,
 } from 'claude-code'
+
+import type { PhiPage } from '../types'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -137,6 +143,23 @@ const TOOLS = [
 // How long one of those commands may run.
 const TOOL_MS = 30_000
 
+// The pane's id, which is its `ui.render` request id too, and its tab's label beside another plugin's pane.
+const PANE = 'p4-phi'
+const PANE_TITLE = 'p4-phi'
+// The pages the pane shows, in its order, each a file python writes into the session's folder in the store:
+// controls.board_path, asks.page_path and puppeteer.ledger_path. A session has the ones its part gives it: a
+// puppeteer the first two, an orchestrator the last, a worker none.
+const PAGES = [
+  { name: 'board', file: 'board.md', title: 'Board' },
+  { name: 'asks', file: 'asks.md', title: 'Requests of ezexe' },
+  { name: 'ledger', file: 'ledger.md', title: 'Sessions' },
+] as const
+// The most of one page that is drawn: a surface draws 100,000 characters in one drawing, by the types of Markdown.
+const PAGE_CHARS = 24_000
+// The pages as the pane draws them, kept in `$.state`, where a write draws the open pane again. The tag declines
+// what another version of this module stored, which outlives a reload.
+const shown = atom({ plugin: 'p4-phi', key: 'pages' } as const, [], { shape: 'pages-1' })
+
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
@@ -211,6 +234,11 @@ const submitted: Submitted[] = []
 const told = new Map<string, string>()
 // Whether the store's failure model weighs shell calls, as its first line said when it was last read.
 let shellModel: { at: number; isWeighted: boolean } | undefined
+
+// The pane was opened by its command or drawn, so each look's end reads the pages anew, and what was last set in
+// `$.state`, as JSON: the same pages write nothing, so they draw nothing.
+let isPaneOpen = false
+let paged: string | undefined
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -430,6 +458,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
+    if (isPaneOpen) void repage($)
     // One turn at most for one look: a goal to set first, whose command starts its own turn, then the work a wait
     // left unmoved, else the upkeep that is due.
     const prompt = answer?.move || answer?.upkeep
@@ -783,6 +812,10 @@ async function offer($: EngineInterface): Promise<void> {
     switches ??= readSwitches($)
     if ((await switches).isPhiOff) return
     for (const tool of TOOLS) await $.tool.register(tool)
+    await $.command.register({
+      name: 'phi-pane',
+      description: "p4-phi: this session's board, its ledger of requests and its ledger of sessions, in a pane",
+    })
   } catch (error) {
     note($, `p4-phi's tools were not declared: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   }
@@ -811,6 +844,58 @@ async function served($: EngineInterface, args: readonly string[]): Promise<Tool
   } catch (error) {
     return { deny: `phi.py did not run: ${String((error as Error)?.message ?? error).slice(0, 200)}` }
   }
+}
+
+// The pages of the session's folder as they stand, put where the pane reads them. The files are read with no
+// process: python wrote them at the look or at the hook before it. A page that is missing or empty is left out.
+async function page($: EngineInterface): Promise<void> {
+  try {
+    const dir = await folderOf($)
+    const pages: PhiPage[] = []
+    for (const { name, file, title } of dir === undefined ? [] : PAGES) {
+      const path = `${dir}/${file}`
+      const text = (await $.fs.read(path).catch(() => '')).trim()
+      const cut = text.length > PAGE_CHARS ? `${text.slice(0, PAGE_CHARS)}\n\n... the rest is in ${path}` : text
+      if (text !== '') pages.push({ name, title, path, text: cut })
+    }
+    const now = JSON.stringify(pages)
+    if (now === paged) return
+    await update($, shown, () => pages)
+    paged = now
+  } catch (error) {
+    note($, `the pane's pages were not read: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
+// After a look, while the pane is open: the pages read anew. A pane the person closed since is read for no more.
+async function repage($: EngineInterface): Promise<void> {
+  try {
+    if (!(await $.ui.panes()).some(pane => pane.id === PANE)) {
+      isPaneOpen = false
+
+      return
+    }
+  } catch {
+    // an engine that lists no panes: the pages are read all the same
+  }
+  await page($)
+}
+
+// The command `/phi-pane`: the pages as they stand, and then the pane. A pane a command of the person's opens is
+// placed at any width, by the types of `$.ui.open`, and where no surface places one the answer says why.
+async function openPane($: EngineInterface): Promise<string> {
+  isPaneOpen = true
+  await page($)
+  const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
+
+  return opened.isPlaced ? "p4-phi's pane is open." : `p4-phi's pane is open and not drawn: ${opened.reason}`
+}
+
+// One line of a page for a glance: its first line that is not blank, less a heading's marks, cut to the room.
+function glance(text: string, columns: number): string {
+  const first = (text.split('\n').find(line => line.trim() !== '') ?? '').replace(/^#+\s*/, '').trim()
+
+  return first.length > columns ? `${first.slice(0, Math.max(1, columns - 3))}...` : first
 }
 
 // A name as hook.py writes it into a file's name: every character but a letter, a digit, `_` and `-` as `_`.
@@ -960,6 +1045,37 @@ export const register: Register = on => {
   on('tool.run', { tool: 'mcp__p4-phi__tree' }, $ => served($, ['tree'])).catch(() => ({
     deny: 'p4-phi could not run `phi.py tree`.',
   }))
+
+  // The command a person types to see the pane. Nothing runs beneath, since the command is nothing but this.
+  on('command.run', { command: 'phi-pane' }, async $ => ({ text: await openPane($) })).catch(() => ({
+    text: 'p4-phi could not open its pane.',
+  }))
+
+  // The pane's body, drawn from the pages a look or the command put in `$.state`: the read subscribes the drawing,
+  // so a later write draws it again, and a drawing writes nothing. The tree is built with `h`, the factory JSX
+  // compiles to, so the module keeps its name. Docked or inline it is each page whole, as markdown under its
+  // title, and as the desktop app's widget one line a page, cut to the body's columns.
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    isPaneOpen = true
+    const { Box, Text, Markdown } = $.ui.resolve(e)
+    const pages = await read($, shown)
+    const isGlance = e.props.placement === 'widget'
+    const none = isGlance
+      ? 'p4-phi: no board and no ledger.'
+      : 'This session keeps no board and no ledger: it is no puppeteer and no orchestrator, or no look has run yet.'
+    const rows =
+      pages.length === 0
+        ? [h(Text, { dimColor: true }, none)]
+        : isGlance
+          ? pages.map(one => h(Text, { wrap: 'truncate-end' }, glance(one.text, e.props.bodyColumns)))
+          : pages.flatMap(one => [h(Text, { bold: true }, one.title), h(Markdown, { text: one.text })])
+
+    return h(Box, { flexDirection: 'column' }, ...rows) as RenderElement
+  }).catch(($, e) => {
+    const { Text } = $.ui.resolve(e)
+
+    return h(Text, { dimColor: true }, "p4-phi's pane could not be drawn.") as RenderElement
+  })
 
   // The engine decides whether a tool call may run, after the PreToolUse hooks. The event carries the tool, its
   // input, the call's id and a subagent's id, which `classic.PreToolUse` does not hand a function, and no hook

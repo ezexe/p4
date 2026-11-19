@@ -501,15 +501,50 @@ class Module(unittest.TestCase):
         for name in ("CLAUDE_PLUGIN_DATA", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CONFIG_DIR"):
             self.assertIn(f"$.env.get('{name}')", text)
 
-    def test_the_manifest_names_no_contract_and_no_engines_range(self):
-        """A mod "that keeps values in `$.state`" ships a types contract, and this module keeps none. The manifest
-        reference says of `engines`: "Requires Claude Code v2.1.323 or later. To keep the plugin working on v2.0.15
-        through v2.1.75, omit `engines`. Those versions reject the manifest with an `Unrecognized key` error when it
+    def test_the_manifest_names_the_contract_of_the_panes_pages(self):
+        """A mod "that keeps values in `$.state`" ships a types contract, named in plugin.json as `types`. This module
+        keeps one value, the pages its pane draws, and the contract declares it under the plugin's name."""
+        self.assertEqual(self.manifest().get("types"), "./types/index.d.ts")
+        with open(os.path.join(ROOT, "types", "index.d.ts"), encoding="utf-8") as f:
+            contract = f.read()
+        self.assertIn("declare module 'claude-code'", contract)
+        self.assertIn("interface PluginState", contract)
+        self.assertIn(f"'{self.manifest()['name']}': {{ pages: Shaped<PhiPage[]> }}", contract)
+        self.assertNotRegex(contract, r"(?m)^\s*(import|/// <reference)", "a contract holds no import or reference")
+        self.assertEqual(re.findall(r"\{ plugin: '([^']+)', key: '([^']+)' \}", self.text()), [("p4-phi", "pages")])
+
+    def test_the_panes_pages_are_the_files_python_writes(self):
+        """The module holds the three pages' file names as literals, since it reads them with no python: the board
+        controls.board writes, the ledger of requests asks.render writes and the ledger puppeteer.refresh writes, each
+        in the session's own folder. The pane opens by its command alone, and a drawing writes nothing."""
+        sys.path.insert(0, SCRIPTS)
+        try:
+            import phi                      # it hands controls the session folder, as a hook's run does
+            import asks
+            import controls
+            import puppeteer
+        finally:
+            sys.path.remove(SCRIPTS)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as home:
+            folder = phi.session_dir(home, "s1").replace("\\", "/")
+            pages = [controls.board_path(home, "s1"), asks.page_path(home, "s1"), puppeteer.ledger_path(home, "s1")]
+            self.assertEqual([os.path.dirname(page) for page in pages], [folder] * 3)
+            names = [os.path.basename(page) for page in pages]
+        text = self.text()
+        self.assertEqual(re.findall(r"file: '([^']+)'", text), names)
+        self.assertEqual(text.count("$.ui.open("), 1, "the command's own open, and none at a session's start")
+        self.assertIn("on('command.run', { command: 'phi-pane' }", text)
+        self.assertIn("name: 'phi-pane'", text)
+        render = text.split("on('ui.render'", 1)[1].split("on('tool.check'", 1)[0]
+        for write in ("update(", "$.state.set", "$.fs.write", "$.ui.open"):
+            self.assertNotIn(write, render, "a render hook never writes")
+
+    def test_the_manifest_names_no_engines_range(self):
+        """The manifest reference says of `engines`: "Requires Claude Code v2.1.323 or later. To keep the plugin
+        working on v2.0.15 through v2.1.75, omit `engines`. Those versions reject the manifest with an `Unrecognized key` error when it
         has the field", https://code.claude.com/docs/en/plugins/manifest-reference.md. The module's calls are in
         every Claude Code that reads the field, so a range would turn nothing off and would cost those versions the
         whole plugin."""
-        self.assertNotIn("$.state", self.text())
-        self.assertNotIn("types", self.manifest())
         self.assertNotIn("engines", self.manifest())
 
 

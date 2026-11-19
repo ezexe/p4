@@ -66,6 +66,8 @@ type Machine = {
   check?: (payload: Record<string, unknown>) => unknown
   // What the goal command prints for a condition, where it is not `Goal set: <condition>`.
   goalSays?: (condition: string) => string
+  // Why a surface draws no pane it is asked to open, where it draws none.
+  unplaced?: string
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -87,6 +89,9 @@ type Seen = {
   checks: { args: string[]; env: Readonly<Record<string, string>> | undefined; payload: Record<string, unknown> }[]
   // The slash commands it ran, each as a person would type it.
   ran: { command: string; args: string }[]
+  // The slash commands it declared, and the panes it opened and has not seen closed, each with its title.
+  commands: { name: string; description: string }[]
+  panes: { id: string; title?: string }[]
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -110,7 +115,28 @@ function machine(on: On, has: Machine): Seen {
     tools: [],
     checks: [],
     ran: [],
+    commands: [],
+    panes: [],
   }
+  on('command.register', (_, e) => {
+    seen.commands.push({ name: e.name, description: e.description })
+
+    return { value: { command: e.name } }
+  })
+  on('ui.open', (_, e) => {
+    seen.panes.push({ id: e.id, title: e.title })
+
+    return { value: has.unplaced === undefined ? { isPlaced: true } : { isPlaced: false, reason: has.unplaced } }
+  })
+  on('ui.panes', () => ({
+    value: seen.panes.map(pane => ({
+      id: pane.id,
+      title: pane.title ?? pane.id,
+      isShown: true,
+      isFocused: false,
+      isPlaced: has.unplaced === undefined,
+    })),
+  }))
   on('command.run', (_, e) => {
     seen.ran.push({ command: e.command, args: e.args })
 
@@ -1618,4 +1644,183 @@ test('with no python found a tool says so, and starts nothing', async ($, on) =>
     deny: 'p4-phi found no working python to run phi.py with.',
   })
   expect(seen.asked).toEqual([])
+})
+
+// The pane as a surface asks for it: docked beside the transcript, as the desktop app seated a probe's pane.
+const PANE = {
+  plugin: 'p4-phi',
+  component: 'Pane',
+  requestId: 'p4-phi',
+  props: {
+    title: 'p4-phi',
+    isFocused: false,
+    bodyColumns: 26,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 20 },
+    view: {},
+  },
+} as const
+const SURFACES = ['terminal', 'desktop', 'vscode', 'mobile'] as const
+// The command as the engine raises it when a person types `/phi-pane` and presses Enter.
+const TYPED = {
+  command: 'phi-pane',
+  args: '',
+  origin: { kind: 'composer' },
+  presentation: { isFullscreen: true, columns: 160 },
+} as const
+// A puppeteer's folder, which holds all three pages, as controls.board, asks.render and puppeteer.render write them.
+const BOARD = '# Puppeteer board: "Phi integration" `local_top00001`\n\n## Controlled sessions\n\n- "flush" `local_a`: idle.\n'
+const ASKS = '# Requests of ezexe\'s to "Phi integration" `local_top00001`\n\n- r1, 2026-11-19 10:02: port the flush | open\n'
+const LEDGER = '# Ledger: Phi integration\n\n## Sessions\n\n- "flush" `local_a`: working; 2 turns\n'
+const PUPPETEER = {
+  [`${DATA}/.python`]: `${KEPT}\n`,
+  [KEPT]: '',
+  [`${FOLDER}/session.json`]: '{}',
+  [`${FOLDER}/board.md`]: BOARD,
+  [`${FOLDER}/asks.md`]: ASKS,
+  [`${FOLDER}/ledger.md`]: LEDGER,
+}
+
+test("the pane's command is declared at a session's start, no pane opens unasked, and P4_PHI=0 declares none", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...PUPPETEER } })
+
+  await $.session.start(START)
+  await clock.advance(60_000)
+
+  expect(seen.commands.map(command => command.name)).toEqual(['phi-pane'])
+  expect(seen.panes).toEqual([])
+  // With no pane open no look reads a page.
+  expect(seen.read.filter(path => path.endsWith('.md'))).toEqual([])
+  expect(seen.logged).toEqual([])
+})
+
+test('P4_PHI=0 declares no command', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...PUPPETEER } })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.commands).toEqual([])
+})
+
+test('the command opens the pane, which shows the board, the requests and the sessions on every surface', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...PUPPETEER } })
+
+  await $.session.start(START)
+  await clock.settle()
+  const looks = seen.calls.length
+  const ran = await $.command.run(TYPED)
+  await clock.settle()
+
+  expect(ran.text).toBe("p4-phi's pane is open.")
+  expect(seen.panes).toEqual([{ id: 'p4-phi', title: 'p4-phi' }])
+  // The pages are files python wrote already, so the command starts no process.
+  expect(seen.calls.length).toBe(looks)
+  expect(seen.ran).toEqual([])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect((await ui.findAll({ type: 'Text' })).map(title => title.text)).toEqual(['Board', 'Requests of ezexe', 'Sessions'])
+    expect((await ui.findAll({ type: 'Markdown' })).map(page => page.text)).toEqual([BOARD.trim(), ASKS.trim(), LEDGER.trim()])
+    await ui.unmount()
+  }
+})
+
+test("as the desktop app's widget the pane is one line a page, cut to the body's columns", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  machine(on, { files: { ...PUPPETEER } })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'widget', anchoredEdges: [] }, surface: 'desktop' })
+  const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)
+
+  expect(lines).toEqual(['Puppeteer board: "Phi i...', "Requests of ezexe's to ...", 'Ledger: Phi integration'])
+  expect(lines.every(line => line.length <= PANE.props.bodyColumns)).toBe(true)
+  expect(await ui.findAll({ type: 'Markdown' })).toEqual([])
+  await ui.unmount()
+})
+
+test('while the pane is open each look reads the pages anew, and the open drawing shows what changed', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...PUPPETEER } })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  expect((await ui.find({ type: 'Markdown', text: /Ledger/ }))?.text).toBe(LEDGER.trim())
+
+  // A worker's turn ended: the timer's look rewrote the ledger, and the same drawing holds the new page.
+  const moved = LEDGER.replace('working; 2 turns', 'idle; 3 turns, shown done')
+  seen.files[`${FOLDER}/ledger.md`] = moved
+  const wrote = seen.wrote.length
+  await clock.advance(5_000)
+  expect((await ui.find({ type: 'Markdown', text: /Ledger/ }))?.text).toBe(moved.trim())
+  // A drawing writes no file, and the pages are read by the module itself.
+  expect(seen.wrote.length).toBe(wrote)
+  expect(seen.read.filter(path => path.endsWith('/ledger.md')).length).toBeGreaterThan(1)
+
+  // Once the person closed the pane a look reads no page.
+  seen.panes.length = 0
+  await clock.advance(5_000)
+  const read = seen.read.length
+  await clock.advance(60_000)
+  expect(seen.read.length).toBe(read)
+  await ui.unmount()
+})
+
+test('a session with no board and no ledger is told so in the pane, and a long page is cut with its path', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => WORKER })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+
+    expect((await ui.findAll({ type: 'Text' })).map(line => line.text)).toEqual([
+      'This session keeps no board and no ledger: it is no puppeteer and no orchestrator, or no look has run yet.',
+    ])
+    await ui.unmount()
+  }
+
+  // The session came to start others, and its ledger grew past what one page draws.
+  seen.files[`${FOLDER}/ledger.md`] = `# Ledger: Phi integration\n\n${'- a row of the ledger\n'.repeat(2_000)}`
+  await $.command.run(TYPED)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const page = (await ui.find({ type: 'Markdown' }))?.text ?? ''
+
+  expect(page.length).toBeLessThan(24_200)
+  expect(page.endsWith(`... the rest is in ${FOLDER}/ledger.md`)).toBe(true)
+  await ui.unmount()
+})
+
+test('where no surface draws a pane the command says why, and a pane nobody opened draws with nothing stored', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const reason = 'no-surface: no surface is attached'
+  machine(on, { files: { ...PUPPETEER }, unplaced: reason })
+
+  // A surface asks for the pane before any command ran, as after a reload of the module.
+  const ui = await $.ui.mount({ ...PANE, surface: 'mobile' })
+  expect((await ui.findAll({ type: 'Markdown' })).length).toBe(0)
+  await ui.unmount()
+
+  await $.session.start(START)
+  await clock.settle()
+  expect((await $.command.run(TYPED)).text).toBe(`p4-phi's pane is open and not drawn: ${reason}`)
 })
