@@ -7,6 +7,8 @@ const DATA = '/home/u/.claude/plugins/data/p4-temportal-inline'
 const KEPT = '/opt/python/bin/python3'
 const START = { cwd: '/', surface: 'desktop', isInteractive: true } as const
 const EXIT = { reason: 'prompt_input_exit', sessionId: 'cli-0001', resume: { id: 'cli-0001' } } as const
+// What the engine stamps on a command a person types: Enter at the prompt, on the main screen at 80 columns.
+const TYPED = { origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
 
 // What `lifetime.py tick` prints.
 type Answer = Record<string, unknown>
@@ -364,8 +366,8 @@ test('/lifetime list and now run lifetime.py with that command and answer what i
   const listed = 'cookie  notebook/page.html  expires 2026-11-26T07:30+00:00\ncache   notebook/.out/  max_age_days=14'
   const seen = machine(on, { says: args => ({ out: args[0] === 'list' ? `${listed}\n` : 'nothing has expired\n' }) })
 
-  const list = await $.command.run({ command: 'lifetime', args: 'list' })
-  const now = await $.command.run({ command: 'lifetime', args: '  now ' })
+  const list = await $.command.run({ command: 'lifetime', args: 'list', ...TYPED })
+  const now = await $.command.run({ command: 'lifetime', args: '  now ', ...TYPED })
   await clock.settle()
 
   expect(list.text).toBe(listed)
@@ -395,7 +397,7 @@ test('/lifetime set takes a quoted path as one word, and the sweep after it sets
   await clock.settle()
   expect(seen.ran).toEqual([['tick']])
 
-  const set = await $.command.run({ command: 'lifetime', args: 'set "notebook/a page.html" 5m' })
+  const set = await $.command.run({ command: 'lifetime', args: 'set "notebook/a page.html" 5m', ...TYPED })
   await clock.settle()
   expect(set.text).toBe('notebook/a page.html: expires 2026-11-19T08:05')
   expect(seen.ran).toEqual([['tick'], ['set', 'notebook/a page.html', '5m'], ['tick']])
@@ -412,8 +414,8 @@ test('/lifetime clear takes one path, in single quotes too', async ($, on) => {
   const clock = mock.clock(on)
   const seen = machine(on, { says: () => ({ out: 'cleared\n' }) })
 
-  const bare = await $.command.run({ command: 'lifetime', args: 'clear notebook/page.html' })
-  const quoted = await $.command.run({ command: 'lifetime', args: "clear 'notebook/a page.html'" })
+  const bare = await $.command.run({ command: 'lifetime', args: 'clear notebook/page.html', ...TYPED })
+  const quoted = await $.command.run({ command: 'lifetime', args: "clear 'notebook/a page.html'", ...TYPED })
   await clock.settle()
 
   expect([bare.text, quoted.text]).toEqual(['cleared', 'cleared'])
@@ -427,7 +429,7 @@ test('an ask that fits none of the four commands is answered with the usage, and
   const asks = ['', 'help', 'tick', 'tick --let-go', 'sweep', 'list all', 'set notebook/page.html', 'clear', 'now now']
   const asked: (string | undefined)[] = []
 
-  for (const args of asks) asked.push((await $.command.run({ command: 'lifetime', args })).text)
+  for (const args of asks) asked.push((await $.command.run({ command: 'lifetime', args, ...TYPED })).text)
   await clock.settle()
 
   const usage = '/lifetime list | set <path> <lifetime> | clear <path> | now\n'
@@ -442,7 +444,7 @@ test('a refusal of lifetime.py is the answer, and no sweep follows a set that wa
   const refused = 'lifetime.py: memory/MEMORY.md is in memory/, which is never cleared'
   const seen = machine(on, { says: () => ({ code: 2, err: `${refused}\n` }) })
 
-  const set = await $.command.run({ command: 'lifetime', args: 'set memory/MEMORY.md 7d' })
+  const set = await $.command.run({ command: 'lifetime', args: 'set memory/MEMORY.md 7d', ...TYPED })
   await clock.settle()
 
   expect(set.text).toBe(refused)
@@ -454,7 +456,7 @@ test('with no python /lifetime says that lifetime.py did not run', async ($, on)
   const clock = mock.clock(on)
   const seen = machine(on, { files: {}, pythons: {} })
 
-  const list = await $.command.run({ command: 'lifetime', args: 'list' })
+  const list = await $.command.run({ command: 'lifetime', args: 'list', ...TYPED })
   await clock.settle()
 
   expect(list.text).toBe('lifetime.py list did not run, and the debug log says why.')
