@@ -139,10 +139,12 @@ class Paths(unittest.TestCase):
 
     def test_git_bash_and_wsl_paths_are_absolute(self):
         """/e/x as Git Bash writes it is E:/x, not a path under the base."""
+        self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
+        if os.name != "nt":
+            self.skipTest("a letter names a drive only on Windows, and paths_in drops a path on a drive it lacks")
         d = DRIVE
         self.assertEqual(relay.paths_in(f"cat /{d.lower()}/projects/p4-phi/x/a1.txt", f"{d}:/projects/p4-phi"),
                          [relay.norm(f"{d}:/projects/p4-phi/x/a1.txt")])
-        self.assertEqual(relay.norm("/mnt/e/projects/x"), relay.norm("E:/projects/x"))
 
     def test_a_path_on_a_missing_drive_never_hangs(self):
         """A mark's path on a drive this machine lacks gets no repository at once, and that mark is still handed
@@ -169,8 +171,10 @@ class Paths(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
     def test_the_paths_a_note_names(self):
-        got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", f"{DRIVE}:/w")
-        self.assertEqual(got, [relay.norm(f"{DRIVE}:/w/lib/x.py"), relay.norm(f"{DRIVE}:/w/docs/old.md")])
+        # a folder this machine takes as absolute; /w alone would read as the drive W: in Git Bash's spelling
+        base = f"{DRIVE}:/w" if os.name == "nt" else "/work"
+        got = relay.paths_in("deprecates: `lib/x.py` and docs/old.md, see https://example.com/a", base)
+        self.assertEqual(got, [relay.norm(f"{base}/lib/x.py"), relay.norm(f"{base}/docs/old.md")])
 
     def test_a_repository_is_found_without_starting_git(self):
         """A path's repository is found from the `.git` folders above it, with no git process started."""
@@ -786,7 +790,8 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("E:/projects/xy/no", out, "a longer name is not the root")
         self.assertIn("C:/Users/me/tmp/f", out, "a path outside the project stays")
         self.assertIn('"a": "E:/projects/x/lib/a.py"', pathfilter.smudge(out, root))
-        self.assertEqual(pathfilter.project_of("E:/projects/x/.claude/p4"), root)
+        there = root if os.name == "nt" else "/projects/x"          # a folder this machine takes as absolute
+        self.assertEqual(pathfilter.project_of(there + "/.claude/p4"), there)
 
     def worktree_worker(self, name="the-flush"):
         """GRAND as a worker the app started in a git worktree of its own, and that worktree's folder."""
