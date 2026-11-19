@@ -1,9 +1,16 @@
 // p4-temportal's hooks module: the part of the plugin that runs inside Claude Code, where a command hook runs once
 // at its event and is gone. It runs the retention sweep, `lifetime.py tick`, at a session's start, on a timer while
-// the session runs, and in a process let go of at the session's end. It finds the python that find-python.sh proved
-// for the plugin's runner, as p4-phi's module does, and it starts no `sh`.
+// the session runs, and in a process let go of at the session's end. It registers lifetime.py's four commands as the
+// slash command `/lifetime`, which a person runs and the model cannot: the Skill tool refuses a command a module
+// registers. It finds the python that find-python.sh proved for the plugin's runner, as p4-phi's module does, and it
+// starts no `sh`.
+//
+// It registers no tool for the model. A tool's call is served at `tool.call`, by plugins/mods/api.md, "Add a tool",
+// where an answer skips the permission check, and `set`, `clear` and `now` end in deleted files. The event that
+// fires once a call is allowed, `tool.run`, is in the API types of Claude Code 2.1.326 and is no event on 2.1.322,
+// where a module that hooks it does not load.
 
-import type { EngineInterface, Register, Timer } from 'claude-code'
+import type { EngineInterface, ProcessRunResult, Register, Timer } from 'claude-code'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -22,6 +29,22 @@ const ASKED_MS = 1_000
 
 // How long the start of the last sweep may take where nothing meters a session's end.
 const END_MS = 10_000
+
+// The lifetime commands, each with the count of words it takes after its name, and what an ask that fits none is
+// answered.
+const TAKES = new Map([
+  ['list', 0],
+  ['set', 2],
+  ['clear', 1],
+  ['now', 0],
+])
+const HINT = 'list | set <path> <lifetime> | clear <path> | now'
+const USAGE =
+  `/lifetime ${HINT}\n` +
+  'list shows every cookie and cache rule. set gives a file or folder under .claude/p4/temportal/ a lifetime of ' +
+  '30m, 12h, 7d, 2w or an ISO date, after which the retention sweep deletes it. clear removes a lifetime and keeps ' +
+  'the file. now runs the retention sweep, which deletes what is past its lifetime. A path is read from the ' +
+  'working folder, or from temportal/ as list prints it, and one with a space goes in quotes.'
 
 // What `lifetime.py tick` prints: the lines of what it moved and cleared, and the seconds until the next sweep.
 type Answer = { said?: unknown; wait_s?: unknown; let_go?: unknown }
@@ -133,22 +156,31 @@ async function findPython($: EngineInterface): Promise<string | undefined> {
   return python
 }
 
-// Runs one command of lifetime.py for this session's project, as the plugin's runner runs it, and reads the one
-// JSON line it prints. The project is told to lifetime.py as a command hook's environment tells it.
-async function ask($: EngineInterface, args: readonly string[], timeoutMs: number): Promise<Answer | undefined> {
+// Runs one command of lifetime.py for this session's project, as the plugin's runner runs it. The project is told
+// to lifetime.py as a command hook's environment tells it, and a relative path is read from the session's folder.
+async function run(
+  $: EngineInterface,
+  args: readonly string[],
+  timeoutMs: number,
+): Promise<ProcessRunResult | undefined> {
   const python = await findPython($)
   if (python === undefined) return undefined
   const script = `${slashed($.plugin.root)}/hooks/lifetime.py`
   const env = { CLAUDE_PROJECT_DIR: await $.session.root() }
-  let printed = ''
   try {
-    const ran = await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs })
-    printed = ran.stdout.trim().split('\n').at(-1) ?? ''
+    return await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs })
   } catch (error) {
     finding = undefined
-    note($, `lifetime.py ${args.join(' ')} did not run: ${reason(error)}`)
+    note($, `lifetime.py ${args[0] ?? ''} did not run: ${reason(error)}`)
     return undefined
   }
+}
+
+// Runs `lifetime.py tick` and reads the one JSON line it prints.
+async function ask($: EngineInterface, args: readonly string[], timeoutMs: number): Promise<Answer | undefined> {
+  const ran = await run($, args, timeoutMs)
+  if (ran === undefined) return undefined
+  const printed = ran.stdout.trim().split('\n').at(-1) ?? ''
   try {
     const answer: unknown = JSON.parse(printed)
     return typeof answer === 'object' && answer !== null ? (answer as Answer) : undefined
@@ -209,13 +241,50 @@ async function lastSweep($: EngineInterface, left: number): Promise<void> {
   }
 }
 
+// The words of a command as typed. A part in double or single quotes is one word, so a path may hold a space.
+function words(text: string): string[] {
+  const found = text.match(/"[^"]*"|'[^']*'|\S+/g) ?? []
+
+  return found.map(word => (/^(["']).*\1$/s.test(word) ? word.slice(1, -1) : word))
+}
+
+// One command of `/lifetime`: what lifetime.py printed for it, or the line it refused with. A new cookie can be due
+// before the timer's next sweep, so a `set` is followed by a sweep, which sets the timer by that cookie.
+async function lifetime($: EngineInterface, typed: string): Promise<string> {
+  const [name = '', ...rest] = words(typed)
+  if (TAKES.get(name) !== rest.length) return USAGE
+  const ran = await run($, [name, ...rest], SWEEP_MS)
+  if (ran === undefined) return `lifetime.py ${name} did not run, and the debug log says why.`
+  if (name === 'set' && ran.exitCode === 0) void sweep($)
+  const printed = (ran.exitCode === 0 ? ran.stdout : ran.stderr || ran.stdout).trim()
+
+  return printed || `lifetime.py ${name} printed nothing and exited ${ran.exitCode}.`
+}
+
+// The slash command, registered at each start of the module. A name that is taken is refused with a throw.
+async function offer($: EngineInterface): Promise<void> {
+  try {
+    await $.command.register({
+      name: 'lifetime',
+      description: 'Lists, sets and clears the lifetimes of the files p4-temportal keeps, or runs its sweep now.',
+      argumentHint: HINT,
+    })
+  } catch (error) {
+    note($, `/lifetime was not registered: ${reason(error)}`)
+  }
+}
+
 export const register: Register = on => {
-  // The session does not wait for its first sweep.
-  on('session.start', ($, e, next) => {
+  // The session does not wait for its first sweep, and it does wait for the command, which is then listed from the
+  // first prompt.
+  on('session.start', async ($, e, next) => {
     void sweep($)
+    await offer($)
 
     return next(e)
   })
+
+  on('command.run', { command: 'lifetime' }, async ($, e) => ({ text: await lifetime($, e.args) }))
 
   // After a /clear or a resume the process goes on, and the timer with it. Every other reason ends the process.
   on('session.end', async ($, e, next) => {

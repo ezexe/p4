@@ -534,6 +534,28 @@ class Lifetime(unittest.TestCase):
                          (0, 2, ["notebook/notes.md"], "cleared\n"))
         self.assertIn("does not exist", missing.stderr)
 
+    def test_set_and_clear_take_a_cookie_as_list_prints_it(self):
+        """`set notebook/notes.md 7d` run from the project's root, which holds no such path, gives the notebook's
+        file a cookie, `list` prints it by those words, and `clear` takes them too, once the file is gone as well."""
+        f = put(os.path.join(self.t, "notebook", "notes.md"))
+        s = run("--p4", self.p4, "set", "notebook/notes.md", "7d", cwd=self.root)
+        listed = run("--p4", self.p4, "list").stdout
+        os.remove(f)
+        first = run("--p4", self.p4, "clear", "notebook/notes.md", cwd=self.root)
+        again = run("--p4", self.p4, "clear", "notebook/notes.md", cwd=self.root)
+        self.assertEqual((s.returncode, s.stderr, s.stdout.startswith("notebook/notes.md: expires "),
+                          "cookie  notebook/notes.md  expires" in listed, first.stdout, again.stdout),
+                         (0, "", True, True, "cleared\n", "no expiry was set\n"))
+
+    def test_a_path_the_working_folder_holds_is_read_from_it_first(self):
+        """A relative path that names a file of the working folder is that file, so one outside temportal/ is refused
+        though temportal/ holds a file by the same words."""
+        put(os.path.join(self.t, "notebook", "notes.md"))
+        put(os.path.join(self.root, "notebook", "notes.md"))
+        r = run("--p4", self.p4, "set", "notebook/notes.md", "7d", cwd=self.root)
+        self.assertEqual((r.returncode, lifetime.read_expires(self.p4)), (2, {}))
+        self.assertIn("is not under", r.stderr)
+
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
         """A cookie on tmp/ or anything in it, or on the notebook, src/ or expires.json themselves, is refused, since
         tmp/ holds only what an earlier version kept for each session's scratchpad and those are never cleared whole."""

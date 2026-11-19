@@ -43,12 +43,16 @@ the session runs, and at the session's end.
   sweep, session-end       what a session started on an older hooks.json still runs at its start and its end: the
                            same move and sweep, `sweep` printing their lines and `session-end` silent.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
-                           one is read from the working folder. The lifetime is `30m`, `12h`, `7d`, `2w` or an ISO
-                           date or time.
+                           one is read from the working folder, and from temportal/ when the working folder holds
+                           none there, which is how `list` prints a cookie. The lifetime is `30m`, `12h`, `7d`, `2w`
+                           or an ISO date or time.
   list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
                            be read is listed as unreadable, and the retention sweep leaves it as it is.
-  clear <path>             removes a cookie and keeps the file, reading a relative path from the working folder.
+  clear <path>             removes a cookie and keeps the file, reading a relative path as `set` reads it.
   now                      the retention sweep, run by hand.
+
+The module registers these four as the slash command `/lifetime`, and runs each as this script's command of the same
+name.
 
 A failure in a hook prints a one-line notice and exits 0.
 """
@@ -208,6 +212,13 @@ def clear_cookie(p4, path):
         write_expires(p4, d)
         return True
     return False
+
+
+def named(p4, path):
+    """The paths a command's `path` can mean, absolute, the first that holds wins: a relative one is read from the
+    working folder and then from temportal/, so `set` and `clear` take a cookie as `list` prints it."""
+    here = os.path.abspath(path)
+    return [here] if os.path.isabs(path) else [here, os.path.join(home(p4), path)]
 
 
 def _git(p4, *args):
@@ -524,14 +535,15 @@ def main():
     a = ap.parse_args(args)
     p4 = a.p4 or store_of(project_root({}))
     if a.cmd == "set":
+        places = named(p4, a.path)
         try:
-            rel, v = set_cookie(p4, os.path.abspath(a.path), a.lifetime)
+            rel, v = set_cookie(p4, next((p for p in places if os.path.lexists(p)), places[0]), a.lifetime)
         except ValueError as e:
             print(f"lifetime.py: {e}", file=sys.stderr)
             return 2
         print(f"{rel}: expires " + datetime.fromtimestamp(v["expires"]).isoformat(timespec="minutes"))
     elif a.cmd == "clear":
-        print("cleared" if clear_cookie(p4, os.path.abspath(a.path)) else "no expiry was set")
+        print("cleared" if any(clear_cookie(p4, p) for p in named(p4, a.path)) else "no expiry was set")
     elif a.cmd == "list":
         print("\n".join(listing(p4)) or "nothing has a lifetime")
     else:

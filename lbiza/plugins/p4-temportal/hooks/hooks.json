@@ -1,5 +1,5 @@
 {
-  "description": "p4-temportal's hooks. run-hook.sh runs p4_memory.py and scratchpad.py at SessionStart, and each entry sets onFailure to continue, so a runner that cannot start, as on Windows without Git Bash, blocks nothing. register.ts is the hooks module, whose functions run inside Claude Code: it finds the python the runner proved and runs the retention sweep, lifetime.py tick, at a session's start, on its timer while the session runs, and in a process let go of at the session's end, where SessionEnd command hooks share 1.5 seconds that a plugin's timeout does not raise.",
+  "description": "p4-temportal's hooks. run-hook.sh runs p4_memory.py and scratchpad.py at SessionStart, and each entry sets onFailure to continue, so a runner that cannot start, as on Windows without Git Bash, blocks nothing. register.ts is the hooks module, whose functions run inside Claude Code: it finds the python the runner proved and runs the retention sweep, lifetime.py tick, at a session's start, on its timer while the session runs, and in a process let go of at the session's end, where SessionEnd command hooks share 1.5 seconds that a plugin's timeout does not raise. It registers the slash command /lifetime, whose list, set, clear and now each run lifetime.py's command of that name.",
   "modules": ["./register.ts"],
   "hooks": {
     "SessionStart": [

@@ -42,6 +42,9 @@ p4-temportal's `hooks/register.ts` is a hooks module, whose functions run inside
 It runs the retention sweep, `lifetime.py tick`, at a session's start, again when the next cookie is due, a minute at least and an hour at most after the sweep before, and once more at the session's end.
 The sweep at the end runs in a process that `lifetime.py tick --let-go` starts and lets go of, since the `session.end` hooks of every module share the SessionEnd budget, 1.5 seconds by default, by https://code.claude.com/docs/en/plugins/mods/reference.md, "Limits".
 What a sweep moved or cleared is a dim line of the transcript, which the model does not read.
+The module registers the slash command `/lifetime`, whose `list`, `set <path> <lifetime>`, `clear <path>` and `now` each run the command of `lifetime.py` by that name.
+The command is ezexe's: Claude Code's Skill tool refuses a command a module registers, so a session cannot run it, and the skill page tells a session to give ezexe the line to type.
+The module registers no tool for the model, since an answer at `tool.call`, where https://code.claude.com/docs/en/plugins/mods/api.md serves a registered tool, skips the permission check, and `tool.run`, which fires once a call is allowed, is no event on Claude Code 2.1.322, where a module that hooks it does not load.
 No command hook runs the sweep, so where the module does not load nothing is cleared until `lifetime.py now` is run by hand.
 The module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
 

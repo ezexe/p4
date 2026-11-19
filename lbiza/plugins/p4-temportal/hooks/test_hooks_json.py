@@ -90,6 +90,24 @@ class ModuleTest(unittest.TestCase):
         self.assertIn(f"const LEAST_WAIT_MS = {int(lifetime.LEAST_WAIT_S * 1000):_}", text)
         self.assertIn(f"const MOST_WAIT_MS = {int(lifetime.MOST_WAIT_S * 1000):_}", text)
 
+    def test_the_slash_command_runs_the_commands_lifetime_py_takes(self):
+        """`/lifetime` hands lifetime.py the word typed after it, so each of the module's four is a command of
+        lifetime.py's own parser, and the command is registered and answered by one literal name. By
+        https://code.claude.com/docs/en/plugins/mods/api.md, "Add a command": "Register it, then handle `command.run`
+        for its name." The module hooks no tool event: the page serves a registered tool at `tool.call`, where an
+        answer skips the permission check."""
+        import re
+        text = (HERE / "register.ts").read_text(encoding="utf-8")
+        main = (HERE / "lifetime.py").read_text(encoding="utf-8")
+        names = re.findall(r"\['(\w+)', \d\],", text)
+        self.assertEqual(names, ["list", "set", "clear", "now"])
+        for name in names:
+            self.assertIn(f'sp.add_parser("{name}"', main)
+        self.assertIn("name: 'lifetime',", text)
+        self.assertIn("on('command.run', { command: 'lifetime' }", text)
+        self.assertEqual(re.findall(r"on\('(tool\.\w+)'", text), [])
+        self.assertNotIn("$.tool.register", text)
+
 
 class NoGitBashTest(unittest.TestCase):
     def test_a_hook_that_cannot_start_never_blocks_a_call(self):

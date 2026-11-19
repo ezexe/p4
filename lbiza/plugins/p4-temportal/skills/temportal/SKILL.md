@@ -26,14 +26,16 @@ Two kinds of lifetime clear what is no longer relevant, the way a browser handle
 
 The retention sweep clears what is past its lifetime at a session's start, while the session runs, and at its end.
 
-Set a cookie:
+ezexe lists, sets and clears lifetimes with the slash command `/lifetime`, which p4-temportal's hooks module registers:
 
-```bash
-CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime set ".claude/p4/temportal/notebook/<file>" 7d
-```
+- `/lifetime list` shows every cookie and cache rule.
+- `/lifetime set notebook/<file> 7d` gives a file or folder a cookie, with a lifetime of `30m`, `12h`, `7d`, `2w` or an ISO date.
+- `/lifetime clear notebook/<file>` removes an expiry and keeps the file.
+- `/lifetime now` runs the retention sweep at once.
 
-The lifetime is `30m`, `12h`, `7d`, `2w` or an ISO date.
+A session cannot run `/lifetime` itself, since Claude Code's Skill tool refuses a command a hooks module registers, so when a lifetime should be set or cleared, give ezexe the line to type.
+What is set can be read without the command: the cookies are in `.claude/p4/temportal/expires.json` and the cache rules in `.claude/p4/p4.json`.
+A path is read from the working folder, or from `temportal/` as `/lifetime list` prints it, and one with a space goes in quotes.
 No lifetime ends with a session: a file that goes when its session goes belongs in that session's scratchpad, which Claude Code deletes with the session's transcript.
-`list` shows every cookie and cache rule, `clear <path>` removes an expiry and keeps the file, and `now` runs the retention sweep at once.
 A path under `memory/` is refused.
 A tracked file that is cleared keeps its last version in the store's git history.

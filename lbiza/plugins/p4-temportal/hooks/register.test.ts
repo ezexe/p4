@@ -14,19 +14,26 @@ type Answer = Record<string, unknown>
 // A sweep with nothing to say whose next one is an hour away, as lifetime.py answers in a store with no cookie.
 const QUIET: Answer = { said: [], wait_s: 3600 }
 
-// The files of a machine by path, the commands on its PATH that prove themselves as a python, and what a command of
-// lifetime.py prints there.
+// How a command of lifetime.py other than tick ends: its exit status and what it printed.
+type Said = { code?: number; out?: string; err?: string }
+
+// The files of a machine by path, the commands on its PATH that prove themselves as a python, what a tick prints
+// there and how each other command of lifetime.py ends, and whether the name /lifetime is taken.
 type Machine = {
   files?: Record<string, string>
   pythons?: Record<string, string>
   tick?: (args: readonly string[]) => Answer | string | Promise<Answer | string>
+  says?: (args: readonly string[]) => Said
+  isTaken?: boolean
 }
 
-// What the module read, the pythons it tried, each lifetime.py command it ran with its whole call, and what it
-// logged, the transcript's lines apart from the debug log's.
+// What the module read, the pythons it tried, the commands it registered, each lifetime.py command it ran with its
+// whole call, and what it logged, the transcript's lines apart from the debug log's.
 type Seen = {
   read: string[]
   tried: string[][]
+  offered: { name: string; description: string; argumentHint?: string }[]
+  tools: string[]
   ran: string[][]
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined; timeoutMs: number | undefined }[]
   shown: string[]
@@ -40,8 +47,20 @@ function plain(path: string): string {
 
 function machine(on: On, has: Machine): Seen {
   const files = has.files ?? { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '' }
-  const seen: Seen = { read: [], tried: [], ran: [], calls: [], shown: [], debugged: [] }
+  const seen: Seen = { read: [], tried: [], offered: [], tools: [], ran: [], calls: [], shown: [], debugged: [] }
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', (_, e) => {
+    if (has.isTaken === true) return { deny: '"/lifetime" refused: it is the built-in /lifetime' }
+    seen.offered.push({ name: e.name, description: e.description, argumentHint: e.argumentHint })
+
+    return { value: { command: e.name } }
+  })
+  // The module registers no tool: a test that sees one fails on what it counts here.
+  on('tool.register', (_, e) => {
+    seen.tools.push(e.name)
+
+    return { value: { tool: `mcp__p4-temportal__${e.name}` } }
+  })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/work/project' }))
   on('ui.log', (_, e) => {
@@ -79,6 +98,12 @@ function machine(on: On, has: Machine): Seen {
       const args = e.argv.slice(at + 1)
       seen.ran.push([...args])
       seen.calls.push({ argv: e.argv, env: e.init?.env, timeoutMs: e.init?.timeoutMs })
+      if (args[0] !== 'tick') {
+        const said = has.says?.(args) ?? {}
+        const value = { exitCode: said.code ?? 0, stdout: said.out ?? '', stderr: said.err ?? '' }
+
+        return { value: { ...value, isStdoutTruncated: false, isStderrTruncated: false } }
+      }
       const printed = has.tick === undefined ? QUIET : await has.tick(args)
       stdout = typeof printed === 'string' ? printed : `${JSON.stringify(printed)}\n`
     } else {
@@ -319,4 +344,145 @@ test('a last sweep that cannot start ends the session all the same', async ($, o
 
   expect(ended).toEqual({ sessionId: 'cli-0001' })
   expect(seen.ran).toEqual([])
+})
+
+test('the start registers /lifetime with its four commands as the hint, and the session waits for it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+
+  expect(seen.offered.map(command => command.name)).toEqual(['lifetime'])
+  expect(seen.offered[0]?.argumentHint).toBe('list | set <path> <lifetime> | clear <path> | now')
+  expect(seen.offered[0]?.description.length).toBeGreaterThan(20)
+})
+
+test('/lifetime list and now run lifetime.py with that command and answer what it printed', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const listed = 'cookie  notebook/page.html  expires 2026-11-26T07:30+00:00\ncache   notebook/.out/  max_age_days=14'
+  const seen = machine(on, { says: args => ({ out: args[0] === 'list' ? `${listed}\n` : 'nothing has expired\n' }) })
+
+  const list = await $.command.run({ command: 'lifetime', args: 'list' })
+  const now = await $.command.run({ command: 'lifetime', args: '  now ' })
+  await clock.settle()
+
+  expect(list.text).toBe(listed)
+  expect(now.text).toBe('nothing has expired')
+  expect(seen.ran).toEqual([['list'], ['now']])
+  const call = seen.calls[0]
+  expect(call?.argv.slice(0, 4)).toEqual([KEPT, '-I', '-X', 'utf8'])
+  expect(call?.argv[4]?.endsWith('/hooks/lifetime.py')).toBe(true)
+  expect(call?.env).toEqual({ CLAUDE_PROJECT_DIR: '/work/project' })
+})
+
+test('/lifetime set takes a quoted path as one word, and the sweep after it sets the timer by the new cookie', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  // Before the set no cookie is due within the hour, and after it one is due in five minutes.
+  let hasCookie = false
+  const seen = machine(on, {
+    tick: () => ({ said: [], wait_s: hasCookie ? 300 : 3600 }),
+    says: () => {
+      hasCookie = true
+
+      return { out: 'notebook/a page.html: expires 2026-11-19T08:05\n' }
+    },
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.ran).toEqual([['tick']])
+
+  const set = await $.command.run({ command: 'lifetime', args: 'set "notebook/a page.html" 5m' })
+  await clock.settle()
+  expect(set.text).toBe('notebook/a page.html: expires 2026-11-19T08:05')
+  expect(seen.ran).toEqual([['tick'], ['set', 'notebook/a page.html', '5m'], ['tick']])
+
+  await clock.advance(299_999)
+  expect(seen.ran.length).toBe(3)
+  await clock.advance(1)
+  expect(seen.ran.length).toBe(4)
+  expect(seen.ran.at(-1)).toEqual(['tick'])
+})
+
+test('/lifetime clear takes one path, in single quotes too', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { says: () => ({ out: 'cleared\n' }) })
+
+  const bare = await $.command.run({ command: 'lifetime', args: 'clear notebook/page.html' })
+  const quoted = await $.command.run({ command: 'lifetime', args: "clear 'notebook/a page.html'" })
+  await clock.settle()
+
+  expect([bare.text, quoted.text]).toEqual(['cleared', 'cleared'])
+  expect(seen.ran).toEqual([['clear', 'notebook/page.html'], ['clear', 'notebook/a page.html']])
+})
+
+test('an ask that fits none of the four commands is answered with the usage, and nothing runs', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+  const asks = ['', 'help', 'tick', 'tick --let-go', 'sweep', 'list all', 'set notebook/page.html', 'clear', 'now now']
+  const asked: (string | undefined)[] = []
+
+  for (const args of asks) asked.push((await $.command.run({ command: 'lifetime', args })).text)
+  await clock.settle()
+
+  const usage = '/lifetime list | set <path> <lifetime> | clear <path> | now\n'
+  expect(asked.map(text => text?.startsWith(usage))).toEqual(asks.map(() => true))
+  expect(seen.ran).toEqual([])
+  expect(seen.tried).toEqual([])
+})
+
+test('a refusal of lifetime.py is the answer, and no sweep follows a set that was refused', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const refused = 'lifetime.py: memory/MEMORY.md is in memory/, which is never cleared'
+  const seen = machine(on, { says: () => ({ code: 2, err: `${refused}\n` }) })
+
+  const set = await $.command.run({ command: 'lifetime', args: 'set memory/MEMORY.md 7d' })
+  await clock.settle()
+
+  expect(set.text).toBe(refused)
+  expect(seen.ran).toEqual([['set', 'memory/MEMORY.md', '7d']])
+})
+
+test('with no python /lifetime says that lifetime.py did not run', async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: {}, pythons: {} })
+
+  const list = await $.command.run({ command: 'lifetime', args: 'list' })
+  await clock.settle()
+
+  expect(list.text).toBe('lifetime.py list did not run, and the debug log says why.')
+  expect(seen.debugged).toEqual(['no working python found, so no retention sweep runs'])
+})
+
+test('where the name /lifetime is taken the debug log says so, and the session starts and is swept', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { isTaken: true })
+
+  const started = await $.session.start(START)
+  await clock.settle()
+
+  expect(started).toEqual({ cwd: '/' })
+  expect(seen.ran).toEqual([['tick']])
+  expect(seen.debugged.length).toBe(1)
+  expect(seen.debugged[0]?.startsWith('/lifetime was not registered: ')).toBe(true)
+})
+
+test('the module registers no tool for the model, whose call would run with no permission check', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.offered.map(command => command.name)).toEqual(['lifetime'])
+  expect(seen.tools).toEqual([])
 })
