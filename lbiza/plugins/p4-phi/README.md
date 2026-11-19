@@ -261,6 +261,20 @@ p4-phi keeps a finding in `notes.jsonl` in its writer's folder in the store, by 
 
 p4-phi uses the folder for what it gives: the id in its path names a started session's starter before the app's record does, and a terminal worker's brief, script and report are files in its `terminal-workers` folder.
 
+### The check before a second background copy, beside Claude Code's list of background tasks
+
+Claude Code keeps the list of a session's running background tasks itself.
+`/tasks` shows it to a person, and a Stop hook's input holds it as `background_tasks`, each task with its `id`, `type`, `status`, `description` and, for a shell task, its `command`, by `hooks.md`, "Stop input".
+p4-phi makes no list of its own.
+Its Stop hook keeps that input's list on `session.json`, an entry leaves it when its completion notice arrives or a `TaskStop` or `KillShell` call stops it, and before a shell call with `run_in_background` the check `restart-check` refuses a command the kept list still holds as running, once for each copy, with the id to wait on.
+
+- Nothing of Claude Code refuses or warns of a second start of a command that still runs in the background. `tools-reference.md`, "Background commands", and `interactive-mode.md`, "How backgrounding works", name no such check.
+- The list reaches a hook at `Stop` and `SubagentStop` and at no other event. The input of `PreToolUse` and of the module's `tool.check` lists no running task, so a check before a call has only what the last Stop kept.
+- `/tasks` is a view for a person, which no hook reads and no tool of a session returns, and `TaskList` is the list of to-dos.
+- The hooks module's API has no method that returns the list: the 80 methods of Claude Code 2.1.326, as p4-native's `hooks/weighed.json` lists them, hold none for a background task.
+
+So the kept list and the check stay, and they rest on the native list alone: where the Stop input held no `background_tasks`, the check refuses nothing.
+
 ## No setup
 
 The plugin works in any project it is enabled in.
