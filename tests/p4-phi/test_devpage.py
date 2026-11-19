@@ -66,6 +66,24 @@ class Page(unittest.TestCase):
         for gone in ("| claude -p", "~/.claude/debug/latest"):   # the by-hand check the cases took the place of
             self.assertNotIn(gone, page, gone)
 
+    def test_the_page_holds_both_arms_scores_of_the_two_cases_on_the_rule_as_rewritten(self):
+        """plugin-evals.md, "The no-plugin baseline": "If a case scores 1.0 both with and without the plugin, the
+        plugin isn't what made it pass." The two cases on the act-don't-wait rule scored so at the first run, so
+        the page sets out each variant tried, the scores of both arms of the kept ones, how the two run alone, and
+        what the rule does not add on the pinned model."""
+        page = read(PAGE)
+        self.assertIn('<h3 id="the-two-cases-on-the-rule">The two cases on the rule, rewritten</h3>', page)
+        rewritten = page.split('id="the-two-cases-on-the-rule"', 1)[1].split("<h3>What a run's trace showed</h3>")[0]
+        for said in ("<tr><td><code>decides-from-the-files</code></td><td>0.67</td><td>0.67</td><td>0.00</td></tr>",
+                     "<tr><td><code>asks-before-an-irreversible-step</code></td><td>0.33</td><td>0.00</td>"
+                     "<td>+0.33</td></tr>",
+                     "<code>--max-cost-usd 1.5</code>", "<code>--tag rule</code>", "<code>claude-sonnet-5-5</code>",
+                     "What the rule does not add"):
+            self.assertIn(said, rewritten, said)
+        for case in ("decides-from-the-files", "asks-before-an-irreversible-step"):
+            self.assertEqual(rewritten.count(f"<tr><td><code>{case}</code></td><td>"), 4, "three variants, and kept")
+        self.assertIn("<code>--tag rule</code> at its end", page.split('id="the-two-cases-on-the-rule"', 1)[0])
+
     def test_a_plugin_dir_session_runs_only_from_a_scratch_project(self):
         page = read(PAGE)
         self.assertIn("A development copy is any session that loads a clone of p4, by the <code>--plugin-dir</code> flag or "

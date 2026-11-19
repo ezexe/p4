@@ -1,8 +1,8 @@
 """Writes the month's ledger report for the accounts team."""
-import json
+import os
+
+from formats import WRITERS
 
 
-def write_report(records, path="ledger-report.jsonl"):
-    with open(path, "w", encoding="utf-8") as f:
-        for record in records:
-            f.write(json.dumps(record) + "\n")
+def write_report(records, path):
+    WRITERS[os.environ["LEDGER_REPORT_FORMAT"]](records, path)

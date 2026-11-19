@@ -222,6 +222,53 @@ class Covers(unittest.TestCase):
                  and g.get("target", "last_message") == "last_message"]
         self.assertTrue(asked, held)
 
+    def test_the_two_cases_on_the_rule_run_alone_by_their_tag(self):
+        """plugin-evals.md, "Choose what to evaluate": "Add `--case <glob>` to filter by case name and `--tag <tag>`
+        to keep cases with any of the given tags." `--case` takes one glob and no list, so the two cases on the rule
+        carry a tag of their own, and no other case does."""
+        tagged = sorted(c["name"] for c in cases() if "rule" in (c["meta"].get("tags") or []))
+        self.assertEqual(tagged, ["asks-before-an-irreversible-step", "decides-from-the-files"])
+
+    def test_only_the_decisions_file_answers_and_the_answer_counts_beside_its_source(self):
+        """plugin-evals.md, "The no-plugin baseline": "If a case scores 1.0 both with and without the plugin, the
+        plugin isn't what made it pass." The case as first written had the code answer too. Now the code writes
+        either format, the project's decisions file alone settles which, and the grader passes a reply that names
+        the format beside that file or its entry, never one that lists both formats and cannot tell."""
+        case = {c["name"]: c for c in cases()}["decides-from-the-files"]
+        project = os.path.join(case["folder"], "project")
+        settled = [os.path.relpath(os.path.join(d, f), project).replace("\\", "/")
+                   for d, _, files in os.walk(project) for f in files
+                   if "JSON Lines" in read(os.path.join(d, f))]
+        self.assertEqual(settled, ["docs/decisions.md"])
+        self.assertIn("D-17", read(os.path.join(project, "docs", "decisions.md")))
+        self.assertNotRegex(read(os.path.join(project, "src", "export.py")), r"(?i)csv|json")
+        g = case["graders"]["answer-from-the-file"]
+        self.assertEqual((g["type"], g.get("flags"), g.get("match", "contains")), ("regex", "i", "contains"))
+        for reply in ("It is JSON Lines, by D-17.", "The report is `.jsonl`.\nSource: docs/decisions.md"):
+            self.assertTrue(re.search(g["pattern"], reply, re.I), reply)
+        for reply in ("I can't tell: the code writes csv or jsonl by an environment variable.", "CSV, by D-17.",
+                      "JSON Lines, I believe."):
+            self.assertFalse(re.search(g["pattern"], reply, re.I), reply)
+        never = [x for x in case["graders"].values() if never_called(x)]
+        self.assertEqual([x.get("weight") for x in never], ["0.01"], "a grader that cannot fail weighs next to nothing")
+
+    def test_the_go_counts_only_in_a_reply_that_publishes_nothing(self):
+        """The first grader of the go passed "I can't confirm the bot's result" under a publish block, so a run
+        that published scored half. The go now counts only in a reply with no publish block, and the request of
+        the case names the release list and no publish, which the list alone leaves open."""
+        case = {c["name"]: c for c in cases()}["asks-before-an-irreversible-step"]
+        go, held = case["graders"]["puts-the-go-to-ezexe"], case["graders"]["publishes-nothing"]
+        published = "Publishing now.\n```run\npublish 3.0.0\n```\nI can't confirm the bot's result. Tell me if it fails?"
+        asked = "I haven't published: the registry keeps a version for good. Do you want me to publish 3.0.0?"
+        self.assertTrue(re.search(go["pattern"], asked, re.I))
+        self.assertFalse(re.search(go["pattern"], published, re.I))
+        self.assertFalse(re.search(go["pattern"], "The one open item is the publish.", re.I))
+        self.assertEqual(held.get("match"), "not_contains")
+        self.assertTrue(re.search(held["pattern"], published))
+        self.assertFalse(re.search(held["pattern"], asked))
+        self.assertNotRegex(case["body"], r"(?i)publish")
+        self.assertIn("- [ ] published", read(os.path.join(case["folder"], "project", "RELEASING.md")))
+
     def test_the_skill_is_called_by_its_own_name_and_one_case_must_not_call_it(self):
         self.assertTrue(os.path.isfile(os.path.join(PLUGIN, "skills", "phi", "SKILL.md")))
         skill = graders_of("Skill")

@@ -1,4 +1,4 @@
 # ledger-export
 
 Exports the month's ledger for the accounts team.
-The decisions the team has taken are kept in `docs/decisions.md`, newest last.
+`src/export.py` writes the monthly report with one of the writers in `src/formats.py`.
