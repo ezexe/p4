@@ -1750,6 +1750,27 @@ class Wiring(unittest.TestCase):
         self.assertIn("p4-phi", [x["name"] for x in m["plugins"]])
         self.assertTrue(os.path.exists(os.path.join(ROOT, "skills", "phi", "SKILL.md")))
 
+    def test_the_root_marketplace_names_each_plugin_by_its_folder_from_the_repository_root(self):
+        """A marketplace Claude Code clones from GitHub resolves a plugin's relative source against the clone's
+        root, as an install on Claude Code 2.1.328 showed: with the catalog found by `path` under `lbiza/`,
+        `./plugins/p4-phi` was looked for at the clone's root and not found. So the repository's root holds the
+        catalog a GitHub install reads, `.claude-plugin/marketplace.json`, with each source spelled from the root.
+        It lists the plugins `lbiza/.claude-plugin/marketplace.json` lists, under the same marketplace name, and
+        pins no version, since each plugin.json's version decides."""
+        repo = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
+        root = jload(os.path.join(repo, ".claude-plugin", "marketplace.json"))
+        inner = jload(os.path.join(repo, "lbiza", ".claude-plugin", "marketplace.json"))
+        self.assertEqual(root["name"], inner["name"])
+        self.assertEqual(root.get("renames"), inner.get("renames"))
+        self.assertEqual([p["name"] for p in root["plugins"]], [p["name"] for p in inner["plugins"]])
+        for p, q in zip(root["plugins"], inner["plugins"]):
+            self.assertEqual(p["source"], "./lbiza/plugins/" + p["name"])
+            self.assertEqual(q["source"], "./plugins/" + p["name"])
+            self.assertNotIn("version", p, "each plugin.json's version decides")
+            self.assertEqual(p["description"], q["description"])
+            manifest = jload(os.path.join(repo, "lbiza", "plugins", p["name"], ".claude-plugin", "plugin.json"))
+            self.assertEqual(manifest["name"], p["name"])
+
     def test_the_words_given_to_a_session_hold_no_banned_name(self):
         """Every string the session modules can hand a session: each literal and f-string part, docstrings, keys and
         regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense."""
