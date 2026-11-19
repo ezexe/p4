@@ -91,5 +91,6 @@ Each plugin's hooks module starts python itself, with no `sh`, so p4-temportal's
 
 ## Tests
 
-Each test file runs on its own from its folder with `python -I -X utf8 <file>`: p4-temportal's in `plugins/p4-temportal/hooks/` and p4-phi's in `plugins/p4-phi/scripts/`.
+The python tests are under `tests/`, beside this file, each in the folder named after the plugin whose code it runs.
+`python -m pytest`, run in this folder, runs every one of them.
 The tests of a plugin's hooks module are in `hooks/register.test.ts`, and `claude plugin test <plugin folder>` runs them.

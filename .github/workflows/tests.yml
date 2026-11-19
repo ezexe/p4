@@ -26,6 +26,11 @@ jobs:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    # Each command of this job runs in lbiza/, where pyproject.toml names the test tools and pytest's settings and
+    # tests/ holds the tests.
+    defaults:
+      run:
+        working-directory: lbiza
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7

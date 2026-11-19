@@ -93,8 +93,8 @@ The plugins' hooks need only the system `python3` and its standard library.
 ezexe/phi's packages `phi_prune`, `phi_rank`, `phi_store` and `phi_model`, which the p4-model skill runs, the `.pt` ranker and the ensemble of shard models of `phi_rank/tree.py`, and the teacher model's `anthropic` SDK run from this checkout's own `.venv/`, built by one script:
 
 ```bash
-python3 scripts/make_venv.py            # create or top up .venv: torch from the CPU wheels, ezexe/phi, anthropic
-python3 scripts/make_venv.py --check    # only report which modules .venv lacks
+python3 lbiza/scripts/make_venv.py            # create or top up .venv: torch from the CPU wheels, ezexe/phi, anthropic
+python3 lbiza/scripts/make_venv.py --check    # only report which modules .venv lacks
 .venv/bin/python -m phi_model check --project <repository>     # Windows: .venv\Scripts\python.exe
 ```
 
@@ -108,8 +108,8 @@ The script stops before it makes or tops up `.venv` when the Python that will ru
 
 Claude Code copies a plugin installed from a marketplace it clones into its plugin cache, `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/`, so a change to the plugin's code or its `hooks/hooks.json` reaches such an install only with a new version.
 A plugin's version lives in one file, its own `lbiza/plugins/<plugin>/.claude-plugin/plugin.json`, and each such change bumps it there.
-No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `tests/p4-phi/test_wiring.py` holds every entry of the catalog to that.
-The `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request and every push to `main`: every test under `tests/` through `python -m pytest`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
+No entry of the catalog `.claude-plugin/marketplace.json` carries a version, since the manifest's version comes first when Claude Code computes one, and `lbiza/tests/p4-phi/test_wiring.py` holds every entry of the catalog to that.
+The `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) runs on every pull request and every push to `main`: every test under `lbiza/tests/` through `python -m pytest`, `claude plugin validate --strict` on the catalog and on each plugin, and `claude plugin test` on each plugin's hooks module.
 [CONTRIBUTING.md](CONTRIBUTING.md#tests) says how to run the tests in a checkout.
 An install takes the new version at Claude Code's next auto-update pass where auto-update is on for `p4-marketplace`, and at `claude plugin update <plugin>@p4-marketplace` where it is off, as it is by default for a marketplace like this one.
 A session that is running keeps the version it loaded until `/reload-plugins` or its next start.

@@ -29,12 +29,12 @@ An installed copy is a copy in Claude Code's plugin cache, which takes the new v
 
 ## Tests
 
-Every test of the repository is under `tests/`, in the folder named after the plugin whose code it runs, and pytest runs them.
-`python -m venv .venv` and then `.venv/bin/python -m pip install --group dev` set the test tools up once in a checkout, with `.venv\Scripts\python.exe` in place of `.venv/bin/python` on Windows.
-`.venv/bin/python -m pytest` runs every test, on a worker for each logical processor and eight at most, and `.venv/bin/python -m pytest tests/p4-phi/test_relay.py` runs one file.
-[`pyproject.toml`](pyproject.toml) names the tools and pytest's settings.
-[`tests/conftest.py`](tests/conftest.py) gives each worker a temp folder, a home and git settings of its own and none of a session's variables, so a run from a Claude Code session sees nothing of that session and spends nothing.
-A test file reaches the code it runs by its `SRC` folder, and a test of a new python file goes in `tests/<plugin>/test_<name>.py`.
+Every test of the repository is under `lbiza/tests/`, in the folder named after the plugin whose code it runs, and pytest runs them.
+`python -m venv .venv` at the checkout's root and then, in `lbiza/`, `../.venv/bin/python -m pip install --group dev` set the test tools up once in a checkout, with `..\.venv\Scripts\python.exe` in place of `../.venv/bin/python` on Windows.
+`../.venv/bin/python -m pytest` run in `lbiza/` runs every test, on a worker for each logical processor and eight at most, and `../.venv/bin/python -m pytest tests/p4-phi/test_relay.py` runs one file.
+[`lbiza/pyproject.toml`](lbiza/pyproject.toml) names the tools and pytest's settings.
+[`lbiza/tests/conftest.py`](lbiza/tests/conftest.py) gives each worker a temp folder, a home and git settings of its own and none of a session's variables, so a run from a Claude Code session sees nothing of that session and spends nothing.
+A test file reaches the code it runs by its `SRC` folder, and a test of a new python file goes in `lbiza/tests/<plugin>/test_<name>.py`.
 A hooks module's `register.test.ts` stays beside the module inside its plugin, where `claude plugin test` reads it.
 A landing rests on a local run of `python -m pytest` that passes.
 GitHub runs the `tests` workflow of [`.github/workflows/tests.yml`](.github/workflows/tests.yml) on every pull request and every push to `main`, with no credentials: its `pytest` job runs every test on a Windows runner, and its `plugins` job runs `claude plugin validate --strict` on the catalog and on each plugin and `claude plugin test` on each plugin's hooks module.

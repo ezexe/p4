@@ -246,7 +246,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <tr><td><code>holds-the-rules-in-its-system-prompt</code></td><td>The hooks module's <code>prompt.compose</code> hook, which sets both built-in rules as a section of the system prompt.</td><td>The reply quotes the words that follow each rule's opening, which the prompt does not give.</td></tr>
 </tbody></table></div>
 <ul>
-<li><code>tests/p4-phi/test_evals.py</code> reads the folder in the tests that gate a landing: every case parses and names a grader, no case lists a tool outside the read-only set, and the words a case rests on are still in the rule, the skill's description and the agent's name.</li>
+<li><code>lbiza/tests/p4-phi/test_evals.py</code> reads the folder in the tests that gate a landing: every case parses and names a grader, no case lists a tool outside the read-only set, and the words a case rests on are still in the rule, the skill's description and the agent's name.</li>
 </ul>
 <h3>The first run</h3>
 <p>The whole suite, run once with the command above on 2026-11-19, with Claude Code 2.1.328 and p4-phi 0.11.41: 48 runs in 590 seconds, an estimate of $2.13, and exit status 0. One run of each case with the plugin alone, on p4-phi 0.11.44 as it landed, passed every case as well, at an estimate of $0.44.</p>

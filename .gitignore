@@ -1,4 +1,4 @@
-# the virtual environment scripts/make_venv.py builds
+# the virtual environment lbiza/scripts/make_venv.py builds
 .venv/
 
 # what Claude Code and the plugins write for a session started in this checkout: its settings and its store

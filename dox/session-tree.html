@@ -696,9 +696,9 @@ var ACT={
   reparent:function(){move(S.sel,$("under").value)},
   branch:function(){
     if(!S.queue)S.queue=[
-      {t:"Tell siblings when owned paths change",f:"scripts/relay.py, tests/p4-phi/test_relay.py"},
+      {t:"Tell siblings when owned paths change",f:"scripts/relay.py, lbiza/tests/p4-phi/test_relay.py"},
       {t:"Keep an archived worker's open steps",f:"scripts/relay.py, scripts/phi.py"},
-      {t:"Register a landed route",f:"scripts/puppeteer.py, tests/p4-phi/test_puppeteer.py"},
+      {t:"Register a landed route",f:"scripts/puppeteer.py, lbiza/tests/p4-phi/test_puppeteer.py"},
       {t:"Redraw the four diagrams",f:"README.md"},
       {t:"Say report when done in every brief",f:"scripts/phi.py, scripts/plans.py"}];
     $("branch").hidden=false;queueUI();
