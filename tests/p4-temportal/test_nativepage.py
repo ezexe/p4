@@ -23,7 +23,7 @@ ROWS = ("compaction", "memory", "consolidation", "rules", "checkpoints", "transc
 COLUMNS = ("What is kept", "Set out for the plugin", "What Claude Code does, and the page", "p4-temportal today",
            "What it only configures", "What the native feature lacks, which the plugin adds", "Part")
 NO_PART = ("none", "built", "left")
-LANDED = ("1", "2")                         # the parts of the order that are on main
+LANDED = ("1", "2", "3")                         # the parts of the order that are on main
 
 
 def page():
@@ -84,6 +84,9 @@ class Page(unittest.TestCase):
             self.assertIn(word, today, word)
         for word in ("mcp__p4-temportal__lifetime", "tool.run", "2.1.328"):
             self.assertIn(word, rows(text)["lifetimes"], word)
+        self.assertIn("consolidate-memory", rows(text)["consolidation"])
+        for word in ("/memory", "/rewind", "/resume", "/export", "/context", "/compact", "/autocompact"):
+            self.assertIn(f"<code>{word}</code>", rows(text)["commands"], word)
 
     def test_the_page_says_what_was_set_out_and_what_the_docs_do_not_confirm(self):
         text = page()

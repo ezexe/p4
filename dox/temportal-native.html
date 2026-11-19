@@ -105,8 +105,8 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-consolidation"><th scope="row">Memory consolidation</th>
           <td><p>Nothing.</p></td>
           <td><p>No docs page read names a pass that merges or prunes memory. <code>claude-directory.md</code>: "<code>MEMORY.md</code> and topic files stay until you or Claude edits or deletes them." The desktop app lists a skill <code>consolidate-memory</code>, "Reflective pass over your memory files".</p></td>
-          <td><p>Nothing, and no lifetime ever clears <code>memory/</code>.</p></td>
-          <td><p>Nothing. The skill page names the app's skill where a session is asked to prune memory.</p></td>
+          <td><p>Nothing of its own, and no lifetime ever clears <code>memory/</code>. The skill page names the skill <code>consolidate-memory</code> for a session that is asked to prune memory.</p></td>
+          <td><p>Nothing.</p></td>
           <td><p>Nothing known.</p></td>
           <td class="n">3</td></tr>
         <tr id="row-rules"><th scope="row">Rules files</th>
@@ -168,8 +168,8 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-commands"><th scope="row">Commands on memory and context</th>
           <td><p>Nothing.</p></td>
           <td><p><code>commands.md</code>: <code>/memory</code>, <code>/context</code>, <code>/compact</code>, <code>/autocompact</code>, <code>/rewind</code>, <code>/recap</code>, <code>/export</code>, <code>/resume</code> and <code>/clear</code>.</p></td>
-          <td><p>The skill page names none of them.</p></td>
-          <td><p>Nothing. The skill page names each command where a session would otherwise do the thing by hand.</p></td>
+          <td><p>The skill page has a section on what Claude Code keeps by itself. It names <code>/memory</code>, <code>/rewind</code>, <code>/resume</code>, <code>/export</code>, <code>/context</code>, <code>/compact</code> and <code>/autocompact</code>, each where a session would otherwise do the thing by hand, with <code>cleanupPeriodDays</code> and <code>plansDirectory</code>.</p></td>
+          <td><p>Nothing.</p></td>
           <td><p>Nothing.</p></td>
           <td class="n">3</td></tr>
         <tr id="row-tools"><th scope="row">The session's own commands and tools</th>
@@ -189,7 +189,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
     <ol>
       <li id="part-1"><strong>Compaction.</strong> The hooks module tells the summary what to keep, adds the list of the files the session wrote behind the summary, and starts a compaction at a quiet moment below the automatic line. It came first because it was the one row where a session loses what it needs and the plugin did nothing. It landed in p4-temportal 0.3.28.</li>
       <li id="part-2"><strong>A session sets a lifetime itself.</strong> The four commands of <code>/lifetime</code> become a tool the model can call, registered by the hooks module and served once Claude Code allowed the call. It landed in p4-temportal 0.3.29.</li>
-      <li id="part-3"><strong>The skill page names what Claude Code keeps.</strong> It says which native command or setting keeps each thing, so a session reaches for that and builds no copy by hand.</li>
+      <li id="part-3"><strong>The skill page names what Claude Code keeps.</strong> It says which native command or setting keeps each thing, so a session reaches for that and builds no copy by hand. It landed in p4-temportal 0.3.30.</li>
       <li id="part-4"><strong>The leftovers of the copies go.</strong> The commands the scripts still answer for sessions of older versions are deleted, since an installed version runs the scripts of its own folder in Claude Code's plugin cache.</li>
       <li id="part-5"><strong>Plan files.</strong> A store that asks for it gets <code>plansDirectory</code> written by the settings keeper, behind a live check of a plan written under <code>.claude/p4/</code>.</li>
     </ol>

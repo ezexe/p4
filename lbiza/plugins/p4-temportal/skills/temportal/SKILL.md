@@ -1,6 +1,6 @@
 ---
 name: temportal
-description: Where this project keeps its auto memory, its notebook and its saved code, where a session's temporary files and lasting findings go, and how lifetimes clear what p4 keeps. Use before writing a temporary file, a probe, a log or a download, before keeping a finding past the session, and when asked what temportal holds or to clear it.
+description: Where this project keeps its auto memory, its notebook and its saved code, where a session's temporary files and lasting findings go, how lifetimes clear what p4 keeps, what a compaction keeps, and which of Claude Code's own commands keep the rest. Use before writing a temporary file, a probe, a log or a download, before keeping a finding past the session, before making a backup copy or pruning memory, after a compaction, and when asked what temportal holds or to clear it.
 ---
 
 # temportal
@@ -16,6 +16,18 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 - `temportal/notebook/` is the notebook, kept across sessions and written by p4's scripts only, never by a session's own tools.
 - Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
+
+## What Claude Code keeps by itself
+
+Reach for Claude Code's own command or setting before building a copy by hand.
+
+- **Memory:** Claude Code writes and loads it, and `/memory` opens it and turns it on or off. Where the session lists the skill `consolidate-memory`, that skill merges duplicates, fixes stale facts and prunes the index, so memory is pruned with it and never by a lifetime.
+- **A file as it was before an edit:** Claude Code takes a checkpoint before each prompt that starts a turn, and `/rewind` restores the code, the conversation or both, so make no backup copy before an edit. A checkpoint holds what the file tools changed and not what a shell command changed.
+- **The whole conversation:** the transcript stays on disk for `cleanupPeriodDays`, 30 days unless set, `/resume` opens a session again and `/export` writes one out, so the store keeps no copy of a conversation.
+- **The context:** `/context` shows what fills it, `/compact` with words after it compacts at once and tells the summary those words, and `/autocompact` moves the line of the automatic compaction.
+- **Plans:** a plan file is Claude Code's own, under `~/.claude/plans/` unless the project's settings name a `plansDirectory`.
+- **Worktrees:** Claude Code removes the worktree of an unnamed session by itself and sweeps the worktrees of subagents once they are older than `cleanupPeriodDays`, so no lifetime is set on one.
+- **Standing instructions:** `CLAUDE.md` and the unscoped rules files load at each start and again after a compaction, so an instruction that must hold in every session goes there and not in the notebook.
 
 ## Compaction
 

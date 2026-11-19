@@ -55,6 +55,23 @@ class SkillCommands(unittest.TestCase):
             self.assertIn(word, said, word)
         self.assertLess(text.index("`mcp__p4-temportal__lifetime`"), text.index("give ezexe the line to type"))
 
+    def test_the_page_names_what_claude_code_keeps_by_itself(self):
+        """The rule "Native first" of CONTRIBUTING.md: a session reaches for Claude Code's own command or setting and
+        builds no copy by hand. The page names each one the table of dox/temportal-native.html gives, in a section of
+        its own that hands no shell line."""
+        text = SKILL.read_text(encoding="utf-8")
+        section = text.split("## What Claude Code keeps by itself", 1)[1].split("\n## ", 1)[0]
+        for named in ("`/memory`", "`consolidate-memory`", "`/rewind`", "`cleanupPeriodDays`", "`/resume`",
+                      "`/export`", "`/context`", "`/compact`", "`/autocompact`", "`plansDirectory`", "`CLAUDE.md`"):
+            self.assertIn(named, section, named)
+        items = [line for line in section.splitlines() if line.startswith("- **")]
+        self.assertEqual([re.match(r"- \*\*([^*]+):\*\*", line).group(1) for line in items],
+                         ["Memory", "A file as it was before an edit", "The whole conversation", "The context",
+                          "Plans", "Worktrees", "Standing instructions"])
+        self.assertNotIn("(", section)
+        self.assertIn("never by a lifetime", section)
+        self.assertIn("make no backup copy", section)
+
     def test_the_project_is_not_left_to_fill(self):
         # ezexe/p4#113: lifetime.py finds the store from CLAUDE_PROJECT_DIR or the working directory without --p4.
         text = SKILL.read_text(encoding="utf-8")
