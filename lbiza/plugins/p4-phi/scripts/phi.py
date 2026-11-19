@@ -12,9 +12,10 @@ but for a fresh child the app may write it only after the first message, so the 
 read first and the record corrects it. `detach` and `reparent` rewrite it in session.json.
 
 The hooks, each in its h_ function:
-- SessionStart gives the built-in rules, as rules_text says, and the start background to a fork, after a clear,
-  with the session's own turns and the address book whole, and to a session no app runs. After a compaction the
-  summary keeps the conversation, so it gives the address book's changed entries with the path of book.md.
+- SessionStart gives the start background to a fork, after a clear, with the session's own turns and the address
+  book whole, and to a session no app runs. After a compaction the summary keeps the conversation, so it gives the
+  address book's changed entries with the path of book.md. It hands no rule: the rules built into p4-phi are a
+  section of the system prompt, which the plugin's hooks module sets from `phi.py rules`, as rules_section says.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the address book's
   changes and what the sessions beside it changed. A start and every message pass whole, the lines that ask
@@ -25,7 +26,8 @@ The hooks, each in its h_ function:
 - The checks before and after a tool call ride on the retrieval hooks' entries, through `routed`.
 
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
-with the watcher's commands from puppeteer.py; `--help` gives the arguments of each.
+with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
+own: it prints the text of the system prompt's section as one JSON line.
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, and `puppeteer`, which puppeteer.on reads. The `phi`
@@ -1555,15 +1557,36 @@ def built_in():
     return ([BUILT_IN] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
 
 
-def rules_text():
-    """The rules p4-phi hands a session at its start: the rules built into p4-phi, whole. The store's feedback and
-    user memories are not handed: memory.md, "Auto memory", says the app loads the first 200 lines of MEMORY.md at
-    the start of every conversation, and CLAUDE.md is read again after a compaction, so live_rules hands a line only
-    for a memory that changes after the start."""
-    if not RULES:
+def rules_section():
+    """The text of the section the plugin's hooks module adds to the system prompt at `prompt.compose`: the rules
+    built into p4-phi, whole, for the session this process runs for. plugins/mods/reference.md, "Prompts and what
+    Claude reads": `prompt.compose` fires when "Claude Code renders a system prompt" and a hook answers "`{ sections
+    }`, a list of `{ id, text, scope }` in the order they're sent". The system prompt goes with every request and is
+    sent anew after a compaction, so no hook hands the rules at a start, a clear or a compaction.
+    '' where a setting turns the rules off: P4_PHI=0, P4_PHI_RULES=0, `rules: false` in the store's phi.json, or
+    both `phi.act_dont_wait` and `phi.levels` false in the project's p4.json, which Me reads from the session's own
+    store. A project with no store has no phi.json and gets the rules, as every session does.
+    The store's feedback and user memories are no part of it: memory.md, "Auto memory", says the app loads the first
+    200 lines of MEMORY.md at the start of every conversation, and CLAUDE.md is read again after a compaction, so
+    live_rules hands a line only for a memory that changes after the start."""
+    if os.environ.get("P4_PHI") == "0":
         return ""
-    RAN["rules"] = 0
-    return builtin_text()
+    me = Me()
+    if me.home and os.path.isdir(me.home):
+        configure(me.home)                         # phi.json's `rules`, and P4_PHI_RULES ahead of it
+    elif os.environ.get("P4_PHI_RULES") in ("0", "1"):
+        globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
+    return builtin_text() if RULES else ""
+
+
+def rules_main():
+    """`phi.py rules`: one JSON line for the hooks module, `{"rules": <the section's text>}`. A failure prints
+    nothing, so the module adds no section, and leaves its line in the session's log."""
+    try:
+        sys.stdout.write(json.dumps({"rules": rules_section()}) + "\n")
+    except Exception as e:  # noqa: BLE001
+        log_failure("rules", {}, e)
+    return 0
 
 
 # --- a memory another session changes mid-session ---------------------------------------------------------------------
@@ -2058,10 +2081,10 @@ def tracked(home):
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
-        # a project with no .claude/p4 yet still gets the rules p4-phi carries itself; the SessionStart hooks run
-        # side by side, so p4-temportal making the folder first is not to be counted on
+        # a project with no .claude/p4 yet has nothing to hand: the rules p4-phi carries itself are in its system
+        # prompt, as rules_section says
         RAN["start"] = "no store"
-        return (builtin_text() or None) if RULES and payload.get("source") != "resume" else None
+        return None
     p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
@@ -2102,12 +2125,11 @@ def h_session_start(payload):
         RAN["pair"] = "compacted"
     elif source in ("compact", "clear"):
         first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
-    rules = rules_text() if source != "resume" else ""
     save_session(me.home, s)
     # past the app's cap of 10,000 characters Claude sees a preview of the first 2,000 and the file's path, so what
-    # asks the session to act comes first: the page to resume from and the notices, then the built-in rules and the
-    # background, and last the address book, which is whole on its page as well
-    return "\n\n".join(p for p in (first, *notices, rules, text, book_line) if p) or None
+    # asks the session to act comes first: the page to resume from and the notices, then the background, and last
+    # the address book, which is whole on its page as well
+    return "\n\n".join(p for p in (first, *notices, text, book_line) if p) or None
 
 
 def started_by(me, payload):
@@ -3378,6 +3400,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
+    if argv[:1] == ["rules"]:                      # the hooks module's own, which needs no store
+        return rules_main()
     import argparse
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)

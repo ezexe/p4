@@ -390,7 +390,8 @@ class Supervisor(unittest.TestCase):
         def start(source):
             r = t.hook("session-start", KID2, {"hook_event_name": "SessionStart", "source": source},
                        P4_PHI_BOOK="1")
-            return context(r).rsplit("\n\nphi (p4-phi): ", 1)[-1]        # the book comes last
+            # the book comes last, and alone where the start hands nothing before it
+            return context(r).rsplit("\n\nphi (p4-phi): ", 1)[-1].removeprefix("phi (p4-phi): ")
 
         page = book.page_path(t.p4, KID2)
         same = start("compact")

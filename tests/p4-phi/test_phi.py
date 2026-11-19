@@ -133,6 +133,15 @@ class Tree:
                           capture_output=True, text=True, env=self.env(host, proj), cwd=proj or self.proj,
                           timeout=60, clock=clock)
 
+    def rules(self, host, proj=None, **more):
+        """What `phi.py rules` prints for the plugin's hooks module: the text of the system prompt's section that
+        holds the rules built into p4-phi, '' where a setting turns them off."""
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "rules"],
+                       capture_output=True, text=True, env=self.env(host, proj, **more), cwd=proj or self.proj,
+                       timeout=60)
+        assert r.returncode == 0 and r.stdout.count("\n") == 1, (r.returncode, r.stdout, r.stderr)
+        return json.loads(r.stdout)["rules"]
+
     def stop(self, host, prompt, calls=(), report="done", uuid="u0", **kw):
         t = transcript(os.path.join(self.tmp, host + uuid + ".jsonl"), prompt, calls, report, uuid)
         return self.hook(STOP, host, {"hook_event_name": "Stop", "transcript_path": t,
@@ -545,14 +554,16 @@ class Sessions(unittest.TestCase):
             t = Tree(tmp, store=False)
             t.record(TOP)
             r = t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
-            self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "the built-in rules, with no store")
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a start hands nothing with no store")
+            self.assertEqual(t.rules(TOP), phi.builtin_text(), "the built-in rules, as the system prompt's section")
             r = t.say(TOP, TASK)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
             self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
 
     def test_the_first_session_of_a_store_hears_the_built_in_rules_alone(self):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
-        self.assertEqual((r.returncode, context(r)), (0, phi.builtin_text()), "no memories: the built-in rules")
+        self.assertEqual((r.returncode, context(r)), (0, ""), "no memories and no background: nothing is handed")
+        self.assertEqual(self.t.rules(TOP), phi.builtin_text(), "the built-in rules are its system prompt's section")
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
         self.assertEqual(self.t.session(TOP)["task"], TASK)
 
@@ -805,8 +816,8 @@ class Background(unittest.TestCase):
         self.t.stop(TOP, TASK, [("Edit", {"file_path": "src/export/flush.py"}, "ok")], "Half done.")
         other = "local_top00002"
         self.t.record(other, title="Something else entirely")
-        self.assertEqual(self.start(other), phi.builtin_text())   # in the app a start is given no background,
-        # since its parent session is not known yet; it has the built-in rules, the store having no memories here
+        self.assertEqual(self.start(other), "")   # in the app a start is given no background, since its parent
+        # session is not known yet, and the built-in rules are in its system prompt
         text = context(self.t.say(other, "paint the fence green"))
         self.assertIn("the orchestrators in this project before this one", text)
         self.assertIn("\"Narwhal exporter\"", text)
@@ -837,7 +848,7 @@ class Background(unittest.TestCase):
         for gone in ("This session's own turns so far", "Half done.", "edited export/flush.py",
                      "background for this session"):
             self.assertNotIn(gone, text, gone)
-        self.assertIn("act-don't-wait", text, "the built-in rules still come")
+        self.assertNotIn("act-don't-wait", text, "the built-in rules are in the system prompt, sent anew after it")
         text = self.start(KID, "clear")
         self.assertIn("This session's own turns so far", text)
         self.assertIn("Half done.", text)
@@ -1336,20 +1347,25 @@ class Rules(unittest.TestCase):
 
     def test_each_memory_reaches_a_session_once(self):
         """ezexe/p4#130: a memory's line in the index is the one form a session is handed at its start, so p4-phi
-        hands the built-in rules whole and no line of a feedback or user memory, at a start, a clear or a compaction."""
+        sets the built-in rules whole in the system prompt and hands no line of a feedback or user memory, there or
+        at a start, a clear or a compaction."""
         for host in (TOP, KID):
+            section = self.t.rules(host)
+            self.assertIn("- " + phi.BUILT_IN, section, host)
             for source in ("startup", "clear", "compact"):
                 text = self.start(host, source)
-                self.assertIn("- " + phi.BUILT_IN, text, (host, source))
+                self.assertNotIn(phi.BUILT_IN, text, (host, source))
                 for word in ("tabs-not-spaces", "Indent with tabs", "long-rule", "Run the ports check", "out/Narwhal"):
-                    self.assertNotIn(word, text, (host, source))
+                    self.assertNotIn(word, text + section, (host, source))
                 self.assertLessEqual(len(text), APP_CAP)
 
 
-    def test_a_resume_is_not_told_again_and_a_compaction_is(self):
-        self.start(TOP)
-        self.assertNotIn("act-don't-wait", self.start(TOP, "resume"))
-        self.assertIn("act-don't-wait", self.start(TOP, "compact"))
+    def test_no_start_hands_the_rules_since_the_system_prompt_holds_them(self):
+        """The system prompt goes with every request, a resumed conversation keeps its own and a compaction sends it
+        anew, so no source of a SessionStart hands the rules."""
+        for source in ("startup", "resume", "clear", "compact", "fork"):
+            self.assertNotIn("act-don't-wait", self.start(TOP, source), source)
+        self.assertIn("act-don't-wait", self.t.rules(TOP))
 
     def test_no_ceiling_or_page_of_p4_phis_own_and_the_acting_lines_lead_past_the_apps_cap(self):
         """Audit candidate 10. hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and
@@ -1390,10 +1406,10 @@ class Rules(unittest.TestCase):
         self.assertNotIn("did not fit", ctx)
         self.assertFalse(os.path.exists(os.path.join(self.t.dir(TOP), "held.md")), "no page of p4-phi's own")
 
-    def test_the_built_in_rules_come_beside_the_background(self):
+    def test_a_fresh_childs_background_comes_with_its_first_message_and_its_start_hands_no_rule(self):
         self.t.say(TOP, TASK)
         text = self.start(KID)
-        self.assertIn("act-don't-wait", text)
+        self.assertNotIn("act-don't-wait", text, "the rules are in its system prompt")
         self.assertLessEqual(len(text), APP_CAP)
         first = context(self.t.say(KID, HANDED))                         # a fresh child's background: its first message
         self.assertIn("background for this session", first)
@@ -1421,11 +1437,13 @@ class Rules(unittest.TestCase):
         later = context(t.say(KID, "go on"))
         self.assertNotIn("did not fit", later, "a later prompt has no ceiling of p4-phi's own either")
         self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")))
+        calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(12)]
+        for n in range(3):                                          # its own turns, which a clear's start hands whole
+            t.stop(KID, HANDED, calls, "Ported: " + "the flush writes the ports table. " * 12, uuid=f"k{n}")
         start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1"))
         self.assertGreater(len(start), 9500)
         self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
-        self.assertLess(start.index("act-don't-wait"), 2000, "the rules inside the app's 2,000-character preview")
-        self.assertLess(start.index("act-don't-wait"), start.index("background for this session"))
+        self.assertNotIn("act-don't-wait", start, "no rule is handed at a start")
 
     def test_an_orchestrators_long_command_runs_as_sent(self):
         """ezexe/p4#243 D4 and row S22: the app moves a foreground command to the background at its timeout,
@@ -1472,7 +1490,7 @@ class Rules(unittest.TestCase):
                 self.assertIn("this session's address book, whole on" if source == "clear" else
                               "this session's address book, unchanged since it last looked, is whole on", text, source)
                 self.assertIn("names the shared store git@example.com:team/elsewhere.git", text, source)
-                self.assertIn("act-don't-wait", text, "the built-in rules come with any background")
+                self.assertNotIn("act-don't-wait", text, "the built-in rules are no part of a start's text")
                 if source == "compact":
                     self.assertTrue(text.startswith("phi (p4-phi): this session is a puppeteer and its "
                                                     "context was compacted"), text[:200])
@@ -1481,14 +1499,14 @@ class Rules(unittest.TestCase):
     def test_past_the_apps_cap_the_notices_lead_and_the_address_book_comes_last(self):
         """ezexe/p4#243 D9: past 10,000 characters the app hands Claude a preview of the first 2,000 and the file's
         path. A clear's start text with a long background and a long address book keeps the notices inside that
-        preview, the built-in rules before the background, and the book last."""
+        preview and the book last. The built-in rules are in the system prompt, and no part of that text."""
         t = self.t
         subprocess.run(["git", "init", "-q", t.p4], check=True, capture_output=True)
         gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
                             text=True).stdout.strip()
         write(os.path.join(gd, relay.TRACK_STATE), json.dumps(
             {"fails": 1, "next": time.time() + 3600, "reason": "index.lock is held", "owed": []}))
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True,
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True, "own_turns": 6,
                                                                   "home": "git@example.com:team/elsewhere.git"}}))
         write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 2 * APP_CAP}))
         t.say(TOP, TASK, P4_PHI_BOOK="1")
@@ -1497,7 +1515,7 @@ class Rules(unittest.TestCase):
             t.record(host, TOP, f"Port part {k} of the narwhal exporter's flush to the new writer")
             t.say(host, f"Port part {k} of the flush.\nFiles: src/export/flush_part_{k}.py, tests/test_part_{k}.py")
         calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(14)]
-        for n in range(3):
+        for n in range(6):                                          # six turns of its own, each kept by own_turns
             t.stop(TOP, "Build the next part of the narwhal tools and check it. " * 5, calls,
                    "Built and checked: " + "the part reads the ports table back and its check passes. " * 8,
                    uuid=f"u{n}")
@@ -1514,32 +1532,37 @@ class Rules(unittest.TestCase):
             self.assertIn(line, text)
             self.assertLessEqual(text.index(line) + len(line), 2000, f"inside the app's preview: {line}")
         book = text.index("this session's address book")
-        for later in ("built-in, act-don't-wait", "built-in, levels", "background for this session"):
-            self.assertLess(text.index(later), book, f"{later} comes before the address book")
-        self.assertLess(text.index("built-in, levels"), text.index("background for this session"))
+        self.assertLess(text.index("background for this session"), book, "the background before the address book")
+        self.assertNotIn("built-in, ", text, "no rule is handed at a start")
 
     def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
-        self.assertEqual(self.start(TOP), "")
+        self.assertEqual(self.t.rules(TOP), "")
+        self.assertEqual(self.t.rules(TOP, P4_PHI_RULES="1"), phi.builtin_text(), "the variable comes ahead of it")
         os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
+        self.assertEqual(self.t.rules(TOP, P4_PHI_RULES="0"), "")
+        self.assertEqual(self.t.rules(TOP, P4_PHI="0"), "", "the plugin turned off sets no section")
         for f in os.listdir(os.path.join(self.t.p4, "temportal", "memory")):
             os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
-        self.assertEqual(self.start(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
+        self.assertEqual(self.t.rules(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
+        self.assertEqual(self.start(TOP), "", "and a start hands no rule")
 
     def test_the_built_in_rule_names_research_and_the_decisions_file(self):
         """A question research can answer is decided by the session and logged with its source, never put to ezexe."""
-        line = next(x for x in self.start(TOP).splitlines() if "act-don't-wait" in x)
+        line = next(x for x in self.t.rules(TOP).splitlines() if "act-don't-wait" in x)
         for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
             self.assertIn(word, line)
 
     def test_many_memories_leave_the_start_text_as_it_is(self):
-        """However many memories the store holds, the start carries the built-in rules whole and none of them."""
+        """However many memories the store holds, the system prompt's section carries the built-in rules whole and
+        none of them, and no start hands one."""
         for k in range(400):
             memory(self.t.p4, f"a-rather-long-memory-name-number-{k:03d}", "feedback", f"Rule {k} of the many.")
+        section = self.t.rules(KID)
+        self.assertIn("- " + phi.BUILT_IN, section)
+        self.assertNotIn("a-rather-long-memory-name", section)
         for source in ("startup", "clear", "compact"):
-            got = self.start(KID, source)
-            self.assertIn("- " + phi.BUILT_IN, got, source)
-            self.assertNotIn("a-rather-long-memory-name", got, source)
+            self.assertNotIn("a-rather-long-memory-name", self.start(KID, source), source)
         self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "rules.md")), "no page copies them")
 
     def test_a_failed_first_commit_is_told_at_the_next_start_once(self):
@@ -1560,15 +1583,15 @@ class Rules(unittest.TestCase):
 
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
-        other session's start."""
-        self.assertEqual(phi.rules_text(), phi.builtin_text())
+        other session's start, so the system prompt's section is the built-in rules alone."""
+        self.assertEqual(self.t.rules(KID), phi.builtin_text())
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
         self.assertIn("that go is ezexe's to give", phi.BUILT_IN)
-        self.assertIn("act-don't-wait", self.start(TOP))
+        self.assertIn("act-don't-wait", self.t.rules(TOP))
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
-        got = self.start(TOP)
+        got = self.t.rules(TOP)
         self.assertNotIn("act-don't-wait", got)
         self.assertIn("built-in, levels", got, "the other built-in rule still comes")
         try:
@@ -1578,12 +1601,13 @@ class Rules(unittest.TestCase):
             write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False, "levels": False}}))
             phi.project_conf(self.t.p4)
             self.assertEqual(phi.builtin_text(), "")
+            self.assertEqual(self.t.rules(TOP), "", "both rules off: the system prompt gets no section")
         finally:
             phi.project_conf("")
 
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
-        got = self.start(TOP)
+        got = self.t.rules(TOP)
         for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:check`",
                      "`run_in_background: true`"):
             self.assertIn(word, got)
@@ -1593,19 +1617,18 @@ class Rules(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bare = Tree(tmp, store=False)
             bare.record(TOP)
-            r = bare.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
-            self.assertIn("built-in, levels", context(r), "a project with no store")
+            self.assertIn("built-in, levels", bare.rules(TOP), "a project with no store")
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
-        off = self.start(KID)
+        off = self.t.rules(KID)
         self.assertNotIn("built-in, levels", off)
         self.assertIn("act-don't-wait", off)
 
     def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
         """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
         notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A
-        background subagent's results reach Claude as a completion notification in a later turn". So the rule handed
-        at a session's start holds no sentence of its own on waiting, and still names the background route."""
-        self.assertIn(phi.LEVELS, self.start(TOP))
+        background subagent's results reach Claude as a completion notification in a later turn". So the rule in a
+        session's system prompt holds no sentence of its own on waiting, and still names the background route."""
+        self.assertIn(phi.LEVELS, self.t.rules(TOP))
         for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
             self.assertNotIn(word, phi.LEVELS, word)
         self.assertIn("`run_in_background: true`", phi.LEVELS)
@@ -1618,23 +1641,23 @@ class Rules(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
         self.assertIn("goes to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", phi.LEVELS)
         self.assertNotIn("sweep", phi.LEVELS)
-        self.assertNotIn("p4-phi:sweep", self.start(TOP))
+        self.assertNotIn("p4-phi:sweep", self.t.rules(TOP))
 
     def test_the_levels_rule_names_no_read_of_the_plan_limits(self):
-        """The built-in rule `levels` handed at a session's start tells it to read no plan limit before a start or
+        """The built-in rule `levels` in a session's system prompt tells it to read no plan limit before a start or
         an Agent call: how much of the plan a piece of work spends is ezexe's, and a session neither weighs it nor
         stops for it. The rule names no stop or restart of a running session either."""
-        got = self.start(TOP)
+        got = self.t.rules(TOP)
         self.assertIn("built-in, levels:", got)
         for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
             self.assertNotIn(word, phi.LEVELS, word)
 
     def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
         """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
-        order. When nothing else assigns one, the agent runs on your session's model." So the rule handed at a
-        session's start tells it to name a model for each stage, in the page's words, and the skill quotes both
-        sentences with the page."""
-        got = self.start(TOP)
+        order. When nothing else assigns one, the agent runs on your session's model." So the rule in a
+        session's system prompt tells it to name a model for each stage, in the page's words, and the skill quotes
+        both sentences with the page."""
+        got = self.t.rules(TOP)
         self.assertIn("A Workflow script names a model for each stage", got)
         for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
                       "\"runs on your session's model\""):
@@ -2115,13 +2138,14 @@ class NoWriteUnderClaude(unittest.TestCase):
             for source in ("compact", "clear"):
                 said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
         said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
+        said[TOP, "rules"] = self.t.rules(TOP)           # the system prompt's section, which holds the built-in rules
         for key, text in said.items():
             self.assertEqual(writes_under_claude(text), [], key)
         page = self.pad(self.WORKER) + "/state.md"
         self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
         self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
         self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
-        self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "start"])
+        self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "rules"])
         for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
 

@@ -49,18 +49,21 @@ type Machine = {
   files?: Record<string, string>
   pythons?: Record<string, string>
   look?: (args: readonly string[]) => Answer | Promise<Answer>
+  // What `phi.py rules` prints as the system prompt's section: none where a setting turns the rules off.
+  rules?: string
   usage?: SessionUsage
   // Why a message to an address is not delivered there, where it is not.
   refuses?: (to: string) => string | undefined
 }
 
-// What the module read, the pythons it tried, each phi.py command it ran with its whole call, what it wrote, the
-// messages it sent to other sessions and the prompts it submitted.
+// What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
+// with its whole call, what it wrote, the messages it sent to other sessions and the prompts it submitted.
 type Seen = {
   files: Record<string, string>
   read: string[]
   tried: string[][]
   looks: string[][]
+  asked: string[][]
   calls: { argv: readonly string[]; env: Readonly<Record<string, string>> | undefined }[]
   wrote: { path: string; text: string }[]
   logged: string[]
@@ -80,6 +83,7 @@ function machine(on: On, has: Machine): Seen {
     read: [],
     tried: [],
     looks: [],
+    asked: [],
     calls: [],
     wrote: [],
     logged: [],
@@ -144,9 +148,14 @@ function machine(on: On, has: Machine): Seen {
     let stdout = ''
     if (at >= 0) {
       const args = e.argv.slice(at + 1)
-      seen.looks.push([...args])
       seen.calls.push({ argv: e.argv, env: e.init?.env })
-      stdout = `${JSON.stringify(has.look === undefined ? ORCHESTRATOR : await has.look(args))}\n`
+      if (args[0] === 'rules') {
+        seen.asked.push([...args])
+        stdout = `${JSON.stringify({ rules: has.rules ?? '' })}\n`
+      } else {
+        seen.looks.push([...args])
+        stdout = `${JSON.stringify(has.look === undefined ? ORCHESTRATOR : await has.look(args))}\n`
+      }
     } else {
       seen.tried.push([...e.argv])
       const path = (has.pythons ?? {})[e.argv[0] ?? '']
@@ -745,4 +754,81 @@ test('no turn is started for upkeep while a turn of the session runs', async ($,
 
   expect(seen.looks.length).toBeGreaterThan(2)
   expect(seen.submitted).toEqual([])
+})
+
+// The rules built into p4-phi as `phi.py rules` prints them, under the head phi.builtin_text gives them.
+const RULES =
+  'phi (p4-phi): the rules built into p4-phi, for every session:\n' +
+  "- built-in, act-don't-wait: A question that the code can answer is researched and decided by this session.\n" +
+  '- built-in, levels: work is delegated to where Claude Code runs it best.'
+// A system prompt as Claude Code composes it: its opening on the shared side, and a session's own sections after.
+const COMPOSED = {
+  sections: [
+    { id: 'intro', text: 'You are Claude Code.', scope: 'shared' },
+    { id: 'memory', text: 'The memory index of this project.', scope: 'session' },
+  ],
+} as const
+const RENDER = {
+  model: 'claude-fable-5-2',
+  promptModel: 'claude-fable-5-2',
+  surfaces: ['desktop'],
+  tools: ['Bash', 'Agent'],
+  outputStyle: null,
+  traits: [],
+} as const
+
+test('the rules built into p4-phi are the last section of the system prompt, on the session side', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { rules: RULES })
+  on('prompt.compose', () => COMPOSED)
+
+  const composed = await $.prompt.compose(RENDER)
+
+  expect(composed.sections).toEqual([...COMPOSED.sections, { id: 'p4-phi:rules', text: RULES, scope: 'session' }])
+  // Python holds the words and reads the settings, asked as a look is: for this session, in its project.
+  expect(seen.asked).toEqual([['rules']])
+  expect(seen.calls[0]?.argv.slice(0, 4)).toEqual([KEPT, '-I', '-X', 'utf8'])
+  expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
+  expect(seen.looks).toEqual([])
+})
+
+test('a prompt rendered again holds the section once, with the words of that render', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, { rules: RULES })
+  // A render beneath that already holds the section, as a plugin above another copy of this one would see it.
+  const held = { id: 'p4-phi:rules', text: 'the rules as they read before', scope: 'session' } as const
+  on('prompt.compose', () => ({ sections: [COMPOSED.sections[0], held, COMPOSED.sections[1]] }))
+
+  const composed = await $.prompt.compose(RENDER)
+
+  expect(composed.sections).toEqual([...COMPOSED.sections, { id: 'p4-phi:rules', text: RULES, scope: 'session' }])
+})
+
+test('where a setting turns the rules off the system prompt is left as composed', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  // `phi.py rules` prints no text where phi.json, p4.json or P4_PHI_RULES turns the rules off.
+  const seen = machine(on, { rules: '' })
+  on('prompt.compose', () => COMPOSED)
+
+  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
+  expect(seen.asked).toEqual([['rules']])
+})
+
+test('P4_PHI=0 sets no section, and python is not asked', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const seen = machine(on, { rules: RULES })
+  on('prompt.compose', () => COMPOSED)
+
+  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
+  expect(seen.calls).toEqual([])
+})
+
+test('with no python the system prompt goes out as composed', async ($, on) => {
+  mock.env(on, {})
+  const seen = machine(on, { files: {}, pythons: {}, rules: RULES })
+  on('prompt.compose', () => COMPOSED)
+
+  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
+  expect(seen.asked).toEqual([])
+  expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })

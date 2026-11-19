@@ -11,7 +11,7 @@ p4-phi keeps each session's files in `<project>/.claude/p4/phi/sessions/<session
 
 ## What reaches a session without a command
 
-- At its start: the rules built into p4-phi, whole. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message, unless it was cut back to a pointer or its body says the plugin carries its rule.
+- In its system prompt: the rules built into p4-phi, whole, as a section the plugin's hooks module sets when Claude Code renders the prompt, so no hook hands them at a start, a clear or a compaction, and a subagent, whose prompt is not rendered that way, holds none. The store's feedback and user memories reach it as their lines in the memory index the app loads, and a memory that changes later is handed once at the next message, unless it was cut back to a pointer or its body says the plugin carries its rule.
 - Beside its first message, when the sessions linked to it left any: its start background, whose first and last lines say what it holds and how to keep a finding or say the task is done.
 - Beside its next message: the reports of the workers or coworkers it started that finished a turn since.
 - As a message from a worker it started, at the end of each of that worker's turns: the turn's report, which the plugin's hooks module sends and no worker writes. The message opens `phi (p4-phi): this session ended a turn.`, starts a turn when this session is idle, and needs no reply. A report it holds is named beside it and not repeated. A puppeteer's standing worker and coworkers write their own closing message.
@@ -56,7 +56,7 @@ Run each with `python -I -X utf8 "${CLAUDE_PLUGIN_ROOT}/scripts/phi.py"`, and pa
 
 ## Delegation
 
-The built-in rule `levels`, given at a session's start, says where work runs: Claude Code's built-in subagent `Explore` for a search or a read across files, called with `model` `haiku`, a Bash or PowerShell call with `run_in_background: true` for a long command, Claude Code's bundled skill `code-review` without `--fix` for an independent review of a code change, the plugin's background subagent `p4-phi:check` for an independent read of a result that is no code change, or a worker.
+The built-in rule `levels`, held in a session's system prompt, says where work runs: Claude Code's built-in subagent `Explore` for a search or a read across files, called with `model` `haiku`, a Bash or PowerShell call with `run_in_background: true` for a long command, Claude Code's bundled skill `code-review` without `--fix` for an independent review of a code change, the plugin's background subagent `p4-phi:check` for an independent read of a result that is no code change, or a worker.
 `phi.child_levels` in `.claude/p4/p4.json` sets the model and effort a worker starts with for each kind of step: by default `static` runs on `claude-sonnet-5-5` at `medium`, and `build` and `design` on the parent session's model at `high`.
 No start's `effort` is named above the starting session's own, since the app starts no session above its starter's effort: p4-phi reads that level from the hook input's `effort.level` or from `CLAUDE_EFFORT`, and keeps the last one seen on the session's record.
 No p4 setting names a subagent's model or effort, since Claude Code sets both: by https://code.claude.com/docs/en/sub-agents.md, "Choose a model", the `model` on the Agent call comes first, then the `model` field of the agent's definition, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the session's model.

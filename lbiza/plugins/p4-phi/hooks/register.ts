@@ -5,10 +5,12 @@
 // session's folder in the store, for the python scripts to read. And it wakes an idle session, which no command
 // hook can: at a worker's turn end it sends the worker's report to the session that started it, and where a look
 // answers work that a turn's wait left unmoved, or upkeep that is due while every session it started is idle, it
-// starts a turn of the session's own for it.
+// starts a turn of the session's own for it. And it sets the rules built into p4-phi as a section of the system
+// prompt, where a command hook can only hand text beside a start.
 
 import type {
   EngineInterface,
+  PromptComposeResult,
   Register,
   SessionContextUsage,
   SessionRateLimit,
@@ -30,11 +32,17 @@ const MOST_WAIT_MS = 600_000
 // The most of a report that is sent to a starter: what phi.py keeps of one, its REPORT_CHARS.
 const REPORT_CHARS = 4_000
 
+// The id of the system prompt's section that holds the rules built into p4-phi. A plugin's own section is named
+// `<plugin>:<name>`, by the types of `prompt.compose`.
+const RULES_SECTION = 'p4-phi:rules'
+
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
+// `rules` is what `phi.py rules` prints alone: the text of the system prompt's section.
 type Answer = {
+  rules?: string
   dir?: string
   starter?: string
   move?: string
@@ -430,6 +438,27 @@ function record($: EngineInterface, context: SessionContextUsage, limits: readon
   writing = writing.then(() => writeUsage($, context, limits))
 }
 
+// The system prompt as composed beneath, with the rules built into p4-phi as its last section, on the session's
+// side of the cache boundary since a project's settings choose the rules. Python holds the rules' words and reads
+// the settings that turn one off, so it is asked for the text at each render: a system prompt is rendered for a
+// conversation's first request and after a compaction, not at every turn. With no text, as where a setting turns
+// the rules off or no python runs, the prompt is left as composed.
+async function withRules($: EngineInterface, composed: PromptComposeResult): Promise<PromptComposeResult> {
+  try {
+    switches ??= readSwitches($)
+    if ((await switches).isPhiOff) return composed
+    const text = ((await ask($, ['rules'], LOOK_MS))?.rules ?? '').trim()
+    if (text === '') return composed
+    const others = composed.sections.filter(section => section.id !== RULES_SECTION)
+
+    return { sections: [...others, { id: RULES_SECTION, text, scope: 'session' }] }
+  } catch (error) {
+    note($, `the rules were not set in the system prompt: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+
+    return composed
+  }
+}
+
 // At a session's start, and at each reload of the module: the first look, which arms the timer and answers the
 // session's folder, and then the usage as it stands.
 async function begin($: EngineInterface): Promise<void> {
@@ -494,4 +523,8 @@ export const register: Register = on => {
 
     return next(e)
   })
+
+  // Claude Code raises this when it renders a system prompt. A hook that fails here is skipped, and the prompt goes
+  // out as composed beneath.
+  on('prompt.compose', async ($, e, next) => withRules($, await next(e))).catch(($, e, next) => next(e))
 }

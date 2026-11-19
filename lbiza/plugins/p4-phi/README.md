@@ -47,12 +47,16 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Asks for a look at a turn's end and at a message's arrival | `plugins/mods/reference.md`, "Events" | `turn.complete` fires when "A turn ended", and `session.receive` when "A message arrives from, or is about to go to, another agent or session." |
 | Keeps a session's context fill and plan limits in `usage.json` in the session's folder, written by the module at the session's start and at each whole point a figure moves | `plugins/mods/reference.md`, "Mods API methods" and "Events" | "`usage()` returns `{ startedAt, context, rateLimits, cost }`: `context` has `tokens`, `window`, and `percent`, and `rateLimits` is a list of `{ kind, percentUsed, resetsAt }`.", and `session.measure` fires "After each turn, and when a plan limit's percent used changes" |
 
+| Sets the rules built into p4-phi as a section of the system prompt, `p4-phi:rules`, last on the session's side, with the text `phi.py rules` prints for the session, so no hook hands them at a start, a clear or a compaction | `plugins/mods/reference.md`, "Prompts and what Claude reads" | `prompt.compose` fires when "Claude Code renders a system prompt", and a hook answers "`{ sections }`, a list of `{ id, text, scope }` in the order they're sent" |
 | Sends the report of each turn of a session another session started to that session, from the module, so no worker is asked for a closing line | `plugins/mods/api.md`, "Send and receive messages between sessions", and `cross-session-messaging.md`, "Message delivery" | "To send one, call `$.session.send({ to, text })`, which makes the same delivery the SendMessage tool makes." and "When the receiving session is idle, Claude Code starts a new turn with the message." |
 | Starts a turn in a session whose turn ended on a step that waits on other sessions, for the work that wait leaves to move | `plugins/mods/api.md`, "Start a turn from a background job" | "The call waits until the session is idle and then starts a new turn." |
 
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 `phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
+The section of the system prompt is left out where `P4_PHI=0`, `P4_PHI_RULES=0`, `rules: false` in `phi.json`, or both `phi.act_dont_wait` and `phi.levels` false in `p4.json` turn the rules off, and a rule one of those two keys turns off is left out of it.
+A subagent holds no such section: Claude Code raises `prompt.compose` for the main conversation's system prompt, and a live check on Claude Code 2.1.326 raised none for a subagent started in the same session.
+A setting changed during a conversation reaches its system prompt at the next compaction or clear, since by `plugins/mods/reference.md` Claude "keeps reading the text saved with the conversation" until then.
 A puppeteer's line at its standing worker's report and the upkeep's check of a short context read each session's share there, so no session is asked for its usage, and only a session with no measure kept is named for a `get_usage` read.
 
 The module asks python once who started the session, with the question of where its folder is, and sends that session the turn's last message at `turn.complete`, cut to 4,000 characters.
@@ -180,7 +184,7 @@ The plugin works in any project it is enabled in.
 It needs no key in `p4.json`, no entry in a project's `settings.json` or `settings.local.json`, no environment variable and no existing `.claude/p4` store, and it writes to no settings file.
 
 - The plugin's own SessionStart hook makes the store `.claude/p4/` at the first session of a project and writes `p4.json` with the defaults `p4conf.py` holds, which leave out `child_levels`, `puppeteer_section` and `clear_at`: those three are read when a project sets them. A value it wrote follows a later change of its default, and a value set by hand stays. A value set by hand moves only when it equals the value recorded as written, at the next generation, or, in a store from before the record, a past default.
-- Before the store exists, a session is given the built-in rules.
+- Before the store exists, a session holds the built-in rules in its system prompt, as every session does.
 - The plugin ships no `settings.json`, a file no plugin page of the docs describes.
 
 ### `p4.json`, section `phi`

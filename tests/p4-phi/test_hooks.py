@@ -718,8 +718,7 @@ class ZeroConfiguration(unittest.TestCase):
 
     def test_every_handler_runs_in_a_project_with_no_store(self):
         start, said, pre, plain, stop = self.handlers()
-        self.assertIn("built-in, levels", start["additionalContext"])
-        self.assertIn("act-don't-wait", start["additionalContext"])
+        self.assertEqual(start, {}, "a start hands no rule: the rules are a section of the system prompt")
         self.assertEqual(pre, {}, "the call runs as sent with no line: the app moves it at its own timeout")
         self.assertEqual((said, plain, stop), ({}, {}, {}))
         self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi.py's own handlers write nothing")
@@ -733,7 +732,7 @@ class ZeroConfiguration(unittest.TestCase):
                          (True, True, True, None), "p4.json is written with the working defaults")
         self.env["P4_PHI_WATCH"] = "0"       # only so this test leaves no watcher behind in its temporary folder
         start, said, pre, plain, stop = self.handlers()
-        self.assertIn("built-in, levels", start["additionalContext"])
+        self.assertNotIn("built-in, ", json.dumps(start), "a start hands no rule")
         self.assertEqual(pre, {}, "the call runs as sent with no line")
         with open(os.path.join(p4, "phi", "sessions", self.sid, "session.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f)["task"], "Make the exporter write its ports table")
