@@ -515,6 +515,55 @@ def run_from(home, s, main, but=""):
     return spelled(main)
 
 
+# Where the session that reads a removal stands decides the git command it can run. worktrees.md, "How Claude Code
+# enforces isolation": "While a session is isolated in a worktree, Claude Code blocks the tool calls the checks below
+# define", among them "Git redirects: Claude Code blocks a Bash or Monitor command that redirects git into the main
+# checkout. The redirect can come through `git -C`, `--git-dir`, a `GIT_DIR` or `GIT_WORK_TREE` variable, or a `cd`
+# into the main checkout before running git." The same page, "What worktrees share with the main checkout": "git
+# commands in a worktree write to the main repository's shared `.git` directory." So from a worktree of the repository
+# `git worktree remove` and `git branch -d` reach it with no `-C`, and `-C` stays for a session in no worktree.
+_TOP = {}                        # a folder to the checkout it lies in, for one process
+
+
+def stand(home, s, main, but=""):
+    """How the session that reads a line runs git on the repository whose main checkout is `main`, as (how, folder):
+    ("-C", a checkout of it) where the session's own folder is no worktree, as run_from picks the checkout; ("in", a
+    worktree of it) where its own folder is a linked worktree, that folder when it is of this repository, else a
+    worktree of this repository the session itself works in, and git then runs there with no `-C`; ("", "") where
+    its own folder is a worktree of another repository and it works in none of this one."""
+    here = str(s.get("cwd") or "")
+    if here not in _TOP:
+        _TOP[here] = _out(here, "rev-parse", "--show-toplevel") or ""
+    top = _TOP[here]
+    if not top or not linked(top):
+        return "-C", run_from(home, s, main, but=but)
+    same = relay.norm(os.path.realpath(main))
+    for p in [top] + [t["path"] for t in trees_of(home, s["sessionId"], s) if t.get("there")]:
+        if os.path.isdir(p) and relay.norm(p) != relay.norm(but) and linked(p) \
+                and relay.norm(os.path.realpath(main_of(p) or "")) == same:
+            return "in", spelled(p)
+    return "", ""
+
+
+def git_of(how, folder, rest):
+    """One git command of a removal with the folder it runs in: (the command, '' where it carries `-C`)."""
+    return (f"git -C \"{folder}\" {rest}", "") if how == "-C" else (f"git {rest}", folder)
+
+
+THEIRS = ("it is clean and merged, and its repository, {main}, is not the one this session's own worktree is of, so "
+          "a session in that repository removes it, by {cmds} run there")
+
+
+def cmds_text(cmds):
+    """The commands of a removal as a line names them, each in backticks, with the worktree to run those in that
+    carry no `-C`."""
+    by = {}
+    for c, folder in cmds:
+        by.setdefault(folder, []).append(f"`{c}`")
+    return "; ".join("; ".join(cs) + (f", run in `{folder}` with no `-C`, which Claude Code refuses from a worktree"
+                                      if folder else "") for folder, cs in by.items())
+
+
 def in_use(home, but=()):
     """The folders the sessions the app still runs work in, by p4-phi's records and the app's, without those of the
     sessions `but`."""
@@ -573,16 +622,21 @@ def lost(home, s, t, branch, mains):
         if on_default(main, branch) is not True:
             return [], (f"`{branch}` in {spelled(main)}", f"its worktree is gone and it holds commits that are not on "
                                                           f"{default_ref(main) or 'a default branch'}")
-        frm = run_from(home, s, main)
+        how, frm = stand(home, s, main)
         listed = any(line.startswith("worktree ") and relay.norm(line[9:].strip()) == relay.norm(t["path"])
                      for line in (_out(main, "worktree", "list", "--porcelain") or "").splitlines())
-        return ([f"git -C \"{frm}\" worktree prune"] if listed else []) + [f"git -C \"{frm}\" branch -d {branch}"], None
+        rest = (["worktree prune"] if listed else []) + [f"branch -d {branch}"]
+        if not how:
+            return [], (f"`{branch}` in {spelled(main)}",
+                        THEIRS.format(main=spelled(main), cmds=" and ".join(f"`git {r}`" for r in rest)))
+        return [git_of(how, frm, r) for r in rest], None
     return [], None
 
 
 def removals(home, s, trees, skip_own=False, but=(), kept=None):
-    """The commands that remove the clean, merged worktrees among `trees` and delete their merged branches; what is
-    dirty or unmerged, each as (tree, why); and True when a tree was passed over because a session the app still
+    """The commands that remove the clean, merged worktrees among `trees` and delete their merged branches, each as
+    git_of gives it for where this session stands; what is dirty or unmerged, or of a repository this session cannot
+    run git on, each as (tree, why); and True when a tree was passed over because a session the app still
     runs works in it. The deepest folder comes first, and a worktree that holds another checkout goes only after
     that one. `skip_own` leaves the folder the app made, and what lies in it, to the app's own archive, and `but`
     names the sessions whose folders count as free. `kept` is upkeep.json's record of each worktree's main checkout,
@@ -623,18 +677,22 @@ def removals(home, s, trees, skip_own=False, but=(), kept=None):
         if inner:
             held.append((tree, f"it holds another checkout, {inner[0]}, which a removal would take along"))
             continue
-        frm = run_from(home, s, main, but=t["path"])
-        cmds.append(f"git -C \"{frm}\" worktree remove \"{tree}\"")
-        going.add(key)
+        how, frm = stand(home, s, main, but=t["path"])
+        rest = [f"worktree remove \"{tree}\""]
         # the branch is held to the default branch by its own tip: a worktree can sit on a detached HEAD, and then
         # its branch is the one the app's record names, which the folder's HEAD says nothing of
         if branch and branch != default_ref(main).rpartition("/")[2] \
                 and _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is not None:
             if on_default(main, branch) is True:
-                cmds.append(f"git -C \"{frm}\" branch -d {branch}")
+                rest.append(f"branch -d {branch}")
             else:
                 held.append((f"`{branch}` in {spelled(main)}", f"it holds commits that are not on "
                                                                f"{default_ref(main) or 'a default branch'}"))
+        if not how:                                # another repository to this session: named once, and left
+            held.append((tree, THEIRS.format(main=spelled(main), cmds=" and ".join(f"`git {r}`" for r in rest))))
+            continue
+        cmds += [git_of(how, frm, r) for r in rest]
+        going.add(key)
     return cmds, held, waits
 
 
@@ -666,8 +724,7 @@ def archive_acts(home, s, d, hand):
         if hand:
             d["tried"][key] = n + 1
         cmds, _, _ = removals(home, s, trees, skip_own=True, but=(k,), kept=d["mains"])
-        after = (f" Once the call returns, remove what it leaves on disk: " + "; ".join(f"`{c}`" for c in cmds)
-                 + f". {LEAVE}") if cmds else ""
+        after = (f" Once the call returns, remove what it leaves on disk: {cmds_text(cmds)}. {LEAVE}") if cmds else ""
         card = "" if mode in NO_ASK else (" This session does not run in auto or bypass permissions mode, so the "
                                           "app shows ezexe its approval card for the call: that card is the app's.")
         last = (f" This is the {TRIES}rd time p4-phi hands it: if the app refuses again, as it does for a session "
@@ -789,9 +846,9 @@ def leftover_acts(home, s, d, hand):
         if k and hand and not cmds and not waits and not [h for h in held if f"tree:{h[0]}" not in d["named"]]:
             d["swept"][k] = now()                  # nothing of it is left to remove or to name
         if cmds:
-            out.append((f"leftover:{k or 'agents'}:{len(cmds)}:{cmds[0][-40:]}", "leftover", True,
+            out.append((f"leftover:{k or 'agents'}:{len(cmds)}:{cmds[0][0][-40:]}", "leftover", True,
                         f"leftovers of {whose}: its worktree is clean and its branch merged, so remove them: "
-                        + "; ".join(f"`{c}`" for c in cmds) + f". {LEAVE}"))
+                        f"{cmds_text(cmds)}. {LEAVE}"))
         fresh = [h for h in held if f"tree:{h[0]}" not in d["named"]]
         if fresh:
             if hand:

@@ -367,6 +367,115 @@ class Leftovers(Base):
         self.assertEqual(git(self.repo, "branch", "--list", "worktree-kid").stdout.strip(), "")
         self.assertEqual(self.lines(self.said(), "leftovers of"), [], "nothing of it is left")
 
+    def reader_in(self, folder):
+        """TOP's own folder, as the app's record gives it: p4-phi's record follows it at TOP's next message."""
+        self.t.record(TOP, title="Orchestrate the narwhal exporter", cwd=folder)
+        phi.RECORDS.clear()
+
+    def tree_of(self, repo, name):
+        """A linked worktree of `repo` on a branch of its own, as the file system spells its folder."""
+        tree = os.path.join(self.tmp, "trees", name)
+        r = git(repo, "worktree", "add", "-q", tree, "-b", f"worktree-{name}", "HEAD")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return os.path.realpath(tree).replace("\\", "/")
+
+    def other_repository(self):
+        """A second repository with one commit, and its folder."""
+        other = os.path.join(self.tmp, "other")
+        subprocess.run(["git", "init", "-q", "-b", "main", other], check=True, capture_output=True)
+        write(os.path.join(other, "notes.md"), "notes\n")
+        git(other, "add", "-A")
+        self.assertEqual(git(other, "commit", "-q", "-m", "the notes").returncode, 0)
+        return other
+
+    def test_a_session_in_a_worktree_of_the_repository_is_handed_the_commands_with_no_C(self):
+        """https://code.claude.com/docs/en/worktrees.md, "How Claude Code enforces isolation": "While a session is
+        isolated in a worktree, Claude Code blocks the tool calls the checks below define", among them "Git
+        redirects: Claude Code blocks a Bash or Monitor command that redirects git into the main checkout. The
+        redirect can come through `git -C`". The same page, "What worktrees share with the main checkout": "git
+        commands in a worktree write to the main repository's shared `.git` directory." So a session whose own
+        folder is a worktree of the leftover's repository is handed `git worktree remove` and `git branch -d` with
+        no `-C`, to run in its own folder, and git takes each there."""
+        mine = self.tree_of(self.repo, "top")
+        self.reader_in(mine)
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.")
+        first = self.lines(self.said(), "archive:")[0]
+        self.assertIn("Once the call returns, remove what it leaves on disk", first)
+        self.assertNotIn("git -C", first, "the archive line's removal has no -C either")
+        self.archive_in_app()
+        left = self.lines(self.said(), "leftovers of")
+        self.assertEqual(len(left), 1)
+        kid = os.path.realpath(self.wt).replace("\\", "/")
+        cmds = re.findall(r"`(git [^`]+)`", left[0])
+        self.assertEqual(cmds, [f'git worktree remove "{kid}"', "git branch -d worktree-kid"])
+        self.assertNotIn("git -C", left[0])
+        self.assertIn(f"run in `{mine}` with no `-C`, which Claude Code refuses from a worktree", left[0])
+        self.assertFalse([c for c in cmds if "--force" in c or " -f" in c or " -D" in c])
+        for c in cmds:                              # git takes each in the session's own folder
+            r = subprocess.run(c, shell=True, cwd=mine, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, c + "\n" + r.stderr)
+        self.assertFalse(os.path.isdir(self.wt))
+        self.assertEqual(git(self.repo, "branch", "--list", "worktree-kid").stdout.strip(), "")
+        self.assertTrue(os.path.isdir(mine), "its own worktree stays")
+        self.assertEqual(self.lines(self.said(), "leftovers of"), [], "nothing of it is left")
+
+    def test_a_session_in_the_checkout_itself_keeps_the_commands_with_C(self):
+        """No check of the page holds a session that is in no worktree, so in the repository's main checkout the
+        line names that checkout by `-C`, as it did."""
+        self.reader_in(self.repo)
+        self.archived_kid()
+        left = self.lines(self.said(), "leftovers of")
+        self.assertEqual(len(left), 1)
+        checkout = os.path.realpath(self.repo).replace("\\", "/")
+        kid = os.path.realpath(self.wt).replace("\\", "/")
+        self.assertEqual(re.findall(r"`(git [^`]+)`", left[0]),
+                         [f'git -C "{checkout}" worktree remove "{kid}"', f'git -C "{checkout}" branch -d worktree-kid'])
+        self.assertNotIn("with no `-C`", left[0])
+
+    def test_a_session_in_a_worktree_of_another_repository_is_told_once_who_removes_it(self):
+        """A session whose own folder is a worktree of another repository, and which works in no worktree of the
+        leftover's, is handed no command for it: the line says once that a session in that repository removes it,
+        with the two commands as that session runs them, and the worktree is left."""
+        theirs = self.tree_of(self.other_repository(), "elsewhere")
+        self.reader_in(theirs)
+        self.archived_kid()
+        got = self.said()
+        self.assertEqual(self.lines(got, "leftovers of"), [], got)
+        named = self.lines(got, "left on disk")
+        self.assertEqual(len(named), 1, got)
+        kid = os.path.realpath(self.wt).replace("\\", "/")
+        self.assertIn("is not the one this session's own worktree is of, so a session in that repository removes "
+                      f"it, by `git worktree remove \"{kid}\"` and `git branch -d worktree-kid` run there", named[0])
+        self.assertNotIn("git -C", named[0])
+        self.assertIn("Name each to ezexe once", named[0])
+        again = self.said()
+        self.assertEqual(self.lines(again, "left on disk") + self.lines(again, "leftovers of"), [], "said once")
+        self.assertTrue(os.path.isdir(self.wt), "left as it is")
+
+    def test_a_session_that_works_in_a_worktree_of_the_repository_runs_them_there(self):
+        """A session whose own folder is a worktree of another repository can still work in a worktree of the
+        leftover's, such as one it made with `git worktree add`: its turns' heads hold it. The commands then carry
+        no `-C` and the line names that worktree as the folder they run in."""
+        theirs = self.tree_of(self.other_repository(), "elsewhere")
+        made = self.tree_of(self.repo, "made")
+        self.reader_in(theirs)
+        head = git(made, "rev-parse", "HEAD").stdout.strip()
+        with open(os.path.join(self.t.dir(TOP), "turns.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"delta": {"heads": [f"{made}@worktree-made {head}"]}}) + "\n")
+        self.archived_kid()
+        left = self.lines(self.said(), "leftovers of")
+        self.assertEqual(len(left), 1)
+        cmds = re.findall(r"`(git [^`]+)`", left[0])
+        kid = os.path.realpath(self.wt).replace("\\", "/")
+        self.assertEqual(cmds, [f'git worktree remove "{kid}"', "git branch -d worktree-kid"])
+        self.assertIn(f"run in `{made}` with no `-C`", left[0])
+        for c in cmds:
+            r = subprocess.run(c, shell=True, cwd=made, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, c + "\n" + r.stderr)
+        self.assertFalse(os.path.isdir(self.wt))
+
     def test_a_dirty_worktree_is_named_to_ezexe_once_and_left(self):
         self.turn_on()
         self.commit()
