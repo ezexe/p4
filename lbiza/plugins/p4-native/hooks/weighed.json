@@ -351,7 +351,8 @@
    "kind": "method",
    "used": [
     "p4-native",
-    "p4-phi"
+    "p4-phi",
+    "p4-temportal"
    ]
   },
   "$.session.identity": {
@@ -446,13 +447,14 @@
   "$.settings.read": {
    "kind": "method",
    "open": [
-    "p4-phi",
-    "p4-temportal"
+    "p4-phi"
    ],
    "would": {
-    "p4-phi": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds.",
-    "p4-temportal": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds."
-   }
+    "p4-phi": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds."
+   },
+   "used": [
+    "p4-temportal"
+   ]
   },
   "$.state.get": {
    "kind": "method",

@@ -64,7 +64,8 @@ The folder `native/` holds a `.gitignore` of `*`, which the module writes once, 
 Two sessions that start at once each read the file back after their write and write again where their entry is missing.
 An entry that is not there means not known: the session is older than the newest 24, its hooks modules did not load, or the project has no store.
 A project with no `.claude/p4` gets no file, and the tool and the command still answer from the session's own reading.
-p4-phi and p4-temportal do not read the map yet.
+p4-temportal reads it: its hooks module's search for a python reads `platform` from this session's own entry and falls back to the shape of the plugin's folder.
+p4-phi does not read the map yet.
 
 ## Watched conditions
 
@@ -131,7 +132,7 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `tool`: 122 rows, 46 used, 0 open, 67 declined, 9 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
-- `method`: 93 rows, 31 used, 3 open, 59 declined, 0 weighed by nobody
+- `method`: 93 rows, 32 used, 2 open, 59 declined, 0 weighed by nobody
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -148,7 +149,7 @@ The 36 module events and the 50 module methods are walked too, each against its 
 The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
 The walk found one use the record had missed: p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, so `$.state.get` and `$.state.set` are used, and the test reads those two helpers as the two methods.
 Of the events, 34 are declined, and `session.attach` and `session.detach` are open for p4-native, which would read the map's surfaces again when a surface joins or leaves.
-Of the methods, 59 are declined, and two more are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
+Of the methods, 59 are declined, and two are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
 Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
 Nine rows are still weighed by nobody, all of them tools, which this walk did not cover: `SetGoal`, `GetGoal`, `PauseGoal`, `TaskCreate`, `TaskList`, `TaskUpdate`, `TodoWrite`, `MultiEdit` and `KillShell`.
 A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.

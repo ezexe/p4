@@ -98,7 +98,8 @@ class RecordTest(unittest.TestCase):
                     "TaskList", "TaskUpdate"):
             self.assertIs(ROWS[key].get("nobody"), True, key)
             self.assertEqual(ROWS[key]["kind"], "tool", key)
-        self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi", "p4-temportal"])
+        self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi"])
+        self.assertEqual(ROWS["$.settings.read"].get("used"), ["p4-temportal"])
 
     def test_no_row_of_a_walked_kind_says_weighed_by_nobody(self):
         """The slash commands of the desktop build were walked one by one, the seven the inventory found with no
