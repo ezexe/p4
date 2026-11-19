@@ -16,7 +16,9 @@ MODULE = (PLUGIN / "hooks" / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
 KINDS = ("command", "tool", "hook", "event", "method")
 # the kinds walked row by row, so none of their rows says weighed by nobody
-WALKED = ("command", "hook")
+WALKED = ("command", "hook", "event", "method")
+# the functions of the state library a module imports from `claude-code`, each with the methods of `$` it calls
+STATE_HELPERS = {"read": ("$.state.get",), "update": ("$.state.get", "$.state.set")}
 PLUGIN_NAMES = sorted(p.name for p in PLUGINS.iterdir() if (p / ".claude-plugin" / "plugin.json").is_file())
 
 
@@ -46,6 +48,11 @@ def uses():
                 out.append(("method", "$." + name, folder.name))
             for name in re.findall(r"'(mcp__ccd_\w+__\w+|PushNotification)'", text):
                 out.append(("tool", name, folder.name))
+            # the state library of `claude-code`: `read` is a `$.state.get`, and `update` reads and then writes
+            helpers = re.search(r"import \{([^}]*)\} from 'claude-code'", text)
+            for helper in re.findall(r"\w+", helpers.group(1)) if helpers else []:
+                if helper in STATE_HELPERS and re.search(rf"\b{helper}\(\$,", text):
+                    out.extend(("method", method, folder.name) for method in STATE_HELPERS[helper])
         config = hooks / "hooks.json"
         if config.is_file():
             for name in json.loads(config.read_text(encoding="utf-8")).get("hooks", {}):
@@ -88,13 +95,15 @@ class RecordTest(unittest.TestCase):
 
     def test_the_names_no_audit_weighed_are_marked_so(self):
         for key in ("SetGoal", "GetGoal", "PauseGoal", "TaskCreate", "TodoWrite", "MultiEdit", "KillShell",
-                    "$.mcp.call"):
+                    "TaskList", "TaskUpdate"):
             self.assertIs(ROWS[key].get("nobody"), True, key)
+            self.assertEqual(ROWS[key]["kind"], "tool", key)
         self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi", "p4-temportal"])
 
     def test_no_row_of_a_walked_kind_says_weighed_by_nobody(self):
         """The slash commands of the desktop build were walked one by one, the seven the inventory found with no
-        row among them, and so were the hook events of hooks.md, so each comes to used, open or declined."""
+        row among them, and so were the hook events of hooks.md and the events and methods of the hooks module as
+        the types file of Claude Code 2.1.326 lists them, so each comes to used, open or declined."""
         for key, row in ROWS.items():
             if row["kind"] in WALKED:
                 self.assertNotEqual(verdict(row), "nobody", key)
@@ -107,6 +116,22 @@ class RecordTest(unittest.TestCase):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
         self.assertEqual(ROWS["Notification"]["open"], ["p4-native"])
         self.assertEqual(ROWS["PostToolBatch"]["open"], ["p4-phi"])
+        counts = {kind: sum(1 for row in ROWS.values() if row["kind"] == kind) for kind in KINDS}
+        self.assertEqual((counts["event"], counts["method"]), (51, 93))
+        for key in ("$.mcp.call", "$.store.get", "$.model.complete", "$.ui.ask", "tool.describe", "ui.press"):
+            self.assertEqual(verdict(ROWS[key]), "declined", key)
+        self.assertEqual(ROWS["$.process.hookEnv"]["open"], ["p4-phi", "p4-temportal"])
+        self.assertEqual(ROWS["$.ui.notify"]["open"], ["p4-native"])
+        self.assertEqual(ROWS["session.attach"]["open"], ["p4-native"])
+        self.assertEqual(ROWS["session.detach"]["open"], ["p4-native"])
+
+    def test_the_state_library_counts_as_the_methods_it_calls(self):
+        """p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, which no pattern
+        of `$.state.get(` finds, so the record had both methods as weighed by nobody."""
+        found = uses()
+        self.assertIn(("method", "$.state.get", "p4-phi"), found)
+        self.assertIn(("method", "$.state.set", "p4-phi"), found)
+        self.assertEqual(ROWS["$.state.set"]["used"], ["p4-phi"])
 
     def test_an_open_row_names_a_plugin_and_what_it_would_replace_or_add_there(self):
         """`open` lists plugins of this repository, and `would` holds one sentence for each of them and for no
@@ -128,7 +153,7 @@ class RecordTest(unittest.TestCase):
 
     def test_a_declined_row_gives_each_of_the_three_plugins_a_reason_once_walked(self):
         for key, row in ROWS.items():
-            if row["kind"] == "hook" and verdict(row) == "declined":
+            if row["kind"] in ("hook", "event", "method") and verdict(row) == "declined":
                 self.assertEqual(sorted(row["declined"]), PLUGIN_NAMES, key)
 
 

@@ -3,27 +3,59 @@
  "rows": {
   "$.agent.call": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin runs a tool as a subagent's own call.",
+    "p4-temportal": "no plugin runs a tool as a subagent's own call.",
+    "p4-native": "no plugin runs a tool as a subagent's own call."
+   }
   },
   "$.agent.limits": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "how many agents run at once is Claude Code's own bound, and no plugin plans by it.",
+    "p4-temportal": "how many agents run at once is Claude Code's own bound, and no plugin plans by it.",
+    "p4-native": "how many agents run at once is Claude Code's own bound, and no plugin plans by it."
+   }
   },
   "$.agent.list": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi binds a subagent at `agent.spawn`, which hands the call that launched it, and a list does not.",
+    "p4-temportal": "it tracks no subagent.",
+    "p4-native": "it tracks no subagent."
+   }
   },
   "$.agent.register": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "its one agent type is the file `agents/check.md`, which loads where no module does.",
+    "p4-temportal": "it has no agent type.",
+    "p4-native": "it has no agent type."
+   }
+  },
+  "$.agent.spawn": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "a session's own model starts its subagents, by the Agent tool.",
+    "p4-temportal": "a session's own model starts its subagents, by the Agent tool.",
+    "p4-native": "a session's own model starts its subagents, by the Agent tool."
+   }
   },
   "$.audio.play": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin makes a sound.",
+    "p4-temportal": "no plugin makes a sound.",
+    "p4-native": "no plugin makes a sound."
+   }
   },
   "$.audio.speak": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin makes a sound.",
+    "p4-temportal": "no plugin makes a sound.",
+    "p4-native": "no plugin makes a sound."
+   }
   },
   "$.clock.after": {
    "kind": "method",
@@ -49,7 +81,11 @@
   },
   "$.clock.sleep": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a wait inside a hook spends the hook's own budget, so the modules wait by `$.clock.after`.",
+    "p4-temportal": "a wait inside a hook spends the hook's own budget, so the modules wait by `$.clock.after`.",
+    "p4-native": "a wait inside a hook spends the hook's own budget, so the modules wait by `$.clock.after`."
+   }
   },
   "$.command.list": {
    "kind": "method",
@@ -74,7 +110,19 @@
   },
   "$.config.list": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the rows of `/config` are ezexe's, and the settings a plugin needs are the open row `$.settings.read`.",
+    "p4-temportal": "the rows of `/config` are ezexe's, and the settings a plugin needs are the open row `$.settings.read`.",
+    "p4-native": "the rows of `/config` are ezexe's, and the settings a plugin needs are the open row `$.settings.read`."
+   }
+  },
+  "$.config.set": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "a `/config` row is ezexe's to change.",
+    "p4-temportal": "a `/config` row is ezexe's to change.",
+    "p4-native": "a `/config` row is ezexe's to change."
+   }
   },
   "$.env.get": {
    "kind": "method",
@@ -85,11 +133,19 @@
   },
   "$.env.set": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a child's variables are passed as its own `env`.",
+    "p4-temportal": "a child's variables are passed as its own `env`.",
+    "p4-native": "it set the agent teams switch in a terminal session on 2.1.328 and the check failed, so nothing ships that sets a variable."
+   }
   },
   "$.fs.ancestors": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin reads instruction files up the tree.",
+    "p4-temportal": "no plugin reads instruction files up the tree.",
+    "p4-native": "no plugin reads instruction files up the tree."
+   }
   },
   "$.fs.exists": {
    "kind": "method",
@@ -116,7 +172,11 @@
   },
   "$.fs.stat": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a file's age is read by the python of the sweep, and the modules ask only whether a path exists.",
+    "p4-temportal": "a file's age is read by the python of the sweep, and the modules ask only whether a path exists.",
+    "p4-native": "a file's age is read by the python of the sweep, and the modules ask only whether a path exists."
+   }
   },
   "$.fs.write": {
    "kind": "method",
@@ -127,31 +187,65 @@
   },
   "$.http.fetch": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no module makes a network request.",
+    "p4-temportal": "no module makes a network request.",
+    "p4-native": "no module makes a network request."
+   }
   },
   "$.mcp.call": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the app's tools are called by `$.tool.call`, under the session's own permission rules, and a call here asks nobody.",
+    "p4-temportal": "the app's tools are called by `$.tool.call`, under the session's own permission rules, and a call here asks nobody.",
+    "p4-native": "the app's tools are called by `$.tool.call`, under the session's own permission rules, and a call here asks nobody."
+   }
   },
   "$.mcp.connect": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin lists an MCP server of its own or holds one back.",
+    "p4-temportal": "no plugin lists an MCP server of its own or holds one back.",
+    "p4-native": "no plugin lists an MCP server of its own or holds one back."
+   }
   },
   "$.model.classify": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "each call spends usage, which is ezexe's to decide.",
+    "p4-temportal": "each call spends usage, which is ezexe's to decide.",
+    "p4-native": "each call spends usage, which is ezexe's to decide."
+   }
   },
   "$.model.complete": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "each call spends usage, which is ezexe's to decide.",
+    "p4-temportal": "each call spends usage, which is ezexe's to decide.",
+    "p4-native": "each call spends usage, which is ezexe's to decide."
+   }
   },
   "$.model.fork": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "each call spends usage, which is ezexe's to decide.",
+    "p4-temportal": "each call spends usage, which is ezexe's to decide.",
+    "p4-native": "each call spends usage, which is ezexe's to decide."
+   }
   },
   "$.process.hookEnv": {
    "kind": "method",
-   "nobody": true
+   "open": [
+    "p4-phi",
+    "p4-temportal"
+   ],
+   "would": {
+    "p4-phi": "replace the environment the module builds by hand for each python child, and its search of the plugins folders for its own data folder.",
+    "p4-temportal": "replace the environment the module builds by hand for each python child, and its search of the plugins folders for its own data folder."
+   },
+   "declined": {
+    "p4-native": "it starts no process."
+   }
   },
   "$.process.run": {
    "kind": "method",
@@ -162,15 +256,51 @@
   },
   "$.process.spawn": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a child it starts is killed when the module unloads, and what the modules start must finish or outlive them.",
+    "p4-temportal": "a child it starts is killed when the module unloads, and what the modules start must finish or outlive them.",
+    "p4-native": "a child it starts is killed when the module unloads, and what the modules start must finish or outlive them."
+   }
+  },
+  "$.prompt.compose": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "no plugin composes a system prompt for nobody to send.",
+    "p4-temportal": "no plugin composes a system prompt for nobody to send.",
+    "p4-native": "no plugin composes a system prompt for nobody to send."
+   }
+  },
+  "$.prompt.fill": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
+  },
+  "$.prompt.media": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "no plugin reads an image or a document of a prompt.",
+    "p4-temportal": "no plugin reads an image or a document of a prompt.",
+    "p4-native": "no plugin reads an image or a document of a prompt."
+   }
   },
   "$.prompt.paint": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "$.prompt.read": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "$.prompt.submit": {
    "kind": "method",
@@ -179,9 +309,29 @@
     "p4-phi"
    ]
   },
+  "$.prompt.suggest": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
+  },
+  "$.session.append": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "a notice rides the next prompt as context, which stores no row of its own.",
+    "p4-temportal": "the ledger goes into the result of `session.compact`.",
+    "p4-native": "a notice rides the next prompt as context, which stores no row of its own."
+   }
+  },
   "$.session.authorize": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the account and its credential are ezexe's.",
+    "p4-temportal": "the account and its credential are ezexe's.",
+    "p4-native": "the account and its credential are ezexe's."
+   }
   },
   "$.session.compact": {
    "kind": "method",
@@ -191,7 +341,11 @@
   },
   "$.session.cwd": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the modules read the project by `$.session.root`, and a subagent's own folder comes with its events.",
+    "p4-temportal": "the modules read the project by `$.session.root`, and a subagent's own folder comes with its events.",
+    "p4-native": "the modules read the project by `$.session.root`, and a subagent's own folder comes with its events."
+   }
   },
   "$.session.id": {
    "kind": "method",
@@ -202,7 +356,11 @@
   },
   "$.session.identity": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the account and its credential are ezexe's.",
+    "p4-temportal": "the account and its credential are ezexe's.",
+    "p4-native": "the account and its credential are ezexe's."
+   }
   },
   "$.session.info": {
    "kind": "method",
@@ -213,15 +371,27 @@
   },
   "$.session.messages": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "its python reads the transcript file, from command hooks too, where no module answers.",
+    "p4-temportal": "`session.compact` hands the messages the ledger is built from.",
+    "p4-native": "the map and the probes read no message."
+   }
   },
   "$.session.model": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no step of a plugin turns on the session's model, which is ezexe's choice.",
+    "p4-temportal": "no step of a plugin turns on the session's model, which is ezexe's choice.",
+    "p4-native": "no step of a plugin turns on the session's model, which is ezexe's choice."
+   }
   },
   "$.session.repo": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "git is read by the python scripts, which run where no module loads too.",
+    "p4-temportal": "git is read by the python scripts, which run where no module loads too.",
+    "p4-native": "git is read by the python scripts, which run where no module loads too."
+   }
   },
   "$.session.root": {
    "kind": "method",
@@ -239,7 +409,11 @@
   },
   "$.session.surface": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "deprecated for `$.session.surfaces`, which p4-native reads.",
+    "p4-temportal": "deprecated for `$.session.surfaces`, which p4-native reads.",
+    "p4-native": "deprecated for `$.session.surfaces`, which p4-native reads."
+   }
   },
   "$.session.surfaces": {
    "kind": "method",
@@ -249,7 +423,11 @@
   },
   "$.session.turns": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin counts ezexe's prompts.",
+    "p4-temportal": "no plugin counts ezexe's prompts.",
+    "p4-native": "no plugin counts ezexe's prompts."
+   }
   },
   "$.session.usage": {
    "kind": "method",
@@ -272,41 +450,85 @@
     "p4-temportal"
    ],
    "would": {
-    "p4-phi": "replace the keeper's reads of the user, project and managed settings files from disk, where a module loads, with the merged settings the engine holds.",
-    "p4-temportal": "replace the keeper's reads of the user, project and managed settings files from disk, where a module loads, with the merged settings the engine holds."
+    "p4-phi": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds.",
+    "p4-temportal": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds."
    }
   },
   "$.state.get": {
    "kind": "method",
-   "nobody": true
+   "used": [
+    "p4-phi"
+   ]
   },
   "$.state.set": {
    "kind": "method",
-   "nobody": true
+   "used": [
+    "p4-phi"
+   ]
   },
   "$.store.delete": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-temportal": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-native": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it."
+   }
   },
   "$.store.get": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-temportal": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-native": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it."
+   }
   },
   "$.store.keys": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-temportal": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-native": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it."
+   }
   },
   "$.store.set": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-temportal": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it.",
+    "p4-native": "what a plugin keeps is in the project's `.claude/p4` store, where the other plugins and the scripts read it."
+   }
+  },
+  "$.telemetry.log": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-temportal": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-native": "telemetry is the engine's and the built-in plugins' alone."
+   }
+  },
+  "$.telemetry.mark": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-temportal": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-native": "telemetry is the engine's and the built-in plugins' alone."
+   }
   },
   "$.theme.clear": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the look of the app is ezexe's interface.",
+    "p4-temportal": "the look of the app is ezexe's interface.",
+    "p4-native": "the look of the app is ezexe's interface."
+   }
   },
   "$.theme.set": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the look of the app is ezexe's interface.",
+    "p4-temportal": "the look of the app is ezexe's interface.",
+    "p4-native": "the look of the app is ezexe's interface."
+   }
   },
   "$.tool.call": {
    "kind": "method",
@@ -314,6 +536,14 @@
     "p4-native",
     "p4-phi"
    ]
+  },
+  "$.tool.check": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "p4-phi answers the engine's own question at `tool.check`, and no plugin asks one of its own.",
+    "p4-temportal": "p4-phi answers the engine's own question at `tool.check`, and no plugin asks one of its own.",
+    "p4-native": "p4-phi answers the engine's own question at `tool.check`, and no plugin asks one of its own."
+   }
   },
   "$.tool.list": {
    "kind": "method",
@@ -331,27 +561,67 @@
   },
   "$.turn.abort": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a running turn is ezexe's to stop.",
+    "p4-temportal": "a running turn is ezexe's to stop.",
+    "p4-native": "a running turn is ezexe's to stop."
+   }
+  },
+  "$.ui.ask": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "a question for ezexe is the session's to ask, by `wrap_up` or AskUserQuestion.",
+    "p4-temportal": "a question for ezexe is the session's to ask, by `wrap_up` or AskUserQuestion.",
+    "p4-native": "a question for ezexe is the session's to ask, by `wrap_up` or AskUserQuestion."
+   }
   },
   "$.ui.blit": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin draws a `Raster` or swaps an `Image`.",
+    "p4-temportal": "no plugin draws a `Raster` or swaps an `Image`.",
+    "p4-native": "no plugin draws a `Raster` or swaps an `Image`."
+   }
   },
   "$.ui.cancelNotify": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "nothing is raised by `$.ui.notify` yet, so there is nothing to take back.",
+    "p4-temportal": "nothing is raised by `$.ui.notify` yet, so there is nothing to take back.",
+    "p4-native": "nothing is raised by `$.ui.notify` yet, so there is nothing to take back."
+   }
   },
   "$.ui.close": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the pane is ezexe's to close, and p4-phi closes none itself.",
+    "p4-temportal": "the pane is ezexe's to close, and p4-phi closes none itself.",
+    "p4-native": "the pane is ezexe's to close, and p4-phi closes none itself."
+   }
   },
   "$.ui.copy": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin writes to ezexe's clipboard.",
+    "p4-temportal": "no plugin writes to ezexe's clipboard.",
+    "p4-native": "no plugin writes to ezexe's clipboard."
+   }
+  },
+  "$.ui.focus": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-temportal": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-native": "p4-phi's pane draws text alone and moves no focus or window itself."
+   }
   },
   "$.ui.invalidate": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the pane draws from `$.state`, whose writes draw its readers again, so nothing is invalidated by hand.",
+    "p4-temportal": "the pane draws from `$.state`, whose writes draw its readers again, so nothing is invalidated by hand.",
+    "p4-native": "the pane draws from `$.state`, whose writes draw its readers again, so nothing is invalidated by hand."
+   }
   },
   "$.ui.log": {
    "kind": "method",
@@ -363,11 +633,24 @@
   },
   "$.ui.notice": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin writes under an open permission dialog, and what a check said goes beside the call's result.",
+    "p4-temportal": "no plugin writes under an open permission dialog, and what a check said goes beside the call's result.",
+    "p4-native": "no plugin writes under an open permission dialog, and what a check said goes beside the call's result."
+   }
   },
   "$.ui.notify": {
    "kind": "method",
-   "nobody": true
+   "open": [
+    "p4-native"
+   ],
+   "would": {
+    "p4-native": "add a notification on ezexe's own channel at a turn's end in a session with no `PushNotification` tool, where the push today sends nothing."
+   },
+   "declined": {
+    "p4-phi": "a turn's end reaches its starter by the report of the turn.",
+    "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
+   }
   },
   "$.ui.open": {
    "kind": "method",
@@ -383,7 +666,11 @@
   },
   "$.ui.place": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin draws a row of its own in the transcript.",
+    "p4-temportal": "no plugin draws a row of its own in the transcript.",
+    "p4-native": "no plugin draws a row of its own in the transcript."
+   }
   },
   "$.ui.resolve": {
    "kind": "method",
@@ -391,9 +678,21 @@
     "p4-phi"
    ]
   },
+  "$.ui.scroll": {
+   "kind": "method",
+   "declined": {
+    "p4-phi": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-temportal": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-native": "p4-phi's pane draws text alone and moves no focus or window itself."
+   }
+  },
   "$.ui.selection": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin reads what ezexe selected.",
+    "p4-temportal": "no plugin reads what ezexe selected.",
+    "p4-native": "no plugin reads what ezexe selected."
+   }
   },
   "$.ui.status": {
    "kind": "method",
@@ -403,15 +702,27 @@
   },
   "$.ui.toast": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "what a module tells ezexe is a line of the transcript by `$.ui.log`, and a notice for the model rides the next prompt.",
+    "p4-temportal": "what a module tells ezexe is a line of the transcript by `$.ui.log`, and a notice for the model rides the next prompt.",
+    "p4-native": "what a module tells ezexe is a line of the transcript by `$.ui.log`, and a notice for the model rides the next prompt."
+   }
   },
   "$.ui.view": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "which agent's transcript the window shows is ezexe's interface.",
+    "p4-temportal": "which agent's transcript the window shows is ezexe's interface.",
+    "p4-native": "which agent's transcript the window shows is ezexe's interface."
+   }
   },
   "$.wasm.compile": {
    "kind": "method",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin ships WebAssembly.",
+    "p4-temportal": "no plugin ships WebAssembly.",
+    "p4-native": "no plugin ships WebAssembly."
+   }
   },
   "/__remote-workflow": {
    "kind": "command",
@@ -2007,7 +2318,11 @@
   },
   "agent.offer": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin hides an agent type from the model, and p4-phi's rule names the types to use.",
+    "p4-temportal": "no plugin hides an agent type from the model, and p4-phi's rule names the types to use.",
+    "p4-native": "no plugin hides an agent type from the model, and p4-phi's rule names the types to use."
+   }
   },
   "agent.spawn": {
    "kind": "event",
@@ -2017,11 +2332,19 @@
   },
   "attribution.text": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the lines a commit or a pull request ends with are ezexe's own rule.",
+    "p4-temportal": "the lines a commit or a pull request ends with are ezexe's own rule.",
+    "p4-native": "the lines a commit or a pull request ends with are ezexe's own rule."
+   }
   },
   "command.describe": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin rewords or hides a command of Claude Code.",
+    "p4-temportal": "no plugin rewords or hides a command of Claude Code.",
+    "p4-native": "no plugin rewords or hides a command of Claude Code."
+   }
   },
   "command.run": {
    "kind": "event",
@@ -2033,15 +2356,27 @@
   },
   "config.describe": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the rows of `/config` are ezexe's interface.",
+    "p4-temportal": "the rows of `/config` are ezexe's interface.",
+    "p4-native": "the rows of `/config` are ezexe's interface."
+   }
   },
   "config.set": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a `/config` row is ezexe's to change.",
+    "p4-temportal": "a `/config` row is ezexe's to change.",
+    "p4-native": "a `/config` row is ezexe's to change."
+   }
   },
   "engine.create": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin adds a noun to `$` or withholds one.",
+    "p4-temportal": "no plugin adds a noun to `$` or withholds one.",
+    "p4-native": "no plugin adds a noun to `$` or withholds one."
+   }
   },
   "mcp__Claude_Browser__": {
    "kind": "tool",
@@ -2470,19 +2805,35 @@
   },
   "plugin.register": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "which hooks modules load is ezexe's to decide, and no plugin judges another.",
+    "p4-temportal": "which hooks modules load is ezexe's to decide, and no plugin judges another.",
+    "p4-native": "which hooks modules load is ezexe's to decide, and no plugin judges another."
+   }
   },
   "prompt.attachment": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the reminders Claude Code injects by itself are left as it writes them.",
+    "p4-temportal": "the reminders Claude Code injects by itself are left as it writes them.",
+    "p4-native": "the reminders Claude Code injects by itself are left as it writes them."
+   }
   },
   "prompt.autocomplete": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "prompt.change": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "prompt.compose": {
    "kind": "event",
@@ -2492,23 +2843,43 @@
   },
   "prompt.context": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the context blocks of a conversation's first message are left as Claude Code computes them, and p4-phi hands its lines beside a prompt.",
+    "p4-temportal": "the context blocks of a conversation's first message are left as Claude Code computes them, and p4-phi hands its lines beside a prompt.",
+    "p4-native": "the context blocks of a conversation's first message are left as Claude Code computes them, and p4-phi hands its lines beside a prompt."
+   }
   },
   "prompt.edit": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "prompt.fill": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "prompt.mention": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin guards or rewrites a file named after an `@`.",
+    "p4-temportal": "no plugin guards or rewrites a file named after an `@`.",
+    "p4-native": "no plugin guards or rewrites a file named after an `@`."
+   }
   },
   "prompt.section": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi adds its own section at `prompt.compose`, and no plugin rewrites one of Claude Code's.",
+    "p4-temportal": "p4-phi adds its own section at `prompt.compose`, and no plugin rewrites one of Claude Code's.",
+    "p4-native": "p4-phi adds its own section at `prompt.compose`, and no plugin rewrites one of Claude Code's."
+   }
   },
   "prompt.submit": {
    "kind": "event",
@@ -2519,15 +2890,32 @@
   },
   "prompt.suggest": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the prompt box is ezexe's interface.",
+    "p4-temportal": "the prompt box is ezexe's interface.",
+    "p4-native": "the prompt box is ezexe's interface."
+   }
   },
   "session.append": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the transcript's rows are stored as Claude Code writes them.",
+    "p4-temportal": "the transcript's rows are stored as Claude Code writes them.",
+    "p4-native": "the transcript's rows are stored as Claude Code writes them."
+   }
   },
   "session.attach": {
    "kind": "event",
-   "nobody": true
+   "open": [
+    "p4-native"
+   ],
+   "would": {
+    "p4-native": "read the map's surfaces again when a surface joins the session, where the map today keeps them as its first turn found them."
+   },
+   "declined": {
+    "p4-phi": "the pane is drawn for whichever surface asks.",
+    "p4-temportal": "it draws nothing."
+   }
   },
   "session.compact": {
    "kind": "event",
@@ -2538,7 +2926,16 @@
   },
   "session.detach": {
    "kind": "event",
-   "nobody": true
+   "open": [
+    "p4-native"
+   ],
+   "would": {
+    "p4-native": "read the map's surfaces again when a surface leaves the session, where the map today keeps them as its first turn found them."
+   },
+   "declined": {
+    "p4-phi": "the pane is drawn for whichever surface asks.",
+    "p4-temportal": "it draws nothing."
+   }
   },
   "session.end": {
    "kind": "event",
@@ -2561,7 +2958,11 @@
   },
   "session.send": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the guard on a SendMessage call is at `tool.check`, which hears the same message before it leaves.",
+    "p4-temportal": "it sends no message between sessions.",
+    "p4-native": "it sends no message between sessions."
+   }
   },
   "session.start": {
    "kind": "event",
@@ -2573,19 +2974,35 @@
   },
   "session.stop": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a Stop goes on whatever a hook does, and `turn.complete` then says the turn was aborted.",
+    "p4-temportal": "a Stop goes on whatever a hook does, and `turn.complete` then says the turn was aborted.",
+    "p4-native": "a Stop goes on whatever a hook does, and `turn.complete` then says the turn was aborted."
+   }
   },
   "skill.prompt": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin rewrites the text of a skill.",
+    "p4-temportal": "no plugin rewrites the text of a skill.",
+    "p4-native": "no plugin rewrites the text of a skill."
+   }
   },
   "telemetry.log": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-temportal": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-native": "telemetry is the engine's and the built-in plugins' alone."
+   }
   },
   "telemetry.mark": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-temportal": "telemetry is the engine's and the built-in plugins' alone.",
+    "p4-native": "telemetry is the engine's and the built-in plugins' alone."
+   }
   },
   "tool.call": {
    "kind": "event",
@@ -2601,11 +3018,19 @@
   },
   "tool.describe": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin rewords a tool, and a tool pinned out of ToolSearch costs every prompt its schema.",
+    "p4-temportal": "no plugin rewords a tool, and a tool pinned out of ToolSearch costs every prompt its schema.",
+    "p4-native": "no plugin rewords a tool, and a tool pinned out of ToolSearch costs every prompt its schema."
+   }
   },
   "tool.judge": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "auto mode and its classifier are ezexe's to decide.",
+    "p4-temportal": "auto mode and its classifier are ezexe's to decide.",
+    "p4-native": "auto mode and its classifier are ezexe's to decide."
+   }
   },
   "tool.run": {
    "kind": "event",
@@ -2632,31 +3057,59 @@
   },
   "turn.step": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin reads an answer piece by piece, and a turn's whole answer comes at `turn.complete`.",
+    "p4-temportal": "no plugin reads an answer piece by piece, and a turn's whole answer comes at `turn.complete`.",
+    "p4-native": "no plugin reads an answer piece by piece, and a turn's whole answer comes at `turn.complete`."
+   }
   },
   "ui.fault": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin draws a `Client`, whose event this is.",
+    "p4-temportal": "no plugin draws a `Client`, whose event this is.",
+    "p4-native": "no plugin draws a `Client`, whose event this is."
+   }
   },
   "ui.focus": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-temportal": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-native": "p4-phi's pane draws text alone and moves no focus or window itself."
+   }
   },
   "ui.input": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi's pane draws no `Input`.",
+    "p4-temportal": "p4-phi's pane draws no `Input`.",
+    "p4-native": "p4-phi's pane draws no `Input`."
+   }
   },
   "ui.message": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin draws a `Client`, whose event this is.",
+    "p4-temportal": "no plugin draws a `Client`, whose event this is.",
+    "p4-native": "no plugin draws a `Client`, whose event this is."
+   }
   },
   "ui.pointer": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin sets a theme, and only the plugin that set one hears a click on the backdrop.",
+    "p4-temportal": "no plugin sets a theme, and only the plugin that set one hears a click on the backdrop.",
+    "p4-native": "no plugin sets a theme, and only the plugin that set one hears a click on the backdrop."
+   }
   },
   "ui.press": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi's pane draws no `Button`.",
+    "p4-temportal": "p4-phi's pane draws no `Button`.",
+    "p4-native": "p4-phi's pane draws no `Button`."
+   }
   },
   "ui.render": {
    "kind": "event",
@@ -2666,15 +3119,27 @@
   },
   "ui.resolve": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin restyles an element for the others.",
+    "p4-temportal": "no plugin restyles an element for the others.",
+    "p4-native": "no plugin restyles an element for the others."
+   }
   },
   "ui.scroll": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-temportal": "p4-phi's pane draws text alone and moves no focus or window itself.",
+    "p4-native": "p4-phi's pane draws text alone and moves no focus or window itself."
+   }
   },
   "ui.select": {
    "kind": "event",
-   "nobody": true
+   "declined": {
+    "p4-phi": "p4-phi's pane draws no `Select`.",
+    "p4-temportal": "p4-phi's pane draws no `Select`.",
+    "p4-native": "p4-phi's pane draws no `Select`."
+   }
   }
  }
 }

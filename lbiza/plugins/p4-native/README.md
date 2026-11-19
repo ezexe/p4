@@ -121,7 +121,7 @@ An answer kept under the first rule is compared with nothing.
 ## The inventory
 
 The audits of Claude Code's slash commands, tools and features against p4-phi and p4-temportal were made by hand, row by row.
-`hooks/weighed.json` keeps what they came to as one record, 417 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
+`hooks/weighed.json` keeps what they came to as one record, 430 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
 A row is a slash command, a tool, a hook event, an event of the hooks module or a method of it, and it says which plugins use it, which declined it and why, which hold it open, or that it was weighed by nobody.
 A key that ends in `__` stands for every tool of that server, and one that ends in `*` for every name that begins with it.
 
@@ -130,8 +130,8 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `command`: 131 rows, 19 used, 0 open, 112 declined, 0 weighed by nobody
 - `tool`: 122 rows, 46 used, 0 open, 67 declined, 9 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
-- `event`: 51 rows, 15 used, 0 open, 0 declined, 36 weighed by nobody
-- `method`: 80 rows, 29 used, 1 open, 0 declined, 50 weighed by nobody
+- `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
+- `method`: 93 rows, 31 used, 3 open, 59 declined, 0 weighed by nobody
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -139,12 +139,18 @@ The names told are kept in `probes.json` under the kind of host, so a name is to
 A plugin's own command and another server's tool are no part of the host and are left out.
 
 A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
-So those three kinds are in the record as Claude Code 2.1.326 has them, read from that build's types file, and a newer build's are walked by hand.
+So those three kinds are in the record as Claude Code 2.1.326 has them, the hook events read from `hooks.md` and the module's events and methods from that build's types file, and a newer build's are walked by hand.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
 The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, and 2 are open.
 An open row names each plugin it would serve and, under `would`, what it would replace or add there.
 `Notification` is open for p4-native, which would add a push when a session waits at a permission prompt or sits idle, and `PostToolBatch` for p4-phi, which would write the lookup rows of a parallel batch in one process start.
-The module events and methods are still to walk: 36 of the 51 and 50 of the 80.
+The 36 module events and the 50 module methods are walked too, each against its own comment in the types file.
+The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
+The walk found one use the record had missed: p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, so `$.state.get` and `$.state.set` are used, and the test reads those two helpers as the two methods.
+Of the events, 34 are declined, and `session.attach` and `session.detach` are open for p4-native, which would read the map's surfaces again when a surface joins or leaves.
+Of the methods, 59 are declined, and two more are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
+Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
+Nine rows are still weighed by nobody, all of them tools, which this walk did not cover: `SetGoal`, `GetGoal`, `PauseGoal`, `TaskCreate`, `TaskList`, `TaskUpdate`, `TodoWrite`, `MultiEdit` and `KillShell`.
 A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.
 
 Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.
