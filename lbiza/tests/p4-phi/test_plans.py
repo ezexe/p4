@@ -186,12 +186,30 @@ class TreeOfPlans(unittest.TestCase):
     def test_siblings_started_in_one_step_get_the_steps_their_briefs_name(self):
         """Two children started while the parent is on step 2, one for its docs step: each its own parent step."""
         home = self.t.p4
-        s = {"sessionId": "x", "spawnedFrom": {"sessionId": TOP}, "task": "Write the layout docs for the store"}
+        s = {"sessionId": "x", "spawnedFrom": {"sessionId": TOP}, "task": "Write the docs, for step 3 of the list"}
         self.assertEqual(plans.root_of(home, s), "3")
         s["task"] = "Move the store layout into phi, the code part"
         self.assertEqual(plans.root_of(home, s), "2")
         s["task"] = "something else entirely"
-        self.assertEqual(plans.root_of(home, s), "2", "no match: the step in progress")
+        self.assertEqual(plans.root_of(home, s), "2", "no step named: the step in progress")
+
+    def test_a_brief_that_names_no_step_is_bound_to_the_step_in_progress_when_it_started(self):
+        """A brief was bound to the open step of the parent's list whose words it shared most. So a worker whose
+        brief spoke of a native goal was bound to the parent's step "Give this session a native goal", which was
+        another piece of work, and was told of that step's every change. A brief that names no step is bound to the
+        step in progress when its session started, whatever words it shares with another step, and keeps that step
+        when the parent moves on before the worker's first task list."""
+        t = self.t
+        s = {"sessionId": "x", "spawnedFrom": {"sessionId": TOP}, "task": "Write the layout docs for the store"}
+        self.assertEqual(plans.root_of(t.p4, s), "2", "step 3 holds its words, and step 2 is in progress")
+        ctx = context(t.say(B, "Write the layout docs for the store"))
+        self.assertIn("this session is for step 2 of its parent's task list, \"Move the store layout into phi\"", ctx)
+        self.assertEqual(t.session(B)["rootStep"], "2", "kept from its start")
+        self.plan(TOP, {"advance": True})
+        self.assertEqual(plans.load(t.p4, TOP)["current"], "3")
+        self.plan(B, items("Draft the layout table docs", "Publish the layout table docs"))
+        self.assertEqual([x["addr"] for x in plans.load(t.p4, B)["steps"]], ["2.1", "2.2"])
+        self.assertEqual(t.session(B)["rootStep"], "2")
 
     def test_a_subagent_is_a_task_of_the_step_that_launched_it(self):
         t, home = self.t, self.t.p4

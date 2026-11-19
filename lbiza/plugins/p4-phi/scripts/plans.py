@@ -69,9 +69,11 @@ def addr(root, i):
 
 
 def root_of(home, s):
-    """A session's parent step: the address its brief names, else the parent's open step its brief's words match
-    best, else the parent's step in progress now; '' for an orchestrator or a parent with no task list. Siblings
-    started in one step for different steps of the task list each get their own."""
+    """A session's parent step: the address its brief names, else the parent's step in progress when the session
+    started; '' for an orchestrator or a parent with no task list. A brief that names no step is bound to no step
+    by its words: a worker whose brief spoke of a native goal was bound to the step "Give this session a native
+    goal" of its parent, which another session was started for, and was told of that step's every change. Siblings
+    started in one step for different steps of the task list each get their own where their briefs name them."""
     if s.get("rootStep") is not None:
         return str(s.get("rootStep") or "")
     parent = relay._parent(s)
@@ -80,22 +82,7 @@ def root_of(home, s):
     m = STEP_RE.search(str(s.get("task") or ""))
     if m:
         return m.group(1)
-    pp = load(home, parent)
-    current = str(pp.get("current") or "")
-    mine = words(s.get("task"))
-
-    def fit(st):                                       # shared words, then the share of the step's own words
-        theirs = words((st or {}).get("content"))
-        n = len(mine & theirs)
-        return (n, n / len(theirs)) if theirs and n >= (min(SHARE, len(theirs)) or SHARE) else (0, 0.0)
-
-    best, score = current, fit(step_of(pp, current))
-    for st in pp.get("steps") or []:
-        if st.get("status") == "completed":
-            continue
-        if fit(st) > score:                            # the step in progress wins a tie
-            best, score = str(st.get("addr") or ""), fit(st)
-    return best
+    return str(load(home, parent).get("current") or "")
 
 
 def step_of(plan, a):
@@ -182,8 +169,10 @@ def record(home, s, inp):
     root = old.get("root") if old.get("steps") else root_of(home, s)
     parent = relay._parent(s)
     if not old.get("steps") and parent and root:
-        ps = step_of(load(home, parent), root)
-        old["rootText"] = (ps or {}).get("content", "")
+        left = s.get("rootLeft") if isinstance(s.get("rootLeft"), dict) else None
+        ps = None if left else step_of(load(home, parent), root)
+        # a step that left the parent's list before this first list is read from the words it had, plans.leave
+        old["rootText"] = str(left.get("was") or "") if left else (ps or {}).get("content", "")
     keep = {st.get("content", ""): st.get("tasks") for st in old.get("steps") or [] if st.get("tasks")}
     at = {st.get("addr"): st.get("content", "") for st in old.get("steps") or [] if st.get("tasks")}
     olds = {st.get("content", "") for st in old.get("steps") or []}
@@ -1098,6 +1087,8 @@ def slice_for(home, s):
     parent = relay._parent(s)
     if not root or not parent or s.get("rootLeft"):
         return ""
+    if s.get("rootStep") is None:                 # kept from its start, so the parent's next step does not take it
+        s["rootStep"] = root
     pp = load(home, parent)
     steps = pp.get("steps") or []
     at = next((k for k, x in enumerate(steps) if x["addr"] == root), None)
