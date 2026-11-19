@@ -39,9 +39,10 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  that PHI_CHECK names for the tool, or else lookups.py's check: an earlier finding beside a web
                  call, an earlier failure before a command expected to fail. A subagent's call also gets phi.py's
                  word of what changed since its launch beside that answer, when there is one.
-  lookup-record  PostToolUse and PostToolUseFailure, matcher `.*`. phi.py's records that PHI_RECORD names for the
-                 tool, whose answer is returned for `update_plan`, Write and Edit; otherwise lookups.py writes the
-                 call's row and tells a failure what other sessions did about it.
+  lookup-record  PostToolUseFailure, matcher `.*`, and PostToolUse for the tools of WAITED alone. phi.py's records
+                 that PHI_RECORD names for the tool, whose answer is returned for `update_plan`, Write and Edit;
+                 otherwise lookups.py writes the call's row and tells a failure what other sessions did about it.
+  lookup-row     PostToolUse for every tool WAITED does not name, async. The call's row, and nothing printed.
   close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
                  repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
                  the session up to date, and then the repository's and the dependencies' documents and the index.
@@ -721,6 +722,14 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
               "Edit": "memory-gap", "MultiEdit": "memory-gap", "TaskStop": "task-stop", "KillShell": "task-stop"}
 
 
+# The tools whose PostToolUse entry a call waits on, as the first matcher of hooks.json lists them: a record of
+# phi.py can answer for a tool of PHI_RECORD, and lookups.py reads an error only out of a shell tool's output when
+# the call worked, so it has words for no other. Every other tool has the async entry `lookup-row` alone, which
+# writes the same row h_lookup_record would, and a call that failed has the PostToolUseFailure entry whatever its
+# tool.
+WAITED = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "TaskStop", "KillShell", "mcp__ccd_turn__update_plan",
+          "mcp__ccd_turn__wrap_up")
+
 # After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
 # nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
 PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
@@ -741,8 +750,8 @@ def plugins_own(payload):
 def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
-    plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and the record hooks already run
-    on every tool, so a record added to phi.py needs no hook of its own in hooks.json. A check added to phi.py
+    plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and a record added to phi.py
+    needs no hook of its own in hooks.json, only its tool in WAITED and in the two PostToolUse matchers there. A check added to phi.py
     needs none either, and its tool must be one hooks/register.ts lists, where the plugin's hooks module tells
     which calls python has a check for."""
     names = table.get(str(payload.get("tool_name") or ""))
@@ -790,7 +799,8 @@ def h_lookup_phi(payload):
 
 
 def h_lookup_row(payload):
-    """A clean call's lookup row, written in the background by the async entry; nothing printed."""
+    """A call's lookup row, written in the background by an async entry; nothing printed. It is a clean call's row
+    for a tool of WAITED, and the row of every call that worked for any other tool."""
     if plugins_own(payload):
         return None
     phi_route(payload, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it

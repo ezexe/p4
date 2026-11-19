@@ -6,9 +6,11 @@
 # surrogates that a later UTF-8 write refuses.
 # find-python.sh, which run-hook.sh shares, finds the python.
 #
-# The record hooks run after every tool call, so every process this script starts is paid at each call. The platform
+# The record hooks run after a tool call, so every process this script starts is paid at each call. The platform
 # is read from the environment, so no `uname` runs, and a clean call's record is written by a python left running
-# behind, so the call waits only for this script. The check before a call starts no shell: the plugin's hooks module
+# behind, so the call waits only for this script. hooks.json has a call that worked wait for this script only for a
+# tool whose record can answer, a shell tool or a tool of hook.py's PHI_RECORD, and gives every other tool the one
+# async entry `lookup-row`, so no shell stands between such a call and its result. The check before a call starts no shell: the plugin's hooks module
 # tells which calls python has a check for and runs `hook.py lookup-check` for those itself.
 set -u
 
@@ -23,7 +25,7 @@ piped=0
 # call whole.
 # P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it and the async entry nothing.
 clean=0
-if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
+if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name" = lookup-row ]; then
   payload=$(cat)
   piped=1
   # A call a plugin's hooks module made itself, by its id: no lookup of the session's, so no python starts for it,
@@ -31,7 +33,10 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ]; then
   case "$payload" in
     *'"tool_use_id":"toolu_plugin_'*|*'"tool_use_id": "toolu_plugin_'*) exit 0 ;;
   esac
-  if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
+  # `lookup-row` is the entry of a tool nothing waits on: its row is written whatever the result printed.
+  if [ "$name" = lookup-row ]; then
+    :
+  elif [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
       *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear line answers beside the result

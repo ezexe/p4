@@ -17,6 +17,7 @@ matchers.
 
 import json
 import os
+import re
 import sqlite3
 import sys
 import tempfile
@@ -534,12 +535,53 @@ class HooksJson(unittest.TestCase):
         self.assertEqual([m["matcher"] for m in h["PreToolUse"]], ["Agent"])
         self.assertEqual(h["PreToolUse"][0]["hooks"][0]["command"].split()[-1], "agent")
         for ev in ("PostToolUse", "PostToolUseFailure"):
-            self.assertEqual(h[ev][0]["matcher"], ".*")
             self.assertEqual(h[ev][0]["hooks"][0]["command"].split()[-1], "lookup-record")
             self.assertEqual(h[ev][0]["hooks"][0]["timeout"], 10)
+        # a call that failed is answered whole, whatever its tool
+        self.assertEqual([m["matcher"] for m in h["PostToolUseFailure"]], [".*"])
         # ezexe/p4#150: a clean call's row is written by an entry the app runs in the background
         self.assertEqual([(x["command"].split()[-1], x.get("async")) for x in h["PostToolUse"][0]["hooks"]],
                          [("lookup-record", None), ("lookup-record-async", True)])
+
+    def test_a_call_that_worked_waits_on_a_shell_only_for_a_tool_whose_record_can_answer(self):
+        """The first matcher of PostToolUse names hook.WAITED, which holds every tool phi.py keeps a record of and
+        the shell tools, and the second takes every other name and no name of the first, so each call has the
+        entries of one matcher and its row is written once. The second has the async `lookup-row` alone."""
+        import test_hooks
+        waited, others = test_hooks.own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")["PostToolUse"]
+        self.assertEqual(waited["matcher"].split("|"), list(hook.WAITED))
+        self.assertLessEqual(set(hook.PHI_RECORD) | set(hook.PHI_TIE) | set(lk.SHELL_TOOLS), set(hook.WAITED))
+        self.assertEqual(others["matcher"], "^(?!(?:%s)$).*" % "|".join(hook.WAITED))
+        self.assertEqual([(x["command"].split()[-1], x.get("async"), x.get("timeout")) for x in others["hooks"]],
+                         [("lookup-row", True, None)])
+        named = re.compile(others["matcher"])
+        for tool in hook.WAITED:
+            self.assertIsNone(named.search(tool), tool)
+        for tool in ("Read", "Grep", "Glob", "Agent", "WebFetch", "WebSearch", "NotebookEdit", "BashOutput", "Editor",
+                     "mcp__ccd_turn__update_plans", "mcp__ccd_session_mgmt__list_sessions", "mcp__p4-phi__note"):
+            self.assertIsNotNone(named.search(tool), tool)
+            self.assertNotIn(tool, hook.WAITED)
+
+    def test_a_tool_nothing_waits_on_has_the_row_its_waited_entry_wrote(self):
+        """A call that worked, of a tool lookups.py reads no error out of, has the same row from `lookup-row` as
+        from `lookup-record`, clean or with words that read like an error, and neither prints a word."""
+        import tempfile
+        said = "Error: 3 matches\nTraceback (most recent call last):\n  File x\nValueError: boom"
+
+        def row_of(name, text):
+            with tempfile.TemporaryDirectory() as tmp:
+                proj = make_project(tmp)
+                r = run_hook(name, post("Grep", {"pattern": "boom", "path": "src"}, text, S1, proj, "toolu_01G"), proj)
+                self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+                con = sqlite3.connect(lk.db_path(os.path.join(proj, ".claude", "p4")))
+                try:
+                    rows = con.execute("SELECT tool, kind, key, target, ask, ok, sig, finding, fix FROM calls").fetchall()
+                finally:
+                    con.close()
+                self.assertEqual(len(rows), 1)
+                return rows[0]
+        for text in ("src/a.py:3: boom", said):
+            self.assertEqual(row_of("lookup-row", text), row_of("lookup-record", text))
 
     def test_only_the_lookup_row_goes_to_the_background(self):
         """The entry the call waits on keeps phi.py's records of a clean call that a later check reads, and the async
@@ -573,6 +615,9 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), [],
                              "a subagent's clean read: nothing waits, since its id is bound at its SubagentStart")
             self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")
+            self.assertEqual(ran("lookup-row", "Read", clean), ["lookup-row"], "a tool nothing waits on: its row")
+            self.assertEqual(ran("lookup-row", "Read", {"hook_event_name": "PostToolUse", "tool_response": "Error: x"}),
+                             ["lookup-row"], "and its row whatever the result printed")
             failed = {"hook_event_name": "PostToolUseFailure", "error": "Exit code 1"}
             self.assertEqual(ran("lookup-record", "Bash", failed), ["lookup-record"], "a failure is answered whole")
             self.assertEqual(ran("lookup-record-async", "Bash", failed), [])
@@ -581,6 +626,7 @@ class HooksJson(unittest.TestCase):
             app = "mcp__ccd_session_mgmt__list_sessions"
             self.assertEqual(ran("lookup-record", app, dict(clean, **own)), [])
             self.assertEqual(ran("lookup-record-async", app, dict(clean, **own)), [], "no row for a plugin's call")
+            self.assertEqual(ran("lookup-row", app, dict(clean, **own)), [], "nor from the entry of its own tool")
             self.assertEqual(ran("lookup-record", app, dict(failed, **own)), [])
             self.assertEqual(ran("lookup-record", "Write", dict(clean, **own)), [], "phi.py keeps nothing of it")
             compact = json.dumps({"tool_name": app, **clean, **own}, separators=(",", ":"))
