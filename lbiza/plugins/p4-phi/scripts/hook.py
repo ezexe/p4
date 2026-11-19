@@ -717,9 +717,9 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "Bash": ("issue-guard", "store-guard", "branch-guard", "restart-check", "nudge", "puppeteer-tool"),
              "PowerShell": ("issue-guard", "store-guard", "branch-guard", "restart-check", "nudge", "puppeteer-tool"),
              "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
-             "MultiEdit": ("nudge", "puppeteer-tool"), "NotebookEdit": ("nudge", "puppeteer-tool")}
+             "NotebookEdit": ("nudge", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",
-              "Edit": "memory-gap", "MultiEdit": "memory-gap", "TaskStop": "task-stop", "KillShell": "task-stop"}
+              "Edit": "memory-gap", "TaskStop": "task-stop"}
 
 
 # The tools whose PostToolUse entry a call waits on, as the first matcher of hooks.json lists them: a record of
@@ -727,7 +727,7 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
 # the call worked, so it has words for no other. Every other tool has the async entry `lookup-row` alone, which
 # writes the same row h_lookup_record would, and a call that failed has the PostToolUseFailure entry whatever its
 # tool.
-WAITED = ("Bash", "PowerShell", "Write", "Edit", "MultiEdit", "TaskStop", "KillShell", "mcp__ccd_turn__update_plan",
+WAITED = ("Bash", "PowerShell", "Write", "Edit", "TaskStop", "mcp__ccd_turn__update_plan",
           "mcp__ccd_turn__wrap_up")
 
 # After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
@@ -793,7 +793,7 @@ def h_lookup_phi(payload):
     if plugins_own(payload):
         return None
     out = phi_route(payload, PHI_RECORD)
-    if out and str(payload.get("tool_name") or "") in ("Write", "Edit", "MultiEdit"):
+    if out and str(payload.get("tool_name") or "") in ("Write", "Edit"):
         return out
     return None
 
@@ -821,8 +821,7 @@ def h_lookup_record(payload):
         return None
     phi_route(payload, PHI_TIE)                    # as h_lookup_row does behind a clean call: one of the two runs
     out = phi_route(payload, PHI_RECORD)
-    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",
-                                                             "MultiEdit"):
+    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit"):
         return out
     import lookups
     p4 = ready(payload)

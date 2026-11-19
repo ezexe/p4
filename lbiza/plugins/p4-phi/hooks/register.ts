@@ -82,7 +82,7 @@ const CHECK_MS = 10_000
 // The tools hook.py has a check for, as its PHI_CHECK and lookups.py read them. An edit is checked only for a
 // session that owes a nudge or is a puppeteer, a shell call only where a filter below passes it, and the rest
 // always: a web call, a message to another session, a session archiving itself and a session's start.
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 const CHECKED_TOOLS = new Set([
   'WebFetch',

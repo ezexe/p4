@@ -1545,7 +1545,7 @@ test('a session that owes a nudge and a puppeteer are checked at each edit and s
 
   delete seen.files[`${PHI}/.nudge/cli-0001`]
   seen.files[`${PHI}/.puppeteers/cli-0001`] = ''
-  await $.tool.check(call('MultiEdit', { file_path: 'a.py', edits: [] }))
+  await $.tool.check(call('NotebookEdit', { notebook_path: 'a.ipynb', new_source: '' }))
   expect(seen.checks.length).toBe(5)
   // A tool hook.py has no check for is not read for either.
   await $.tool.check(call('Read', { file_path: 'a.py' }))

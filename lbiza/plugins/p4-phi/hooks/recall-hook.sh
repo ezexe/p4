@@ -49,8 +49,8 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name"
   if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then
     case "$payload" in
       *'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
-      *'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*|*'"tool_name":"KillShell"'*|*'"tool_name": "KillShell"'*) ;;
-      *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*|*'"tool_name":"MultiEdit"'*|*'"tool_name": "MultiEdit"'*) ;;
+      *'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*) ;;
+      *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*) ;;
       *) exit 0 ;;
     esac
     name=lookup-phi                               # phi.py's records, and no lookup row

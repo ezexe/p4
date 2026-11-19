@@ -910,7 +910,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
 #                input's `background_tasks`, which turn_relay reads from the list keep_in_flight kept
 #   start        the first row of the subagent's own transcript, `subagents/agent-<agent_id>.jsonl`
 #   result       `last_assistant_message` of the SubagentStop input, and that transcript's last message
-#   files        the Edit, Write, MultiEdit and NotebookEdit calls of that transcript, which the SubagentStop input
+#   files        the Edit, Write and NotebookEdit calls of that transcript, which the SubagentStop input
 #                names as `agent_transcript_path`
 # Two things stay beside them. `status` says whether the SubagentStop has come: summary reads it when an anchor is
 # made, with no hook input and no transcript at hand. `wrote` is the files a stopped subagent's transcript shows it
@@ -1524,13 +1524,13 @@ def goal_over(row):
 # `description` and, for a shell task, its `command`, and is present when the task registry is reachable. p4-phi
 # records no launch of its own: the Stop hook keeps that list on session.json, and the checks that run between turns,
 # such as the restart check and the archive checks, read it there, since PreToolUse input lists no running task.
-# An entry leaves the kept list once its completion notice arrives as a message or a TaskStop or KillShell call stops
+# An entry leaves the kept list once its completion notice arrives as a message or a TaskStop call stops
 # it, so nothing names it as running after its end. A step's subagents stay in its task list, as agent_bind puts
 # them, so _tasks reads them.
 
 IN_FLIGHT_FIELDS = ("id", "type", "status", "description", "command")
 NOTICE = re.compile(r"<task-id>\s*([^<\s]+)\s*</task-id>.*?<status>\s*([^<\s]+)\s*</status>", re.S)
-STOPPED = re.compile(r'"name"\s*:\s*"(?:TaskStop|KillShell)"\s*,\s*"input"\s*:\s*\{[^{}]*?'
+STOPPED = re.compile(r'"name"\s*:\s*"TaskStop"\s*,\s*"input"\s*:\s*\{[^{}]*?'
                      r'"(?:task_id|shell_id|id)"\s*:\s*"([A-Za-z0-9_-]{6,})"')
 
 
@@ -1547,7 +1547,7 @@ def keep_in_flight(s, payload):
 
 
 def clear_in_flight(s, text):
-    """The kept entries whose completion notice, or whose TaskStop or KillShell call, `text` holds, taken off the
+    """The kept entries whose completion notice, or whose TaskStop call, `text` holds, taken off the
     session -> the ids taken off."""
     ended = {m.group(1) for m in NOTICE.finditer(str(text or ""))} | {
         m.group(1) for m in STOPPED.finditer(str(text or ""))}

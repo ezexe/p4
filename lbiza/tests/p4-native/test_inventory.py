@@ -96,16 +96,21 @@ class RecordTest(unittest.TestCase):
     def test_the_nine_tools_no_audit_weighed_have_a_verdict(self):
         """The goal tools are in the build's types and in no session's tool list, so `SetGoal` is open for p4-phi
         behind p4-native's probe and the other two are declined. The Task tools and `TodoWrite` are declined, and
-        `MultiEdit` and `KillShell`, which p4-phi's matchers name, are used by it."""
+        `MultiEdit` and `KillShell` are declined by all three, and p4-phi names neither in its matchers, its
+        hooks module or its scripts: one is a legacy name and the other a previous name of `TaskStop`."""
         self.assertEqual(ROWS["SetGoal"]["open"], ["p4-phi"])
         self.assertIn("`set-goal-tool`", ROWS["SetGoal"]["would"]["p4-phi"])
         for key in ("GetGoal", "PauseGoal", "TaskCreate", "TaskList", "TaskUpdate", "TodoWrite"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
             self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
-        matcher = (PLUGINS / "p4-phi" / "hooks" / "hooks.json").read_text(encoding="utf-8")
+        phi = PLUGINS / "p4-phi"
+        named = [phi / "hooks" / "hooks.json", phi / "hooks" / "register.ts", phi / "hooks" / "recall-hook.sh",
+                 *sorted((phi / "scripts").glob("*.py"))]
         for key in ("MultiEdit", "KillShell"):
-            self.assertIn(f"|{key}|", matcher, key)
-            self.assertEqual(ROWS[key]["used"], ["p4-phi"], key)
+            for file in named:
+                self.assertNotIn(key, file.read_text(encoding="utf-8"), f"{key} in {file.name}")
+            self.assertEqual(verdict(ROWS[key]), "declined", key)
+            self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
         self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi"])
         self.assertEqual(ROWS["$.settings.read"].get("used"), ["p4-temportal"])
         self.assertFalse([key for key, row in ROWS.items() if row.get("nobody")])

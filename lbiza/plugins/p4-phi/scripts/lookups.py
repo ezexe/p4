@@ -91,10 +91,10 @@ EPOCHS_SHELL = 6                 # the failure model's passes: more passes learn
 #                                  foresee the later ones no better
 
 SHELL_TOOLS = ("Bash", "PowerShell")
-# "NotebookRead", "MultiEdit" and "Task" are tool names of older Claude Code versions, still met in their transcripts
+# "NotebookRead" and "Task" are tool names of older Claude Code versions, still met in their transcripts
 KINDS = {"WebFetch": "web", "WebSearch": "web", "Bash": "shell", "PowerShell": "shell", "Read": "read",
          "NotebookRead": "read", "Grep": "search", "Glob": "search", "Edit": "edit", "Write": "edit",
-         "MultiEdit": "edit", "NotebookEdit": "edit", "Agent": "agent", "Task": "agent"}
+         "NotebookEdit": "edit", "Agent": "agent", "Task": "agent"}
 WS = re.compile(r"\s+")
 STRONG = re.compile(r"(^\s*[\w.]*(Error|Exception)\b\s*[:(]|command not found|is not recognized as|"
                     r"No such file or directory|unexpected EOF|^\s*fatal: |Permission denied|ENAMETOOLONG|"
@@ -159,7 +159,7 @@ def ask_of(tool, inp):
         return WS.sub(" ", g("query")).strip()
     if tool in ("Grep", "Glob"):
         return " ".join(x for x in (g("pattern"), g("path"), g("glob"), g("type"), g("output_mode")) if x)
-    if tool in ("Read", "NotebookRead", "Edit", "Write", "MultiEdit", "NotebookEdit"):
+    if tool in ("Read", "NotebookRead", "Edit", "Write", "NotebookEdit"):
         return " ".join(x for x in (g("file_path") or g("notebook_path"), g("offset"), g("limit")) if x)
     if tool in ("Agent", "Task"):
         return WS.sub(" ", g("subagent_type") + " " + g("prompt")).strip()
@@ -214,7 +214,7 @@ def key_of(tool, inp):
     """Two calls with one key are the same call: the tool, its target and its question, with spacing set aside, and
     case too except in a command. An Edit or a Write adds a hash of the text it replaces or writes."""
     ask = ask_of(tool, inp)
-    if tool in ("Edit", "Write", "MultiEdit"):
+    if tool in ("Edit", "Write"):
         ask += "|" + hashlib.sha1(str(inp.get("old_string") or inp.get("content") or "").encode("utf-8", "replace")
                                   ).hexdigest()[:8]
     base = f"{tool}|{target_of(tool, inp)}|{ask if tool in SHELL_TOOLS else ask.lower()}"

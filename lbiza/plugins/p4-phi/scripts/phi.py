@@ -108,7 +108,7 @@ SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", 
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
             "goal": "GOAL", "app_tools": "APP_TOOLS"}
 SHELL_TOOLS = ("Bash", "PowerShell")
-EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
 export mkdir true diff sort cut pwd if while until get-content select-string get-childitem dir findstr start-sleep
 set-location write-output write-host get-item test-path""".split()) | {""}
@@ -2243,7 +2243,7 @@ def h_issue_guard(payload):
 
 
 def h_task_stop(payload):
-    """PostToolUse on TaskStop, or KillShell in an older session: the stopped task's entry leaves the list the last
+    """PostToolUse on TaskStop: the stopped task's entry leaves the list the last
     Stop kept, since a stop sends no completion notice. Prints nothing."""
     me = Me(payload)
     if not me.home or not me.id:
@@ -3600,7 +3600,7 @@ def h_agent_call(payload):
     return text or None
 
 
-WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+WRITE_TOOLS = ("Edit", "Write", "NotebookEdit")
 
 
 def transcript_calls(path):
@@ -3615,7 +3615,7 @@ def transcript_calls(path):
 
 
 def agent_writes(calls):
-    """The files a subagent's calls wrote, by Edit, Write, MultiEdit or NotebookEdit, each once."""
+    """The files a subagent's calls wrote, by Edit, Write or NotebookEdit, each once."""
     out = []
     for c in calls:
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}

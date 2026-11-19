@@ -817,8 +817,8 @@ class AtArchive(Base):
         self.assertFalse(any("bg44444444" in x for x in puppeteer.unfinished(self.t.p4, KID)))
 
     def test_a_task_stop_clears_the_saved_entry(self):
-        """A stop sends no notice, so a TaskStop or KillShell call ends the entry, through the lookup-record gate."""
-        for tool, key, tid in (("TaskStop", "task_id", "bg55555555"), ("KillShell", "shell_id", "bg66666666")):
+        """A stop sends no notice, so a TaskStop call ends the entry, named by `task_id` or `shell_id`, through the lookup-record gate."""
+        for tool, key, tid in (("TaskStop", "task_id", "bg55555555"), ("TaskStop", "shell_id", "bg66666666")):
             self.background(KID, "sh run-suites.sh", tid)
             body = {"session_id": CLI[KID], "cwd": self.t.proj, "hook_event_name": "PostToolUse", "tool_name": tool,
                     "tool_input": {key: tid}, "tool_response": "stopped", "tool_use_id": f"toolu_{tid}"}

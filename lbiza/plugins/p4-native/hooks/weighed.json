@@ -1882,10 +1882,8 @@
   },
   "KillShell": {
    "kind": "tool",
-   "used": [
-    "p4-phi"
-   ],
    "declined": {
+    "p4-phi": "a previous name of `TaskStop`, which is the name a hook's input carries, so p4-phi names `TaskStop` alone.",
     "p4-temportal": "the build has no such tool.",
     "p4-native": "the build has no such tool."
    }
@@ -1930,10 +1928,8 @@
   },
   "MultiEdit": {
    "kind": "tool",
-   "used": [
-    "p4-phi"
-   ],
    "declined": {
+    "p4-phi": "a legacy name no build its hooks module loads on calls, so p4-phi names `Edit`, `Write` and `NotebookEdit`.",
     "p4-temportal": "the build has no such tool.",
     "p4-native": "the build has no such tool."
    }

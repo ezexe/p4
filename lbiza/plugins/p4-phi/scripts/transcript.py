@@ -34,7 +34,7 @@ import os
 import re
 import shlex
 
-EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
 READ_TOOLS = ("Read", "NotebookRead")
 SHELL_TOOLS = ("Bash", "PowerShell")     # a command's paths are read the same way, whichever shell ran it
 SEARCH_TOOLS = ("Grep", "Glob")

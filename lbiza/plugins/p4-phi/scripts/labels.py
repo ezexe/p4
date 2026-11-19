@@ -423,7 +423,7 @@ def tool_inputs(turn):
     out = []
     for c in (turn or {}).get("calls", []):
         inp = c.get("input") if isinstance(c.get("input"), dict) else {}
-        if c["name"] in ("Edit", "Write", "MultiEdit", "NotebookEdit"):
+        if c["name"] in ("Edit", "Write", "NotebookEdit"):
             out.append(" ".join(str(inp.get(k, "")) for k in ("file_path", "new_string", "content", "edits")))
         elif c["name"] in ("Bash", "PowerShell"):
             out.append(str(inp.get("command", "")))

@@ -121,7 +121,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|MultiEdit|TaskStop|KillShell|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
+        "matcher": "Bash|PowerShell|Write|Edit|TaskStop|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
         "hooks": [
           {
             "type": "command",
@@ -137,7 +137,7 @@
         ]
       },
       {
-        "matcher": "^(?!(?:Bash|PowerShell|Write|Edit|MultiEdit|TaskStop|KillShell|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up)$).*",
+        "matcher": "^(?!(?:Bash|PowerShell|Write|Edit|TaskStop|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up)$).*",
         "hooks": [
           {
             "type": "command",
