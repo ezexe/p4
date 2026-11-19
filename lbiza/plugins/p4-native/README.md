@@ -217,7 +217,7 @@ Not seen live: the other five rows, and a line carried by a next prompt.
 These were declined by choice and not by a block, so each stays a setting of Claude Code or of the desktop app, and p4-native writes none of them and probes none.
 
 - The pull request flow: `mcp__ccd_pr__`, `/autofix-pr` and auto-merge, where ezexe lands by a local gate and a push to `main`.
-- Scheduled runs: `/schedule`, the desktop app's scheduled tasks, `CronCreate` and `/loop`, where each run is a new session that spends usage.
+- Scheduled runs: `/schedule` and the desktop app's scheduled tasks, where each run is a new session that spends usage.
 - Models, effort, fast mode and the advisor: `/model`, `/effort`, `/fast` and `/advisor`.
 - Permission modes, plan mode, auto mode and the sandbox: `/permissions`, `/plan`, `/auto-mode-setup` and `/sandbox`.
 - `autoCompactWindow`, `idleCompaction`, the memory toggle `/memory`, and `cleanupPeriodDays` for how long transcripts stay.

@@ -1,6 +1,6 @@
 {
   "name": "p4-native",
-  "version": "0.5.16",
+  "version": "0.5.17",
   "description": "The host layer of ezexe/p4: at a session's start it works out what this host is and can do, the desktop app or a terminal, interactive or scripted, the Claude Code version and the tools that answer here, and keeps that map in the project's .claude/p4 store, where the session and the other p4 plugins read it, and when the Claude Code version changes it probes each condition that blocked a decision and tells the session once what changed, it names each command and tool of a new build that no p4 plugin has weighed, it hands one line when a session does by hand what a tool of this host does, and two native features wait behind options that are off by default.",
   "author": {
     "name": "ezexe"
