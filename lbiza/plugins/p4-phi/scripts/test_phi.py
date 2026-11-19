@@ -1495,15 +1495,13 @@ class Rules(unittest.TestCase):
         self.assertNotIn("sweep", phi.LEVELS)
         self.assertNotIn("p4-phi:sweep", self.start(TOP))
 
-    def test_the_levels_rule_names_the_read_of_the_plan_limits(self):
-        """The built-in rule `levels` handed at a session's start names the app's own `get_usage`, which reports the
-        account's plan limits, before a batch of starts or Agent calls, once, and names no stop or restart of a
-        running session."""
+    def test_the_levels_rule_names_no_read_of_the_plan_limits(self):
+        """The built-in rule `levels` handed at a session's start tells it to read no plan limit before a start or
+        an Agent call: how much of the plan a piece of work spends is ezexe's, and a session neither weighs it nor
+        stops for it. The rule names no stop or restart of a running session either."""
         got = self.start(TOP)
-        self.assertIn("Before a batch of session starts or Agent calls, read the plan limits once with "
-                      "`mcp__ccd_session_mgmt__get_usage`", got)
-        self.assertEqual(phi.LEVELS.count("mcp__ccd_session_mgmt__get_usage"), 1)
-        for word in ("stop_session", "restart", "start it again", "set_session_model"):
+        self.assertIn("built-in, levels:", got)
+        for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
             self.assertNotIn(word, phi.LEVELS, word)
 
     def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):

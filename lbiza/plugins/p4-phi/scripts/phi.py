@@ -1132,8 +1132,6 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 #   route past the skill is "Build your own reviewer: write a reviewer subagent or a review skill": that is
 #   agents/check.md.
 # - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
-# - The read of the plan limits is the app's own tool, `mcp__ccd_session_mgmt__get_usage`, which plans.LIMITS_FIRST
-#   names: a command hook calls no session tool, so the rule asks the session for the read.
 # - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
 #   background task and continue working while it runs." interactive-mode.md, "How backgrounding works": "Output is
 #   written to a file and Claude can retrieve it using the Read tool". So a long command needs no agent to run it.
@@ -1152,8 +1150,7 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
           "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
           + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
-          "such a read of a result that is no code change goes to the subagent `p4-phi:check`. "
-          + plans.LIMITS_FIRST + " A worker is "
+          "such a read of a result that is no code change goes to the subagent `p4-phi:check`. A worker is "
           "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
           "names them; an effort above this session's own is not accepted. " + WORKFLOW)
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names

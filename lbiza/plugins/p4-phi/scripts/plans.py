@@ -768,13 +768,9 @@ def level_words(text):
 
 LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work carries, said in one line of its brief, "
               "`Model and effort: <model> at <effort> effort`.")
-# The app's own tool reports the plan limits: `mcp__ccd_session_mgmt__get_usage` returns "The account's Claude Code
-# plan limits and how full a session's context window is", "For pacing side sessions", as its description says. So
-# the read is one line that names the tool, and p4-phi reads no limit itself.
-LIMITS_FIRST = ("Before a batch of session starts or Agent calls, read the plan limits once with "
-                "`mcp__ccd_session_mgmt__get_usage`, so each `model` is picked from the work and what the limits show.")
-LEVEL_HOW = (LIMITS_FIRST + " "
-             "Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
+# No line tells a session to read the plan limits before a start or an Agent call: how much of the plan a piece of
+# work spends is ezexe's, and a session neither weighs it nor stops for it.
+LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
              "default static or mechanical work runs on a cheaper model at medium effort, and a build that changes "
              "behaviour or a design or review step on this session's own model at high effort. An effort above this "
              "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
