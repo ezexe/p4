@@ -51,6 +51,8 @@ type Machine = {
   look?: (args: readonly string[]) => Answer | Promise<Answer>
   // What `phi.py rules` prints as the system prompt's section: none where a setting turns the rules off.
   rules?: string
+  // What a write waits on before it lands, as a slow disk does.
+  write?: (path: string) => Promise<void>
   usage?: SessionUsage
   // Why a message to an address is not delivered there, where it is not.
   refuses?: (to: string) => string | undefined
@@ -94,7 +96,8 @@ function machine(on: On, has: Machine): Seen {
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.usage', () => ({ value: has.usage ?? USAGE }))
-  on('fs.write', (_, e) => {
+  on('fs.write', async (_, e) => {
+    await has.write?.(plain(e.path))
     seen.wrote.push({ path: plain(e.path), text: e.text })
     files[plain(e.path)] = e.text
 
@@ -142,7 +145,12 @@ function machine(on: On, has: Machine): Seen {
 
     return text === undefined ? { deny: 'ENOENT' } : { value: text }
   })
-  on('fs.exists', (_, e) => ({ value: files[plain(e.path)] !== undefined }))
+  // A file, or a folder that holds one.
+  on('fs.exists', (_, e) => {
+    const path = plain(e.path)
+
+    return { value: Object.keys(files).some(file => file === path || file.startsWith(`${path}/`)) }
+  })
   on('process.run', async (_, e) => {
     const at = e.argv.findIndex(arg => arg.endsWith('/scripts/phi.py'))
     let stdout = ''
@@ -831,4 +839,130 @@ test('with no python the system prompt goes out as composed', async ($, on) => {
   expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
   expect(seen.asked).toEqual([])
   expect(seen.logged).toEqual(['no working python found, so no look runs'])
+})
+
+// A project with a store: hook.py keeps a launch's lines under its models folder, in `served/start-<session>`.
+const STORE = { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '', '/work/project/.claude/p4/phi/models/index.json': '{}' }
+const BOUND_IN = '/work/project/.claude/p4/phi/models/served/start-cli-0001'
+// An Agent call's launch and the subagent it starts, with the ids a live run in the desktop app gave both.
+const LAUNCH = { prompt: 'Read flush.py and list its writes', description: 'flush reads', subagentType: 'Explore' }
+const CALL = 'toolu_01TjNXV8xpTHFt4xgeeSvhDJ'
+const AGENT = 'af120930b4bb4d7c6'
+const SPAWNED = { model: 'claude-fable-5-2', agentId: AGENT } as const
+const SUBAGENT_START = { agent_id: AGENT, agent_type: 'Explore' } as const
+
+test('a subagent is bound to the Agent call that launched it, where hook.py reads the pair', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE } })
+  on('agent.spawn', () => SPAWNED)
+
+  const started = await $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
+  await clock.settle()
+
+  expect(started).toEqual(SPAWNED)
+  expect(seen.wrote).toEqual([{ path: `${BOUND_IN}/bound-${AGENT}`, text: `${CALL}\n` }])
+  // The pair is retrieval's own record, so no python runs for it.
+  expect(seen.calls).toEqual([])
+})
+
+test("a subagent's SubagentStart hooks run once its binding is written", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const order: string[] = []
+  machine(on, {
+    files: { ...STORE },
+    write: async () => {
+      await clock.sleep(200)
+      order.push('bound')
+    },
+  })
+  on('agent.spawn', () => SPAWNED)
+  on('classic.SubagentStart', () => {
+    order.push('SubagentStart hooks')
+
+    return {}
+  })
+
+  await $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
+  const raised = $.classic.SubagentStart(SUBAGENT_START)
+  await clock.advance(199)
+  expect(order).toEqual([])
+  await clock.advance(1)
+  await raised
+
+  expect(order).toEqual(['bound', 'SubagentStart hooks'])
+})
+
+test('a SubagentStart raised ahead of its spawn is held until the spawn answers', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const order: string[] = []
+  const seen = machine(on, { files: { ...STORE }, write: async () => void order.push('bound') })
+  on('agent.spawn', async () => {
+    await clock.sleep(100)
+
+    return SPAWNED
+  })
+  on('classic.SubagentStart', () => {
+    order.push('SubagentStart hooks')
+
+    return {}
+  })
+
+  const spawning = $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
+  const raised = $.classic.SubagentStart(SUBAGENT_START)
+  await clock.advance(99)
+  expect(order).toEqual([])
+  await clock.advance(1)
+  await Promise.all([spawning, raised])
+
+  expect(order).toEqual(['bound', 'SubagentStart hooks'])
+  expect(seen.wrote.length).toBe(1)
+})
+
+test('a start no spawn answers for passes after a short hold, bound to nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const order: string[] = []
+  const seen = machine(on, { files: { ...STORE } })
+  on('classic.SubagentStart', () => {
+    order.push('SubagentStart hooks')
+
+    return {}
+  })
+
+  const raised = $.classic.SubagentStart(SUBAGENT_START)
+  await clock.advance(499)
+  expect(order).toEqual([])
+  await clock.advance(1)
+  await raised
+
+  expect(order).toEqual(['SubagentStart hooks'])
+  expect(seen.wrote).toEqual([])
+})
+
+test('a spawn no Agent call launched and a project with no store are bound to nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...STORE } })
+  const raised: unknown[] = []
+  on('agent.spawn', (_, e) => {
+    raised.push({ tool_use_id: e.tool_use_id, workflow: e.workflow, resume: e.resume })
+
+    return SPAWNED
+  })
+
+  // A fork no tool call starts carries an empty id. A workflow's agent carries the id of the Workflow call that
+  // started its run, and a resumed run an old one: the engine alone sets `workflow` and `resume`, so a test raises
+  // neither, and the hook leaves both unbound by the same test of the event's fields.
+  await $.agent.spawn({ ...LAUNCH, tool_use_id: '' } as never)
+  await clock.settle()
+  expect(raised).toEqual([{ tool_use_id: '', workflow: undefined, resume: undefined }])
+  expect(seen.wrote).toEqual([])
+
+  delete seen.files['/work/project/.claude/p4/phi/models/index.json']
+  await $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
+  await clock.settle()
+  expect(seen.wrote).toEqual([])
 })

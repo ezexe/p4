@@ -21,7 +21,7 @@ sys.path.insert(0, SRC)
 import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
-from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, handed, runs_of  # noqa: E402
+from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, handed, runs_of, write  # noqa: E402
 import inproc  # noqa: E402
 
 A, B = KID, KID2
@@ -250,6 +250,9 @@ class TreeOfPlans(unittest.TestCase):
                 capture_output=True, text=True, timeout=60, env=t.env(A, P4_RECALL_SYNC="1"))
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertNotIn("updatedInput", r.stdout, "the subagent's prompt stays as written, ezexe/p4#243 row D2")
+            recall = __import__("hook")                      # the file hooks/register.ts writes at `agent.spawn`
+            write(os.path.join(recall.pending_dir({"session_id": CLI[A], "cwd": t.proj}), recall.BOUND + "a204"),
+                  "toolu_204\n")
             r = inproc.run(["sh", hook, "subagent-start"], input=json.dumps({
                 "session_id": CLI[A], "cwd": t.proj, "hook_event_name": "SubagentStart", "agent_id": "a204",
                 "agent_type": "general-purpose"}),

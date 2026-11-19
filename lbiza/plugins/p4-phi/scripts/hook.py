@@ -28,8 +28,9 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   agent          PreToolUse, matcher `Agent`. Nothing: the call runs with its prompt as written. phi.py's text for
                  the subagent and the retrieval lines under "Notes from this repo's memory:" wait for its start.
   subagent-start SubagentStart. phi.py binds the subagent, by the `agent_id` the input carries, to the launching
-                 session's step in progress. Then those lines as `additionalContext`, the oldest launch of the
-                 agent's type first, nothing when there are none.
+                 session's step in progress. Then the lines of the Agent call that launched it as
+                 `additionalContext`: the plugin's hooks module binds the subagent's id to that call's id at
+                 `agent.spawn`, and launch_of reads the pair. Nothing where no launch is bound or it kept no line.
   lookup-check   PreToolUse, matcher `.*`. The first answer of phi.py's checks that PHI_CHECK names for the tool,
                  or else lookups.py's check: an earlier finding beside a web call, an earlier failure before a
                  command expected to fail. A subagent's call also gets phi.py's word of what changed since its
@@ -60,8 +61,10 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
   `agent_type` with the agent name that the matcher filters on", and `additionalContext` is "added to the subagent's
   context at the start of its conversation, before its first prompt", so the subagent-start hook binds the id and
   gives the lines there, ezexe/p4#243 row D2. The page gives the input no field of the Agent call that launched the
-  subagent, neither its `tool_use_id` nor its prompt, so a launch's lines are matched to a start by session and
-  agent type, oldest first: the one order rule kept.
+  subagent, neither its `tool_use_id` nor its prompt. The hooks module's event does: `agent.spawn` carries the
+  call's `tool_use_id`, "The Agent tool call this spawn belongs to", and answers "The started subagent's id: the
+  same string its loop's `tool.call` events carry as `agentId`", by the types of Claude Code 2.1.326. hooks/
+  register.ts writes that pair, and a start takes the lines of its own launch and of no other.
 - PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
 - Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
   conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
@@ -474,11 +477,9 @@ def pending_dir(payload):
 
 
 def hold_for_start(payload, kind, text, key):
-    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id. hooks.md, "SubagentStart
-    input", gives a start the subagent's `agent_id` and `agent_type` and no field of the Agent call that launched
-    it, so a start takes the oldest launch of its type, and drop_launch takes away a launch whose call ended without
-    its start taking it, as a call that was denied or failed does. Only these lines go by that order: phi.py binds
-    its record of the subagent by the `agent_id` alone."""
+    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id, which is how launch_of's
+    answer finds them. A launch whose call was denied or failed starts no subagent, so no start is bound to it, and
+    its lines go at PENDING_S. phi.py binds its own record of the subagent by the `agent_id` alone."""
     d = pending_dir(payload)
     tid = re.sub(r"[^\w-]", "_", str(payload.get("tool_use_id") or ""))
     try:
@@ -490,24 +491,25 @@ def hold_for_start(payload, kind, text, key):
         pass
 
 
-def drop_launch(payload):
-    """After an Agent call ran or failed, its launch's lines if no start took them: a denied or failed call starts
-    no subagent, and a later start of the same type must not get them."""
-    tid = str(payload.get("tool_use_id") or "")
-    if str(payload.get("tool_name") or "") != "Agent" or not tid:
-        return
-    d = pending_dir(payload)
-    tail = "-" + re.sub(r"[^\w-]", "_", tid) + ".json"
+BOUND = "bound-"                 # in pending_dir, before a subagent's id: the file that names its launch
+
+
+def launch_of(payload):
+    """The Agent call that launched the subagent a SubagentStart names: that call's `tool_use_id`, read from the
+    file the plugin's hooks module wrote for the subagent's id when `agent.spawn` answered, and taken. '' where no
+    launch is bound: a session with no hooks module, a subagent no Agent call started, such as a workflow's, or a
+    project with no store, where no line is kept either."""
+    aid = re.sub(r"[^\w-]", "_", str(payload.get("agent_id") or ""))
+    if not aid:
+        return ""
+    path = os.path.join(pending_dir(payload), BOUND + aid)
     try:
-        names = os.listdir(d)
+        with open(path, encoding="utf-8") as f:
+            tid = f.read().strip()
+        os.remove(path)
     except OSError:
-        return
-    for n in names:
-        if n.endswith(tail):
-            try:
-                os.remove(os.path.join(d, n))
-            except OSError:
-                pass
+        return ""
+    return tid
 
 
 def h_agent(payload):
@@ -540,13 +542,14 @@ def h_agent(payload):
 
 
 def h_subagent_start(payload):
-    """SubagentStart: phi.py binds the subagent by the `agent_id` the input carries. Then the oldest launch of this
-    agent type in this session that no start has taken gives its lines as `additionalContext`, and its served record
-    is bound to the subagent's id for its SubagentStop."""
+    """SubagentStart: phi.py binds the subagent by the `agent_id` the input carries. Then the launch launch_of
+    names for it gives its lines as `additionalContext`, and its served record is bound to the subagent's id for
+    its SubagentStop. A start no launch is bound to gets no line."""
     import labels as lb
     phi_text("agent-start", payload)              # phi.py: the subagent's id bound to the step in progress
+    tid = launch_of(payload)
     d = pending_dir(payload)
-    kind = str(payload.get("agent_type") or "general-purpose")
+    tail = "-" + re.sub(r"[^\w-]", "_", tid) + ".json"
     try:
         names = sorted(os.listdir(d))
     except OSError:
@@ -557,11 +560,11 @@ def h_subagent_start(payload):
             if time.time() - os.path.getmtime(p) > PENDING_S:
                 os.remove(p)
                 continue
+            if not tid or not name.endswith(tail):
+                continue
             with open(p, encoding="utf-8") as f:
                 row = json.load(f)
-            if row.get("type") != kind:
-                continue
-            os.remove(p)                                  # taken: a second start of the same type gets the next
+            os.remove(p)                                  # taken by the one start it launched
         except (OSError, ValueError):
             continue
         p4 = p4_of(payload)
@@ -756,7 +759,6 @@ def h_lookup_phi(payload):
     """After a clean call the app does not wait on for its lookup row: phi.py's records alone, which must be in
     place before the next call, run here in the entry the call waits on. Its answer is returned for a Write or an
     Edit, as h_lookup_record returns it."""
-    drop_launch(payload)
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("Write", "Edit", "MultiEdit"):
         return out
@@ -778,7 +780,6 @@ def h_lookup_record(payload):
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
     task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
     call's row, and a failure other sessions already met is told what they did about it."""
-    drop_launch(payload)
     phi_route(payload, PHI_TIE)                    # as h_lookup_row does behind a clean call: one of the two runs
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit",

@@ -391,6 +391,14 @@ class Agent(Base):
     INPUT = {"prompt": "check whether the quokka harness runs the zebrafish plotter golden images on every push",
              "description": "Check the harness", "subagent_type": "Explore", "model": "haiku"}
 
+    def bound(self, agent_id, tool_use_id):
+        """The file hooks/register.ts writes when `agent.spawn` answers: the subagent's id, bound to the Agent call
+        that launched it."""
+        import hook
+        d = hook.pending_dir({"session_id": SESSION, "cwd": self.proj})
+        os.makedirs(d, exist_ok=True)
+        write(os.path.join(d, hook.BOUND + agent_id), tool_use_id + "\n")
+
     def test_the_subagent_prompt_stays_and_its_lines_come_at_its_start(self):
         """ezexe/p4#243, row D2: the Agent call runs with its prompt as written, and the retrieval lines reach the
         subagent as context at its SubagentStart, once."""
@@ -400,6 +408,7 @@ class Agent(Base):
         self.assertNotIn("updatedInput", (o or {}).get("hookSpecificOutput") or {}, "the prompt stays as written")
         start = {"hook_event_name": "SubagentStart", "agent_id": "a9", "agent_type": "Explore",
                  "session_id": SESSION, "cwd": self.proj}
+        self.bound("a9", "toolu_1")
         hso = self.out(run_hook("subagent-start", start, self.proj))["hookSpecificOutput"]
         self.assertEqual(hso["hookEventName"], "SubagentStart")
         self.assertTrue(hso["additionalContext"].startswith("Notes from this repo's memory:\n- "),
@@ -412,9 +421,62 @@ class Agent(Base):
         self.assertEqual(o2, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}},
                          "P4_AGENT_ALLOW=1 adds allow and nothing else")
 
-    def test_a_failed_agent_call_leaves_no_lines_for_a_later_start(self):
-        """A launch whose Agent call failed or was denied starts no subagent, so its lines go with the call, and a
-        later start of the same type gets none; a launch no start took is swept once old."""
+    def test_a_start_takes_the_lines_of_its_own_launch_whatever_the_order_and_the_type(self):
+        """The plugin's hooks module binds a subagent's id to the Agent call that launched it: `agent.spawn` carries
+        the call's `tool_use_id` and answers the subagent's id. Two launches of one agent type wait: the start
+        bound to the later one takes that one's lines and leaves the earlier one's, where the order of launches
+        would have handed it the earlier."""
+        import hook
+        import labels as lb
+        other = dict(self.INPUT, prompt="read how the zebrafish plotter writes its golden images to disk")
+        for tid, inp in (("toolu_first", self.INPUT), ("toolu_second", other)):
+            run_hook("agent", {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": dict(inp),
+                               "tool_use_id": tid, "session_id": SESSION, "cwd": self.proj}, self.proj)
+        d = hook.pending_dir({"session_id": SESSION, "cwd": self.proj})
+        self.assertEqual(len(os.listdir(d)), 2, "both launches wait")
+        self.bound("a21", "toolu_second")
+        start = {"hook_event_name": "SubagentStart", "agent_id": "a21", "agent_type": "Explore",
+                 "session_id": SESSION, "cwd": self.proj}
+        r = run_hook("subagent-start", start, self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("quokka", r.stdout, "no line of the earlier launch's prompt")
+        left = os.listdir(d)
+        self.assertEqual(len(left), 1, left)
+        self.assertTrue(left[0].endswith("-toolu_first.json"), "the earlier launch still waits for its own start")
+        self.assertEqual(lb.read_served(self.p4, "bind-a21"), {"key": hook.sha8(other["prompt"].rstrip())},
+                         "its served record is the later launch's, for its SubagentStop")
+        self.bound("a22", "toolu_first")
+        first = self.out(run_hook("subagent-start", dict(start, agent_id="a22"), self.proj))
+        self.assertTrue(first["hookSpecificOutput"]["additionalContext"].startswith("Notes from this repo's memory:"))
+        self.assertEqual(os.listdir(d), [], "each launch taken by its own start, and each binding with it")
+
+    def test_the_hooks_module_writes_the_binding_where_launch_of_reads_it(self):
+        """hooks/register.ts holds the store's folder and the file's name as literals, since a module has no python:
+        both are held here to hook.pending_dir and hook.BOUND, and the session's id is spelled as python spells it."""
+        import hook
+        with open(os.path.join(ROOT, "hooks", "register.ts"), encoding="utf-8") as f:
+            module = f.read()
+        os.makedirs(p4conf.sub(self.p4, "models"), exist_ok=True)       # as the layout hook makes it at a start
+        d = hook.pending_dir({"session_id": "cli 0001/x", "cwd": self.proj})
+        self.assertEqual(os.path.relpath(d, self.proj).replace(os.sep, "/"),
+                         ".claude/p4/phi/models/served/start-cli_0001_x")
+        self.assertEqual(os.path.relpath(p4conf.sub(self.p4, "models"), self.proj).replace(os.sep, "/"),
+                         ".claude/p4/phi/models", "the folder whose presence says the project has a store")
+        for said in ("const MODELS = '.claude/p4/phi/models'", f"const BOUND = '{hook.BOUND}'",
+                     "`${models}/served/start-${named(await $.session.id())}`", "id.replace(/[^\\w-]/g, '_')",
+                     "`${folder}/${BOUND}${named(agentId)}`, `${toolUseId}\\n`",
+                     "on('agent.spawn'", "on('classic.SubagentStart'"):
+            self.assertIn(said, module, said)
+        self.bound("a 31", "toolu_31")
+        self.assertEqual(hook.launch_of({"session_id": SESSION, "cwd": self.proj, "agent_id": "a 31"}), "",
+                         "an id is read under the name the module writes it by")
+        self.bound("a_31", "toolu_31")
+        self.assertEqual(hook.launch_of({"session_id": SESSION, "cwd": self.proj, "agent_id": "a 31"}), "toolu_31")
+
+    def test_a_start_no_launch_is_bound_to_gets_no_lines(self):
+        """A launch whose Agent call failed or was denied starts no subagent, so no start is bound to it and a later
+        start of the same type gets none of its lines; neither does a start the hooks module bound to another call,
+        such as a workflow's agent; a launch no start took is swept once old."""
         import hook
         launch = {"hook_event_name": "PreToolUse", "tool_name": "Agent", "tool_input": dict(self.INPUT),
                   "tool_use_id": "toolu_gone", "session_id": SESSION, "cwd": self.proj}
@@ -423,10 +485,13 @@ class Agent(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         start = {"hook_event_name": "SubagentStart", "agent_id": "a11", "agent_type": "Explore",
                  "session_id": SESSION, "cwd": self.proj}
-        self.assertIsNone(self.out(run_hook("subagent-start", start, self.proj)), "the failed call's lines are gone")
-        run_hook("agent", dict(launch, tool_use_id="toolu_old"), self.proj)
+        self.assertIsNone(self.out(run_hook("subagent-start", start, self.proj)), "no launch bound: no lines")
+        self.bound("a12", "toolu_of_a_workflow")
+        self.assertIsNone(self.out(run_hook("subagent-start", dict(start, agent_id="a12"), self.proj)),
+                          "bound to a call that kept no lines")
         d = hook.pending_dir({"session_id": SESSION, "cwd": self.proj})
-        self.assertTrue(os.listdir(d))
+        self.assertEqual([n for n in os.listdir(d) if n.startswith(hook.BOUND)], [], "a binding is read once")
+        self.assertTrue(os.listdir(d), "the failed call's lines wait, for no start")
         hook.sweep_served(self.p4, now_s=time.time() + hook.PENDING_S + 60)
         self.assertFalse(os.path.exists(d), "an old launch and then its empty folder are swept")
 

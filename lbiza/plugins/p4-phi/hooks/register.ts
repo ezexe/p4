@@ -9,6 +9,7 @@
 // prompt, where a command hook can only hand text beside a start.
 
 import type {
+  AgentSpawnInput,
   EngineInterface,
   PromptComposeResult,
   Register,
@@ -35,6 +36,17 @@ const REPORT_CHARS = 4_000
 // The id of the system prompt's section that holds the rules built into p4-phi. A plugin's own section is named
 // `<plugin>:<name>`, by the types of `prompt.compose`.
 const RULES_SECTION = 'p4-phi:rules'
+
+// A project's store, and under it where hook.py keeps a launch's lines for its subagent's start: hook.pending_dir
+// in python, `served/start-<session>` under the store's models folder. A file `bound-<agent id>` there holds the
+// id of the Agent call that launched the subagent, which hook.launch_of reads at the subagent's SubagentStart.
+const MODELS = '.claude/p4/phi/models'
+const BOUND = 'bound-'
+// How long a subagent's SubagentStart hooks are held for the `agent.spawn` that started it to answer, where they
+// are raised first. Seen in the desktop app on Claude Code 2.1.326, the spawn answers first and nothing is held.
+const SPAWN_WAIT_MS = 500
+// The subagents kept in mind, at most: a session starts far fewer at a time.
+const MOST_SPAWNED = 256
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
 // started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
@@ -93,6 +105,11 @@ let isInTurn = false
 // The whole points of the usage last written to usage.json, and the writes, one after another.
 let written: string | undefined
 let writing: Promise<void> = Promise.resolve()
+
+// The subagents whose start `agent.spawn` answered, each with the write of its binding, by the subagent's id, and
+// what a SubagentStart raised ahead of that answer waits on.
+const spawned = new Map<string, Promise<void>>()
+const awaited = new Map<string, () => void>()
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -459,6 +476,54 @@ async function withRules($: EngineInterface, composed: PromptComposeResult): Pro
   }
 }
 
+// A name as hook.py writes it into a file's name: every character but a letter, a digit, `_` and `-` as `_`.
+function named(id: string): string {
+  return id.replace(/[^\w-]/g, '_')
+}
+
+// Writes which Agent call launched a subagent, where the project has a store: with none, hook.py keeps no line for
+// a launch either. This is retrieval's own record, which P4_PHI=0 does not turn off, as it does not turn off the
+// runner that reads it.
+async function bind($: EngineInterface, toolUseId: string, agentId: string): Promise<void> {
+  try {
+    const models = `${slashed(await $.session.root())}/${MODELS}`
+    if (!(await $.fs.exists(models))) return
+    const folder = `${models}/served/start-${named(await $.session.id())}`
+    await $.fs.write(`${folder}/${BOUND}${named(agentId)}`, `${toolUseId}\n`)
+  } catch (error) {
+    note($, `a subagent was not bound to its launch: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
+// A subagent `agent.spawn` answered. One an Agent call launched is bound to that call's id. A workflow's agent
+// carries the id of its run's Workflow call, and a resumed run started long ago, so neither is bound.
+function keepSpawn($: EngineInterface, e: AgentSpawnInput, agentId: string): void {
+  const isLaunch = e.tool_use_id !== '' && e.workflow === undefined && e.resume === undefined
+  spawned.set(agentId, isLaunch ? bind($, e.tool_use_id, agentId) : Promise.resolve())
+  for (const oldest of spawned.keys()) {
+    if (spawned.size <= MOST_SPAWNED) break
+    spawned.delete(oldest)
+  }
+  awaited.get(agentId)?.()
+}
+
+// Resolves once the binding of a subagent is written, so the SubagentStart command hooks, which run beneath, read
+// it. A subagent `agent.spawn` has not answered yet is waited for, a short while.
+async function spawnBound($: EngineInterface, agentId: string): Promise<void> {
+  try {
+    if (!spawned.has(agentId)) {
+      await new Promise<void>(resolve => {
+        awaited.set(agentId, resolve)
+        $.clock.after(SPAWN_WAIT_MS, resolve)
+      })
+      awaited.delete(agentId)
+    }
+    await spawned.get(agentId)
+  } catch (error) {
+    note($, `a subagent's start was not held: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+}
+
 // At a session's start, and at each reload of the module: the first look, which arms the timer and answers the
 // session's folder, and then the usage as it stands.
 async function begin($: EngineInterface): Promise<void> {
@@ -527,4 +592,21 @@ export const register: Register = on => {
   // Claude Code raises this when it renders a system prompt. A hook that fails here is skipped, and the prompt goes
   // out as composed beneath.
   on('prompt.compose', async ($, e, next) => withRules($, await next(e))).catch(($, e, next) => next(e))
+
+  // An agent is about to start. The event carries the id of the Agent call that launches it, and `next(e)` answers
+  // the id the subagent runs under, which a SubagentStart command hook's input holds with no word of the call. The
+  // pair is kept for hook.py, in place of its guess that a start belonged to the oldest launch of its agent type.
+  on('agent.spawn', async ($, e, next) => {
+    const started = await next(e)
+    if (started.agentId !== undefined) keepSpawn($, e, started.agentId)
+
+    return started
+  }).catch(($, e, next) => next(e))
+
+  // The SubagentStart command hooks run beneath this hook, so they run once the pair is written.
+  on('classic.SubagentStart', async ($, e, next) => {
+    await spawnBound($, e.agent_id)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 }
