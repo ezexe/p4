@@ -144,7 +144,6 @@ class Lifetime(unittest.TestCase):
         now = 1_000_000.0
         self.assertEqual(lifetime.parse_lifetime("30m", now), now + 1800)
         self.assertEqual(lifetime.parse_lifetime("2w", now), now + 14 * DAY)
-        self.assertEqual(lifetime.parse_lifetime("session"), "session")
         self.assertGreater(lifetime.parse_lifetime("2099-01-01"), now)
         with self.assertRaises(ValueError):
             lifetime.parse_lifetime("soon")
@@ -392,21 +391,30 @@ class Lifetime(unittest.TestCase):
         self.assertIn("cookie  notebook/bad.md  unreadable", listed.stdout)
         self.assertIn("cookie  notebook/odd.md  unreadable", listed.stdout)
 
-    def test_a_session_cookie_ends_with_its_session(self):
+    def test_no_lifetime_ends_with_a_session(self):
+        """`set <path> session` is refused with a line that names the session's scratchpad directory, written as an
+        older skill page gives it, with --session, and no cookie is kept."""
         f = put(os.path.join(self.t, "notebook", "state.md"))
-        lifetime.set_cookie(self.p4, f, "session", session_id="abc")
-        lifetime.sweep(self.p4, ended_session="other")
-        self.assertTrue(os.path.exists(f))
-        lifetime.sweep(self.p4, ended_session="abc")
-        self.assertFalse(os.path.exists(f))
+        r = run("--p4", self.p4, "set", f, "session", "--session", "abc", CLAUDE_CODE_SESSION_ID="abc")
+        self.assertEqual((r.returncode, r.stdout, lifetime.read_expires(self.p4)), (2, "", {}))
+        self.assertIn("no lifetime ends with a session", r.stderr)
+        self.assertIn("scratchpad directory", r.stderr)
+        with self.assertRaises(ValueError):
+            lifetime.parse_lifetime("Session")
 
-    def test_a_session_cookie_takes_the_session_id_claude_code_sets(self):
-        """With only CLAUDE_CODE_SESSION_ID in the environment, `set <path> session` succeeds, and the cookie clears
-        when that session ends."""
+    def test_a_cookie_an_earlier_version_set_for_a_session_is_never_cleared(self):
+        """An entry of expires.json that an earlier version set to end with a session stays with its file through
+        the sweep at that session's end, `list` says what it is, and `set` gives it a lifetime."""
         f = put(os.path.join(self.t, "notebook", "state.md"))
-        r = run("--p4", self.p4, "set", f, "session", CLAUDE_CODE_SESSION_ID="abc")
-        run("session-end", stdin=json.dumps({"session_id": "abc"}), CLAUDE_PROJECT_DIR=self.root)
-        self.assertEqual((r.returncode, r.stderr, os.path.exists(f)), (0, "", False))
+        lifetime.write_expires(self.p4, {"notebook/state.md": {"session": "abc12345-rest"}})
+        ended = run("session-end", stdin=json.dumps({"session_id": "abc12345-rest"}), CLAUDE_PROJECT_DIR=self.root)
+        swept = lifetime.sweep(self.p4, now=time.time() + 400 * DAY)
+        listed = lifetime.listing(self.p4)[0]
+        self.assertEqual((ended.stdout, swept, os.path.exists(f)), ("", "", True))
+        self.assertEqual(listed, "cookie  notebook/state.md  set by an earlier version to end with session abc12345, "
+                                 "so never cleared: set a lifetime on it or clear it")
+        lifetime.set_cookie(self.p4, f, "1h")
+        self.assertEqual(list(lifetime.read_expires(self.p4)["notebook/state.md"]), ["expires"])
 
     def test_set_reads_a_relative_path_from_the_working_folder_and_refuses_a_missing_one(self):
         """`set notes.md 7d` run inside a folder gives that folder's file a cookie, `clear` reads its path the same

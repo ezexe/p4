@@ -32,7 +32,8 @@ Set a cookie:
 CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}" sh "${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh" lifetime set ".claude/p4/temportal/notebook/<file>" 7d
 ```
 
-The lifetime is `30m`, `12h`, `7d`, `2w`, an ISO date, or `session` with `--session ${CLAUDE_SESSION_ID}` to clear it when this session ends.
+The lifetime is `30m`, `12h`, `7d`, `2w` or an ISO date.
+No lifetime ends with a session: a file that goes when its session goes belongs in that session's scratchpad, which Claude Code deletes with the session's transcript.
 `list` shows every cookie and cache rule, `clear <path>` removes an expiry and keeps the file, and `now` runs the retention sweep at once.
 A path under `memory/` is refused.
 A tracked file that is cleared keeps its last version in the store's git history.

@@ -9,10 +9,17 @@ phi/.layout-conflicts/ too, where a layout move sets aside the older copies of t
 copy's age starts at the later of its own time and its folder's, since a move keeps the time of the copy it sets
 aside and gives the folder it lands in a new one, and neither folder is cleared when it or phi/ is a link or resolves
 to any other place. A cookie is one file or folder with its own expiry, set by `lifetime.py set <path> <lifetime>`
-and kept in temportal/expires.json, and the lifetime `session` clears it when the session that set it ends. A cache
-rule whose path resolves to memory/, in any letter case, or to a folder outside temportal/ clears nothing. A cookie
-is refused inside memory/, on tmp/ or anything in it, and on the notebook, src/ or expires.json themselves: tmp/ holds
-only the folders an earlier version kept for each session's scratchpad, and the others are never cleared whole.
+and kept in temportal/expires.json. A cache rule whose path resolves to memory/, in any letter case, or to a folder
+outside temportal/ clears nothing. A cookie is refused inside memory/, on tmp/ or anything in it, and on the notebook,
+src/ or expires.json themselves: tmp/ holds only the folders an earlier version kept for each session's scratchpad,
+and the others are never cleared whole.
+
+No lifetime ends with a session. A file that goes when its session goes belongs in that session's scratchpad
+directory, which Claude Code makes for the session and deletes with its transcript, by
+https://code.claude.com/docs/en/claude-directory.md, "Session scratchpad directory": "Scratchpad files last as long as
+the session's transcript". The lifetime `session` cleared a cookie at the SessionEnd of the session that set it, which
+a session that is resumed outlives and a session whose process is killed never reaches. `set` refuses it, and a
+cookie an earlier version set that way is listed as such and never cleared.
 
 A file the store's git tracks is removed with its removal staged, so its last version stays in the history, and an
 ignored or untracked file is deleted. The retention sweep stages those removals and no other change, so an edit
@@ -25,13 +32,11 @@ clears it.
   sweep                    the retention sweep at SessionStart: clears what has expired and prints one line when it
                            cleared something. Before it, as every hook of a start does, it moves files left in an
                            earlier place of the store's layout, and prints that move's line when this hook made it.
-  session-end              the retention sweep at SessionEnd, which also clears the cookies of the session that ends,
-                           silently.
+  session-end              the retention sweep at SessionEnd, silently.
   set <path> <lifetime>    gives a file or folder under temportal/ a cookie. The path must exist, and a relative
-                           one is read from the working folder. The lifetime `session` ends with the session that
-                           --session names, by default CLAUDE_CODE_SESSION_ID, which Claude Code sets in its Bash
-                           and PowerShell tools and its hooks.
-  list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
+                           one is read from the working folder. The lifetime is `30m`, `12h`, `7d`, `2w` or an ISO
+                           date or time.
+  list                    every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
                            be read is listed as unreadable, and the retention sweep leaves it as it is.
   clear <path>             removes a cookie and keeps the file, reading a relative path from the working folder.
   now                      the retention sweep, run by hand.
@@ -61,7 +66,9 @@ WHOLE = (NOTEBOOK, "src", EXPIRES)      # the notebook, the saved code and the c
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
-SESSION = "session"
+SESSION = "session"                     # the lifetime an earlier version took, and the key of the entries it wrote
+NO_SESSION = ("no lifetime ends with a session: a file that goes when its session goes belongs in that session's "
+              "scratchpad directory, which Claude Code deletes with its transcript")
 FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no rule clears it
 
 
@@ -91,18 +98,19 @@ def rules(p4, warn=True):
 
 
 def parse_lifetime(text, now=None):
-    """`30m`, `12h`, `7d`, `2w`, an ISO date or time, or `session` -> the expiry as epoch seconds, or SESSION."""
+    """`30m`, `12h`, `7d`, `2w` or an ISO date or time -> the expiry as epoch seconds. `session` is refused with
+    NO_SESSION."""
     now = time.time() if now is None else now
     t = str(text).strip().lower()
     if t == SESSION:
-        return SESSION
+        raise ValueError(f"{NO_SESSION}; use 30m, 12h, 7d, 2w or an ISO date")
     m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([mhdw])", t)
     if m:
         return now + float(m.group(1)) * UNITS[m.group(2)]
     try:
         d = datetime.fromisoformat(str(text).strip())
     except ValueError:
-        raise ValueError(f"not a lifetime: {text!r}; use 30m, 12h, 7d, 2w, an ISO date or 'session'")
+        raise ValueError(f"not a lifetime: {text!r}; use 30m, 12h, 7d, 2w or an ISO date")
     if d.tzinfo is None:
         d = d.astimezone()
     return d.timestamp()
@@ -166,7 +174,7 @@ def refusal(p4, path):
     return rel, None
 
 
-def set_cookie(p4, path, lifetime, session_id="", now=None):
+def set_cookie(p4, path, lifetime, now=None):
     """Give `path`, a file or folder under temportal/, an expiry -> (rel, expiry). A relative `path` is read from
     temportal/, and the command line makes it absolute from the working folder first. Raises ValueError for a path
     outside temportal/, inside memory/, on tmp/ or inside it, that is one of WHOLE or that does not exist, and for a
@@ -178,12 +186,7 @@ def set_cookie(p4, path, lifetime, session_id="", now=None):
         raise ValueError(f"{path} does not exist")
     when = parse_lifetime(lifetime, now)
     d = read_expires(p4)
-    if when == SESSION:
-        if not session_id:
-            raise ValueError("a 'session' lifetime needs the session id: pass --session")
-        d[rel] = {"session": session_id}
-    else:
-        d[rel] = {"expires": round(when, 3)}
+    d[rel] = {"expires": round(when, 3)}
     write_expires(p4, d)
     return rel, d[rel]
 
@@ -335,16 +338,15 @@ def _clear(d, rule, now, by_folder=False):
     return gone
 
 
-def sweep_cookies(p4, now=None, ended_session=""):
-    """Clear every cookie whose time is up, and the session cookies of `ended_session` -> [rel cleared]. An entry
-    whose expiry cannot be read is left as it is."""
+def sweep_cookies(p4, now=None):
+    """Clear every cookie whose time is up -> [rel cleared]. An entry whose expiry cannot be read is left as it is,
+    and so is one an earlier version set to end with a session."""
     now = time.time() if now is None else now
     d = read_expires(p4)
     cleared, changed = [], False
     for rel, v in sorted(d.items()):
         try:
-            due = (isinstance(v, dict) and (("expires" in v and float(v["expires"]) <= now)
-                                             or (ended_session and v.get("session") == ended_session)))
+            due = isinstance(v, dict) and "expires" in v and float(v["expires"]) <= now
         except (TypeError, ValueError):
             due = False
         if not due or refusal(p4, rel)[1]:
@@ -379,14 +381,14 @@ def _stage_removals(p4, paths):
             pass
 
 
-def sweep(p4, now=None, ended_session=""):
+def sweep(p4, now=None):
     """The retention sweep: the cache rules, then the cookies, with the removal of each tracked file it cleared
     staged and no other change -> the line to print, or ''."""
     if not os.path.isdir(home(p4)):
         return ""
     removed = []
     cache = sweep_cache(p4, now, removed)
-    cookies = sweep_cookies(p4, now, ended_session)
+    cookies = sweep_cookies(p4, now)
     if not cache and not cookies:
         return ""
     if _own_repo(p4):
@@ -408,8 +410,9 @@ def listing(p4, now=None):
                 t = float(v["expires"])
                 when = datetime.fromtimestamp(t, timezone.utc).astimezone().isoformat(timespec="minutes")
                 line = f"cookie  {rel}  expires {when}" + ("  past due" if t <= now else "")
-            elif "session" in v:
-                line = f"cookie  {rel}  until session {v['session'][:8]} ends"
+            elif SESSION in v:
+                line = (f"cookie  {rel}  set by an earlier version to end with session {str(v[SESSION])[:8]}, so "
+                        "never cleared: set a lifetime on it or clear it")
         except (TypeError, ValueError, OverflowError, OSError):
             pass
         why = refusal(p4, rel)[1]
@@ -436,8 +439,7 @@ def main():
         try:
             p4 = store_of(project_root(payload))
             moved = p4conf.migrate_layout(p4)
-            ended = str(payload.get("session_id") or "") if sub == "session-end" else ""
-            line = sweep(p4, ended_session=ended)
+            line = sweep(p4)
             if sub == "sweep":
                 if moved:
                     print("p4-temportal: " + "; ".join(moved) + ".")
@@ -453,9 +455,9 @@ def main():
     sp = ap.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("set", help="give a file or folder under temportal/ an expiry")
     s.add_argument("path")
-    s.add_argument("lifetime", help="30m, 12h, 7d, 2w, an ISO date, or 'session'")
-    s.add_argument("--session", default=os.environ.get("CLAUDE_CODE_SESSION_ID", ""),
-                   help="the session a 'session' lifetime ends with, by default CLAUDE_CODE_SESSION_ID")
+    s.add_argument("lifetime", help="30m, 12h, 7d, 2w or an ISO date")
+    # what a session that loaded an older skill page still passes with the lifetime `session`, which is refused
+    s.add_argument("--session", default="", help=argparse.SUPPRESS)
     c = sp.add_parser("clear", help="remove a file's expiry, keeping the file")
     c.add_argument("path")
     sp.add_parser("list", help="every cookie and cache rule")
@@ -464,12 +466,11 @@ def main():
     p4 = a.p4 or store_of(project_root({}))
     if a.cmd == "set":
         try:
-            rel, v = set_cookie(p4, os.path.abspath(a.path), a.lifetime, a.session)
+            rel, v = set_cookie(p4, os.path.abspath(a.path), a.lifetime)
         except ValueError as e:
             print(f"lifetime.py: {e}", file=sys.stderr)
             return 2
-        print(f"{rel}: " + (f"until session {v['session'][:8]} ends" if "session" in v else
-                            "expires " + datetime.fromtimestamp(v["expires"]).isoformat(timespec="minutes")))
+        print(f"{rel}: expires " + datetime.fromtimestamp(v["expires"]).isoformat(timespec="minutes"))
     elif a.cmd == "clear":
         print("cleared" if clear_cookie(p4, os.path.abspath(a.path)) else "no expiry was set")
     elif a.cmd == "list":
