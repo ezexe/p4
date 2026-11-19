@@ -502,9 +502,32 @@ def page_of_task(home, s):
     m = STATE_IN_TASK.search(PHI.clean(s.get("task")))
     if m:
         return m.group(1).replace("\\", "/")
-    if s.get("standingKind") in ("worker", "coworker"):
+    if s.get("standingKind") in ("worker", "coworker") or s.get("pageTold"):
         return state_page(s)
     return ""
+
+
+# The description of `mcp__ccd_session_mgmt__clear_session` has "The transcript starts over empty while the session
+# keeps its folder, model, permissions and settings", for this session or "an idle session this session started". So a
+# session that keeps a state page can clear a coworker, and a coworker with no page would resume from nothing.
+KEEP_PAGE = ("phi (p4-phi): \"{title}\" `{pid}`, which started this session, keeps a state page, and this session "
+             "keeps none. Keep this session's task, its queue, its open items and the sessions it works with by id on "
+             "a state page of its own, {page}, rewritten at each turn's end, so it resumes from that page after a "
+             "compaction or a clear, its own or one \"{title}\" makes. Write the page before this turn ends. Said "
+             "once: each later `wrap_up` asks for the page brought up to date.")
+
+
+def keep_line(home, s):
+    """At a turn's `wrap_up`, for a coworker that keeps no state page while the session that started it keeps one:
+    one line, said once, that tells it to keep a page and where, state_page's place in its own scratchpad. Its record
+    then holds `pageTold`, so page_of_task gives that page from the next `wrap_up` on. '' for any other session."""
+    pid = PHI.spawned_from(s)
+    up = PHI.load_session(home, pid) if pid else {}
+    if not up.get("sessionId") or not page_of_task(home, up):
+        return ""
+    s["pageTold"] = True
+    PHI.save_session(home, s)
+    return KEEP_PAGE.format(title=full_title(pid, up), pid=pid, page=state_page(s))
 
 
 def state_first(home, s):
@@ -547,17 +570,18 @@ def idle_coworkers(home, s):
     w = _watcher()
     return [k for k, ks in sorted(plans._children(home, sid).items())
             if page_of_task(home, ks) and k not in unread and not w.working(home, k)
-            and not plans.open_steps(home, k) and not w.held_tasks(home, k)]
+            and not plans.open_steps(home, k) and not w.held_tasks(home, k)
+            and (not ks.get("pageTold") or os.path.isfile(state_page(ks)))]   # told at a wrap_up: once it is written
 
 
 def clear_line(home, s, store):
     """At a turn's `wrap_up`, for a session that keeps a state page: bring the page up to date, whatever its context
     reads, so a clear loses nothing; then read its context share with the app's `get_usage` on `"self"` and, past the
-    share p4.json names, clear each coworker of `idle_coworkers` and itself, its own clear the turn's last call. ''
-    with no page."""
+    share p4.json names, clear each coworker of `idle_coworkers` and itself, its own clear the turn's last call. With
+    no page, keep_line's one line for a coworker of a session that keeps one, and '' for any other."""
     page = page_of_task(home, s)
     if not page:
-        return ""
+        return keep_line(home, s)
     kids = idle_coworkers(home, s)
     whose = ", its own or one the session that started it makes," if PHI.spawned_from(s) else ""
     first = (f", then clear each coworker p4-phi's records hold idle with an empty queue, by "

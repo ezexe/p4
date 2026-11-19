@@ -1994,7 +1994,52 @@ class ClearFamily(unittest.TestCase):
         self.assertNotIn(GRAND, said, "nor one with no state page to resume from, since a clear would lose its work")
         self.assertNotIn(theirs, said)
         self.assertIn(own, said, "its own clear stays")
-        self.assertEqual(self.wrap_up(GRAND, "6"), "", "a session that keeps no state page is handed nothing")
+
+    def test_a_coworker_with_no_state_page_is_told_once_to_keep_one_and_where(self):
+        """The description of `mcp__ccd_session_mgmt__clear_session` has "The transcript starts over empty while the
+        session keeps its folder, model, permissions and settings", for this session or "an idle session this
+        session started". So a coworker that keeps no state page, started by a session that keeps one, would resume
+        from nothing after that session's clear, and was told nothing. At its `wrap_up` it is handed one line, once,
+        that says to keep a page and where, in its own scratchpad. From then on it is a session that keeps a state
+        page, and the session that started it names it for a clear only once the page is written."""
+        t = self.t
+        lone, kid = "local_top00009", "local_kid00009"
+        for k, sid in enumerate((lone, kid)):
+            CLI.setdefault(sid, f"9999{k}000-0000-4000-8000-000000000000")
+        pad = os.path.join(t.tmp, "temp", CLI.get(GRAND, GRAND), "scratchpad").replace("\\", "/")
+        page = pad + "/state.md"
+        t.record(GRAND, started_by=TOP, title="the docs coworker")       # a coworker whose task names no state page
+        t.hook(PROMPT, GRAND, {"hook_event_name": "UserPromptSubmit", "scratchpad_dir": pad,
+                               "prompt": handed("Write the exporter's docs.\nFiles: docs/export.md")})
+        told = self.wrap_up(GRAND, "1")
+        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, which started this session, keeps a state page, and "
+                      f"this session keeps none.", told)
+        self.assertIn(f"on a state page of its own, {page}, rewritten at each turn's end", told)
+        self.assertIn("Said once", told)
+        self.assertEqual(told.count("\n"), 0, "one line")
+        for other in ("clear_session", "get_usage", KID, KID2, self.KID3):
+            self.assertNotIn(other, told, "it names no clear and no other session")
+        self.assertEqual(writes_under_claude(told), [], "the page is in the app's scratchpad, never under .claude")
+        again = self.wrap_up(GRAND, "2")
+        self.assertNotIn("this session keeps none", again, "said once")
+        self.assertIn(f"bring this session's state page up to date at {page}", again, "from then on it keeps one")
+        self.assertIn("one the session that started it makes", again)
+        ctx = context(t.hook(START, GRAND, {"hook_event_name": "SessionStart", "source": "clear"}))
+        self.assertIn(page, ctx.split("\n", 1)[0], "and it is handed the page first after a clear")
+        t.stop(GRAND, "Write the docs", report="Written.")
+        t.say(TOP, "what came in?")                 # TOP is handed the docs coworker's report
+        self.assertNotIn(GRAND, self.wrap_up(TOP, "3"), "told and not written yet: a clear would lose its work")
+        write(page, "# State of the docs coworker\n")
+        said = self.wrap_up(TOP, "4")
+        self.assertIn(f"`{GRAND}`", said, "written: the session that started it clears it with itself")
+        self.assertLess(said.index("`mcp__ccd_session_mgmt__clear_session` on its id"), said.index(f"`{GRAND}`"))
+        t.record(lone, title="Build the importer")  # a session that keeps no state page, and one it started
+        t.say(lone, "Build the importer")
+        t.record(kid, started_by=lone, title="the parser worker")
+        t.say(kid, handed("Build the parser.\nFiles: src/parse.py"))
+        for host in (lone, kid):
+            self.assertEqual(self.wrap_up(host, "5"), "", "no state page above it: handed nothing")
+            self.assertEqual(self.wrap_up(host, "6"), "")
 
 
 ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|logged|rewrit\w*|puts?|records?|"
