@@ -43,8 +43,10 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
   archiving    the app asks ezexe before every archive call, by the ask rule the settings keeper writes on the
                archive tool, and the tool refuses a session with live background work. p4-phi only names the
                controlled sessions its records hold complete, which no tool of the app tells: no open plan step
-               and no closing commit unpushed.
-  requests     a controlled session that would start a new orchestrator writes `request ... --to-puppeteer`
+               and no closing commit unpushed. Where a project turns `phi.upkeep` on, the keeper writes no such
+               rule, the line that names a complete session holds its archive call, and no line leaves the
+               archive to ezexe.
+  requests    a controlled session that would start a new orchestrator writes `request ... --to-puppeteer`
                into its own store; the puppeteer's hooks read it there, and what became of it is kept on
                the puppeteer's record, where the hook of the session that filed it reads it.
   the tree     the app nests a session under the session that calls the start tool, and no tool moves it after, so a
@@ -71,6 +73,7 @@ REASON_MIN = 12                  # characters of a reason that says something
 RECENT = 120                     # the app's newest records looked through for sessions a puppeteer started
 SHARE = 2                        # content words a message shares with a controlled session's topic to be sent there
 _SECTIONS = {}                   # the app's file, read once a process: under "all", each session's section by its id
+UPKEEP = False                   # phi.project_conf sets it from p4.json phi.upkeep
 
 
 def _watcher():
@@ -310,8 +313,8 @@ RULE = (
     "orchestrators of other trees, which stay at the top of their own trees as its siblings. Record them with "
     "`{cmd} controls <sessionId> ...`; `{cmd} controls` prints where each stands. Its board is {board}, and what "
     "p4-phi cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers "
-    "directly where it can, the decisions that are ezexe's, the archive calls, which the app puts to ezexe on its "
-    "approval card, and the start of each new orchestrator. The app continues it with a short note when a session it started ends a turn, and "
+    "directly where it can, the decisions that are ezexe's, the archive calls, {archives}, "
+    "and the start of each new orchestrator. The app continues it with a short note when a session it started ends a turn, and "
     "p4-phi hands it one line per controlled session's turn; it relays none of these to ezexe and acts only on what "
     "is ezexe's. Work ezexe gives it on a controlled session's topic goes straight to that orchestrator in one "
     "SendMessage holding {restate}, a `Files:` line and what done looks like, and that session briefs and starts a "
@@ -328,15 +331,20 @@ RULE = (
     "each change on its board; a model is passed only on the start call and never changed after. A `Finding:` line "
     "stays on its board until such a note holds its text. It shows ezexe a result in its reply as a short "
     "table or list, with the full page kept in the store's notes, and publishes no Artifact and sends no file "
-    "unless ezexe asks. The app asks ezexe on its approval card before each archive call it makes.")
+    "unless ezexe asks.{asks}")
+# The two places of RULE that word the archive: who answers for the call, and the sentence that ends the rule. With
+# `phi.upkeep` on, the call is the upkeep line's and no sentence leaves it to ezexe.
+ARCHIVES = ("which the app puts to ezexe on its approval card",
+            " The app asks ezexe on its approval card before each archive call it makes.")
+ARCHIVES_UPKEEP = ("which its upkeep line names for each finished, landed session it started", "")
+PAIR_ASKS = " The app asks ezexe on its approval card before any archive call on its tree."
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
     "tree, in its own section, and orchestrates that tree itself. That puppeteer is the one address for a decision "
     "of ezexe's authority, a press the app requires or an outcome ezexe should hear; a message about a file, an "
     "issue or a piece of work goes straight to the session that holds that file, owns that issue or started that "
-    "work, as the address book names it, never through the puppeteer. The app asks ezexe on its approval card "
-    "before any archive call on its tree.")
+    "work, as the address book names it, never through the puppeteer.{asks}")
 PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` dropped it from the "
              "sessions it controls, or left the sidebar section. This session starts its own new orchestrators.")
 ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line here says to start a new "
@@ -568,8 +576,9 @@ def board_path(home, sid):
 
 
 def rule_text(home, s):
+    archives, asks = ARCHIVES_UPKEEP if UPKEEP else ARCHIVES
     return RULE.format(section=section_of(s["sessionId"]), cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
-                       restate=PHI.RESTATE, worker=WORKER_BRIEF)
+                       restate=PHI.RESTATE, worker=WORKER_BRIEF, archives=archives, asks=asks)
 
 
 def control(home, s, add=(), drop=()):
@@ -625,7 +634,7 @@ def pair_text(s, store=""):
     if pid and held.get("sessionId") != pid:
         s["puppeteer"] = {"sessionId": pid, "time": PHI.now()}
         return "phi (p4-phi): " + PAIR.format(title=full_title(pid), pid=pid, section=section_of(pid),
-                                              cmd=PHI.commands())
+                                              cmd=PHI.commands(), asks="" if UPKEEP else PAIR_ASKS)
     if not pid and held.get("sessionId"):
         s.pop("puppeteer", None)
         return "phi (p4-phi): " + PAIR_OVER.format(title=full_title(held["sessionId"]), pid=held["sessionId"])
@@ -1032,14 +1041,20 @@ def boundary(home, s):
 
 def complete_text(ready):
     """The line naming the controlled sessions p4-phi's records hold complete, which no tool of the app tells, and
-    an empty string when there are none. Archiving is the app's: it asks ezexe before the archive tool runs."""
+    an empty string when there are none. Archiving is the app's: it asks ezexe before the archive tool runs. Where
+    the project turns `phi.upkeep` on, the line holds the archive call of each, which waits on nobody."""
     if not ready:
         return ""
     names = "; ".join(f"\"{full_title(sid)}\" `{sid}`" for sid in ready)
-    return (f"phi (p4-phi): p4-phi's records hold {'these sessions' if len(ready) != 1 else 'this session'} this "
+    head = (f"phi (p4-phi): p4-phi's records hold {'these sessions' if len(ready) != 1 else 'this session'} this "
             f"puppeteer controls complete, shown done with nothing open: {names}. Keep each outcome that is not on "
-            f"the board yet with `{PHI.commands()} note`, then tell ezexe. Archiving one is "
-            f"`mcp__ccd_session_mgmt__archive_session`, which the app puts to ezexe on its approval card.")
+            f"the board yet with `{PHI.commands()} note`, then ")
+    if UPKEEP:
+        return (head + "archive each with `mcp__ccd_session_mgmt__archive_session` and its `session_id`, in this "
+                       "turn: `phi.upkeep` is on in this project, which is ezexe's standing word for it, so the call "
+                       "waits on nobody. Say in one line which were archived.")
+    return (head + "tell ezexe. Archiving one is "
+                   "`mcp__ccd_session_mgmt__archive_session`, which the app puts to ezexe on its approval card.")
 
 
 def compacted(home, s):
@@ -1060,8 +1075,9 @@ def hand(home, s, new):
     s["handedTo"] = {"sessionId": new, "time": PHI.now()}
     PHI.save_session(home, s)
     return (f"handed over to \"{full_title(new)}\" `{new}`: it runs `controls --from {s['sessionId']}`, then keeps "
-            f"this session's outcome with `note`, and the app asks ezexe on its approval card before it "
-            f"archives this session")
+            f"this session's outcome with `note`, and "
+            + ("its upkeep line names this session's archive call once it is finished and landed" if UPKEEP else
+               "the app asks ezexe on its approval card before it archives this session"))
 
 
 def take(home, s, old):

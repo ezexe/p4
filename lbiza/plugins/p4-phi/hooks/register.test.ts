@@ -666,3 +666,83 @@ test('no turn is started for a wait while a turn of the session runs', async ($,
   expect(seen.looks.length).toBeGreaterThan(2)
   expect(seen.submitted).toEqual([])
 })
+
+// The prompt upkeep.wake answers, which opens with plans.UPKEEP_MARK.
+const UPKEEP = 'phi (p4-phi): upkeep is due for the sessions this one started: 1 act, each listed beside this prompt.'
+
+test('a look that answers upkeep that is due starts a turn of the session for it, once', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = false
+  const seen = machine(on, {
+    // Python answers it once for an act and counts the turn, as it does for `move`.
+    look: () => {
+      const answer = isDue ? { ...ORCHESTRATOR, upkeep: UPKEEP } : ORCHESTRATOR
+      isDue = false
+
+      return answer
+    },
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  expect(seen.submitted).toEqual([])
+
+  // Every started session went idle with an act due: no event of this session says so, and the timer's look does.
+  isDue = true
+  await clock.advance(6_000)
+  expect(seen.submitted).toEqual([UPKEEP])
+  expect(seen.sent).toEqual([])
+
+  await clock.advance(60_000)
+  expect(seen.submitted).toEqual([UPKEEP])
+})
+
+test('with the setting off a look answers no upkeep, and the module starts no turn', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { look: () => ORCHESTRATOR })
+
+  await $.session.start(START)
+  await clock.advance(120_000)
+
+  expect(seen.looks.length).toBeGreaterThan(2)
+  expect(seen.submitted).toEqual([])
+})
+
+test('work a wait left unmoved comes before upkeep, and one look starts one turn', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = false
+  const seen = machine(on, {
+    look: () => {
+      const answer = isDue ? { ...ORCHESTRATOR, move: MOVE, upkeep: UPKEEP } : ORCHESTRATOR
+      isDue = false
+
+      return answer
+    },
+  })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  isDue = true
+  await clock.advance(6_000)
+
+  expect(seen.submitted).toEqual([MOVE])
+})
+
+test('no turn is started for upkeep while a turn of the session runs', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = false
+  const seen = machine(on, { look: () => (isDue ? { ...ORCHESTRATOR, upkeep: UPKEEP } : ORCHESTRATOR) })
+
+  await $.session.start(START)
+  await clock.advance(5_000)
+  await $.turn.start({ text: 'land the series', turnId: 't1' })
+  isDue = true
+  await clock.advance(60_000)
+
+  expect(seen.looks.length).toBeGreaterThan(2)
+  expect(seen.submitted).toEqual([])
+})

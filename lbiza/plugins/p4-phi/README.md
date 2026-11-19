@@ -64,6 +64,7 @@ A turn that ends on a step waiting on other sessions is let end, since a Stop ho
 The look that follows answers what does not depend on that wait: a child that reported done with a commit that closes an issue and is on no branch of origin, and an open step that is plain work no live child holds.
 The module then submits that list as a prompt, once for a turn, and the session reads it as p4-phi's words and not ezexe's.
 Each such turn counts against `phi.keep_going_max` with the Stop hook's own send-backs, until a turn begins that the module did not start.
+Where a project turns `phi.upkeep` on, the look also answers upkeep that is due while every started session is idle, and the module starts one turn for it, as "Upkeep of a session tree" below says.
 The Stop hook's send-back to an open step stays, because `$.prompt.submit` starts a turn only after the session went idle, which the starter and the app have by then read as a turn's end.
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
@@ -128,6 +129,27 @@ Seen in a desktop session on Claude Code 2.1.326, in a scratch project that load
 - The reading reads its branch from git and returns it in the field `branch`, which is how the session finds it: it passes that branch as `source_branch` when it starts the chosen reading.
 - The ledger counts no level miss for a file such an agent wrote inside that worktree.
 
+## Upkeep of a session tree
+
+A session that started others keeps them by itself once the project turns `phi.upkeep` on, and with it off everything stays as the other sections say.
+`phi.py upkeep on` and `phi.py upkeep off` set it in the store's `p4.json` and run the settings keeper at once, and `phi.py upkeep` prints what is due.
+With it on, beside every message such a session gets, p4-phi hands the acts that are due for the sessions it started, and the setting is ezexe's standing word for each, so none waits on ezexe.
+
+- Archive: a started session that is finished, with no open step, no background task and its last report handed, and whose commits are all on its repository's default branch on the remote, is named by its whole title with the call `mcp__ccd_session_mgmt__archive_session` and its `session_id`. One whose work is not landed gets the landing line first.
+- Follow-through: what a finished worker's report lists as found and not fixed, or as left, is kept as open items in `upkeep.json` in the orchestrator's folder. Each goes back to that worker by message while it is live and its context is short, and otherwise to a successor, and it closes only on a commit on the default branch that names it, on a note that says why it is left, or on ezexe's word. Every open item is listed at every turn.
+- Steps that wait: a step kept with the session it waits on is handed as due once that session's work is on the default branch.
+- Leftovers on disk: after an archive, a clean worktree and its merged branch are named for removal by `git worktree remove` with no force and `git branch -d`, never `-D`, and so is the worktree of a subagent whose branch is merged. Anything dirty or unmerged is named to ezexe once and left, and so is a worktree that holds another checkout, while one a live session still works in is passed over until that session is archived.
+
+What the app and Claude Code already do is configured or called, and p4-phi builds only the rest:
+
+- The archive is the app's tool, and https://code.claude.com/docs/en/desktop.md, "Work across sessions", says "You get an approval card before Claude archives a session, except in Auto mode and Bypass permissions mode". So p4-phi archives nothing: it names the call, and with the setting on the keeper writes no ask rule on the tool and takes its own entry out.
+- The app removes the worktree it made for a session at its archive, and Claude Code removes a subagent's worktree that holds no changes and sweeps the others once they are older than `cleanupPeriodDays`, by https://code.claude.com/docs/en/worktrees.md, "Clean up subagent and background-session worktrees". p4-phi names what neither removes: the merged branch, a worktree a session made itself with `git worktree add`, and a merged subagent worktree before that sweep.
+- A message between sessions is `SendMessage`, and a new session is the app's start tool or its card, so p4-phi sends and starts nothing for an item or a step: it names the call.
+- The turn for upkeep that is due while every started session is idle is `$.prompt.submit` of the hooks module, the call that already starts the turn after a wait, inside the same `phi.keep_going_max`.
+
+The session runs every command itself, so its own permission rules hold for each: p4-phi asks git only what is true and removes nothing in its own process.
+The skill page lists what upkeep cannot do, a start on a turn no person began among them.
+
 ## A puppeteer and the sessions it controls
 
 A puppeteer is the orchestrator ezexe files in the sidebar section "puppeteers", which controls the orchestrators of other trees.
@@ -182,7 +204,8 @@ Every key is optional.
 | `chain_max` | 8 | the sessions, 1 to 50, followed upward from a session |
 | `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
-| `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps, counted together with the turns in a row the hooks module starts for work a wait left unmoved |
+| `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps, counted together with the turns in a row the hooks module starts for work a wait left unmoved, and the most turns it starts for upkeep until ezexe's own message begins one |
+| `upkeep` | false | true has a session that started others handed their upkeep as acts that wait on nobody, with no ask rule on the archive tool; `phi.py upkeep on` and `off` set it |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
 

@@ -1815,7 +1815,8 @@ def retire_done(home, parent, sid, now, extra="", archived=False):
 #
 # The app removes a session's worktree itself, at archive or about 30 days after, and `clean_up_worktrees` removes
 # the inactive ones on ezexe's approval, desktop.md, "Keep uncommitted changes when a session is archived", so p4-phi
-# names no worktree for removal. gh is run here for the issue loop.
+# names no worktree for removal here. What the app leaves, the merged branch and a worktree a session made itself, is
+# upkeep.py's to name where a project turns `phi.upkeep` on. gh is run here for the issue loop.
 
 CMD_META = set('&|<>^%!"()\r\n')         # what cmd.exe reads in a .cmd or .bat file's arguments; no quoting stops it
 
@@ -1871,11 +1872,11 @@ def stale_text(pend):
     if stale:
         names = ", ".join(link_of(x) for x in stale)
         out.append(f"phi (p4-phi): stale, their work superseded by a newer note, their outcome kept as a replaces: "
-                   f"note on this session: {names}. {READY}")
+                   f"note on this session: {names}. {READY_UPKEEP if UPKEEP else READY}")
     if done:
         names = ", ".join(link_of(x) for x in done)
         out.append(f"phi (p4-phi): finished, their outcome kept as a replaces: "
-                   f"note on this session: {names}. {READY}")
+                   f"note on this session: {names}. {READY_UPKEEP if UPKEEP else READY}")
     return "\n".join(out)
 
 
@@ -1885,10 +1886,15 @@ def stale_text(pend):
 # `doneRetired` or `stale` in its session.json, and `gone` true for routing, owned paths, the tree and what relay.py
 # hands other sessions from that moment. Its parent is told once, and the sessions the app has not archived yet are
 # listed on <home>/phi/ready-to-archive.md. Archiving one in the app is ezexe's: the settings keeper writes an ask
-# rule on the archive tool, so the app asks ezexe before every archive call in any permission mode.
+# rule on the archive tool, so the app asks ezexe before every archive call in any permission mode. Where a project
+# turns `phi.upkeep` on, those words go: the keeper writes no such rule, and upkeep.py hands the session that started
+# a finished, landed session its archive call.
 
+UPKEEP = False                   # phi.project_conf sets it from p4.json phi.upkeep
 READY = ("p4-phi counts them as archived from now. Archiving one in the app is ezexe's: the archive tool asks "
          "ezexe on the app's approval card before it runs.")
+READY_UPKEEP = ("p4-phi counts them as archived from now, and its upkeep line names the archive call of each once "
+                "it is finished and landed.")
 BUTTON = ("This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` "
           "whose first action is the app's `archive`, and a recap of one sentence naming what was done: that puts the "
           "button in this session's next-step box, and ezexe archives it with one press. Write no paragraph asking "

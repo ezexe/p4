@@ -1309,11 +1309,14 @@ def waiting_step(home, sid):
 # KEEP_GOING_MAX with the Stop hook's send-backs of the turn it follows.
 
 WAKE_MARK = "phi (p4-phi): the turn before this one ended on"
+# The prompt of a turn the module starts for upkeep, upkeep.wake, opens with this one. No prompt opens with it while
+# `phi.upkeep` is off.
+UPKEEP_MARK = "phi (p4-phi): upkeep is due"
 
 
 def woken(prompt):
-    """True for the prompt of a turn the hooks module started for work a wait left unmoved."""
-    return str(prompt or "").lstrip().startswith(WAKE_MARK)
+    """True for the prompt of a turn the hooks module started: for work a wait left unmoved, or for upkeep."""
+    return str(prompt or "").lstrip().startswith((WAKE_MARK, UPKEEP_MARK))
 
 
 # The app's own notice about a message this session sent to another session: that it is held, released, denied or

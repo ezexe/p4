@@ -71,6 +71,9 @@ DEFAULTS = {
         "keep_going_max": 2,             # times the Stop hook sends a turn with open steps back
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
+        "upkeep": False,                 # true: a session that started others is handed their upkeep as acts that
+                                         # wait on nobody, and the keeper writes no ask rule on the archive tool;
+                                         # `phi.py upkeep on` and `off` set it
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
@@ -782,7 +785,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 9
+GEN = 10
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
@@ -906,6 +909,25 @@ def _without_retired(d, prefix=""):
 
 def section(p4, name, write=True):
     return load(p4, write=write)[name]
+
+
+def set_key(p4, dotted, value):
+    """One setting of p4.json set to `value`, as a command of p4's sets it for ezexe: the file is brought up to date
+    first, so the key is written beside every default, and a value that differs from the default counts as set by
+    hand from then on, which no later load moves."""
+    _load_file(p4, write=True, warn=False)
+    data = read_json(path(p4)) or {}
+    _put(data, dotted, value)
+    _write(p4, data)
+    return value
+
+
+def upkeep_on(p4):
+    """True when the store turns p4-phi's upkeep of a session tree on, by `phi.upkeep` or its variable."""
+    try:
+        return _get(load(p4, write=False, warn=False), "phi.upkeep") is True
+    except Exception:  # noqa: BLE001 — a store that cannot be read keeps the ask rule
+        return False
 
 
 def _at(d, dotted):
@@ -1567,7 +1589,10 @@ def allow_rules(platform, conf):
 # archive_session call, which replaced p4-phi's own archive guard. permission-modes.md, "Actions no mode
 # auto-approves". It is one entry of `permissions.ask` that p4 owns, kept by the same rule as the allow rules under
 # RECORD's `askRules`: an entry the user wrote is never taken over or removed, and one deleted by hand stays gone.
-# Both copies write it, since its text names no plugin folder.
+# Both copies write it, since its text names no plugin folder. A store that turns `phi.upkeep` on wants none: ezexe
+# decided that a session archives the finished, landed sessions it started by itself, so the keeper writes no ask
+# rule there and takes its own entry out, and the app's own rule holds, desktop.md, "Work across sessions": "You get
+# an approval card before Claude archives a session, except in Auto mode and Bypass permissions mode".
 ASK_KEY = "permissions.ask"
 ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
 # The deny rule ezexe approved, kept the same way under RECORD's `denyRules`: a session's model is chosen on its start
@@ -1727,7 +1752,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     for k in WRITES:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
-    _keep_rules(new, rec, name, list(ASK_RULES), owned_only, ASK_KEY, "askRules")
+    _keep_rules(new, rec, name, [] if upkeep_on(p4) else list(ASK_RULES), owned_only, ASK_KEY, "askRules")
     _keep_rules(new, rec, name, list(DENY_RULES), owned_only, DENY_KEY, "denyRules")
     for k in env + dropped:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only, past)

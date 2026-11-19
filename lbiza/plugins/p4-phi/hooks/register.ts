@@ -4,7 +4,8 @@
 // arrival and on a timer. It keeps the session's usage, which no command hook is given, in usage.json in the
 // session's folder in the store, for the python scripts to read. And it wakes an idle session, which no command
 // hook can: at a worker's turn end it sends the worker's report to the session that started it, and where a look
-// answers work that a turn's wait left unmoved it starts a turn of the session's own for it.
+// answers work that a turn's wait left unmoved, or upkeep that is due while every session it started is idle, it
+// starts a turn of the session's own for it.
 
 import type {
   EngineInterface,
@@ -30,11 +31,14 @@ const MOST_WAIT_MS = 600_000
 const REPORT_CHARS = 4_000
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
-// started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here.
+// started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
+// is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
+// `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
 type Answer = {
   dir?: string
   starter?: string
   move?: string
+  upkeep?: string
   watching?: boolean
   off?: boolean
   changed?: boolean
@@ -300,7 +304,9 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
-    if (answer?.move) wake($, answer.move)
+    // One turn at most for one look: the work a wait left unmoved first, else the upkeep that is due.
+    const prompt = answer?.move || answer?.upkeep
+    if (prompt) wake($, prompt)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
     note($, `the watcher's timer failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)

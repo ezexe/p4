@@ -788,7 +788,8 @@ def look(home, sid, net=False, folder_only=False):
     session is an orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`,
     True when P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
     rewritten; `net`, True when the look read GitHub; `move`, the prompt phi.move_text answers for a turn the
-    module starts; and the three times of `pace`.
+    module starts; `upkeep`, the prompt upkeep.wake answers for one, asked for only at a look that rewrote the
+    ledger or is a slow one, and only where `move` is empty; and the three times of `pace`.
     `net` asks for a slow look, which reads GitHub unless P4_PHI_WATCH_NET is 0 and checks the routes.
     `folder_only` answers the folder and does nothing else.
     A session whose folder was never made, or was deleted, gets no look: nothing is written and no folder is made,
@@ -837,6 +838,13 @@ def look(home, sid, net=False, folder_only=False):
         move = ""
     if move:
         out["move"] = move
+    elif changed or net:                            # upkeep that is due while every started session is idle
+        try:
+            due = _phi().upkeep.wake(home, sid, conf_store(home, sid))
+        except Exception:  # noqa: BLE001
+            due = ""
+        if due:
+            out["upkeep"] = due
     return dict(out, watching=True, changed=changed, net=reads, **pace(home, sid, True))
 
 
@@ -1082,7 +1090,8 @@ def readings_of(req):
 # given back to the session, or a slash command's wrapper, which rows.HARNESS_RE takes for the harness's too, and
 # the prompt of a turn the plugin's hooks module started, which opens with plans.WAKE_MARK. A paste that holds such
 # a tag further in is still ezexe's.
-SESSION_MARK = re.compile(r"\A\s*(?:" + re.escape(plans.WAKE_MARK) + r"|Another Claude session sent a message:|"
+SESSION_MARK = re.compile(r"\A\s*(?:" + re.escape(plans.WAKE_MARK) + "|" + re.escape(plans.UPKEEP_MARK)
+                          + r"|Another Claude session sent a message:|"
                           r"<cross-session-message\b|"
                           r"<side-sessions-event\b|<task-notification\b|<command-name\b|<command-message\b|"
                           r"<local-command|\[SYSTEM NOTIFICATION\b|\[MESSAGE FROM NON-USER SOURCE\b|"

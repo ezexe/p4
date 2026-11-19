@@ -532,7 +532,7 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009"}   # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c"}   # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -848,6 +848,52 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(list(rec["askRules"].values())[0]["entries"], [self.ARCHIVE_ASK])
         p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["ask"].count(self.ARCHIVE_ASK), 1, "on every platform")
+
+    def test_a_store_that_turns_upkeep_on_gets_no_ask_rule_and_p4s_own_entry_goes(self):
+        """`phi.upkeep` true: a session archives the finished, landed sessions it started by itself, so the keeper
+        writes no ask rule on the archive tool and takes out the entry it wrote. The user's own ask rules stay as
+        they were, and with the setting off again the entry comes back."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session"]
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": {"ask": list(mine)}}, f)
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine + [self.ARCHIVE_ASK], "off: as today")
+        self.assertFalse(p4conf.upkeep_on(p4), "off by default")
+        p4conf.set_key(p4, "phi.upkeep", True)
+        self.assertTrue(p4conf.upkeep_on(p4))
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())
+        self.assertEqual(got["permissions"]["ask"], mine, "p4's own entry is gone, the user's rules are untouched")
+        self.assertNotIn("askRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
+        self.assertEqual(got["permissions"]["deny"], list(p4conf.DENY_RULES), "the deny rule on the model tool stays")
+        self.assertEqual(got["env"].get("P4_PHI_UPKEEP"), "1", "the changed setting shows in the local file")
+        p4conf.set_key(p4, "phi.upkeep", False)
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine + [self.ARCHIVE_ASK], "off: it is back")
+
+    def test_upkeep_on_leaves_an_archive_ask_rule_the_user_wrote(self):
+        """An ask rule on the archive tool that ezexe wrote is no entry of p4's: it stays with the setting on."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump({"permissions": {"ask": [self.ARCHIVE_ASK]}}, f)
+        p4conf.set_key(p4, "phi.upkeep", True)
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["ask"], [self.ARCHIVE_ASK])
+
+    def test_set_key_keeps_every_other_setting_and_a_later_load_never_moves_it(self):
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.set_key(p4, "phi.max_depth", 5)
+        p4conf.set_key(p4, "phi.upkeep", True)
+        for _ in range(2):
+            got = p4conf.load(p4)
+        self.assertIs(got["phi"]["upkeep"], True)
+        self.assertEqual(got["phi"]["max_depth"], 5)
+        self.assertEqual(got["recall"], p4conf.DEFAULTS["recall"])
 
     def test_a_fresh_project_gets_the_ask_rule_and_one_deleted_by_hand_stays_gone(self):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))

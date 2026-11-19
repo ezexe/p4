@@ -1,0 +1,905 @@
+"""upkeep.py: the upkeep of a session tree, which a session that started others keeps by itself.
+
+`phi.upkeep` in the store's p4.json turns it on for a project, off by default, and `phi.py upkeep on` or `off` sets it,
+since a session writes nothing under `.claude` with its own tools. With it off this module hands nothing and keeps
+nothing. With it on, beside every message a session that started others gets, and at the turn the hooks module starts
+for it, p4-phi hands the exact acts that are due for those sessions, and the setting is ezexe's standing word for each:
+
+  archive      a started session that is finished, with no open step, no background task and its last report handed,
+               and whose commits are all on its repository's default branch on the remote, is named by its whole
+               title with the exact archive call. One whose work is not landed gets the landing line first.
+               The archive is the app's own tool: desktop.md, "Work across sessions", has Claude "archive a session",
+               and says "You get an approval card before Claude archives a session, except in Auto mode and Bypass
+               permissions mode". So nothing archives here: the line names the call, and the settings keeper takes
+               its own ask rule on the tool out, which made the app ask in those two modes as well.
+  follow       what a finished worker's report lists as found and not fixed, or as left, is kept as open items in
+               upkeep.json in the orchestrator's folder. Each goes back to that worker by message while it is live
+               and its context is short, and otherwise to a successor, and it closes only on a commit on the default
+               branch that names it, on a note that says why it is left, or on ezexe's word. Every open item is
+               listed at every turn.
+  waits        a step the orchestrator said waits on another session is kept with that session, by its own task
+               list's words or by `phi.py upkeep wait`, and is handed as due once that session's work is on the
+               default branch.
+  leftovers    after an archive, that session's worktree and branch are named for removal where the worktree is
+               clean and the branch merged, by `git worktree remove` with no force and `git branch -d`, never `-D`,
+               and so is the worktree of a subagent whose branch is merged. The app removes the worktree it made
+               itself: the archive tool's text says "Archiving stops the session's process and (by default) cleans up
+               its worktree", and desktop.md, "Keep uncommitted changes when a session is archived", that a worktree
+               with changes "stays on disk" for about 30 days. Claude Code removes a subagent's worktree "when the
+               subagent finishes without changes" and sweeps one with changes once it is older than
+               `cleanupPeriodDays`, worktrees.md, "Clean up subagent and background-session worktrees". What neither
+               does is the rest: the branch, a worktree a session made with `git worktree add`, and a merged
+               subagent worktree before that sweep. Anything dirty or unmerged is named to ezexe once and left.
+
+No act runs in this module's own process. git is asked only what is true, and the session runs each command, so its
+own permission rules hold for every one: phi.py is allowed by p4's allow rule, and a removal run inside it would pass
+those rules by.
+
+The app refuses a new start on a turn no person began. Its own instructions to a desktop session, "Starting other
+sessions", say "On a turn that another session's message or an automated event started, the app refuses a start:
+propose instead", and the start tool's text says of `own_initiative` that "the user sees a card and nothing runs
+until they start it". A message to a live session goes through on any turn. So on such a turn a step or an item that
+wants a new session goes by message to a live worker whose task covers it, and otherwise is shown as the app's card
+with one line to ezexe.
+
+When every started session is idle and an act is due that no turn was started for yet, `wake` answers the prompt of a
+turn the hooks module starts. Each such turn counts in upkeep.json, against `phi.keep_going_max` together with the
+module's other wakes, until ezexe's own message begins a turn, and no act starts a second one, so two sessions that
+answer each other never wake each other without end.
+"""
+
+import hashlib
+import os
+import re
+import time
+
+import p4conf
+import plans
+import relay
+
+PHI = None                       # phi.py's own module, handed over when phi.py imports this one
+
+FILE = "upkeep.json"             # in a session's folder: its open items, its waits and what it was told
+ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
+START = "mcp__ccd_session__start_session"
+MARK = plans.UPKEEP_MARK         # opens the prompt of a turn the hooks module starts for upkeep
+TRIES = 3                        # turns one archive call is handed before p4-phi leaves it
+ITEMS = 12                       # items taken from one report
+ITEM_CHARS = 400                 # of one item
+OPEN_MOST = 60                   # open items one session keeps
+FIT_WORDS = 3                    # content words a step shares with a live worker's task before it goes there
+NO_ASK = ("auto", "bypassPermissions")   # the permission modes the app archives in without its card
+
+
+def on():
+    """True when the project of the running hook or command has `phi.upkeep` on."""
+    return bool(PHI is not None and getattr(PHI, "UPKEEP", False))
+
+
+def now():
+    return time.strftime("%Y-%m-%d %H:%M")
+
+
+def path(home, sid):
+    return os.path.join(relay._dir(home, sid), FILE)
+
+
+def load(home, sid):
+    d = relay._read_json(path(home, sid))
+    for k, kind in (("items", list), ("waits", list), ("named", list), ("wokeFor", list), ("tried", dict),
+                    ("scanned", dict), ("swept", dict), ("mains", dict)):
+        if not isinstance(d.get(k), kind):
+            d[k] = kind()
+    return d
+
+
+def save(home, sid, d):
+    relay._write_json(path(home, sid), d)
+
+
+def set_on(store, flag):
+    """`phi.upkeep` written to the store's p4.json, and the settings keeper run for the project the store sits in, so
+    its ask rule on the archive tool goes or comes back at once. Returns the lines to print."""
+    was = p4conf.upkeep_on(store)
+    p4conf.set_key(store, "phi.upkeep", bool(flag))
+    out = [f"phi.upkeep is {'on' if flag else 'off'} in {p4conf.fwd(p4conf.path(store))}"
+           + ("" if was != bool(flag) else ", as it was")]
+    project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
+    if os.path.basename(os.path.dirname(os.path.abspath(store))) == ".claude":
+        kept = p4conf.keep_settings(project, p4=store)
+        asks = p4conf._get(p4conf.read_json(kept["file"]) or {}, p4conf.ASK_KEY)
+        held = isinstance(asks, list) and ARCHIVE in asks
+        out.append(f"{p4conf.fwd(kept['file'])} holds "
+                   + (f"an ask rule on `{ARCHIVE}`" + ("" if not flag else ", which is not p4's own: p4 takes out "
+                                                       "only the entry it wrote") if held
+                      else f"no ask rule on `{ARCHIVE}`"))
+    out.append("With it on, a session that started others is handed the archive call of each finished, landed "
+               "session, its open follow-through items, the steps whose wait is over and the leftovers on disk."
+               if flag else "With it off, p4-phi hands none of the upkeep acts and keeps the archive ask rule.")
+    return out
+
+
+# --- what git says ----------------------------------------------------------------------------------------------------
+
+_DEFAULT = {}                    # a repository's folder to its default branch on the remote, for one process
+
+
+def _out(cwd, *args):
+    r = relay._git(cwd, *args) if cwd and os.path.isdir(cwd) else None
+    return r.stdout.strip() if r is not None and r.returncode == 0 else None
+
+
+def default_ref(repo):
+    """The default branch of the repository's remote as a ref, such as `origin/main`, '' when git names none:
+    `origin/HEAD` as the clone or a fetch set it, else `origin/main` or `origin/master` when one is there."""
+    if repo in _DEFAULT:
+        return _DEFAULT[repo]
+    ref = _out(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or ""
+    for name in ("origin/main", "origin/master") if not ref else ():
+        if _out(repo, "rev-parse", "--verify", "--quiet", f"refs/remotes/{name}") is not None:
+            ref = name
+            break
+    _DEFAULT[repo] = ref
+    return ref
+
+
+def on_default(repo, rev):
+    """True when `rev` is on the remote's default branch as this clone last saw it, None when that cannot be told."""
+    ref = default_ref(repo)
+    if not ref or not rev:
+        return None
+    r = relay._git(repo, "merge-base", "--is-ancestor", rev, ref)
+    return None if r is None or r.returncode not in (0, 1) else r.returncode == 0
+
+
+def ahead(repo, rev):
+    n = _out(repo, "rev-list", "--count", f"{default_ref(repo)}..{rev}") if default_ref(repo) else None
+    return int(n) if n and n.isdigit() else 0
+
+
+def dirty(tree):
+    """How many changed or untracked files a worktree holds, None when git cannot say."""
+    got = _out(tree, "status", "--porcelain")
+    return None if got is None else len([x for x in got.splitlines() if x.strip()])
+
+
+def main_of(tree):
+    main, found = p4conf.main_root(tree) if tree else ("", False)
+    return main if found else ""
+
+
+def linked(tree):
+    """True for a linked worktree: a checkout whose repository's main checkout is another folder."""
+    main = main_of(tree)
+    return bool(main) and relay.norm(os.path.realpath(main)) != relay.norm(os.path.realpath(tree))
+
+
+def locked_trees(main):
+    """The worktrees of a repository git holds locked, as Claude Code locks a running agent's."""
+    out, cur = set(), ""
+    for line in (_out(main, "worktree", "list", "--porcelain") or "").splitlines():
+        if line.startswith("worktree "):
+            cur = relay.norm(line[9:].strip())
+        elif line.startswith("locked") and cur:
+            out.add(cur)
+    return out
+
+
+def trees_of(home, sid, s):
+    """The checkouts a session worked in, by its turns' heads and the app's record of its worktree, each as a dict:
+    `path`, `first` and `last`, the heads its first and latest turn read there, `linked`, True for a linked worktree,
+    `own`, True for the worktree the app made for it, `there`, True while the folder is on disk, and `branch`."""
+    rec = PHI.app_record(sid) if str(sid).startswith("local_") else {}
+    own = relay.norm(str(rec.get("worktreePath") or ""))
+    seen = {}
+    for r in relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl")):
+        for h in (r.get("delta") or {}).get("heads") or []:
+            repo, _, sha = str(h).rpartition(" ")
+            where, _, branch = repo.rpartition("@")
+            if not where:
+                continue
+            t = seen.setdefault(relay.norm(where), {"path": where, "first": sha, "branch": branch})
+            t["last"], t["branch"] = sha, branch or t["branch"]
+    if own and own not in seen:
+        seen[own] = {"path": str(rec.get("worktreePath")), "first": "", "last": "", "branch": ""}
+    out = []
+    for key, t in seen.items():
+        there = os.path.isdir(t["path"])
+        # a folder that is gone is read as a worktree that was removed: `lost` then asks git which repository, if
+        # any, still holds its branch
+        t.update(there=there, own=key == own, linked=linked(t["path"]) if there else True)
+        if there and t["linked"]:
+            t["branch"] = relay.branch_of(sid, s, t["path"]) or t["branch"]
+        elif key == own:
+            t["branch"] = str(rec.get("branch") or t["branch"] or "")
+        out.append(t)
+    return out
+
+
+def landing(home, sid, s):
+    """Whether a session's work is landed, and what holds it where it is not: every commit of each worktree of its
+    own is on the remote's default branch with nothing uncommitted there, and so is every commit it made in a
+    checkout it shares. Returns (True or False, the reasons, its trees)."""
+    why, trees = [], trees_of(home, sid, s)
+    for t in trees:
+        where = t["path"].replace("\\", "/")
+        if t["linked"] and t["there"]:
+            n = dirty(t["path"])
+            if n is None:
+                why.append(f"git could not read its worktree {where}")
+                continue
+            if n:
+                why.append(f"its worktree {where} holds {n} uncommitted change{'s' * (n != 1)}")
+            got = on_default(t["path"], "HEAD")
+            if got is None:
+                why.append(f"no default branch of a remote is known in {where}")
+            elif not got:
+                k = ahead(t["path"], "HEAD")
+                why.append(f"{k or 'some'} commit{'s' * (k != 1)} of `{t['branch'] or 'its branch'}` in {where} "
+                           f"{'are' if k != 1 else 'is'} not on {default_ref(t['path'])}")
+        elif t["there"] and t["first"] and t["last"] and t["first"] != t["last"]:
+            if on_default(t["path"], t["last"]) is False:
+                why.append(f"its commit {t['last']} in {where} is not on {default_ref(t['path'])}")
+    return not why, why, trees
+
+
+# --- which sessions, and where each stands ----------------------------------------------------------------------------
+
+def started(home, sid):
+    """Each session this one started that the app has not archived, by its id."""
+    return {k: v for k, v in sorted(relay._sessions(home).items())
+            if relay._parent(v) == sid and not v.get("archived") and not relay.archived_in_app(v)}
+
+
+def archived(home, sid):
+    """Each session this one started that the app has archived, or holds no record of any more."""
+    return {k: v for k, v in sorted(relay._sessions(home).items())
+            if relay._parent(v) == sid and (v.get("archived") or relay.archived_in_app(v))}
+
+
+def working(home, sid):
+    return PHI.puppeteer.working(home, sid)
+
+
+def finished(home, sid, s):
+    """True when a started session's work is over by p4-phi's records: a turn of it ended and none runs, its last
+    turn was shown done, its task list holds steps and none is open, or p4-phi counts it as archived already, and no
+    session under it still works or holds an open step."""
+    turns = relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))
+    if not turns or working(home, sid):
+        return False
+    steps = plans.load(home, sid).get("steps") or []
+    still = [x for x in steps if x.get("status") != "completed"]
+    over = bool(turns[-1].get("done")) or (bool(steps) and not still) or bool(s.get("doneRetired") or s.get("stale"))
+    if not over or still:
+        return False
+    for k, ks in relay._sessions(home).items():
+        if k != sid and sid in PHI.chain_of(home, k) and not ks.get("archived") and not relay.archived_in_app(ks) \
+                and (working(home, k) or plans.open_steps(home, k)):
+            return False
+    return True
+
+
+def unread(home, s):
+    """The sessions whose latest report this session has not been handed yet."""
+    seen = s.get("reportsSeen") if isinstance(s.get("reportsSeen"), int) else 0
+    return {r["sessionId"] for r in PHI.latest_reports(PHI.load_reports(home, s["sessionId"])[seen:])}
+
+
+def title(sid, s=None):
+    import book
+    return book.title(sid, s) or str(sid)
+
+
+def short_context(home, sid, store=""):
+    """True while a session's context is short: Claude Code's last measure of it, which the hooks module keeps in
+    usage.json, reads under `phi.clear_at` percent, or no measure is kept."""
+    pct = ((PHI.usage_of(home, sid) or {}).get("context") or {}).get("percent")
+    return pct is None or pct < PHI.controls.clear_at(store)
+
+
+def live(sid, s):
+    """True while the app still runs a session: it holds a record of it and has not archived it."""
+    return not s.get("archived") and not relay.archived_in_app(s)
+
+
+def fit(home, sid, text, store="", skip=()):
+    """The live session this one started whose task covers `text`, as (id, session), or ('', {})."""
+    best = ("", {}, 0)
+    for k, ks in started(home, sid).items():
+        if k in skip or not short_context(home, k, store):
+            continue
+        own = " ".join([str(ks.get("task") or "")] + [str(x) for x in ks.get("fileSet") or []])
+        n = len(plans.words(text) & plans.words(own))
+        if n >= FIT_WORDS and n > best[2]:
+            best = (k, ks, n)
+    return best[0], best[1]
+
+
+# --- the report's own list of what it left ----------------------------------------------------------------------------
+
+LEFT = (r"(?:still\s+)?found\s+(?:and|but)\s+not\s+fixed|not\s+fixed|findings\s+left\s+open|"
+        r"left\s+(?:open|alone|undone|unfixed|for\s+later)|left(?=\s*(?:\*\*|__)?\s*(?::|$))|"
+        r"what\s+is\s+(?:still\s+)?left|still\s+open|open\s+items?|follow[- ]?ups?|"
+        r"not\s+(?:done|verified|checked)(?:\s+live)?|could\s+not\s+(?:verify|check|fix|finish)")
+# A list of what is left opens with a heading that says so, or with a label that ends in a colon: prose that only
+# holds the words, such as "we left the file as it was", opens none.
+HEADING = re.compile(r"^\s*#{1,6}\s+(?:\*\*|__)?\s*(?:" + LEFT + r")\b[^\n]{0,60}$", re.I)
+LABEL = re.compile(r"^\s*(?:[-*]\s+)?(?:\*\*|__)?\s*(?:" + LEFT + r")\b[^:\n.]{0,60}?(?:\*\*|__)?\s*:\s*(?:\*\*|__)?"
+                   r"\s*(?P<rest>.*)$", re.I)
+BULLET = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
+ANY_HEAD = re.compile(r"^\s*#{1,6}\s+\S")
+NONE = re.compile(r"^\W*(?:none|nothing|n/?a|no (?:open )?items?)\W*$", re.I)
+
+
+def left_of(text):
+    """What a report lists as found and not fixed, or as left: the bullets under a heading or a label that says so,
+    and the words after such a label on its own line. At most ITEMS, each cut to ITEM_CHARS."""
+    out, lines, k = [], str(text or "").splitlines(), 0
+
+    def keep(x):
+        x = " ".join(re.sub(r"\*\*|__", "", x).split())
+        if len(x) >= 8 and not NONE.match(x) and x not in out:
+            out.append(PHI.cut(x, ITEM_CHARS) if PHI else x[:ITEM_CHARS])
+    while k < len(lines):
+        label, heading = LABEL.match(lines[k]), HEADING.match(lines[k])
+        k += 1
+        if not label and not heading:
+            continue
+        if label and label.group("rest").strip():
+            keep(label.group("rest"))
+            continue
+        blank = 0
+        while k < len(lines):
+            b = BULLET.match(lines[k])
+            if b and not LABEL.match(lines[k]):
+                keep(b.group(1))
+                blank = 0
+            elif not lines[k].strip():
+                blank += 1
+                if blank > 1:
+                    break
+            elif ANY_HEAD.match(lines[k]) or LABEL.match(lines[k]) or not lines[k].startswith((" ", "\t")):
+                break
+            k += 1
+    return out[:ITEMS]
+
+
+def item_id(child, text):
+    return "it-" + hashlib.sha1(f"{child} {' '.join(sorted(plans.words(text)))}".encode("utf-8")).hexdigest()[:8]
+
+
+def scan(home, sid, d):
+    """The items of each finished started session's latest report, taken into `d` once for that turn. True when one
+    is new."""
+    new = False
+    rows = {r["sessionId"]: r for r in PHI.latest_reports(PHI.load_reports(home, sid))}
+    for k, ks in relay._sessions(home).items():
+        row = rows.get(k)
+        turn = row.get("turn") if row and isinstance(row.get("turn"), dict) else {}
+        mark = f"{turn.get('id')}@{turn.get('time')}"
+        if relay._parent(ks) != sid or not turn or d["scanned"].get(k) == mark or not finished(home, k, ks):
+            continue
+        d["scanned"][k] = mark
+        new = True
+        found = turn.get("left") if isinstance(turn.get("left"), list) else left_of(turn.get("report"))
+        for text in [str(x) for x in found][:ITEMS]:
+            iid = item_id(k, text)
+            if any(i.get("id") == iid for i in d["items"]):
+                continue
+            d["items"].append({"id": iid, "from": k, "title": title(k, ks), "text": text, "time": now(),
+                               "turn": str(turn.get("id") or "")})
+    open_ = [i for i in d["items"] if not i.get("closed")]
+    for i in open_[:-OPEN_MOST]:
+        i["closed"] = {"how": "dropped", "why": f"more than {OPEN_MOST} open items", "time": now()}
+    return new
+
+
+def landed_ids(home, sid, d):
+    """Closes each open item or wait whose id a commit on the remote's default branch names, in a repository the
+    session that left it worked in. True when one closed."""
+    open_ = [i for i in d["items"] + d["waits"] if not i.get("closed")]
+    if not open_:
+        return False
+    repos, closed = {}, False
+    for i in open_:
+        k = i.get("from") or i.get("on") or ""
+        for t in trees_of(home, k, relay._session(home, k)) if k else []:
+            if t["there"]:
+                repos.setdefault(main_of(t["path"]) or t["path"], t["path"])
+    for tree in repos.values():
+        ref = default_ref(tree)
+        got = _out(tree, "log", "-200", "--format=%h%x1f%B%x1e", "-E", "--grep=(it|wt)-[0-9a-f]{8}", ref) if ref \
+            else None
+        for rec in (got or "").split("\x1e"):
+            sha, _, body = rec.strip().partition("\x1f")
+            for i in open_:
+                if sha and not i.get("closed") and i["id"] in body:
+                    i["closed"] = {"how": "commit", "commit": sha, "time": now()}
+                    closed = True
+    return closed
+
+
+def close(home, s, iid, commit="", note="", ezexe="", cwd=""):
+    """Closes an open item or wait by its id, on one of three grounds: a commit that is on the remote's default
+    branch, a note that says why it is left, or ezexe's word, taken only in a turn ezexe's own message began. Returns
+    the line to print."""
+    sid = s["sessionId"]
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        it = next((i for i in d["items"] + d["waits"] if i.get("id") == iid), None)
+        if not it:
+            raise ValueError(f"no open item or wait {iid}: `upkeep` alone lists them")
+        if it.get("closed"):
+            return f"{iid} was closed already, by {it['closed'].get('how')}"
+        if commit:
+            repo = cwd or os.getcwd()
+            if on_default(repo, commit) is not True:
+                raise ValueError(f"{commit} is not on {default_ref(repo) or 'a default branch of a remote'} in {repo}: "
+                                 f"an item closes on a landed commit, so land it first, or run this from its "
+                                 f"repository")
+            it["closed"] = {"how": "commit", "commit": commit, "time": now()}
+        elif note:
+            if len(" ".join(note.split())) < 12:
+                raise ValueError("a note says why it is left, in a sentence")
+            it["closed"] = {"how": "note", "why": " ".join(note.split())[:400], "time": now()}
+            PHI.note_add(home, sid, f"left: {it.get('text') or it.get('step')} ({iid}). Why: {it['closed']['why']}",
+                         "phi.py upkeep close", "left")
+        elif ezexe:
+            if s.get("turnBy") != "user":
+                raise ValueError("ezexe's word closes an item only in a turn ezexe's own message began, and this "
+                                 "turn began with another session's message or an event")
+            it["closed"] = {"how": "ezexe", "why": " ".join(ezexe.split())[:400], "time": now()}
+        else:
+            raise ValueError("name what closes it: --commit <sha>, --note \"<why it is left>\" or --ezexe "
+                             "\"<ezexe's words>\"")
+        save(home, sid, d)
+    return f"{iid} closed by {it['closed']['how']}"
+
+
+def wait(home, s, text, on_sid):
+    """Keeps a step this session said waits on another session, with that session. Returns the line to print."""
+    sid, on_sid = s["sessionId"], PHI.safe_id(on_sid)
+    if relay._parent(relay._session(home, on_sid)) != sid:
+        raise ValueError(f"{on_sid} is no session this one started")
+    text = " ".join(str(text or "").split())
+    if len(text) < 12:
+        raise ValueError("say the step that waits, in a sentence")
+    wid = "wt-" + hashlib.sha1(f"{on_sid} {text}".encode("utf-8")).hexdigest()[:8]
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        if not any(w.get("id") == wid for w in d["waits"]):
+            d["waits"].append({"id": wid, "step": text[:ITEM_CHARS], "on": on_sid, "time": now()})
+            save(home, sid, d)
+    return (f"kept as {wid}: it is handed as due once the work of \"{title(on_sid)}\" `{on_sid}` is on its "
+            f"repository's default branch")
+
+
+WAITS = re.compile(r"\b(?:a?wait\w*|after|once|when|until|blocked\s+(?:on|by)|depends?\s+on|needs?)\b", re.I)
+
+
+def plan_waits(home, sid, kids):
+    """The open steps of a session's own task list that say they wait on a session it started, named in the step by
+    its id, by the short name the app gave it or by its whole title: each as (step, the session's id)."""
+    out = []
+    for x in plans.load(home, sid).get("steps") or []:
+        text = str(x.get("content") or "")
+        if x.get("status") == "completed" or not WAITS.search(text):
+            continue
+        low = text.lower()
+        for k, ks in kids.items():
+            rec = PHI.app_record(k) if str(k).startswith("local_") else {}
+            sp = rec.get("spawnedFrom") if isinstance(rec.get("spawnedFrom"), dict) else {}
+            names = [str(k), str(sp.get("name") or ""), title(k, ks)]
+            if any(len(n) >= 6 and n.lower() in low for n in names):
+                out.append((x, k))
+                break
+    return out
+
+
+# --- the acts ---------------------------------------------------------------------------------------------------------
+
+def spelled(p):
+    """A folder as the file system spells it, with forward slashes: a turn's heads keep it case folded."""
+    return (os.path.realpath(p) if os.path.isdir(p) else str(p)).replace("\\", "/")
+
+
+def run_from(home, s, main, but=""):
+    """A checkout of the repository whose main checkout is `main` that a git command of this session runs from: one
+    the session itself works in, else that main checkout."""
+    for t in trees_of(home, s["sessionId"], s) + [{"path": str(s.get("cwd") or ""), "there": True}]:
+        p = t["path"]
+        if p and t.get("there") and os.path.isdir(p) and relay.norm(p) != relay.norm(but) \
+                and relay.norm(main_of(p) or "") == relay.norm(main):
+            return spelled(p)
+    return spelled(main)
+
+
+def in_use(home, but=()):
+    """The folders the sessions the app still runs work in, by p4-phi's records and the app's, without those of the
+    sessions `but`."""
+    out = set()
+    for k, v in relay._sessions(home).items():
+        if k in but or v.get("archived") or relay.archived_in_app(v):
+            continue
+        rec = PHI.app_record(k) if str(k).startswith("local_") else {}
+        out |= {relay.norm(str(p)) for p in (v.get("cwd"), rec.get("cwd"), rec.get("worktreePath")) if p}
+    return out
+
+
+def nested(tree):
+    """The checkouts inside a worktree that git ignores there, which a removal of the worktree would take along."""
+    out = []
+    for line in (_out(tree, "status", "--porcelain", "--ignored") or "").splitlines():
+        if line.startswith("!! "):
+            p = os.path.join(tree, line[3:].strip().strip('"').rstrip("/"))
+            if os.path.isdir(p) and os.path.exists(os.path.join(p, ".git")):
+                out.append(relay.norm(p))
+    return out
+
+
+def repos_of(home, s, gone="", kept=None):
+    """The main checkouts a worktree that is gone from disk may have belonged to: the one upkeep.json kept for it
+    while it was there, the one its nearest folder still on disk lies in, and those of the repositories this session
+    and the sessions it started work in."""
+    sid, out = s["sessionId"], {}
+    paths = [str((kept or {}).get(relay.norm(gone)) or "")]
+    up = os.path.dirname(gone) if gone else ""
+    while up and not os.path.isdir(up) and os.path.dirname(up) != up:
+        up = os.path.dirname(up)
+    paths += [up, str(s.get("cwd") or "")] + [t["path"] for t in trees_of(home, sid, s)]
+    for k, ks in relay._sessions(home).items():
+        if relay._parent(ks) == sid:
+            paths += [t["path"] for t in trees_of(home, k, ks)]
+    for p in paths:
+        main = main_of(p) if p and os.path.isdir(p) else ""
+        if main:
+            out.setdefault(relay.norm(main), main)
+    return list(out.values())
+
+
+def lost(home, s, t, branch, mains):
+    """A worktree that is gone from disk, as the app's archive leaves one: the commands that delete its merged branch
+    in the repository that holds its last commit, after `git worktree prune` where git still lists the folder, and
+    what holds an unmerged one, as (the commands, None or (what, why))."""
+    if not branch or not t.get("last"):
+        return [], None
+    for main in mains:
+        if _out(main, "cat-file", "-e", f"{t['last']}^{{commit}}") is None:
+            continue
+        if _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is None \
+                or branch == default_ref(main).rpartition("/")[2]:
+            return [], None
+        if on_default(main, branch) is not True:
+            return [], (f"`{branch}` in {spelled(main)}", f"its worktree is gone and it holds commits that are not on "
+                                                          f"{default_ref(main) or 'a default branch'}")
+        frm = run_from(home, s, main)
+        listed = any(line.startswith("worktree ") and relay.norm(line[9:].strip()) == relay.norm(t["path"])
+                     for line in (_out(main, "worktree", "list", "--porcelain") or "").splitlines())
+        return ([f"git -C \"{frm}\" worktree prune"] if listed else []) + [f"git -C \"{frm}\" branch -d {branch}"], None
+    return [], None
+
+
+def removals(home, s, trees, skip_own=False, but=(), kept=None):
+    """The commands that remove the clean, merged worktrees among `trees` and delete their merged branches; what is
+    dirty or unmerged, each as (tree, why); and True when a tree was passed over because a session the app still
+    runs works in it. The deepest folder comes first, and a worktree that holds another checkout goes only after
+    that one. `skip_own` leaves the folder the app made, and what lies in it, to the app's own archive, and `but`
+    names the sessions whose folders count as free. `kept` is upkeep.json's record of each worktree's main checkout,
+    read for one that is gone and written for one that is there."""
+    cmds, held, waits, going, used = [], [], False, set(), None
+    own = [relay.norm(t["path"]) for t in trees if t["own"]] if skip_own else []
+    for t in sorted(trees, key=lambda t: -len(t["path"])):
+        if not t["linked"]:
+            continue
+        branch = t["branch"] if t["branch"] not in ("", "HEAD") else ""
+        key = relay.norm(t["path"])
+        if any(key == o or key.startswith(o + "/") for o in own):
+            continue
+        if not t["there"]:
+            more, why = lost(home, s, t, branch, repos_of(home, s, t["path"], kept))
+            cmds += more
+            if why:
+                held.append(why)
+            continue
+        tree, main = spelled(t["path"]), main_of(t["path"])
+        if kept is not None and kept.get(key) != main:
+            kept[key] = main
+        used = in_use(home, but) if used is None else used
+        if any(u == key or u.startswith(key + "/") for u in used):
+            waits = True
+            continue
+        if key in locked_trees(main):
+            held.append((tree, "git holds it locked, as Claude Code locks the worktree of an agent that still runs"))
+            continue
+        n, got = dirty(t["path"]), on_default(t["path"], "HEAD")
+        if n or n is None or got is not True:
+            held.append((tree, (f"it holds {n} uncommitted change{'s' * (n != 1)}" if n else
+                                "git could not read it" if n is None else
+                                f"`{branch or 'its branch'}` holds commits that are not on "
+                                f"{default_ref(t['path']) or 'a default branch'}")))
+            continue
+        inner = [x for x in nested(t["path"]) if x not in going]
+        if inner:
+            held.append((tree, f"it holds another checkout, {inner[0]}, which a removal would take along"))
+            continue
+        frm = run_from(home, s, main, but=t["path"])
+        cmds.append(f"git -C \"{frm}\" worktree remove \"{tree}\"")
+        going.add(key)
+        # the branch is held to the default branch by its own tip: a worktree can sit on a detached HEAD, and then
+        # its branch is the one the app's record names, which the folder's HEAD says nothing of
+        if branch and branch != default_ref(main).rpartition("/")[2] \
+                and _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is not None:
+            if on_default(main, branch) is True:
+                cmds.append(f"git -C \"{frm}\" branch -d {branch}")
+            else:
+                held.append((f"`{branch}` in {spelled(main)}", f"it holds commits that are not on "
+                                                               f"{default_ref(main) or 'a default branch'}"))
+    return cmds, held, waits
+
+
+LEAVE = ("Each is git's own command with no force, and `-d` is never `-D`: where git refuses one, leave it and say "
+         "so in one line.")
+
+
+def archive_acts(home, s, d, hand):
+    out, sid = [], s["sessionId"]
+    told = unread(home, s)
+    mode = str((PHI.app_record(sid) if sid.startswith("local_") else {}).get("permissionMode") or "")
+    for k, ks in started(home, sid).items():
+        if k in told or not finished(home, k, ks) or PHI.puppeteer.held_tasks(home, k):
+            continue
+        ok, why, trees = landing(home, k, ks)
+        name = f"\"{title(k, ks)}\" `{k}`"
+        if not ok:
+            out.append((f"land:{k}", "land", True,
+                        f"land first: {name} is finished and its work is not landed: {'; '.join(why)}. An "
+                        f"uncommitted change is its own to commit, so ask it by `SendMessage` to `{k}`. A commit "
+                        f"that is not on the default branch is landed as the push line says: its branch merged into "
+                        f"the default branch, the full suite once on the commit being pushed, then the push. It is "
+                        f"archived at the turn after."))
+            continue
+        key = f"archive:{k}"
+        n = int(d["tried"].get(key) or 0)
+        if n >= TRIES:
+            continue
+        if hand:
+            d["tried"][key] = n + 1
+        cmds, _, _ = removals(home, s, trees, skip_own=True, but=(k,), kept=d["mains"])
+        after = (f" Once the call returns, remove what it leaves on disk: " + "; ".join(f"`{c}`" for c in cmds)
+                 + f". {LEAVE}") if cmds else ""
+        card = "" if mode in NO_ASK else (" This session does not run in auto or bypass permissions mode, so the "
+                                          "app shows ezexe its approval card for the call: that card is the app's.")
+        last = (f" This is the {TRIES}rd time p4-phi hands it: if the app refuses again, as it does for a session "
+                f"that is pinned, open on screen or still working, tell ezexe so in one line, and p4-phi hands it "
+                f"no more.") if n + 1 >= TRIES else ""
+        out.append((key, "archive", True,
+                    f"archive: {name} is finished and landed: no open step, no background task, its last report "
+                    f"handed, and every commit of it on its repository's default branch on the remote. Call "
+                    f"`{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and landed\" now.{card}{after}"
+                    f"{last}"))
+    return out
+
+
+def route(home, s, text, by, store, back=""):
+    """Where work that wants a session goes: on a turn a person began, a start; on any other, a message to a live
+    worker whose task covers it, else the app's card with one line to ezexe."""
+    cmd = PHI.commands()
+    if by == "user":
+        return f"start its session with the call `{cmd} draft \"<its words>\"` prints"
+    k, ks = fit(home, s["sessionId"], text, store, skip=(back,))
+    refused = ("no person began this turn, and the app refuses a new start on such a turn, as the start tool's own "
+               "result says, while a message to a live session goes through")
+    if k:
+        return (f"{refused}: send it by `SendMessage` with `to` `{k}`, to \"{title(k, ks)}\", a live session whose "
+                f"task covers it")
+    return (f"{refused}, and no live session's task covers it: show it as the app's card, `{START}` with "
+            f"`initiation` `own_initiative` and a brief that holds its words, and tell ezexe in one line that the "
+            f"card waits")
+
+
+def item_acts(home, s, d, by, store, hand):
+    out = []
+    for it in [i for i in d["items"] if not i.get("closed")]:
+        k = str(it.get("from") or "")
+        ks = relay._session(home, k)
+        head = f"item {it['id']}, left by \"{it.get('title') or title(k, ks)}\": \"{it['text']}\""
+        ends = (f"It closes on a commit on the default branch that names `{it['id']}`, on `{PHI.commands()} upkeep "
+                f"close {it['id']} --note \"<why it is left>\"`, or on ezexe's word.")
+        sent = it.get("sent") if isinstance(it.get("sent"), dict) else None
+        if sent:
+            last = PHI.last_turn_row(home, k) if sent.get("to") == k else {}
+            if last and str(last.get("time") or "") > str(sent.get("time") or "") and not working(home, k):
+                out.append((f"item:{it['id']}:back", "item", True,
+                            f"{head}. It went back to that session at {sent.get('time')}, which reported since, and "
+                            f"no commit that names it is on the default branch: read that report, then close it with "
+                            f"the note or send it on, where {route(home, s, it['text'], by, store, back=k)}. {ends}"))
+            else:
+                out.append((f"item:{it['id']}", "item", False,
+                            f"{head}. Handed at {sent.get('time')} to go {sent.get('how')}, and still open. {ends}"))
+            continue
+        if ks.get("sessionId") and live(k, ks) and short_context(home, k, store):
+            how = (f"send it back by `SendMessage` with `to` `{k}`: its words, to fix it and land it with "
+                   f"`{it['id']}` in the commit message, and to report")
+            mark = {"to": k, "how": "back to that session by message", "time": now()}
+        else:
+            why = "is archived" if not (ks.get("sessionId") and live(k, ks)) else "holds a long context"
+            how = f"that session {why}, so it goes to a successor: {route(home, s, it['text'], by, store, back=k)}"
+            mark = {"to": "", "how": "to a successor", "time": now()}
+        if hand:
+            it["sent"] = mark
+        out.append((f"item:{it['id']}", "item", True, f"{head}. Still open: {how}. {ends}"))
+    return out
+
+
+def wait_acts(home, s, d, by, store):
+    out, sid = [], s["sessionId"]
+    kids = {k: v for k, v in relay._sessions(home).items() if relay._parent(v) == sid}
+    rows = [(f"step {x.get('addr')}, \"{PHI.cut(PHI.clean(x.get('content')), 120)}\"", k, f"step:{x.get('addr')}:{k}",
+             str(x.get("content") or ""), "")
+            for x, k in plan_waits(home, sid, kids)]
+    rows += [(f"{w['id']}, \"{w.get('step')}\"", str(w.get("on") or ""), f"wait:{w['id']}", str(w.get("step") or ""),
+              f" Once it is done, close it with `{PHI.commands()} upkeep close {w['id']} --note \"<what was done>\"`.")
+             for w in d["waits"] if not w.get("closed")]
+    for what, k, key, text, tail in rows:
+        ks = kids.get(k) or {}
+        if not ks or not (ks.get("archived") or relay.archived_in_app(ks) or finished(home, k, ks)):
+            continue
+        ok, why, _ = landing(home, k, ks)
+        if not ok:
+            continue                               # the landing line names it: the step is due once that lands
+        out.append((key, "step", True,
+                    f"due: {what} waited on \"{title(k, ks)}\" `{k}`, whose work is on its repository's default "
+                    f"branch now. Do it in this turn; where it wants a session of its own, "
+                    f"{route(home, s, text, by, store)}.{tail}"))
+    return out
+
+
+AGENT_TREE = re.compile(r"^(.*[/\\]\.claude[/\\]worktrees[/\\][^/\\]+)(?:[/\\]|$)")
+
+
+def agent_trees(home, sid):
+    """The git worktrees the subagents of a session wrote in, by the files p4-phi's records hold each one wrote, as
+    trees_of gives a tree. One whose agent still runs is left out."""
+    seen = {}
+    for _, t in plans._tasks(plans.load(home, sid)):
+        if not t.get("agent") or t.get("status") == "open":
+            continue
+        for p in t.get("wrote") or []:
+            m = AGENT_TREE.match(str(p))
+            if m and relay.norm(m.group(1)) not in seen and os.path.isdir(m.group(1)) and linked(m.group(1)):
+                r = _out(m.group(1), "rev-parse", "--abbrev-ref", "HEAD") or ""
+                seen[relay.norm(m.group(1))] = {"path": m.group(1), "first": "", "last": "", "there": True,
+                                                "own": False, "linked": True, "branch": r}
+    return list(seen.values())
+
+
+def leftover_acts(home, s, d, hand):
+    """After an archive, and for this session's own subagents: the removal of each clean, merged worktree and branch,
+    and, once, the name of each one that is dirty or unmerged."""
+    out, sid = [], s["sessionId"]
+    groups = [(f"\"{title(k, ks)}\" `{k}`, which is archived", k, trees_of(home, k, ks))
+              for k, ks in archived(home, sid).items() if k not in d["swept"]]
+    groups.append(("a subagent of this session whose work is merged", "", agent_trees(home, sid)))
+    seen = set()
+    for whose, k, trees in groups:
+        trees = [t for t in trees if relay.norm(t["path"]) not in seen]     # a folder two sessions shared, once
+        seen |= {relay.norm(t["path"]) for t in trees}
+        cmds, held, waits = removals(home, s, trees, kept=d["mains"])
+        if k and hand and not cmds and not waits and not [h for h in held if f"tree:{h[0]}" not in d["named"]]:
+            d["swept"][k] = now()                  # nothing of it is left to remove or to name
+        if cmds:
+            out.append((f"leftover:{k or 'agents'}:{len(cmds)}:{cmds[0][-40:]}", "leftover", True,
+                        f"leftovers of {whose}: its worktree is clean and its branch merged, so remove them: "
+                        + "; ".join(f"`{c}`" for c in cmds) + f". {LEAVE}"))
+        fresh = [h for h in held if f"tree:{h[0]}" not in d["named"]]
+        if fresh:
+            if hand:
+                d["named"] = (d["named"] + [f"tree:{h[0]}" for h in fresh])[-400:]
+            out.append((f"named:{k or 'agents'}:{fresh[0][0][-40:]}", "named", False,
+                        f"left on disk, of {whose}: " + "; ".join(f"{t}, since {w}" for t, w in fresh)
+                        + ". Name each to ezexe once, in one line, and leave it: a removal by force and a deletion "
+                          "of unmerged work are ezexe's."))
+    return out
+
+
+def acts(home, s, by="user", store="", hand=False, d=None):
+    """Every act due for the sessions `s` started, each as (key, kind, whether it is worth a turn, its line). With
+    `hand`, what is handed is marked in `d`, which the caller saves."""
+    sid = s["sessionId"]
+    d = load(home, sid) if d is None else d
+    scan(home, sid, d)
+    landed_ids(home, sid, d)
+    out = []
+    for part in (lambda: archive_acts(home, s, d, hand), lambda: item_acts(home, s, d, by, store, hand),
+                 lambda: wait_acts(home, s, d, by, store), lambda: leftover_acts(home, s, d, hand)):
+        try:
+            out += part()
+        except Exception:  # noqa: BLE001  one act that cannot be read never costs a message the others
+            pass
+    return out
+
+
+HEAD_LINE = ("phi (p4-phi): upkeep of the sessions this one started. `phi.upkeep` is on in this project, which is "
+             "ezexe's standing word for each act below, so none waits on ezexe: do each in this turn and say in one "
+             "line what was done.")
+TAIL_LINE = ("A force, a deletion of unmerged work, a credential and a permission setting stay ezexe's.")
+
+
+def has_tree(home, sid):
+    return any(relay._parent(v) == sid for v in relay._sessions(home).values()) \
+        or any(t.get("agent") for _, t in plans._tasks(plans.load(home, sid)))
+
+
+def text(home, s, by="user", store=""):
+    """The upkeep lines beside a message, '' with the setting off, for a session that started none, or with nothing
+    due. A turn ezexe's own message began gives the module's upkeep wakes their budget again."""
+    if not on() or not s.get("sessionId") or not has_tree(home, s["sessionId"]):
+        return ""
+    sid = s["sessionId"]
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        before = repr(d)
+        if by == "user":
+            d.pop("woke", None)
+        due = acts(home, s, by, store, hand=True, d=d)
+        if due:
+            d["wokeFor"] = (d["wokeFor"] + [a[0] for a in due if a[0] not in d["wokeFor"]])[-400:]
+        if repr(d) != before:
+            save(home, sid, d)
+    if not due:
+        return ""
+    return "\n".join([HEAD_LINE] + [f"- {a[3]}" for a in due] + [TAIL_LINE])
+
+
+def wakes(d):
+    w = d.get("woke") if isinstance(d, dict) else None
+    return int(w.get("n") or 0) if isinstance(w, dict) else 0
+
+
+def wake(home, sid, store=""):
+    """What `phi.py look` answers as `upkeep`, the prompt of a turn the hooks module starts: given when the setting
+    is on, the session and every session it started are idle, an act is due that no turn was started for and no
+    message carried yet, and the module's wakes are inside `phi.keep_going_max`. '' otherwise."""
+    s = relay._session(home, sid)
+    if not on() or not s.get("sessionId") or relay.gone(home, s) or working(home, sid) or not has_tree(home, sid):
+        return ""
+    if any(working(home, k) for k in started(home, sid)):
+        return ""
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        if plans.wakes(s) + wakes(d) >= plans.KEEP_GOING_MAX:
+            return ""
+        before = repr(d)
+        due = [a for a in acts(home, s, "event", store, hand=False, d=d) if a[2]]
+        new = [a[0] for a in due if a[0] not in d["wokeFor"]]
+        if new:
+            d["wokeFor"] = (d["wokeFor"] + new)[-400:]
+            d["woke"] = {"n": wakes(d) + 1, "time": now()}
+        if repr(d) != before:
+            save(home, sid, d)
+    if not new:
+        return ""
+    return (f"{MARK} for the sessions this one started: {len(due)} act{'s' * (len(due) != 1)}, each listed beside "
+            f"this prompt. p4-phi's hooks module started this turn, since every one of those sessions is idle, and "
+            f"ezexe sent no message. Do each act, say in one line what was done, and end the turn.")
+
+
+def status(home, s, store=""):
+    """What `phi.py upkeep` prints: whether the setting is on, the acts due now, and every open item and wait."""
+    sid = s["sessionId"]
+    lines = [f"phi.upkeep is {'on' if on() else 'off'} for this project"
+             + ("" if on() else f": `{PHI.commands()} upkeep on` turns it on")]
+    if not on():
+        return "\n".join(lines)
+    d = load(home, sid)
+    due = acts(home, s, s.get("turnBy") or "user", store, hand=False, d=d)
+    lines += ["", "Due now:"] + ([f"- {a[3]}" for a in due] or ["- nothing"])
+    gave_up = [k for k, n in d["tried"].items() if int(n or 0) >= TRIES]
+    if gave_up:
+        lines += ["", f"Handed {TRIES} times and left: " + ", ".join(gave_up)]
+    done = [i for i in d["items"] + d["waits"] if i.get("closed")]
+    if done:
+        lines += ["", "Closed:"] + [f"- {i['id']} by {i['closed'].get('how')} at {i['closed'].get('time')}"
+                                    for i in done[-20:]]
+    return "\n".join(lines)

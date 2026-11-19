@@ -333,7 +333,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <li>It does not start a successor, move a session between sections or archive one. Those are the app's tools, and the session makes the calls.</li>
           <li>It speaks only when one of its hooks fires, so a boundary reached while the puppeteer is idle is named beside its next message. A command hook with <code>asyncRewake</code> could wake it at once, and <code>SendMessage</code> with <code>notify_when_idle</code> could tell it when a session goes idle, and p4-phi uses neither.</li>
           <li>It hands a start request only to the session that filed it. A puppeteer may decline only a request addressed to it, and the hook of the session that filed it then closes the row as withdrawn.</li>
-          <li>It refuses no archive call. The settings keeper writes an ask rule on <code>mcp__ccd_session_mgmt__archive_session</code>, so the app shows its approval card before every archive call, bypass mode included, and the tool refuses a session with live background work itself.</li>
+          <li>It refuses no archive call. The settings keeper writes an ask rule on <code>mcp__ccd_session_mgmt__archive_session</code>, so the app shows its approval card before every archive call, bypass mode included, and the tool refuses a session with live background work itself. A project that turns <code>phi.upkeep</code> on gets no such rule: the keeper takes its own entry out, the line that names a complete session holds its archive call, and the app asks as its own rule has it, with no card in auto and bypass permissions mode.</li>
         </ul>
       </div>
       <div class="rule">
@@ -688,7 +688,7 @@ var EX={
     steps:[{side:"you",by:"ezexe, or another session, writes to it."}].concat(e.pair&&!e.told?[{side:"phi",by:"Its own hook finds the puppeteer that lists it, and tells it once.",out:PAIR()}]:[]).concat(e.wasStopped?[{side:"app",by:"The turn clears lastTurnStopped on the app's record, so the address book names it again for the files its brief covers."}]:[]),
     app:"A turn in the session.",phi:"A row in the session's hook log. p4-phi holds it not complete while the turn is open."}},
   archive:function(e){return{title:"The app asks ezexe",
-    why:"Every archive call waits on the app's approval card: the settings keeper writes an ask rule on the archive tool into the project's local settings, and no permission mode skips an explicit ask rule. p4-phi refuses nothing here; the tool itself refuses a session with live background work.",
+    why:"Every archive call waits on the app's approval card: the settings keeper writes an ask rule on the archive tool into the project's local settings, and no permission mode skips an explicit ask rule. A project that turns phi.upkeep on has no such rule, and the app then shows no card in auto and bypass permissions mode. p4-phi refuses nothing here; the tool itself refuses a session with live background work.",
     steps:[{side:"app",by:"The puppeteer makes the call.",code:call(ARCHIVE,{session_id:e.id})},
            {side:"app",by:"The app shows its approval card before the tool runs.",note:"The card is in the box above. A worker that archives itself also passes p4-phi's issue gate first."}],
     app:"Nothing yet. The session is archived once ezexe approves the card.",phi:"Nothing. p4-phi reads the archive from the app's record afterwards."}},

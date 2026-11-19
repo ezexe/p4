@@ -59,6 +59,9 @@ puppeteer.PHI = sys.modules[__name__]   # phi.py runs as a script, so puppeteer.
 import controls  # noqa: E402  a puppeteer filed in the sidebar section, and the sessions it controls
 
 controls.PHI = sys.modules[__name__]
+import upkeep  # noqa: E402  the upkeep of a session tree: archive calls, follow-through, waits and leftovers
+
+upkeep.PHI = sys.modules[__name__]
 
 BACKGROUND = True
 REPORTS = True
@@ -1176,12 +1179,13 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
+UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
 
 
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, UPKEEP
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
@@ -1191,6 +1195,8 @@ def project_conf(store):
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     LEVELS_ON = d.get("levels") is not False
+    UPKEEP = d.get("upkeep") is True
+    relay.UPKEEP = controls.UPKEEP = UPKEEP     # the words that leave an archive to ezexe go with it on
     plans.LEVELS = LEVELS_ON
     plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
     apply_caps(d)
@@ -2235,6 +2241,14 @@ def h_user_prompt_submit(payload):
     def notice(text):
         keep.append(text)
         return text
+    if UPKEEP:
+        try:                                       # the acts due for the sessions this one started, at every turn
+            kept_up = upkeep.text(me.home, s, s.get("turnBy") or "user", me.store)
+        except Exception:  # noqa: BLE001  a record it cannot read never costs the message its other lines
+            kept_up = ""
+        if kept_up:
+            RAN["upkeep"] = kept_up.count("\n- ")
+            parts.insert(0, notice(kept_up))
     pend = (s.pop("staleChildren", None) or []) + relay.drain_archive(me.home, s["sessionId"])
     pend = [x for x in pend if isinstance(x, dict) and not archived_already(me.home, x.get("id"))]
     stale = relay.stale_text(pend)                # children to archive, said once; one archived in the app is not named
@@ -2402,6 +2416,10 @@ def h_stop(payload):
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
+    if UPKEEP and spawned_from(s):                 # the row keeps a report cut to REPORT_CHARS, and a list of what
+        left = upkeep.left_of(report if isinstance(report, str) else "")   # is left often ends a long one
+        if left:
+            row["left"] = left
     files = [c["input"].get("file_path") or c["input"].get("notebook_path") for c in turn.get("calls") or []
              if c.get("name") in EDIT_TOOLS and isinstance(c.get("input"), dict)]
     earlier = load_turns(me.home, s["sessionId"])
@@ -3359,7 +3377,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps"):
+                 "request", "proof", "controls", "gaps", "upkeep"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -3394,6 +3412,16 @@ def main(argv=None):
             p.add_argument("--to-puppeteer", action="store_true",
                            help="ask this session's puppeteer for a new orchestrator, and start none; any other "
                                 "start this session may not make is a suggested task card, not a request")
+        if name == "upkeep":
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "close", "wait"),
+                           help="on or off sets phi.upkeep in the store's p4.json; close closes an open item or "
+                                "wait; wait keeps a step that waits on a session; none prints what is due")
+            p.add_argument("what", nargs="?", default="", help="for close, the item's or wait's id; for wait, the "
+                                                               "step that waits")
+            p.add_argument("--on", dest="waits_on", default="", help="for wait: the session the step waits on")
+            p.add_argument("--commit", default="", help="for close: a commit on the remote's default branch")
+            p.add_argument("--note", default="", help="for close: why it is left")
+            p.add_argument("--ezexe", default="", help="for close: ezexe's own words, in a turn ezexe began")
         if name == "controls":
             p.add_argument("ids", nargs="*", help="orchestrators this puppeteer controls; none prints "
                                                   "where each stands")
@@ -3418,6 +3446,11 @@ def main(argv=None):
             return puppeteer.command(a, me)
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
+            return 0
+        if a.cmd == "upkeep" and a.act in ("on", "off"):   # the project's setting, which needs no session
+            store = a.p4 or me.store or me.home
+            for line in upkeep.set_on(store, a.act == "on"):
+                print(line)
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps
@@ -3456,6 +3489,14 @@ def main(argv=None):
             relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
             print("kept as this session's owned paths: "
                   + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
+            return 0
+        if a.cmd == "upkeep":
+            if a.act == "close":
+                print(upkeep.close(me.home, s, a.what.strip(), a.commit.strip(), a.note, a.ezexe, os.getcwd()))
+            elif a.act == "wait":
+                print(upkeep.wait(me.home, s, a.what, a.waits_on))
+            else:
+                print(upkeep.status(me.home, s, me.store))
             return 0
         if a.cmd == "controls":
             if not controls.is_puppeteer(s, me.store):
