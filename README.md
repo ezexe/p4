@@ -67,6 +67,7 @@ An orchestrator told of a finding settles a duplicate or a conflict with the oth
 
 The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](#install) gives the commands that install them.
 The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
+Ask a question or report a problem in [the repository's issues](https://github.com/ezexe/p4/issues).
 
 <div align="center">
 
