@@ -409,6 +409,14 @@
    "kind": "method",
    "nobody": true
   },
+  "/__remote-workflow": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it runs a workflow script in a session a server launched, which no p4 session is.",
+    "p4-temportal": "it runs a workflow script in a session a server launched, which no p4 session is.",
+    "p4-native": "it runs a workflow script in a session a server launched, which no p4 session is."
+   }
+  },
   "/add-dir": {
    "kind": "command",
    "declined": {
@@ -435,6 +443,14 @@
    "declined": {
     "p4-phi": "artifacts are no part of what sessions hand each other.",
     "p4-temportal": "artifacts."
+   }
+  },
+  "/artifact-design": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design guidance for artifacts, which no plugin makes.",
+    "p4-temportal": "design guidance for artifacts, which no plugin makes.",
+    "p4-native": "design guidance for artifacts, which no plugin makes."
    }
   },
   "/artifact-diagramming": {
@@ -699,6 +715,14 @@
     "p4-phi": "no line needs a transcript file."
    }
   },
+  "/extra-usage": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it is now `/usage-credits`, and spending is ezexe's own to decide.",
+    "p4-temportal": "it is now `/usage-credits`, and spending is ezexe's own to decide.",
+    "p4-native": "it is now `/usage-credits`, and spending is ezexe's own to decide."
+   }
+  },
   "/fast": {
    "kind": "command",
    "declined": {
@@ -815,6 +839,14 @@
     "p4-temportal": "ezexe's interface."
    }
   },
+  "/keybindings-help": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "keyboard shortcuts are ezexe's interface.",
+    "p4-temportal": "keyboard shortcuts are ezexe's interface.",
+    "p4-native": "keyboard shortcuts are ezexe's interface."
+   }
+  },
   "/lifetime": {
    "kind": "command",
    "used": [
@@ -884,6 +916,14 @@
    ],
    "declined": {
     "p4-temportal": "models."
+   }
+  },
+  "/motion": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it makes a Motion artifact, and artifacts are no part of what the plugins keep.",
+    "p4-temportal": "it makes a Motion artifact, and artifacts are no part of what the plugins keep.",
+    "p4-native": "it makes a Motion artifact, and artifacts are no part of what the plugins keep."
    }
   },
   "/output-style": {
@@ -1094,7 +1134,11 @@
   },
   "/send-to-project": {
    "kind": "command",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it sends a brief of the work to a Claude Project, which no plugin keeps or reads.",
+    "p4-temportal": "it sends a brief of the work to a Claude Project, which no plugin keeps or reads.",
+    "p4-native": "it sends a brief of the work to a Claude Project, which no plugin keeps or reads."
+   }
   },
   "/setup-bedrock": {
    "kind": "command",
@@ -1292,11 +1336,27 @@
     "p4-temportal": "cloud."
    }
   },
+  "/whiteboard": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it makes a Whiteboard artifact, and artifacts are no part of what the plugins keep.",
+    "p4-temportal": "it makes a Whiteboard artifact, and artifacts are no part of what the plugins keep.",
+    "p4-native": "it makes a Whiteboard artifact, and artifacts are no part of what the plugins keep."
+   }
+  },
   "/workflow-authoring": {
    "kind": "command",
    "declined": {
     "p4-phi": "a reference for editing `readings.js`, and nothing at run time.",
     "p4-temportal": "workflows."
+   }
+  },
+  "/workflow-launch-exec": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it runs a workflow launch the app handed the session, and no plugin hands one.",
+    "p4-temportal": "it runs a workflow launch the app handed the session, and no plugin hands one.",
+    "p4-native": "it runs a workflow launch the app handed the session, and no plugin hands one."
    }
   },
   "/workflows": {

@@ -121,9 +121,17 @@ An answer kept under the first rule is compared with nothing.
 ## The inventory
 
 The audits of Claude Code's slash commands, tools and features against p4-phi and p4-temportal were made by hand, row by row.
-`hooks/weighed.json` keeps what they came to as one record, 410 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
+`hooks/weighed.json` keeps what they came to as one record, 417 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
 A row is a slash command, a tool, a hook event, an event of the hooks module or a method of it, and it says which plugins use it, which declined it and why, which hold it open, or that it was weighed by nobody.
 A key that ends in `__` stands for every tool of that server, and one that ends in `*` for every name that begins with it.
+
+What the record comes to, by kind, as `/native weighed` prints it.
+
+- `command`: 131 rows, 19 used, 0 open, 112 declined, 0 weighed by nobody
+- `tool`: 122 rows, 46 used, 0 open, 67 declined, 9 weighed by nobody
+- `hook`: 33 rows, 13 used, 0 open, 0 declined, 20 weighed by nobody
+- `event`: 51 rows, 15 used, 0 open, 0 declined, 36 weighed by nobody
+- `method`: 80 rows, 29 used, 1 open, 0 declined, 50 weighed by nobody
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -136,6 +144,9 @@ Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module eve
 A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.
 
 Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.
+Each of the seven has a row now, and so has `/send-to-project`, which the record had as weighed by nobody.
+All eight are declined: three make or style artifacts, two run a workflow the app or a server hands a session, and keyboard shortcuts, spending and Claude Projects are ezexe's own.
+No commands page lists the seven, so each verdict rests on the command's own description in the build.
 Not seen live: the notice at a change of version.
 
 ## One line at a miss
