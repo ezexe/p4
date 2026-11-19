@@ -295,8 +295,64 @@ def command_word(p, n):
     return bool(COMMAND_RE.fullmatch(p)) and not (drive_ok(n) and os.path.lexists(n))
 
 
+# A git ref or a repository as a message writes it: `origin/main`, `upstream/release/2`, `refs/heads/main`, `ezexe/p4`.
+# gitrevisions, "<refname>": "e.g. master, heads/master, refs/heads/master", and a remote-tracking branch is its
+# remote's name and the branch. GitHub names a repository `owner/name`. Each is written as a relative path is.
+_CONFIGS = {}                    # a base folder -> its repository's config file, its time and the remotes it names
+
+
+def remotes(base):
+    """The names of the remotes of the repository at `base`, read from its config file with no process started, and
+    read again when that file changed. A worktree's `.git` is a file that names its git folder, whose `commondir`
+    names the folder the config is in."""
+    if not base:
+        return ()
+    key = norm(base)
+    held = _CONFIGS.get(key)
+    try:
+        if held is None:
+            top = repo_of(base)
+            git = os.path.join(top, ".git") if top else ""
+            if git and os.path.isfile(git):
+                with open(git, encoding="utf-8", errors="replace") as f:
+                    d = f.read().split("gitdir:", 1)[1].strip()
+                git = d if os.path.isabs(d) else os.path.join(top, d)
+                common = os.path.join(git, "commondir")
+                if os.path.isfile(common):
+                    with open(common, encoding="utf-8", errors="replace") as f:
+                        c = f.read().strip()
+                    git = c if os.path.isabs(c) else os.path.join(git, c)
+            held = _CONFIGS[key] = [os.path.join(git, "config") if git else "", None, ()]
+        at = os.path.getmtime(held[0]) if held[0] else None
+        if at != held[1]:
+            with open(held[0], encoding="utf-8", errors="replace") as f:
+                held[1], held[2] = at, tuple(re.findall(r'^\s*\[remote "([^"]+)"\]', f.read(), re.M))
+    except (OSError, IndexError, ValueError):
+        return ()
+    return held[2]
+
+
+def ref_word(p, n, base=""):
+    """True when the words `p` name a git ref or a repository and no path, with nothing on disk at `n`, the path
+    those words would be: two parts of which the second has no file extension, as `origin/main` and `ezexe/p4`
+    are and as issues.without_slugs reads a repository's name, or any number of parts behind `refs` or behind the
+    name of a remote of the repository at `base`. A draft named `origin/main` and `ezexe/p4` as its area, joined to
+    the project's folder. A folder or file that is there stays a path, and so does a word that ends in a slash."""
+    w = str(p or "").replace(chr(92), "/")
+    if "/" not in w or w.startswith(("/", ".", "~")) or re.match(r"^[A-Za-z]:", w) or any(c in w for c in "*?["):
+        return False
+    parts = w.split("/")
+    if not all(parts):
+        return False
+    two = len(parts) == 2 and (not re.search(r"\.[A-Za-z0-9]{1,8}$", parts[1]) or parts[1].lower().endswith(".git"))
+    if not (two or parts[0] == "refs" or parts[0] in remotes(base)):
+        return False
+    return not (drive_ok(n) and os.path.lexists(n))
+
+
 def paths_in(text, base=""):
-    """The paths a note names: in backticks, or written with a slash. A slash command is no path, command_word."""
+    """The paths a note names: in backticks, or written with a slash. A slash command is no path, command_word, and
+    neither is a git ref or a repository's name, ref_word."""
     out = []
     text = re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", str(text or ""))       # a URL is not a path
     for m in PATH_RE.finditer(text):
@@ -304,7 +360,7 @@ def paths_in(text, base=""):
         if p and ("/" in p or "\\" in p or "." in p) and not p.startswith(("http:", "https:")):
             p = p.rstrip(".,;:)")
             n = norm(p, base)
-            if n and n not in out and drive_ok(n) and not command_word(p, n):
+            if n and n not in out and drive_ok(n) and not command_word(p, n) and not ref_word(p, n, base):
                 out.append(n)
     return out
 

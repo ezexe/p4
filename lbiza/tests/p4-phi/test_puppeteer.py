@@ -239,6 +239,22 @@ class Linear(Base):
         self.assertRegex(files, r"^Files: `[^`]*lib/x\.py`$", "the file it names, and no command")
         self.assertRegex(prompt, r"(?m)^Area: `[^`]*lib/x\.py`\.$")
 
+    def test_a_draft_takes_no_git_ref_and_no_repositorys_name_for_a_path(self):
+        """A message that names `origin/main` and `ezexe/p4` got a draft whose `Area:` and `Files:` lines held both,
+        joined to the project's folder. A git ref and a repository's name are no path, relay.ref_word, so the draft
+        names the file the message names and neither of those."""
+        t = self.t
+        write(os.path.join(t.proj, "lib", "x.py"), "x = 1\n")
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        said = RETRY + ", rebased onto origin/main of ezexe/p4"
+        prompt = call_in(context(t.say(TOP, said)))["prompt"]
+        self.assertNotIn("Area:", prompt)
+        self.assertNotIn("Files:", prompt)
+        prompt = call_in(context(t.say(TOP, said + ", in `lib/x.py`")))["prompt"]
+        files = next(x for x in prompt.splitlines() if x.startswith("Files: "))
+        self.assertRegex(files, r"^Files: `[^`]*lib/x\.py`$", "the file it names, and no ref and no repository")
+
     def test_a_typed_slash_command_is_drafted_as_no_session(self):
         """A message that is a slash command is Claude Code's to run and no work of ezexe's to route: `/goal` with a
         condition that reads as work got a start draft titled by the command. phi.request_of takes no request from

@@ -71,6 +71,50 @@ class Paths(unittest.TestCase):
         native = relay.norm("/w/lib/x.py")                  # this machine's own rule, with nothing set
         self.assertEqual(native, "w:/lib/x.py" if os.name == "nt" else "/w/lib/x.py")
 
+    def test_a_git_ref_and_a_repositorys_name_are_no_path(self):
+        """`origin/main` and `ezexe/p4` in a message are a remote-tracking branch, gitrevisions, and a repository as
+        GitHub names one, `owner/name`. Each is written as a relative path is, and a start draft named both as its
+        area, joined to the project's folder. Two parts with no file extension and nothing on disk there are no
+        path, as issues.without_slugs reads a repository's name, and neither is anything behind `refs` or behind
+        the name of a remote of the project's repository. A folder that is there, a file still to be written, a
+        path of three parts and a word that ends in a slash stay paths. The remotes are read from the repository's
+        config with no process started, a worktree's through its `commondir`, and read again when it changed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = os.path.join(tmp, "proj").replace("\\", "/")
+            os.makedirs(os.path.join(base, "lib", "sub"))
+            subprocess.run(["git", "init", "-q", base], check=True)
+            said = ("Rebase onto origin/main of ezexe/p4, as `origin/main` and `anthropics/claude-code.git` say, see "
+                    "refs/heads/main, then fix lib/sub and lib/new.py and docs/guide/intro and notes/ and lib/.")
+            want = [relay.norm(x, base) for x in ("lib/sub", "lib/new.py", "docs/guide/intro", "lib")]
+            self.assertEqual(relay.paths_in(said, base), want)
+            for word in ("origin/main", "ezexe/p4", "refs/heads/main", "refs/remotes/origin/main", "user/repo.git"):
+                self.assertTrue(relay.ref_word(word, relay.norm(word, base), base), word)
+            for word in ("lib/sub", "lib/new.py", "docs/guide/intro", "/origin/main", "./origin/main", "main",
+                         "lib/*", "origin/"):
+                self.assertFalse(relay.ref_word(word, relay.norm(word, base), base), word)
+            # a branch of a remote with a slash in its name is a ref only once the repository has that remote
+            deep = "upstream/release/2"
+            self.assertEqual(relay.remotes(base), ())
+            self.assertFalse(relay.ref_word(deep, relay.norm(deep, base), base))
+            subprocess.run(["git", "-C", base, "remote", "add", "upstream", "https://example.invalid/u/r.git"],
+                           check=True)
+            config = os.path.join(base, ".git", "config")
+            os.utime(config, (time.time() + 5, time.time() + 5))       # a later time, whatever the clock's grain
+            self.assertEqual(relay.remotes(base), ("upstream",), "the config is read again once it changed")
+            self.assertTrue(relay.ref_word(deep, relay.norm(deep, base), base))
+            self.assertEqual(relay.paths_in(f"merge {deep} into lib/sub", base), [relay.norm("lib/sub", base)])
+            os.makedirs(os.path.join(base, "upstream", "release", "2"))
+            self.assertEqual(relay.paths_in(f"read {deep}", base), [relay.norm(deep, base)], "a folder that is there")
+            # a worktree's `.git` is a file, and the remotes are in the config of the folder its commondir names
+            subprocess.run(["git", "-C", base, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
+                            "--allow-empty", "-m", "one"], check=True)
+            tree = os.path.join(tmp, "tree").replace("\\", "/")
+            subprocess.run(["git", "-C", base, "worktree", "add", "-q", tree], check=True)
+            self.assertTrue(os.path.isfile(os.path.join(tree, ".git")))
+            self.assertEqual(relay.remotes(tree), ("upstream",))
+            self.assertEqual(relay.remotes(""), ())
+            self.assertEqual(relay.remotes(os.path.join(tmp, "no-repository")), ())
+
     def test_a_slash_command_is_no_path(self):
         """`/goal` and `/plan` in a message are Claude Code's commands, commands.md, and a plugin's is written
         `/plugin-name:skill-name`, skills.md. Joined to a base on a machine with drive letters each read as a folder
