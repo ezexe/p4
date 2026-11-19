@@ -402,13 +402,16 @@ def migrate_layout(p4, commit=True):
     into temportal/, and store/ and models/, at the top or under recall/, and archive/ into phi/. .gitignore and
     .gitattributes are rewritten to match, and when `p4` is a git repository of its own the move is committed alone.
     After a move, and at a store's first start, when it has no RECORD yet, keep_settings brings Claude Code's settings
-    in the project's local file to what the store wants. Returns the lines to print, none when there was nothing to
+    in the project's local file to what the store wants. It does the same when p4-phi was installed, removed,
+    switched on or switched off since the record was written, by phi_moved, so the two rules that serve p4-phi are
+    written or taken out by whichever plugin starts. Returns the lines to print, none when there was nothing to
     move. Cheap when there is nothing: one lstat call per earlier place in OLDER, one more for a move an earlier start
-    renamed and did not commit, and one for the record."""
+    renamed and did not commit, and the reads of phi_moved: the record, installed_plugins.json and the settings
+    files that can name `enabledPlugins`."""
     lines = _migrate_layout(p4, commit)
-    if (lines or not os.path.exists(record_path(p4))) and os.path.isdir(p4):
+    if os.path.isdir(p4):
         project = session_project(p4)
-        if project:
+        if project and (lines or not os.path.exists(record_path(p4)) or phi_moved(p4, project)):
             try:
                 keep_settings(project, p4=p4)
             except Exception as e:  # noqa: BLE001 — the layout move stands whatever the settings check meets
@@ -1320,6 +1323,7 @@ _PER_FILE = {
                            and _int(v.get("gen", 0))),
     "denyRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
                             and _int(v.get("gen", 0))),
+    "phi": lambda v: isinstance(v, bool),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
 }
 
@@ -1638,12 +1642,12 @@ def version_folders(here):
             if n != m.group(2) and os.path.isfile(os.path.join(m.group(1), n, "scripts", "phi.py"))]
 
 
-# The ask rule ezexe approved for p4 to keep in the local file of every project where p4 runs: an explicit ask rule
+# The ask rule ezexe approved for p4 to keep in the local file of every project where p4-phi runs: an explicit ask rule
 # prompts in every permission mode, bypassPermissions included, so the app shows its approval card before every
 # archive_session call, which replaced p4-phi's own archive guard. permission-modes.md, "Actions no mode
 # auto-approves". It is one entry of `permissions.ask` that p4 owns, kept by the same rule as the allow rules under
 # RECORD's `askRules`: an entry the user wrote is never taken over or removed, and one deleted by hand stays gone.
-# Both copies write it, since its text names no plugin folder. A store that turns `phi.upkeep` on wants none: ezexe
+# Both copies write it, since its text names no plugin folder, and only where p4-phi runs, by phi_on. A store that turns `phi.upkeep` on wants none: ezexe
 # decided that a session archives the finished, landed sessions it started by itself, so the keeper writes no ask
 # rule there and takes its own entry out, and the app's own rule holds, desktop.md, "Work across sessions": "You get
 # an approval card before Claude archives a session, except in Auto mode and Bypass permissions mode".
@@ -1655,6 +1659,68 @@ ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
 # Code from using the specified tool", and "Rules are evaluated in order: deny, then ask, then allow."
 DENY_KEY = "permissions.deny"
 DENY_RULES = ("mcp__ccd_session_mgmt__set_session_model",)
+# Both rules serve p4-phi's session tree alone, so the keeper writes them only where p4-phi is installed and enabled,
+# and takes its own entries out where it is not, as it takes out any key it no longer writes. p4-phi's own copy sits
+# beside phi.py and runs only where p4-phi is loaded. The copy in p4-temportal reads Claude Code's own files:
+# installed_plugins.json for the install, and `enabledPlugins` in the settings files for a plugin switched off.
+# RECORD's part PHI_PART holds, by settings file, whether p4-phi ran at the last whole check of that file, apart from
+# `kept`, which a copy from before this part compares whole.
+PHI = "p4-phi"
+PHI_PART = "phi"
+
+
+def _phi_copy():
+    """The scripts folder of this copy when it is p4-phi's own, which sits beside phi.py; '' for any other copy."""
+    here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
+    return fwd(here) if os.path.isfile(os.path.join(here, "phi.py")) else ""
+
+
+def plugin_enabled(name, target, platform=None):
+    """False when a settings file switches the plugin `name` of MARKET off for a session whose local file is
+    `target`. The first file that names it under `enabledPlugins` decides, in the order of settings.md, "Settings
+    precedence": the managed file, the local file, the project's, the user's. True when none names it."""
+    platform = platform or sys.platform
+    files = list(next((v for k, v in MANAGED.items() if platform.startswith(k)), []))
+    files += [target, os.path.join(os.path.dirname(target), "settings.json"),
+              os.path.join(_config_dir(), "settings.json")]
+    for f in files:
+        named = (read_json(f) or {}).get("enabledPlugins")
+        if isinstance(named, dict) and isinstance(named.get(f"{name}@{MARKET}"), bool):
+            return named[f"{name}@{MARKET}"]
+    return True
+
+
+def phi_on(project, target, platform=None, rec=None):
+    """Whether p4-phi runs in a session of `project`, whose local settings file is `target`: True for p4-phi's own
+    copy, and for any copy where p4-phi is installed for the project and no settings file switches it off. None
+    where neither holds and the record names a copy of p4-phi outside the plugin cache that still holds phi.py, a
+    checkout loaded by `--plugin-dir`: no file says whether this session loaded it, so the rules are left to that
+    copy. False otherwise."""
+    if _phi_copy():
+        return True
+    if PHI in plugin_versions(project) and plugin_enabled(PHI, target, platform):
+        return True
+    dev = (rec or {}).get("phiCopy")
+    if isinstance(dev, str) and dev and not _CACHED.match(dev) and os.path.isfile(os.path.join(dev, "phi.py")):
+        return None
+    return False
+
+
+def phi_moved(p4, project):
+    """True when whether p4-phi runs for `project` differs from what the last whole check of its local file
+    recorded, so the keeper has the two rules to write or to take out. False where this copy cannot tell, where the
+    local file is recorded as unreadable at its present time, and where SETTINGS_ENV turns the keeper off."""
+    if os.environ.get(SETTINGS_ENV) == "0":
+        return False
+    try:
+        rec = read_record(p4)
+        target = settings_file(project)
+        if (rec.get("unreadable") or {}).get(fwd(target), "none") == _mtime(target):
+            return False
+        on = phi_on(project, target, sys.platform, rec)
+        return on is not None and (rec.get(PHI_PART) or {}).get(fwd(target)) != on
+    except Exception:  # noqa: BLE001 — a record or a settings file that cannot be read moves nothing
+        return False
 
 
 def rule_identity(rule):
@@ -1807,8 +1873,11 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     for k in WRITES:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
     _keep_rules(new, rec, name, allow_rules(platform, conf), owned_only)
-    _keep_rules(new, rec, name, [] if upkeep_on(p4) else list(ASK_RULES), owned_only, ASK_KEY, "askRules")
-    _keep_rules(new, rec, name, list(DENY_RULES), owned_only, DENY_KEY, "denyRules")
+    phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves both rules
+    ask = list(ASK_RULES) if phi and not upkeep_on(p4) else []
+    _keep_rules(new, rec, name, None if phi is None else ask, owned_only, ASK_KEY, "askRules")
+    _keep_rules(new, rec, name, None if phi is None else list(DENY_RULES) if phi else [], owned_only, DENY_KEY,
+                "denyRules")
     for k in env + dropped:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only, past)
     cur_env = new.get(ENV_KEY) if isinstance(new.get(ENV_KEY), dict) else {}
@@ -1843,6 +1912,10 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     if not owned_only:
         rec["section"] = conf
         rec.setdefault("kept", {})[name] = {"keeper": KEEPER, "p4env": p4env}
+        if phi is not None:                             # else the answer of the last copy that could tell stays
+            rec.setdefault(PHI_PART, {})[name] = phi
+        if _phi_copy() and not _CACHED.match(_phi_copy()):
+            rec["phiCopy"] = _phi_copy()                # a copy of p4-phi outside the plugin cache kept this store
     if tell:
         told = rec.get("asked") or {}
         for k, v in others.items():
@@ -2105,10 +2178,12 @@ def watch(project, payload):
     unread = (rec.get("unreadable") or {}).get(fwd(target), "none")
     other = [[fwd(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
              if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
+    phi = (rec.get(PHI_PART) or {}).get(fwd(target))    # whether p4-phi ran at the last whole check of this file
     if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))
             and other == (rec.get("otherMemory") or [])
             and ((rec.get("kept") or {}).get(fwd(target)) or {})
-            == {"keeper": KEEPER, "p4env": env_entries(p4, target)}):
+            == {"keeper": KEEPER, "p4env": env_entries(p4, target)}
+            and (unread != "none" or phi_on(project, target, sys.platform, rec) in (None, phi))):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
     return out

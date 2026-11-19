@@ -1094,17 +1094,132 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(got["permissions"]["deny"], ["Bash(rm *)"], "p4's own goes, the user's stays")
         self.assertEqual(got["permissions"]["ask"], [self.ARCHIVE_ASK], "and only that entry")
 
-    def test_the_temportal_copy_writes_the_ask_and_deny_rules_too(self):
-        """The two rules name no plugin folder, so p4-temportal's copy of p4conf.py writes them where it runs alone."""
+    def temportal(self):
+        """p4-temportal's copy of p4conf.py, which sits beside no phi.py."""
         import importlib.util
         spec = importlib.util.spec_from_file_location("p4conf_temportal", COPIES[0])
         other = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(other)
+        return other
+
+    def config(self, *parts):
+        return os.path.join(os.environ["CLAUDE_CONFIG_DIR"], *parts)
+
+    def install_phi(self, enabled=None):
+        """p4-phi as `claude plugin install` leaves it at user scope: a row of installed_plugins.json, and with
+        `enabled` its entry of `enabledPlugins` in the user's settings."""
+        _write(self.config("plugins", "installed_plugins.json"),
+               {"version": 2, "plugins": {"p4-phi@p4-marketplace": [{"scope": "user", "version": "0.11.74"}]}})
+        if enabled is not None:
+            _write(self.config("settings.json"), {"enabledPlugins": {"p4-phi@p4-marketplace": enabled}})
+
+    def two_rules(self):
+        got = self.read(self.local()).get("permissions") or {}
+        return got.get("ask"), got.get("deny")
+
+    def test_the_temportal_copy_writes_the_ask_and_deny_rules_where_p4_phi_is_installed_and_enabled(self):
+        """The two rules serve p4-phi's session tree alone and name no plugin folder, so p4-temportal's copy writes
+        them where Claude Code's own files say p4-phi is installed for the project and not switched off."""
+        other = self.temportal()
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        self.install_phi(enabled=True)
+        other.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+        self.assertNotIn("allow", self.read(self.local())["permissions"], "the allow rules are p4-phi's copy's alone")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(list(rec["phi"].values()), [True])
+
+    def test_the_temportal_copy_writes_neither_rule_where_p4_phi_is_not_installed(self):
+        other = self.temportal()
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        mine = {"ask": ["Bash(git push *)"], "deny": ["Read(./.env)"]}
+        _write(self.local(), {"permissions": mine})
+        other.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.two_rules(), (mine["ask"], mine["deny"]), "the user's own rules and no other")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(list(rec["phi"].values()), [False])
+        self.assertNotIn("askRules", rec)
+        self.assertNotIn("denyRules", rec)
+
+    def test_a_settings_file_that_switches_p4_phi_off_decides_by_precedence(self):
+        """`enabledPlugins` is read as settings.md orders the files: the local file is over the project's, which is
+        over the user's, and an install no file names counts as enabled."""
+        other = self.temportal()
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        key = "p4-phi@p4-marketplace"
+        project = os.path.join(self.project, ".claude", "settings.json")
+        self.install_phi()
+        self.assertIs(other.phi_on(self.project, self.local(), "linux"), True, "installed and named by no file")
+        self.install_phi(enabled=False)
+        self.assertIs(other.phi_on(self.project, self.local(), "linux"), False, "switched off by the user's file")
+        _write(project, {"enabledPlugins": {key: True}})
+        self.assertIs(other.phi_on(self.project, self.local(), "linux"), True, "the project's file is over the user's")
+        _write(self.local(), {"enabledPlugins": {key: False}})
+        self.assertIs(other.phi_on(self.project, self.local(), "linux"), False, "the local file is over the project's")
+        os.remove(self.config("plugins", "installed_plugins.json"))
+        _write(self.local(), {"enabledPlugins": {key: True}})
+        self.assertIs(other.phi_on(self.project, self.local(), "linux"), False, "enabled and not installed")
+
+    def test_a_start_takes_both_rules_out_once_p4_phi_is_gone_and_writes_them_back_once_it_is_there(self):
+        """migrate_layout, which every plugin calls at its start, runs the keeper when p4-phi was removed, switched
+        off or installed since the record was written. The keeper then takes out its own two entries and no rule
+        of the user's, and a start with nothing changed writes nothing."""
+        other = self.temportal()
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        _write(self.local(), {"permissions": {"ask": ["Bash(git push *)"], "deny": ["Read(./.env)"]}})
+        both = (["Bash(git push *)", self.ARCHIVE_ASK], ["Read(./.env)", self.MODEL_DENY])
+        mine = (["Bash(git push *)"], ["Read(./.env)"])
+        self.install_phi(enabled=True)
+        other.migrate_layout(p4)
+        self.assertEqual(self.two_rules(), both)
+        self.install_phi(enabled=False)
+        other.migrate_layout(p4)
+        self.assertEqual(self.two_rules(), mine, "switched off: p4's two go and the user's stay")
+        before = (Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns,
+                  os.stat(self.record()).st_mtime_ns)
+        other.migrate_layout(p4)
+        self.assertEqual((Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns,
+                          os.stat(self.record()).st_mtime_ns), before, "nothing changed, nothing written")
+        self.install_phi(enabled=True)
+        other.migrate_layout(p4)
+        self.assertEqual(self.two_rules(), both, "switched on again: both are back")
+        os.remove(self.config("plugins", "installed_plugins.json"))
+        other.migrate_layout(p4)
+        self.assertEqual(self.two_rules(), mine, "uninstalled: p4's two go")
+
+    def test_p4_phis_own_copy_writes_both_rules_and_its_watcher_writes_them_back(self):
+        """p4-phi's own copy sits beside phi.py and runs only where p4-phi is loaded, as by `--plugin-dir`, which no
+        file records. After p4-temportal's copy kept a store with neither rule, the watcher of p4-phi's copy reads
+        from the record that p4-phi did not run then, and writes both at its start."""
+        from unittest import mock
+        other = self.temportal()
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         other.keep_settings(self.project, platform="linux")
-        got = self.read(self.local())["permissions"]
-        self.assertEqual((got["ask"], got["deny"]), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
-        self.assertNotIn("allow", got, "the allow rules are p4-phi's copy's alone")
+        self.assertEqual(self.two_rules(), (None, None))
+        with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)):
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+
+    def test_the_temportal_copy_leaves_both_rules_to_a_checkout_of_p4_phi_that_kept_the_store(self):
+        """A checkout of p4-phi loaded by `--plugin-dir` is in no file of Claude Code's, so p4-temportal's copy
+        cannot tell whether a session loaded it. The record names the checkout that kept the store, and while that
+        folder holds phi.py the copy neither writes the two rules nor takes them out."""
+        other = self.temportal()
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.keep_settings(self.project, platform="linux")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(rec["phiCopy"], SRC.as_posix())
+        self.assertIsNone(other.phi_on(self.project, self.local(), "linux", rec))
+        other.migrate_layout(p4)
+        other.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        rec["phiCopy"] = Path(self.tmp, "gone", "scripts").as_posix()
+        _write(self.record(), rec)
+        other.migrate_layout(p4)
+        self.assertEqual(self.two_rules(), ([], []), "the checkout is gone, so the two rules go")
 
     def test_the_rules_follow_the_plugin_folder_and_an_entry_deleted_by_hand_stays_gone(self):
         from unittest import mock
