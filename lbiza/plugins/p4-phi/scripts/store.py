@@ -50,7 +50,7 @@ BARRIER_MIN_TOKENS = 3
 HEADERS = {
     "rules.md": ("ezexe's rulings: what holds past the turn, in ezexe's own words.",
                  "Written when ezexe rules something; a later retraction frees a ruling, never an edit here.",
-                 "Fields: ruling, owner-words, scope, form, status, time, pinned, plain; a migrated entry adds from."),
+                 "Fields: ruling, owner-words, scope, form, status, time, plain; a migrated entry adds from."),
     "corrections.md": ("Readings that steered work and were wrong, and details ezexe had to ask for.",
                        "Written when ezexe corrects a reading or asks for what was left out.",
                        "Fields: key, time, match, meant, delta for a corrected reading; asked, time, omitted for a "

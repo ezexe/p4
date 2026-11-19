@@ -16,9 +16,8 @@ event and matcher hooks/hooks.json runs it on, and what it does.
                  for with p4conf's record, which on any change runs p4conf.keep_settings and, for a newer Claude
                  Code, starts `changelog`; and brings the
                  repository's and the dependencies' documents and the index up to date.
-                 It prints a `systemMessage` only naming a key a store wants that p4 never writes, and
-                 `additionalContext` only when ezexe pinned rules: the block `Standing rules from ezexe:` of at
-                 most PINNED_CHARS characters.
+                 It prints a `systemMessage` only naming a key a store wants that p4 never writes, and never
+                 `additionalContext`: a rule every session holds is a rules file, which Claude Code loads itself.
   settings       ConfigChange, matcher `local_settings|project_settings|user_settings`. p4conf.watch checks the
                  keys the record owns, never a block, and prints nothing.
   changelog      Run by the layout hook in a process of its own, with the store and two versions on stdin.
@@ -51,7 +50,11 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
 - UserPromptSubmit: `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`
   adds context beside the submitted prompt and cannot replace the prompt.
 - SessionStart: `hookSpecificOutput.additionalContext` adds context for Claude, and so does plain stdout, so a
-  silent hook prints nothing at all.
+  silent hook prints nothing at all. The layout hook hands no rules: memory.md, "Organize rules with
+  `.claude/rules/`", says "Rules without `paths` frontmatter are loaded at launch with the same priority as
+  `.claude/CLAUDE.md`" and "Personal rules in `~/.claude/rules/` apply to every project on your machine", and
+  context-window.md, "What survives compaction", has the row "Project-root CLAUDE.md and unscoped rules |
+  Re-injected from disk". catchup.py tells ezexe of a rule a store still marks pinned that no rules file carries.
 - PreToolUse: the agent hook rewrites nothing, so the Agent call runs as written, and sets no `permissionDecision`
   unless P4_AGENT_ALLOW=1 adds "allow".
 - SubagentStart: "SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and
@@ -83,7 +86,6 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402
 
-PINNED_CHARS = 1500
 NOTES_HEAD = "Notes from this repo's memory:"
 REPO_DEADLINE_S = 8.0
 HOOK_BUDGET_S = 11.0             # the layout hook's 15 s, less the index build: what the two reads share
@@ -167,14 +169,13 @@ def p4_of(payload):
 
 
 def ready(payload):
-    """The .claude/p4 directory, with PINNED_CHARS and REPO_DEADLINE_S set from its p4.json, when the layout hook has
-    made its corpus or models folder; None otherwise."""
+    """The .claude/p4 directory, with REPO_DEADLINE_S set from its p4.json, when the layout hook has made its corpus
+    or models folder; None otherwise."""
     p4 = p4_of(payload)
     p4conf.migrate_layout(p4)             # a store in an older layout is moved first
     if not (os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models"))):
         return None
-    p4conf.configure(globals(), p4, "recall", {"pinned_chars": "PINNED_CHARS",
-                                                          "repo_deadline_s": "REPO_DEADLINE_S"})
+    p4conf.configure(globals(), p4, "recall", {"repo_deadline_s": "REPO_DEADLINE_S"})
     return p4
 
 
@@ -304,47 +305,6 @@ def refresh_index(p4, project, deadline_s=None):
         st.build_index(p4)
 
 
-def memory_texts(p4):
-    """The collapsed, lowercase text of each file of the store's memory folder, the index MEMORY.md among them,
-    which Claude Code loads itself at a session's start."""
-    import store as st
-    d = p4conf.sub(p4, "memory")
-    out = []
-    try:
-        names = sorted(n for n in os.listdir(d) if n.endswith(".md"))
-    except OSError:
-        return out
-    for n in names:
-        try:
-            with open(os.path.join(d, n), encoding="utf-8", errors="replace") as f:
-                out.append(st.collapse(f.read()).lower())
-        except OSError:
-            continue
-    return out
-
-
-def pinned_block(p4):
-    """The store's LIVE pinned rules, newest first, less any a memory already carries: a memory's index line is the
-    one form a session gets at its start, row A6 of the plugin defaults inventory, ezexe/p4#130."""
-    import store as st
-    rules = [e for e in st.load_store(p4).get("rules.md", [])
-             if e.state == "LIVE" and (e.fields.get("pinned", "").strip().lower() in ("yes", "true", "1"))]
-    if rules:
-        carried = memory_texts(p4)
-        rules = [e for e in rules
-                 if not any(st.collapse(e.fields.get("plain") or e.value).lower() in m for m in carried)]
-    if not rules:
-        return ""
-    rules.sort(key=lambda e: e.time, reverse=True)
-    out = "Standing rules from ezexe:"
-    for e in rules:
-        line = "\n- " + st.collapse(e.fields.get("plain") or e.value)
-        if len(out) + len(line) > PINNED_CHARS:
-            break
-        out += line
-    return out if out.count("\n") else ""
-
-
 SERVED_MAX_S = 86400            # a served record no Stop or SubagentStop took: swept at a layout hook once this old
 
 
@@ -390,11 +350,7 @@ def h_layout(payload):
         except (OSError, ValueError, KeyError, ImportError):
             pass
     refresh_index(p4, project)
-    block = pinned_block(p4)
-    out = {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else {}
-    if block:
-        out["hookSpecificOutput"] = {"hookEventName": "SessionStart", "additionalContext": block}
-    return out or None
+    return {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else None
 
 
 # --- `settings`, on ConfigChange, and the watcher the layout hook runs ----------------------------------------

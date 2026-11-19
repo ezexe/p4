@@ -531,7 +531,7 @@ class P4Conf(unittest.TestCase):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
         HISTORY and the pin below updated."""
         import hashlib
-        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985"}   # append only: one more line for each GEN
+        pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009"}   # append only: one more line for each GEN
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -552,15 +552,36 @@ class P4Conf(unittest.TestCase):
 
     def test_missing_keys_are_added_and_set_values_kept(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"recall": {"pinned_chars": 900, "once_was": "kept"}, "extra": 1}, f)
+            json.dump({"recall": {"repo_deadline_s": 3.0, "once_was": "kept"}, "extra": 1}, f)
         s = p4conf.load(self.p4, warn=False)
         on_disk = self.read()
-        self.assertEqual(on_disk["recall"]["pinned_chars"], 900)
+        self.assertEqual(on_disk["recall"]["repo_deadline_s"], 3.0)
         self.assertEqual(on_disk["recall"]["inject"], "rules-facts", "a missing key is added")
         self.assertEqual(on_disk["recall"]["once_was"], "kept", "an unknown key stays on disk, read by nothing")
         self.assertEqual(on_disk["phi"], p4conf.DEFAULTS["phi"])
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
-        self.assertEqual(s["recall"]["pinned_chars"], 900)
+        self.assertEqual(s["recall"]["repo_deadline_s"], 3.0)
+
+    def test_the_pinned_rules_key_is_retired_and_no_variable_carries_it(self):
+        """The pinned rules block of a start went to Claude Code's own rules files, memory.md, "Organize rules with
+        `.claude/rules/`": no default writes recall.pinned_chars, a store that holds it loses it at the next rewrite
+        with no unknown-key line, and no P4_* variable is derived from it."""
+        import contextlib
+        import io
+        self.assertNotIn("pinned_chars", p4conf.DEFAULTS["recall"])
+        self.assertIn("recall.pinned_chars", p4conf.RETIRED)
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"recall": {"pinned_chars": 900}, "phi": {"max_depth": 4}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("pinned_chars", s["recall"])
+        self.assertNotIn("pinned_chars", self.read()["recall"])
+        self.assertNotIn("recall.pinned_chars", p4conf.env_keys())
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"recall": {"pinned_chars": 900}}, f)
+        self.assertNotIn("P4_RECALL_PINNED_CHARS", p4conf.env_wants(self.p4))
 
     def test_a_retired_section_is_dropped_from_the_file(self):
         """A key of RETIRED, such as `plans` or `version`, leaves a p4.json that holds it at the next rewrite, with no

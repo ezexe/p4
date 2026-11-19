@@ -83,7 +83,6 @@ DEFAULTS = {
                                          # true every line; P4_RECALL_INJECT=0, 1 or rules-facts wins for a run
         "learn": True,                   # false: the Stop hook trains nothing, and labels are still written
         "updated": None,                 # who last set inject and learn, and when: ezexe/phi's phi_model mode writes it
-        "pinned_chars": 1500,
         "repo_deadline_s": 8.0,
         "deps": {                        # frameworks, library packages and external modules as entries, by deps.py
             "auto": True,                # node_modules, vendor, third_party, _deps, vcpkg_installed, site-packages
@@ -157,11 +156,12 @@ READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "c
 # phi.context_window steers nothing either: the app counts a session's context, and a session reads its share with
 # the app's get_usage tool, so p4 holds no window size to count against. phi.file_sets went with the refusal of a
 # start whose brief declares no files: a session that writes works in a git worktree of its own, so no start is
-# held or refused for the files its brief names.
+# held or refused for the files its brief names. recall.pinned_chars went with the pinned rules block of a start:
+# Claude Code loads the rules files under `.claude/rules/` itself, at launch and after a compaction.
 RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
            "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
            "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions",
-           "phi.context_window", "phi.file_sets")
+           "phi.context_window", "phi.file_sets", "recall.pinned_chars")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -782,7 +782,7 @@ def _write(p4, data):
 WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number.
-GEN = 8
+GEN = 9
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],

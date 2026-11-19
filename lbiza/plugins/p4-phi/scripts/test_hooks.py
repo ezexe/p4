@@ -9,7 +9,7 @@ a small git project holding the fixture store. Checked: the hooks.json events, m
 each output's JSON shape against the hooks reference; silence where a hook has nothing to add; `updatedInput`
 carrying every original Agent field; the row opened and completed from `last_assistant_message`; a notification
 complete on arrival; usage labels, used when the served document's path appears in an Edit input and unused otherwise;
-the repo labels of a turn; exit 0 and one notice on a corrupt store; the pinned block cut at 1,500 characters; the
+the repo labels of a turn; exit 0 and one notice on a corrupt store; no pinned block at a start; the
 `.git/info/exclude` line never added twice; the store's .gitignore seeded under its marker; every handler in a
 project with no store.
 """
@@ -167,7 +167,7 @@ class Layout(Base):
         shutil.rmtree(self.p4)
         r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "", "SessionStart prints nothing when no rule is pinned")
+        self.assertEqual(r.stdout, "", "SessionStart prints nothing")
         for sub in ("store", "models", ".git"):
             self.assertTrue(os.path.exists(p4conf.sub(self.p4, sub)), sub)
         self.assertTrue(os.path.exists(os.path.join(self.p4, ".gitignore")))
@@ -250,35 +250,60 @@ class Layout(Base):
         cut = got[:got.index("# seeded by p4-recall")] + "phi/models/ranker.pt\n"
         self.assertEqual(self.gitignore(cut), cut)
 
-    def test_pinned_block_cut_at_1500(self):
-        rules = [[("ruling", f"pinned rule number {k} " + "x" * 120), ("status", "LIVE"), ("pinned", "yes"),
-                  ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(20)]
+    def test_a_start_hands_no_pinned_rule_and_the_rules_files_are_claude_codes_to_load(self):
+        """Audit candidate 1. memory.md, "Organize rules with `.claude/rules/`": "Rules without `paths` frontmatter
+        are loaded at launch with the same priority as `.claude/CLAUDE.md`", and context-window.md, "What survives
+        compaction": "Project-root CLAUDE.md and unscoped rules | Re-injected from disk". So the layout hook hands
+        no block at any source, a rule a store still marks pinned included, and its code is gone."""
+        import hook
+        for name in ("pinned_block", "memory_texts", "PINNED_CHARS"):
+            self.assertFalse(hasattr(hook, name), name)
+        rules = [[("ruling", f"pinned rule number {k}"), ("status", "LIVE"), ("pinned", "yes"),
+                  ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(3)]
         write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))
-        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
-        ctx = o["hookSpecificOutput"]["additionalContext"]
-        self.assertEqual(o["hookSpecificOutput"]["hookEventName"], "SessionStart")
-        self.assertTrue(ctx.startswith("Standing rules from ezexe:"))
-        self.assertLessEqual(len(ctx), 1500)
-        self.assertIn("pinned rule number 19", ctx.split("\n")[1], "newest first")
+        for source in ("startup", "resume", "clear", "compact"):
+            r = run_hook("layout", {"hook_event_name": "SessionStart", "source": source, "cwd": self.proj}, self.proj)
+            self.assertEqual((r.returncode, r.stdout), (0, ""), source)
+        self.assertNotIn("pinned", st.HEADERS["rules.md"][2], "no field of a rule asks for a block at a start")
+        self.assertIn("pinned", st.NOT_TEXT, "an entry that still holds the field gives retrieval no word of it")
 
-
-    def test_a_start_hands_no_pinned_rule_a_memory_already_carries(self):
-        """ezexe/p4#130, row A6: a pinned rule whose text a memory or its index line holds is not handed again at a
-        SessionStart; one no memory carries still is."""
+    def test_catch_up_names_a_pinned_rule_until_a_rules_file_or_a_memory_holds_it(self):
+        """What no docs page has Claude Code read is the store's rules.md, so catch-up tells ezexe, never the model,
+        of each LIVE rule still marked pinned whose text neither a rules file of the project or of the
+        configuration folder nor a memory holds, and is silent once one does."""
+        import catchup
+        from unittest import mock
+        conf = os.path.join(self.tmp.name, "config")
         rules = [[("ruling", "Indent with tabs in the exporter."), ("status", "LIVE"), ("pinned", "yes"),
                   ("time", "2026-10-11 10:00")],
                  [("ruling", "Run the ports check before a commit."), ("status", "LIVE"), ("pinned", "yes"),
-                  ("time", "2026-10-12 10:00")]]
+                  ("time", "2026-10-12 10:00")],
+                 [("ruling", "Name each test for what it proves."), ("status", "LIVE"), ("pinned", "yes"),
+                  ("time", "2026-10-13 10:00")],
+                 [("ruling", "Keep the changelog short."), ("status", "LIVE"), ("time", "2026-10-14 10:00")]]
         write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))
-        write(p4conf.sub(self.p4, "memory", "MEMORY.md"), "# Memory index\n\n- [Tabs](tabs.md) — x\n")
-        write(p4conf.sub(self.p4, "memory", "tabs.md"), "---\nname: tabs\n---\n\nIndent with tabs in the exporter.\n")
-        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
-        ctx = ((o or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
-        self.assertNotIn("Indent with tabs", ctx, "a memory carries it")
-        self.assertIn("Run the ports check before a commit.", ctx)
-        write(p4conf.sub(self.p4, "memory", "ports.md"), "Run the ports check before a commit.\n")
-        o = self.out(run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj))
-        self.assertNotIn("hookSpecificOutput", o or {}, "every pinned rule is a memory: nothing is handed")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": conf}):
+            self.assertEqual(catchup.rules_folders(self.proj), [os.path.join(self.proj, ".claude", "rules"),
+                                                                os.path.join(conf, "rules")])
+            line = catchup.run(self.proj, self.p4, sync=False)
+            self.assertIn("3 rules the store's rules.md marks pinned reach no session", line)
+            self.assertIn(".claude/rules/", line)
+            self.assertLess(line.index("Name each test"), line.index("Indent with tabs"), "newest first")
+            self.assertNotIn("Keep the changelog short", line, "a rule with no mark is no concern of the line")
+            write(os.path.join(self.proj, ".claude", "rules", "exporter", "tabs.md"),
+                  "# Exporter\n\nIndent with tabs in the\nexporter.\n")
+            write(os.path.join(conf, "rules", "commits.md"), "Run the ports check before a commit.\n")
+            line = catchup.run(self.proj, self.p4, sync=False)
+            self.assertIn("1 rule the store's rules.md marks pinned reaches no session", line)
+            self.assertNotIn("Indent with tabs", line, "a project rules file holds it, in a subfolder too")
+            self.assertNotIn("ports check", line, "a rules file of the configuration folder holds it")
+            write(p4conf.sub(self.p4, "memory", "tests.md"), "Name each test for what it proves.\n")
+            self.assertEqual(catchup.run(self.proj, self.p4, sync=False), "", "a memory holds the last one")
+            payload = {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}
+            os.remove(p4conf.sub(self.p4, "memory", "tests.md"))
+            with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.proj}):
+                out = catchup.hook(payload)
+            self.assertEqual(list(out), ["systemMessage"], "a line for ezexe and no context for the model")
 
 
 class Recall(Base):

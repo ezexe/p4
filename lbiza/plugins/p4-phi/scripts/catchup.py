@@ -9,6 +9,12 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
             never waits on a merge, and its output goes to `<git dir>/p4-sync.log`; when it cannot start, the line
             gives the whole command that syncs the store, as phi.py builds it. The fetch that finds out is given
             FETCH_S seconds. Nothing is forced, and nothing is pulled outside `p4.py sync`.
+  rules     when the store's rules.md still marks a LIVE rule `pinned: yes` and no rules file and no memory holds
+            its text. p4-phi hands no pinned rules at a start: Claude Code loads the rules files under
+            `.claude/rules/` and `~/.claude/rules/` at launch and again after a compaction, by
+            https://code.claude.com/docs/en/memory.md and https://code.claude.com/docs/en/context-window.md. Neither
+            page has Claude Code read a store's rules.md, so the line names each such rule until ezexe writes it as
+            a rules file or takes its `pinned` field away.
 
 P4_PHI_CATCHUP=0 turns it off.
 
@@ -89,6 +95,67 @@ def start_sync(p4):
         return False
 
 
+# --- a rule the store still marks pinned -----------------------------------------------------------------------
+
+PINNED_SHOWN = 3              # rules quoted in the line, the rest counted
+PINNED_HEAD = 120             # characters of each
+
+
+def _texts(folder):
+    """The collapsed, lowercase text of every .md file under `folder`, which a missing folder leaves empty."""
+    import store as st
+    out = []
+    for root, _dirs, names in os.walk(folder):
+        for n in sorted(names):
+            if n.endswith(".md"):
+                try:
+                    with open(os.path.join(root, n), encoding="utf-8", errors="replace") as f:
+                        out.append(st.collapse(f.read()).lower())
+                except OSError:
+                    pass
+    return out
+
+
+def rules_folders(project):
+    """The folders whose rules files Claude Code loads at launch for a session in `project`: the project's
+    `.claude/rules/` and the one under its configuration folder, which CLAUDE_CONFIG_DIR moves."""
+    home = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return [os.path.join(project, ".claude", "rules"), os.path.join(home, "rules")]
+
+
+def pinned_left(p4, project):
+    """The text of each LIVE rule the store's rules.md marks `pinned: yes` that no rules file and no memory holds,
+    newest first. A store with no such mark is read no further than its rules.md."""
+    import store as st
+    try:
+        with open(os.path.join(st.store_dir(p4), "rules.md"), encoding="utf-8", errors="replace") as f:
+            if "pinned:" not in f.read():
+                return []
+    except OSError:
+        return []
+    rules = [e for e in st.load_store(p4).get("rules.md", [])
+             if e.state == "LIVE" and e.fields.get("pinned", "").strip().lower() in ("yes", "true", "1")]
+    if not rules:
+        return []
+    held = [t for d in rules_folders(project) + [p4conf.sub(p4, "memory")] for t in _texts(d)]
+    rules.sort(key=lambda e: e.time, reverse=True)
+    texts = [st.collapse(e.fields.get("plain") or e.value) for e in rules]
+    return [t for t in texts if not any(t.lower() in h for h in held)]
+
+
+def pinned_line(p4, project):
+    left = pinned_left(p4, project)
+    if not left:
+        return ""
+    shown = "; ".join(f'"{t[:PINNED_HEAD]}"' for t in left[:PINNED_SHOWN])
+    more = f"; and {len(left) - PINNED_SHOWN} more" if len(left) > PINNED_SHOWN else ""
+    n = len(left)
+    return (f"{n} rule{'s' if n != 1 else ''} the store's rules.md marks pinned reach{'' if n != 1 else 'es'} no "
+            f"session, since p4-phi hands no pinned rules and Claude Code loads rules files at launch and after a "
+            f"compaction; write each as a file under .claude/rules/, committed so a worktree holds it, or under "
+            f"~/.claude/rules/ for every project, or take its `pinned` field away: {shown}{more}")
+
+
 # --- the hook ------------------------------------------------------------------------------------------------
 
 def sync_command(p4):
@@ -98,7 +165,8 @@ def sync_command(p4):
 
 def run(project, p4, sync=True):
     """The line for ezexe, '' when nothing is behind. On the way it calls p4conf.migrate_layout and, when the
-    store's branch is behind, starts `p4.py sync`."""
+    store's branch is behind, starts `p4.py sync`. A rule the store still marks pinned that no rules file holds is
+    named last."""
     parts = []
     if os.path.isdir(p4):
         moved = p4conf.migrate_layout(p4)
@@ -112,6 +180,12 @@ def run(project, p4, sync=True):
                 parts.append(f"the store's branch {got[0]} is {got[1]} commit(s) behind origin/{main}; "
                              + ("`p4.py sync` is merging it in the background" if started
                                 else f"run `{sync_command(p4)}` to merge it"))
+        try:
+            pinned = pinned_line(p4, project)
+        except (OSError, ValueError, ImportError):
+            pinned = ""
+        if pinned:
+            parts.append(pinned)
     return ("phi (p4-phi): " + ". ".join(parts) + ".") if parts else ""
 
 
