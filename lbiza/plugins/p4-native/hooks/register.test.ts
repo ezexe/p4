@@ -3,6 +3,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolInfo } from 'claude-code'
 
+import { counted, recordOf, rowOf, unweighed, verdictOf } from './inventory'
 import { PROBES, START, VETO, busyOf, fromMap, ofAllEvents, ofCompact, ofEvents, ofSelf, seenAtStart } from './probes'
 
 const ROOT = '/work/project'
@@ -63,7 +64,7 @@ type Entry = {
 
 // The probes' file as the module keeps it.
 type Book = {
-  hosts: Record<string, { claude: string; at: string; answers: Record<string, { answer: string; saw: string; claude: string }> }>
+  hosts: Record<string, { claude: string; at: string; answers: Record<string, { answer: string; saw: string; claude: string }>; unweighed?: string[] }>
   notices: string[]
 }
 
@@ -80,6 +81,9 @@ type Machine = {
   isTaken?: boolean
   // What a write does in place of landing, for a write another session's took the place of.
   lost?: () => boolean
+  // The record of what was weighed, as the plugin's own file holds it, and the session's slash commands.
+  record?: unknown
+  commands?: () => { name: string; source: string }[]
   // What a call of a tool answers: its text, or the text of a result that is an error.
   app?: (name: string, input: Record<string, unknown>) => string | { error: string }
 }
@@ -186,7 +190,11 @@ function machine(on: On, has: Machine): Seen {
   on('fs.exists', (_, e) => ({
     value: plain(e.path) === `${ROOT}/.claude/p4` ? has.hasStore !== false : files[plain(e.path)] !== undefined,
   }))
+  on('command.list', () => ({
+    value: (has.commands ?? (() => [])).call(undefined).map(command => ({ ...command, description: '' })) as never,
+  }))
   on('fs.read', (_, e) => {
+    if (plain(e.path).endsWith('/hooks/weighed.json') && has.record !== undefined) return { value: JSON.stringify(has.record) }
     const text = files[plain(e.path)]
 
     return text === undefined ? { deny: 'ENOENT' } : { value: text }
@@ -905,3 +913,115 @@ test('status pins one line that names the host and the version', { options: { st
 
   expect(seen.status).toEqual(['terminal, interactive, Claude Code 2.1.326'])
 })
+
+// A record of what was weighed: a command a plugin uses, one declined, a server's tools and a stem of commands.
+const RECORD = {
+  claude: '2.1.326',
+  rows: {
+    '/compact': { kind: 'command', used: ['p4-temportal'] },
+    '/color': { kind: 'command', declined: { 'p4-phi': "ezexe's interface." } },
+    '/design*': { kind: 'command', declined: { 'p4-phi': 'design work.' } },
+    Read: { kind: 'tool', used: ['p4-phi'] },
+    Bash: { kind: 'tool', used: ['p4-phi'] },
+    Agent: { kind: 'tool', used: ['p4-phi'] },
+    PushNotification: { kind: 'tool', used: ['p4-native'] },
+    SetGoal: { kind: 'tool', nobody: true },
+    mcp__ccd_session__: { kind: 'tool', used: ['p4-phi'] },
+    '$.mcp.call': { kind: 'method', nobody: true },
+    '$.settings.read': { kind: 'method', open: ['p4-phi'] },
+  },
+}
+const BUILTIN = ['compact', 'color', 'design-sync'].map(name => ({ name, source: 'builtin' }))
+
+test('a change of version names once each command and tool of the build that has no row in the record', async ($, on) => {
+  const clock = mock.clock(on)
+  let version = '2.1.328'
+  let commands = [...BUILTIN, { name: 'whiteboard', source: 'builtin' }, { name: 'lifetime', source: 'plugin' }]
+  let tools = [...OWN, tool('Brand'), tool('mcp__ccd_session__start_session'), tool('mcp__ccd_view__show_pane'), tool('mcp__other__thing')]
+  const seen = machine(on, {
+    version: () => version,
+    tools: () => tools,
+    commands: () => commands,
+    record: RECORD,
+    files: { [BOOK]: ranOn('desktop/interactive', '2.1.326') },
+    app: name => (name.endsWith('get_session') ? SELF : name.endsWith('list_sessions') ? '[]' : NO_MESSAGES),
+  })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await clock.settle()
+
+  // A plugin's command and another server's tool are no part of the host, and a key that stands for a server or
+  // a stem covers each name under it.
+  const told = book(seen).notices.join('\n')
+  expect(told).toContain('Claude Code 2.1.328 on desktop/interactive holds 3 commands and tools that no p4 plugin has weighed: /whiteboard, Brand, mcp__ccd_view__show_pane.')
+  expect(book(seen).hosts['desktop/interactive']?.unweighed).toEqual(['/whiteboard', 'Brand', 'mcp__ccd_view__show_pane'])
+
+  // The next build holds the same three and one more: the one is told, alone.
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  version = '2.1.330'
+  commands = [...commands, { name: 'motion', source: 'builtin' }]
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start({ ...BEGUN, turnId: 't2' })
+  await clock.settle()
+  const next = book(seen).notices.join('\n')
+  expect(next).toContain('holds 1 commands and tools that no p4 plugin has weighed: /motion.')
+  expect(next).not.toContain('Brand')
+
+  // A build with nothing new says nothing of the record.
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  version = '2.1.331'
+  tools = tools.filter(one => one.name !== 'Brand')
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start({ ...BEGUN, turnId: 't3' })
+  await clock.settle()
+  expect(book(seen).notices.join('\n')).not.toContain('no p4 plugin has weighed')
+  expect(book(seen).hosts['desktop/interactive']?.unweighed).toEqual(['/whiteboard', '/motion', 'mcp__ccd_view__show_pane'])
+})
+
+test('weighed prints the record\'s counts and each command and tool of this session with no row', async ($, on) => {
+  const clock = mock.clock(on)
+  machine(on, { record: RECORD, commands: () => [...BUILTIN, { name: 'whiteboard', source: 'builtin' }] })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const out = await $.tool.call({ tool: TOOL, command: 'weighed' } as never)
+  const lines = String((out as { result?: unknown }).result)
+  expect(lines).toContain('of Claude Code 2.1.326, which a module cannot list for the build it runs on')
+  expect(lines).toContain('command: 3 rows, 1 used, 0 open, 2 declined, 0 weighed by nobody')
+  expect(lines).toContain('tool: 6 rows, 5 used, 0 open, 0 declined, 1 weighed by nobody')
+  expect(lines).toContain('method: 2 rows, 0 used, 1 open, 0 declined, 1 weighed by nobody')
+  expect(lines).toContain('In this session, terminal/scripted on Claude Code 2.1.326, and weighed by nobody: /whiteboard.')
+})
+
+test('with no record to read, a run of the probes says nothing of it and weighed says so', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { version: () => '2.1.328', files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await clock.settle()
+  expect(book(seen).notices.join('\n')).not.toContain('no p4 plugin has weighed')
+  expect(book(seen).hosts['terminal/scripted']?.unweighed).toBeUndefined()
+
+  const out = await $.command.run({ command: 'native', args: 'weighed', ...TYPED })
+  expect(out.text).toBe('p4-native could not read the record of what was weighed.')
+})
+
+test('a row is found by its own key, by a server\'s key and by a stem, and comes to one verdict', () => {
+  const { rows } = recordOf(JSON.stringify(RECORD))
+  expect(rowOf(rows, '/compact')?.used).toEqual(['p4-temportal'])
+  expect(rowOf(rows, 'mcp__ccd_session__start_session')?.used).toEqual(['p4-phi'])
+  expect(rowOf(rows, '/design-sync')?.declined).toEqual({ 'p4-phi': 'design work.' })
+  expect(rowOf(rows, 'mcp__ccd_view__show_pane')).toBeUndefined()
+  expect(unweighed(rows, ['/compact', '/motion', 'Read', 'Brand'])).toEqual(['/motion', 'Brand'])
+  expect(verdictOf({ kind: 'tool', used: ['p4-phi'], declined: { 'p4-temportal': 'sessions.' } })).toBe('used')
+  expect(verdictOf({ kind: 'method', open: ['p4-phi'] })).toBe('open')
+  expect(verdictOf({ kind: 'tool', nobody: true })).toBe('nobody')
+  expect(recordOf('not json')).toEqual({ claude: '', rows: {} })
+  expect(counted(recordOf(JSON.stringify(RECORD))).length).toBe(5)
+})
+

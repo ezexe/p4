@@ -50,6 +50,8 @@ import {
   seenAtStart,
 } from './probes'
 import type { Answer, Called, Host, Probe, Said } from './probes'
+import { counted, recordOf, unweighed } from './inventory'
+import type { Record_ } from './inventory'
 
 // The project's store, and the map's file inside it.
 const STORE = '.claude/p4'
@@ -62,6 +64,9 @@ const IGNORED = '*\n'
 
 // The file of the probes' answers and of the notices not yet told.
 const BOOK = 'native/probes.json'
+
+// The record of what the p4 plugins weighed, in the plugin's own folder.
+const RECORD = 'hooks/weighed.json'
 
 // The most sessions the file holds, the newest kept.
 const MOST = 24
@@ -81,12 +86,13 @@ const PUSH_MOST = 180
 const APP = 'mcp__ccd_'
 
 // What the commands are, for the slash command and for the tool.
-const HINT = 'map | probes | probe'
+const HINT = 'map | probes | probe | weighed'
 const USAGE =
   `/native ${HINT}\n` +
   'map prints the capability map of this session, read anew, and where it is kept. probes lists every watched ' +
   'condition with the decision it belongs to and the answer kept for this kind of host. probe reads the probes ' +
-  'anew and prints each answer.'
+  'anew and prints each answer. weighed holds the commands and tools of this session against the record of what ' +
+  'the p4 plugins weighed, and names each that has no row.'
 
 // The tool a session calls for the same commands. It waits behind ToolSearch as an MCP server's tool does, since
 // few turns ask what the host is.
@@ -98,10 +104,11 @@ const TOOL = {
     'the tools of the desktop app and of Claude Code that answer here, and the file that keeps it for scripts and ' +
     'other plugins. probes lists the watched conditions, one for each decision the platform blocked, with the ' +
     'answer kept for this kind of host. probe reads them anew, which changes nothing in the session, and says ' +
-    'which answer changed.',
+    'which answer changed. weighed names the slash commands and tools of this session that no p4 plugin has ' +
+    'weighed, against the record of what each plugin uses and what it declined.',
   inputSchema: {
     type: 'object',
-    properties: { command: { type: 'string', enum: ['map', 'probes', 'probe'] } },
+    properties: { command: { type: 'string', enum: ['map', 'probes', 'probe', 'weighed'] } },
     required: ['command'],
   },
 } as const
@@ -124,7 +131,7 @@ export type Facts = {
 // One probe's answer as the file keeps it, the answers of one kind of host with the version they were read on, and
 // the file: the kinds of host by name, and the notices no prompt has carried yet.
 type Kept = Said & { claude: string; at: string; reads?: number }
-type Ran = { claude: string; at: string; answers: Record<string, Kept> }
+type Ran = { claude: string; at: string; answers: Record<string, Kept>; unweighed?: string[] }
 type Book = { hosts: Record<string, Ran>; notices: string[] }
 
 // Whether a person is at the prompt of a terminal, and the names of the fields `session.start` carried. A reload of
@@ -342,6 +349,25 @@ function keptOf(ran: Ran | undefined, probe: Probe): Kept | undefined {
   return last !== undefined && (last.reads ?? 1) === (probe.reads ?? 1) ? last : undefined
 }
 
+// The record of what was weighed, and the commands and tools of this session that have no row in it: the slash
+// commands Claude Code ships, its own tools, and the desktop app's. A plugin's command and another server's tool
+// are no part of the host. Nothing where the record cannot be read.
+async function weigh($: EngineInterface, host: Host): Promise<{ record: Record_; missing: string[] } | undefined> {
+  try {
+    const record = recordOf(await $.fs.read(`${slashed($.plugin.root)}/${RECORD}`))
+    if (Object.keys(record.rows).length === 0) return undefined
+    const commands = (await $.command.list().catch(() => []))
+      .filter(command => command.source === 'builtin')
+      .map(command => `/${command.name}`)
+
+    return { record, missing: unweighed(record.rows, [...commands, ...host.tools.native, ...host.tools.app]) }
+  } catch (error) {
+    note($, `the record of what was weighed was not read: ${reason(error)}`)
+
+    return undefined
+  }
+}
+
 // What a changed answer tells the session.
 function changed(probe: Probe, was: Answer, now: Said, host: Host): string {
   const head =
@@ -357,7 +383,13 @@ function changed(probe: Probe, was: Answer, now: Said, host: Host): string {
 // where none is kept, from the one its decision was made on. A run that read every probe that fits stamps the
 // version, and where another version was kept it names the change of version and the probes read by hand. It
 // answers the notices it made. With no store nothing is kept, and the notices are answered all the same.
-async function settle($: EngineInterface, host: Host, answers: ReadonlyMap<Probe, Said>, isWhole: boolean): Promise<string[]> {
+async function settle(
+  $: EngineInterface,
+  host: Host,
+  answers: ReadonlyMap<Probe, Said>,
+  isWhole: boolean,
+  missing?: readonly string[],
+): Promise<string[]> {
   const opened = await open($)
   const book = opened?.book ?? { hosts: {}, notices: [] }
   const kind = kindOf(host)
@@ -380,6 +412,19 @@ async function settle($: EngineInterface, host: Host, answers: ReadonlyMap<Probe
     }
     ran.claude = host.claude
     ran.at = at
+  }
+  if (missing !== undefined) {
+    // A name with no row is told once for a kind of host, and again only after it left the build and came back.
+    const told = new Set(ran.unweighed ?? [])
+    const fresh = missing.filter(name => !told.has(name))
+    if (fresh.length > 0) {
+      made.push(
+        `p4-native: Claude Code ${host.claude} on ${kind} holds ${fresh.length} commands and tools that no p4 plugin ` +
+          `has weighed: ${fresh.join(', ')}. Each is in this build with no row in the record, so tell ezexe, and ` +
+          `/native weighed lists them until each has a row in hooks/weighed.json.`,
+      )
+    }
+    ran.unweighed = [...missing]
   }
   if (opened !== undefined) {
     book.hosts[kind] = ran
@@ -462,8 +507,9 @@ async function run($: EngineInterface): Promise<{ answers: Map<Probe, Said>; mad
   const fit = PROBES.filter(probe => probe.kind === 'asked' && probe.fits(host))
   owed = fit.filter(probe => probe.atTurnEnd === true)
   const answers = await ask($, fit.filter(probe => probe.atTurnEnd !== true), host)
+  const weighed = await weigh($, host)
 
-  return { answers, made: await settle($, host, answers, true), host }
+  return { answers, made: await settle($, host, answers, true, weighed?.missing), host }
 }
 
 // The probes owed at the end of a turn of the main conversation.
@@ -595,11 +641,33 @@ async function probed($: EngineInterface): Promise<string> {
   return lines.join('\n')
 }
 
+// The record held against this session, as lines: its counts, and each command and tool here that has no row.
+async function inventory($: EngineInterface): Promise<string> {
+  await look($)
+  const host = kept
+  if (host === undefined) return 'p4-native could not read the capability map.'
+  const weighed = await weigh($, host)
+  if (weighed === undefined) return 'p4-native could not read the record of what was weighed.'
+  const { record, missing } = weighed
+  const lines = [
+    `The record lists the hook events and the events and methods of the hooks module of Claude Code ${record.claude}, ` +
+      'which a module cannot list for the build it runs on, and every slash command and tool an audit weighed.',
+    ...counted(record),
+    missing.length === 0
+      ? `Every slash command and tool of this session, ${kindOf(host)} on Claude Code ${host.claude}, has a row.`
+      : `In this session, ${kindOf(host)} on Claude Code ${host.claude}, and weighed by nobody: ${missing.join(', ')}.`,
+    `The record is ${slashed($.plugin.root)}/${RECORD}.`,
+  ]
+
+  return lines.join('\n')
+}
+
 // One command, for the slash command and the tool: what it printed, or the usage for a word that is no command.
 async function answer($: EngineInterface, typed: string): Promise<string> {
   const name = typed.trim() || 'map'
   if (name === 'probes') return listed($)
   if (name === 'probe') return probed($)
+  if (name === 'weighed') return inventory($)
   if (name !== 'map') return USAGE
   await look($)
   if (kept === undefined || keptFor === undefined) return 'p4-native could not read the capability map.'

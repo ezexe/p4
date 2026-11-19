@@ -1,0 +1,2518 @@
+{
+ "claude": "2.1.326",
+ "rows": {
+  "$.agent.call": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.agent.limits": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.agent.list": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.agent.register": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.audio.play": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.audio.speak": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.clock.after": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.clock.every": {
+   "kind": "method",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.clock.now": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "$.clock.sleep": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.command.list": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.command.register": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.command.run": {
+   "kind": "method",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.config.list": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.env.get": {
+   "kind": "method",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.env.set": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.fs.ancestors": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.fs.exists": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.fs.list": {
+   "kind": "method",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.fs.read": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.fs.stat": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.fs.write": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "$.http.fetch": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.mcp.call": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.mcp.connect": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.model.classify": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.model.complete": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.model.fork": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.process.hookEnv": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.process.run": {
+   "kind": "method",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.process.spawn": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.prompt.paint": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.prompt.read": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.prompt.submit": {
+   "kind": "method",
+   "used": [
+    "p4",
+    "p4-phi"
+   ]
+  },
+  "$.session.authorize": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.compact": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.session.cwd": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.id": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "$.session.identity": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.info": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "$.session.messages": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.model": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.repo": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.root": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.session.send": {
+   "kind": "method",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "$.session.surface": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.surfaces": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.session.turns": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.session.usage": {
+   "kind": "method",
+   "used": [
+    "p4",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.session.version": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.settings.read": {
+   "kind": "method",
+   "open": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.state.get": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.state.set": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.store.delete": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.store.get": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.store.keys": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.store.set": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.theme.clear": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.theme.set": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.tool.call": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "$.tool.list": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.tool.register": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.turn.abort": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.blit": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.cancelNotify": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.close": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.copy": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.invalidate": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.log": {
+   "kind": "method",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "$.ui.notice": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.notify": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.open": {
+   "kind": "method",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "$.ui.panes": {
+   "kind": "method",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "$.ui.place": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.resolve": {
+   "kind": "method",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "$.ui.selection": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.status": {
+   "kind": "method",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "$.ui.toast": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.ui.view": {
+   "kind": "method",
+   "nobody": true
+  },
+  "$.wasm.compile": {
+   "kind": "method",
+   "nobody": true
+  },
+  "/add-dir": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a folder grant is ezexe's.",
+    "p4-temportal": "the grant that covers a worktree's memory writes is a user settings entry, which is ezexe's."
+   }
+  },
+  "/advisor": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a second model for one session is ezexe's choice.",
+    "p4-temportal": "models."
+   }
+  },
+  "/agents": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it prints a reminder only.",
+    "p4-temportal": "agents."
+   }
+  },
+  "/artifact-capabilities": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "artifacts are no part of what sessions hand each other.",
+    "p4-temportal": "artifacts."
+   }
+  },
+  "/artifact-diagramming": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the same.",
+    "p4-temportal": "artifacts."
+   }
+  },
+  "/artifacts": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the same.",
+    "p4-temportal": "artifacts."
+   }
+  },
+  "/auto-mode-setup": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "auto mode settings are ezexe's to decide.",
+    "p4-temportal": "permissions."
+   }
+  },
+  "/autocompact": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "it times a compaction, and `phi.clear_at` is a clear from a state page."
+   }
+  },
+  "/autofix-pr": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "p4-phi lands with no pull request.",
+    "p4-temportal": "cloud."
+   }
+  },
+  "/background": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "terminal background sessions, and the tree is the desktop app's.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/batch": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "its units are subagents that each open a pull request.",
+    "p4-temportal": "code changes."
+   }
+  },
+  "/branch": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a branch of one conversation is no linked session.",
+    "p4-temportal": "conversations."
+   }
+  },
+  "/btw": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a side question of ezexe's.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/bug": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "feedback to Anthropic.",
+    "p4-temportal": "feedback."
+   }
+  },
+  "/cd": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a session's folder is set on its start call.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/chrome": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "browser setup.",
+    "p4-temportal": "browser."
+   }
+  },
+  "/claude-api": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "API reference.",
+    "p4-temportal": "API reference."
+   }
+  },
+  "/claude-in-chrome": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "browser work.",
+    "p4-temportal": "browser."
+   }
+  },
+  "/clear": {
+   "kind": "command",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "/code-review": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "code review."
+   }
+  },
+  "/color": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/compact": {
+   "kind": "command",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "/config": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "the keeper writes its keys into the local settings file itself."
+   }
+  },
+  "/context": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "`get_usage` and the module's usage record give the figures."
+   }
+  },
+  "/copy": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/cost": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/dataviz": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "chart guidance.",
+    "p4-temportal": "charts."
+   }
+  },
+  "/debug": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a development aid.",
+    "p4-temportal": "a development aid."
+   }
+  },
+  "/deep-research": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "p4-phi builds no research.",
+    "p4-temportal": "research."
+   }
+  },
+  "/design": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design access.",
+    "p4-temportal": "design."
+   }
+  },
+  "/design-consent": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design access.",
+    "p4-temportal": "design."
+   }
+  },
+  "/design-login": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design access.",
+    "p4-temportal": "design."
+   }
+  },
+  "/design-revoke": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design access.",
+    "p4-temportal": "design."
+   }
+  },
+  "/design-sync": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "design work.",
+    "p4-temportal": "design."
+   }
+  },
+  "/desktop": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "it moves a terminal session into the app.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/diff": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a view for ezexe.",
+    "p4-temportal": "code."
+   }
+  },
+  "/doctor": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a setup checkup of ezexe's.",
+    "p4-temportal": "a setup checkup of ezexe's."
+   }
+  },
+  "/effort": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the tool `set_session_effort` is handed in its place.",
+    "p4-temportal": "models."
+   }
+  },
+  "/exit": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "terminal only.",
+    "p4-temportal": "terminal."
+   }
+  },
+  "/export": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "no line needs a transcript file."
+   }
+  },
+  "/fast": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a price ezexe sets.",
+    "p4-temportal": "models."
+   }
+  },
+  "/feedback": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "feedback to Anthropic.",
+    "p4-temportal": "feedback."
+   }
+  },
+  "/fewer-permission-prompts": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the keeper writes exact allow rules and no wider list.",
+    "p4-temportal": "permissions."
+   }
+  },
+  "/focus": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/fork": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions."
+   }
+  },
+  "/goal": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "turns."
+   }
+  },
+  "/heapdump": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "diagnostics.",
+    "p4-temportal": "diagnostics."
+   }
+  },
+  "/help": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/hooks": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a view for ezexe.",
+    "p4-temportal": "a view for ezexe."
+   }
+  },
+  "/ide": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "editor setup.",
+    "p4-temportal": "editor."
+   }
+  },
+  "/import": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "other tools' configuration.",
+    "p4-temportal": "other tools' configuration."
+   }
+  },
+  "/init": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "p4-phi ships no `CLAUDE.md`.",
+    "p4-temportal": "the plugin ships no `CLAUDE.md`."
+   }
+  },
+  "/insights": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a report for ezexe.",
+    "p4-temportal": "a report."
+   }
+  },
+  "/install-github-app": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "setup.",
+    "p4-temportal": "setup."
+   }
+  },
+  "/install-slack-app": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "setup.",
+    "p4-temportal": "setup."
+   }
+  },
+  "/keybindings": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/lifetime": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "the other plugin's."
+   }
+  },
+  "/list-agents": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions."
+   }
+  },
+  "/login": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/logout": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/loop": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the watcher runs on the module's timer and starts no turn.",
+    "p4-temportal": "the sweep runs on the module's timer and starts no turn."
+   }
+  },
+  "/mcp": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "connector setup.",
+    "p4-temportal": "connectors."
+   }
+  },
+  "/memory": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "the folder is set by `autoMemoryDirectory`, and the toggle is ezexe's."
+   }
+  },
+  "/mobile": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/model": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "models."
+   }
+  },
+  "/output-style": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/passes": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/permissions": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the dialog is ezexe's.",
+    "p4-temportal": "permissions."
+   }
+  },
+  "/plan": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "permission modes are ezexe's.",
+    "p4-temportal": "permission modes."
+   }
+  },
+  "/plugin": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "plugin management."
+   }
+  },
+  "/plugin-authoring": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a reference for editing `register.ts`, and nothing at run time.",
+    "p4-temportal": "a reference for editing `register.ts`, and nothing at run time."
+   }
+  },
+  "/powerup": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "lessons.",
+    "p4-temportal": "lessons."
+   }
+  },
+  "/pr-comments": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "removed.",
+    "p4-temportal": "removed."
+   }
+  },
+  "/privacy-settings": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/radio": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/rate-limit-options": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/recap": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a worker's report is its turn's last message, which the module sends.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/release-notes": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "in a comment of the shared keeper only."
+   }
+  },
+  "/reload-plugins": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "plugin management."
+   }
+  },
+  "/reload-skills": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "skills."
+   }
+  },
+  "/remote-control": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "another device.",
+    "p4-temportal": "another device."
+   }
+  },
+  "/remote-env": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "cloud.",
+    "p4-temportal": "cloud."
+   }
+  },
+  "/rename": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a title comes from the start call.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/restart": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "not on Windows.",
+    "p4-temportal": "not on Windows."
+   }
+  },
+  "/resume": {
+   "kind": "command",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "/review": {
+   "kind": "command",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "code review."
+   }
+  },
+  "/rewind": {
+   "kind": "command",
+   "used": [
+    "p4-temportal"
+   ],
+   "declined": {
+    "p4-phi": "one conversation's checkpoints."
+   }
+  },
+  "/run": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "app launch.",
+    "p4-temportal": "app launch."
+   }
+  },
+  "/run-skill-generator": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "app launch.",
+    "p4-temportal": "app launch."
+   }
+  },
+  "/sandbox": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's to decide.",
+    "p4-temportal": "ezexe's to decide."
+   }
+  },
+  "/schedule": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "cloud tasks.",
+    "p4-temportal": "cloud tasks have no local files."
+   }
+  },
+  "/scroll-speed": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/security-review": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "no rule of p4-phi reviews for security.",
+    "p4-temportal": "code review."
+   }
+  },
+  "/send-to-project": {
+   "kind": "command",
+   "nobody": true
+  },
+  "/setup-bedrock": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "provider setup.",
+    "p4-temportal": "provider."
+   }
+  },
+  "/setup-vertex": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "provider setup.",
+    "p4-temportal": "provider."
+   }
+  },
+  "/simplify": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the rule sends a review to `code-review` and asks for no cleanup pass.",
+    "p4-temportal": "code."
+   }
+  },
+  "/skill-doctor": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a view for ezexe.",
+    "p4-temportal": "a view for ezexe."
+   }
+  },
+  "/skills": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a view for ezexe.",
+    "p4-temportal": "a view for ezexe."
+   }
+  },
+  "/slides": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "presentations.",
+    "p4-temportal": "presentations."
+   }
+  },
+  "/stats": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/status": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/statusline": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/stickers": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/stop": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a terminal background session.",
+    "p4-temportal": "sessions."
+   }
+  },
+  "/subtask": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a read or a check goes to `Explore` or `p4-phi:check` by the Agent tool.",
+    "p4-temportal": "agents."
+   }
+  },
+  "/tasks": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "background tasks are read from `TaskStop` and the completion notices.",
+    "p4-temportal": "background work."
+   }
+  },
+  "/team-onboarding": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a guide for a team.",
+    "p4-temportal": "a guide."
+   }
+  },
+  "/teleport": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "cloud.",
+    "p4-temportal": "cloud."
+   }
+  },
+  "/terminal-setup": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "terminal only.",
+    "p4-temportal": "terminal."
+   }
+  },
+  "/theme": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/tui": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "terminal only.",
+    "p4-temportal": "terminal."
+   }
+  },
+  "/ultraplan": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "removed.",
+    "p4-temportal": "removed."
+   }
+  },
+  "/ultrareview": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a cloud review.",
+    "p4-temportal": "cloud."
+   }
+  },
+  "/update-config": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the keeper writes its keys with no session's edit, and a hook starts no skill.",
+    "p4-temportal": "the keeper writes its keys with no session's edit."
+   }
+  },
+  "/upgrade": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/usage": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "`get_usage` is handed in its place.",
+    "p4-temportal": "usage."
+   }
+  },
+  "/usage-credits": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "account.",
+    "p4-temportal": "account."
+   }
+  },
+  "/verify": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the issue loop runs a named regression test, and Claude cannot start this skill by itself.",
+    "p4-temportal": "app launch."
+   }
+  },
+  "/vim": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "removed.",
+    "p4-temportal": "removed."
+   }
+  },
+  "/voice": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "ezexe's interface.",
+    "p4-temportal": "ezexe's interface."
+   }
+  },
+  "/web-setup": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "cloud.",
+    "p4-temportal": "cloud."
+   }
+  },
+  "/workflow-authoring": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "a reference for editing `readings.js`, and nothing at run time.",
+    "p4-temportal": "workflows."
+   }
+  },
+  "/workflows": {
+   "kind": "command",
+   "declined": {
+    "p4-phi": "the progress view of a run, for ezexe.",
+    "p4-temportal": "workflows."
+   }
+  },
+  "Agent": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "Artifact": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "nothing is published."
+   }
+  },
+  "ArtifactComments": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "artifacts.",
+    "p4-temportal": "nothing is published."
+   }
+  },
+  "ArtifactData": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "artifacts.",
+    "p4-temportal": "nothing is published."
+   }
+  },
+  "AskUserQuestion": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "Bash": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "the tool `mcp__p4-temportal__lifetime` of 495c04e is the call of its own, and `test_skill.py` holds the skill page to no shell line."
+   }
+  },
+  "Checkpoints": {
+   "kind": "tool",
+   "used": [
+    "p4"
+   ]
+  },
+  "ConfigChange": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "CronCreate": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
+    "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
+   }
+  },
+  "CronDelete": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
+    "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
+   }
+  },
+  "CronList": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
+    "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
+   }
+  },
+  "CwdChanged": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "DesignSync": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "design work.",
+    "p4-temportal": "review, design, cloud and Claude Projects."
+   }
+  },
+  "DirectoryAdded": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "Edit": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "Elicitation": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "ElicitationResult": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "EnterPlanMode": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "permission modes are ezexe's.",
+    "p4-temportal": "permission modes."
+   }
+  },
+  "EnterWorktree": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the start call's `use_worktree` gives each writer its worktree.",
+    "p4-temportal": "neither tool changes where a worktree's memory goes."
+   }
+  },
+  "ExitPlanMode": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "permission modes are ezexe's.",
+    "p4-temportal": "permission modes."
+   }
+  },
+  "ExitWorktree": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the start call's `use_worktree` gives each writer its worktree.",
+    "p4-temportal": "neither tool changes where a worktree's memory goes."
+   }
+  },
+  "FileChanged": {
+   "kind": "hook",
+   "used": [
+    "p4-temportal"
+   ]
+  },
+  "GetGoal": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "Glob": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
+   }
+  },
+  "Grep": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
+   }
+  },
+  "InstructionsLoaded": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "KillShell": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "ListAgents": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "ListPlugins": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's plugin catalog.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "ListSkills": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's skills.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "MessageDisplay": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "Monitor": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "a long command is a background Bash call, and the watcher is the module's.",
+    "p4-temportal": "no stream to watch."
+   }
+  },
+  "MultiEdit": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "NotebookEdit": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "Notification": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PauseGoal": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "PermissionDenied": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PermissionRequest": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PostCompact": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PostModelSwitch": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PostToolBatch": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PostToolUse": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "PostToolUseFailure": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "PowerShell": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "the tool `mcp__p4-temportal__lifetime` of 495c04e is the call of its own, and `test_skill.py` holds the skill page to no shell line."
+   }
+  },
+  "PreCompact": {
+   "kind": "hook",
+   "used": [
+    "p4-temportal"
+   ]
+  },
+  "PreModelSwitch": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "PreToolUse": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "PushNotification": {
+   "kind": "tool",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
+   }
+  },
+  "Read": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
+   }
+  },
+  "RemoteTrigger": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "cloud tasks.",
+    "p4-temportal": "review, design, cloud and Claude Projects."
+   }
+  },
+  "ReportFindings": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the review skill's own output.",
+    "p4-temportal": "review, design, cloud and Claude Projects."
+   }
+  },
+  "ScheduleWakeup": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "part of `/loop`.",
+    "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
+   }
+  },
+  "SearchPlugins": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's plugin catalog.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "SearchSkills": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's skills.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "SendMessage": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "SendToProject": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "Claude Projects.",
+    "p4-temportal": "review, design, cloud and Claude Projects."
+   }
+  },
+  "SendToProjectContext": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "Claude Projects.",
+    "p4-temportal": "review, design, cloud and Claude Projects."
+   }
+  },
+  "SendUserFile": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "a standing session sends no file unless ezexe asks.",
+    "p4-temportal": "nothing is published."
+   }
+  },
+  "SessionEnd": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "SessionStart": {
+   "kind": "hook",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "SetGoal": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "Setup": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "Skill": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "Stop": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "StopFailure": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "SubagentStart": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "SubagentStop": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "SuggestPluginInstall": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's plugin catalog.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "SuggestSkills": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the account's skills.",
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "TaskCompleted": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "TaskCreate": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "TaskCreated": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "TaskList": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "TaskStop": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "TaskUpdate": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "TeammateIdle": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "TodoWrite": {
+   "kind": "tool",
+   "nobody": true
+  },
+  "ToolSearch": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
+   }
+  },
+  "Transcripts": {
+   "kind": "tool",
+   "declined": {
+    "p4": "both keys are ezexe's, and transcripts stay where Claude Code puts them."
+   }
+  },
+  "UserPromptExpansion": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "UserPromptSubmit": {
+   "kind": "hook",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "WebFetch": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "a downloaded page is a file like any other."
+   }
+  },
+  "WebSearch": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "a downloaded page is a file like any other."
+   }
+  },
+  "Workflow": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "sessions and agents are p4-phi's."
+   }
+  },
+  "WorktreeCreate": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "WorktreeRemove": {
+   "kind": "hook",
+   "nobody": true
+  },
+  "Worktrees": {
+   "kind": "tool",
+   "declined": {
+    "p4": "they are p4-phi's upkeep."
+   }
+  },
+  "Write": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "agent.offer": {
+   "kind": "event",
+   "nobody": true
+  },
+  "agent.spawn": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "attribution.text": {
+   "kind": "event",
+   "nobody": true
+  },
+  "command.describe": {
+   "kind": "event",
+   "nobody": true
+  },
+  "command.run": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "config.describe": {
+   "kind": "event",
+   "nobody": true
+  },
+  "config.set": {
+   "kind": "event",
+   "nobody": true
+  },
+  "engine.create": {
+   "kind": "event",
+   "nobody": true
+  },
+  "mcp__Claude_Browser__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "browsers and the desktop.",
+    "p4-temportal": "browsers and the desktop."
+   }
+  },
+  "mcp__ccd_connectors__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "connectors.",
+    "p4-temportal": "connectors."
+   }
+  },
+  "mcp__ccd_directory__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "a session's folder is set on its start call.",
+    "p4-temportal": "a folder grant for one session does not cover the memory writes of the next."
+   }
+  },
+  "mcp__ccd_host__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "it reports and clears the app's own data, and none of the store's."
+   }
+  },
+  "mcp__ccd_host__clean_up_worktrees": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "it takes worktrees of sessions idle 30 days and keeps their branches."
+   }
+  },
+  "mcp__ccd_host__discard_kept_worktree": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_host__get_storage_usage": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_host__open_in_editor": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "two are for ezexe's desk, and a worker's own turn holds the machine awake."
+   }
+  },
+  "mcp__ccd_host__request_keep_awake": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "two are for ezexe's desk, and a worker's own turn holds the machine awake."
+   }
+  },
+  "mcp__ccd_host__reveal_path": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "two are for ezexe's desk, and a worker's own turn holds the machine awake."
+   }
+  },
+  "mcp__ccd_pr__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "p4-phi lands by merge and push with no pull request.",
+    "p4-temportal": "pull requests."
+   }
+  },
+  "mcp__ccd_session__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "sessions."
+   }
+  },
+  "mcp__ccd_session__dismiss_task": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session__hand_off_to_session": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "it forks, and every start p4-phi drafts is fresh."
+   }
+  },
+  "mcp__ccd_session__list_start_targets": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session__mark_chapter": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the transcript's look, widgets and the cloud."
+   }
+  },
+  "mcp__ccd_session__move_to_cloud": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the transcript's look, widgets and the cloud."
+   }
+  },
+  "mcp__ccd_session__read_widget_context": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the transcript's look, widgets and the cloud."
+   }
+  },
+  "mcp__ccd_session__start_session": {
+   "kind": "tool",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "sessions."
+   }
+  },
+  "mcp__ccd_session_mgmt__archive_session": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "mcp__ccd_session_mgmt__clear_session": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__delete_session": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "p4-phi restores, deletes and exports nothing."
+   }
+  },
+  "mcp__ccd_session_mgmt__detach_session": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__export_transcript": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "p4-phi restores, deletes and exports nothing."
+   }
+  },
+  "mcp__ccd_session_mgmt__get_session": {
+   "kind": "tool",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__get_usage": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__list_events": {
+   "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "used": [
+    "p4-native"
+   ]
+  },
+  "mcp__ccd_session_mgmt__list_sessions": {
+   "kind": "tool",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__search_session_transcripts": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__send_message": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__set_remote_control": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "each is ezexe's setting or the start call's."
+   }
+  },
+  "mcp__ccd_session_mgmt__set_session_effort": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_session_mgmt__set_session_fast_mode": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "each is ezexe's setting or the start call's."
+   }
+  },
+  "mcp__ccd_session_mgmt__set_session_model": {
+   "kind": "tool",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "mcp__ccd_session_mgmt__set_session_output_style": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "each is ezexe's setting or the start call's."
+   }
+  },
+  "mcp__ccd_session_mgmt__set_session_permission_mode": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "each is ezexe's setting or the start call's."
+   }
+  },
+  "mcp__ccd_session_mgmt__set_session_title": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "each is ezexe's setting or the start call's."
+   }
+  },
+  "mcp__ccd_session_mgmt__stop_session": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "p4-phi stops no session."
+   }
+  },
+  "mcp__ccd_session_mgmt__unarchive_session": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "p4-phi restores, deletes and exports nothing."
+   }
+  },
+  "mcp__ccd_settings__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "auto-archive there goes by days idle or by a pull request, with no test of landed work.",
+    "p4-temportal": "Code tab preferences, none of which the plugin relies on."
+   }
+  },
+  "mcp__ccd_sidebar__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "the sidebar."
+   }
+  },
+  "mcp__ccd_sidebar__create_group": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__create_section": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__delete_group": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__delete_section": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__list_groups": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_sidebar__list_sections": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_sidebar__mark_completed": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__move_sessions": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_sidebar__rename_group": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__rename_section": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__set_pinned": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__set_unread": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_sidebar__set_view": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the sidebar's look is ezexe's."
+   }
+  },
+  "mcp__ccd_turn__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "turns."
+   }
+  },
+  "mcp__ccd_turn__update_plan": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_turn__wrap_up": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__ccd_view__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "panes on ezexe's screen.",
+    "p4-temportal": "panes."
+   }
+  },
+  "mcp__ccd_window__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "the window's layout.",
+    "p4-temportal": "windows."
+   }
+  },
+  "mcp__terminal__": {
+   "kind": "tool",
+   "declined": {
+    "p4-temportal": "terminals."
+   }
+  },
+  "mcp__terminal__list_terminal_tabs": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__terminal__open_terminal_tab": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "`run_in_terminal` opens its own tab."
+   }
+  },
+  "mcp__terminal__read_terminal": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__terminal__run_in_terminal": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__terminal__stop_terminal_tab": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "mcp__visualize__": {
+   "kind": "tool",
+   "declined": {
+    "p4-phi": "drawing.",
+    "p4-temportal": "drawing."
+   }
+  },
+  "plugin.register": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.attachment": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.autocomplete": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.change": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.compose": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "prompt.context": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.edit": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.fill": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.mention": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.section": {
+   "kind": "event",
+   "nobody": true
+  },
+  "prompt.submit": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-phi"
+   ]
+  },
+  "prompt.suggest": {
+   "kind": "event",
+   "nobody": true
+  },
+  "session.append": {
+   "kind": "event",
+   "nobody": true
+  },
+  "session.attach": {
+   "kind": "event",
+   "nobody": true
+  },
+  "session.compact": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-temportal"
+   ]
+  },
+  "session.detach": {
+   "kind": "event",
+   "nobody": true
+  },
+  "session.end": {
+   "kind": "event",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "session.measure": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "session.receive": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "session.send": {
+   "kind": "event",
+   "nobody": true
+  },
+  "session.start": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "session.stop": {
+   "kind": "event",
+   "nobody": true
+  },
+  "skill.prompt": {
+   "kind": "event",
+   "nobody": true
+  },
+  "telemetry.log": {
+   "kind": "event",
+   "nobody": true
+  },
+  "telemetry.mark": {
+   "kind": "event",
+   "nobody": true
+  },
+  "tool.call": {
+   "kind": "event",
+   "used": [
+    "p4-native"
+   ]
+  },
+  "tool.check": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "tool.describe": {
+   "kind": "event",
+   "nobody": true
+  },
+  "tool.judge": {
+   "kind": "event",
+   "nobody": true
+  },
+  "tool.run": {
+   "kind": "event",
+   "used": [
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "turn.complete": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "turn.start": {
+   "kind": "event",
+   "used": [
+    "p4-native",
+    "p4-phi",
+    "p4-temportal"
+   ]
+  },
+  "turn.step": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.fault": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.focus": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.input": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.message": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.pointer": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.press": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.render": {
+   "kind": "event",
+   "used": [
+    "p4-phi"
+   ]
+  },
+  "ui.resolve": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.scroll": {
+   "kind": "event",
+   "nobody": true
+  },
+  "ui.select": {
+   "kind": "event",
+   "nobody": true
+  }
+ }
+}

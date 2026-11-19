@@ -36,6 +36,13 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - On such a line, tell ezexe which decision can be reopened and what was seen, and change nothing by yourself: reopening a decision is ezexe's.
 - A line that begins `p4-native: Claude Code changed from` names the conditions no probe reads by itself, and `/release-notes` is where ezexe reads what changed.
 
+## The inventory
+
+- `hooks/weighed.json` of the plugin is the record of what the p4 plugins weighed: for each slash command, tool, hook event and event or method of the hooks module, who uses it, who declined it and why, or that nobody weighed it.
+- Call the tool with `command` set to `weighed` for the record's counts and for each command and tool of this session that has no row.
+- A line that begins `p4-native: Claude Code` and says `no p4 plugin has weighed` names what is new in this build, and it is told once: tell ezexe the names, and add no row by yourself.
+- Before building something by hand, look the native command or tool up in the record: a row that says declined gives the reason, and one that says nobody means it was never weighed.
+
 ## Options
 
 - `push` and `status` are options of the plugin that are off until ezexe turns them on, and a session turns on neither.

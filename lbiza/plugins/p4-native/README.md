@@ -118,6 +118,26 @@ So the probe asks three times, for 3, 14 and 30 messages, and the condition is o
 An answer kept under the first rule is compared with nothing.
 `FileChanged` for a new file in a watched folder was seen to fire on Claude Code 2.1.328, and p4-temportal 0.3.35 moves a notebook's log at that event, so nothing is blocked there and no probe watches it.
 
+## The inventory
+
+The audits of Claude Code's slash commands, tools and features against p4-phi and p4-temportal were made by hand, row by row.
+`hooks/weighed.json` keeps what they came to as one record, 410 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
+A row is a slash command, a tool, a hook event, an event of the hooks module or a method of it, and it says which plugins use it, which declined it and why, which hold it open, or that it was weighed by nobody.
+A key that ends in `__` stands for every tool of that server, and one that ends in `*` for every name that begins with it.
+
+When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
+The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
+`/native weighed` and the tool's `weighed` print the record's counts and each command and tool of this session that has no row.
+A plugin's own command and another server's tool are no part of the host and are left out.
+
+A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
+So those three kinds are in the record as Claude Code 2.1.326 has them, read from that build's types file, and a newer build's are walked by hand.
+Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods are used by no p4 plugin and were weighed by nobody.
+A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.
+
+Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.
+Not seen live: the notice at a change of version.
+
 ## ezexe's own choices
 
 These were declined by choice and not by a block, so each stays a setting of Claude Code or of the desktop app, and p4-native writes none of them and probes none.
