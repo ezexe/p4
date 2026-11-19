@@ -129,7 +129,7 @@ A key that ends in `__` stands for every tool of that server, and one that ends 
 What the record comes to, by kind, as `/native weighed` prints it.
 
 - `command`: 131 rows, 19 used, 0 open, 112 declined, 0 weighed by nobody
-- `tool`: 122 rows, 46 used, 0 open, 67 declined, 9 weighed by nobody
+- `tool`: 122 rows, 48 used, 1 open, 73 declined, 0 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
 - `method`: 93 rows, 32 used, 2 open, 59 declined, 0 weighed by nobody
@@ -151,7 +151,12 @@ The walk found one use the record had missed: p4-phi's pane reads and writes `$.
 Of the events, 34 are declined, and `session.attach` and `session.detach` are open for p4-native, which would read the map's surfaces again when a surface joins or leaves.
 Of the methods, 59 are declined, and two are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
 Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
-Nine rows are still weighed by nobody, all of them tools, which this walk did not cover: `SetGoal`, `GetGoal`, `PauseGoal`, `TaskCreate`, `TaskList`, `TaskUpdate`, `TodoWrite`, `MultiEdit` and `KillShell`.
+The nine tools the record had as weighed by nobody are walked as well, so no row of any kind says so now.
+`SetGoal`, `GetGoal` and `PauseGoal` are in the build's types file and in no session's tool list here: ToolSearch found none of the three in a desktop session on Claude Code 2.1.326, with a goal in force, and a module's `$.tool.call` of `SetGoal` was rejected with "no tool named" there and in a scripted run on 2.1.328.
+Not tested: `GetGoal` and `PauseGoal` through `$.tool.call`, and any of the three in a terminal session at its prompt.
+So `SetGoal` is open for p4-phi, which would call it in place of the `/goal` its module runs through `$.command.run` once a session has the tool, as the probe `set-goal-tool` watches, and the other two are declined.
+`TaskCreate`, `TaskList`, `TaskUpdate` and `TodoWrite` are declined: by the tools reference a newer model gets the Task tools only where ezexe opts in, a session here has none, and p4-phi mirrors the app's `update_plan`.
+`MultiEdit` and `KillShell` are no tools of this build, whose types file lists neither, and p4-phi's PostToolUse matcher and its python still name both, so their rows say used by p4-phi though no call of either can come from this build.
 A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.
 
 Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.

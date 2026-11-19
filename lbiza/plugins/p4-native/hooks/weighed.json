@@ -1848,7 +1848,11 @@
   },
   "GetGoal": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no session of this host has the tool, and p4-phi keeps the goal it set by `/goal` itself.",
+    "p4-temportal": "it sets and reads no goal.",
+    "p4-native": "it sets and reads no goal."
+   }
   },
   "Glob": {
    "kind": "tool",
@@ -1878,7 +1882,13 @@
   },
   "KillShell": {
    "kind": "tool",
-   "nobody": true
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "the build has no such tool.",
+    "p4-native": "the build has no such tool."
+   }
   },
   "ListAgents": {
    "kind": "tool",
@@ -1920,7 +1930,13 @@
   },
   "MultiEdit": {
    "kind": "tool",
-   "nobody": true
+   "used": [
+    "p4-phi"
+   ],
+   "declined": {
+    "p4-temportal": "the build has no such tool.",
+    "p4-native": "the build has no such tool."
+   }
   },
   "NotebookEdit": {
    "kind": "tool",
@@ -1944,7 +1960,11 @@
   },
   "PauseGoal": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no session of this host has the tool, and a blocked worker asks its starter by SendMessage.",
+    "p4-temportal": "it sets and reads no goal.",
+    "p4-native": "it sets and reads no goal."
+   }
   },
   "PermissionDenied": {
    "kind": "hook",
@@ -2129,7 +2149,16 @@
   },
   "SetGoal": {
    "kind": "tool",
-   "nobody": true
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the `/goal` its hooks module runs through `$.command.run` with a call of the tool, once a session of this host has it, which the probe `set-goal-tool` watches."
+   },
+   "declined": {
+    "p4-temportal": "it sets and reads no goal.",
+    "p4-native": "it watches whether a session has the tool, by the probe `set-goal-tool`, and sets no goal."
+   }
   },
   "Setup": {
    "kind": "hook",
@@ -2194,7 +2223,11 @@
   },
   "TaskCreate": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a session of this host has no Task tools, which a newer model gets only where ezexe opts in, and p4-phi mirrors the app's `update_plan`.",
+    "p4-temportal": "it keeps no task list.",
+    "p4-native": "it keeps no task list."
+   }
   },
   "TaskCreated": {
    "kind": "hook",
@@ -2206,7 +2239,11 @@
   },
   "TaskList": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a session of this host has no Task tools, which a newer model gets only where ezexe opts in, and p4-phi mirrors the app's `update_plan`.",
+    "p4-temportal": "it keeps no task list.",
+    "p4-native": "it keeps no task list."
+   }
   },
   "TaskStop": {
    "kind": "tool",
@@ -2219,7 +2256,11 @@
   },
   "TaskUpdate": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a session of this host has no Task tools, which a newer model gets only where ezexe opts in, and p4-phi mirrors the app's `update_plan`.",
+    "p4-temportal": "it keeps no task list.",
+    "p4-native": "it keeps no task list."
+   }
   },
   "TeammateIdle": {
    "kind": "hook",
@@ -2231,7 +2272,11 @@
   },
   "TodoWrite": {
    "kind": "tool",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it is off by default in favour of the Task tools, which a session of this host lacks too.",
+    "p4-temportal": "it keeps no task list.",
+    "p4-native": "it keeps no task list."
+   }
   },
   "ToolSearch": {
    "kind": "tool",

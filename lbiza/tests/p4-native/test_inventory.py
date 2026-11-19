@@ -16,7 +16,7 @@ MODULE = (PLUGIN / "hooks" / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
 KINDS = ("command", "tool", "hook", "event", "method")
 # the kinds walked row by row, so none of their rows says weighed by nobody
-WALKED = ("command", "hook", "event", "method")
+WALKED = ("command", "tool", "hook", "event", "method")
 # the functions of the state library a module imports from `claude-code`, each with the methods of `$` it calls
 STATE_HELPERS = {"read": ("$.state.get",), "update": ("$.state.get", "$.state.set")}
 PLUGIN_NAMES = sorted(p.name for p in PLUGINS.iterdir() if (p / ".claude-plugin" / "plugin.json").is_file())
@@ -93,13 +93,22 @@ class RecordTest(unittest.TestCase):
             self.assertEqual(row["kind"], kind, key)
             self.assertIn(plugin, row.get("used") or [], f"{key} is used by {plugin}")
 
-    def test_the_names_no_audit_weighed_are_marked_so(self):
-        for key in ("SetGoal", "GetGoal", "PauseGoal", "TaskCreate", "TodoWrite", "MultiEdit", "KillShell",
-                    "TaskList", "TaskUpdate"):
-            self.assertIs(ROWS[key].get("nobody"), True, key)
-            self.assertEqual(ROWS[key]["kind"], "tool", key)
+    def test_the_nine_tools_no_audit_weighed_have_a_verdict(self):
+        """The goal tools are in the build's types and in no session's tool list, so `SetGoal` is open for p4-phi
+        behind p4-native's probe and the other two are declined. The Task tools and `TodoWrite` are declined, and
+        `MultiEdit` and `KillShell`, which p4-phi's matchers name, are used by it."""
+        self.assertEqual(ROWS["SetGoal"]["open"], ["p4-phi"])
+        self.assertIn("`set-goal-tool`", ROWS["SetGoal"]["would"]["p4-phi"])
+        for key in ("GetGoal", "PauseGoal", "TaskCreate", "TaskList", "TaskUpdate", "TodoWrite"):
+            self.assertEqual(verdict(ROWS[key]), "declined", key)
+            self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
+        matcher = (PLUGINS / "p4-phi" / "hooks" / "hooks.json").read_text(encoding="utf-8")
+        for key in ("MultiEdit", "KillShell"):
+            self.assertIn(f"|{key}|", matcher, key)
+            self.assertEqual(ROWS[key]["used"], ["p4-phi"], key)
         self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi"])
         self.assertEqual(ROWS["$.settings.read"].get("used"), ["p4-temportal"])
+        self.assertFalse([key for key, row in ROWS.items() if row.get("nobody")])
 
     def test_no_row_of_a_walked_kind_says_weighed_by_nobody(self):
         """The slash commands of the desktop build were walked one by one, the seven the inventory found with no
