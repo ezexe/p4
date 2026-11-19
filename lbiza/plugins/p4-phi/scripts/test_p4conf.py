@@ -1136,7 +1136,9 @@ class Watcher(unittest.TestCase):
             self.assertEqual(d.get("autoMemoryDirectory"), mem, "the whole check wrote the key")
             with open(os.path.join(p4, "claude-settings.json"), encoding="utf-8") as f:
                 self.assertEqual(json.load(f)["claude"]["version"], "2.1.400")
-            self.assertEqual(got["newer"], ("2.1.300", "2.1.400"), "the changelog between the two is read")
+            self.assertEqual(got, {"asks": []})
+            self.assertEqual(p4conf.read_record(p4)["changelog"], {"from": "2.1.300", "to": "2.1.400"},
+                             "the versions between the two are owed to the changelog read")
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
             self.assertEqual(self.runs(), 1, "the same binary: no --version runs")
             del d["autoMemoryDirectory"]
@@ -1191,19 +1193,34 @@ class Watcher(unittest.TestCase):
         os.environ.pop("CLAUDE_PROJECT_DIR", None)
         out = p4conf.watch(self.project, {"hook_event_name": "ConfigChange", "source": "local_settings",
                                           "file_path": local})
-        self.assertEqual(out, {"asks": [], "newer": None}, "a ConfigChange check never blocks")
+        self.assertEqual(out, {"asks": []}, "a ConfigChange check never blocks")
         with open(local, encoding="utf-8") as f:
             self.assertEqual(json.load(f)["autoMemoryDirectory"], "D:/mine")
         self.assertNotIn("autoMemoryDirectory", json.dumps(p4conf.read_record(p4).get("files") or {}))
 
+    def owe(self, p4, old, new):
+        """The record as watch leaves it when a newer Claude Code runs: the versions between the two owed."""
+        os.makedirs(p4, exist_ok=True)
+        rec = p4conf.read_record(p4)
+        rec["changelog"] = {"from": old, "to": new}
+        p4conf.write_record(p4, rec)
+
+    def cache(self, text):
+        """Claude Code's own cached changelog under its configuration folder, which the tests' CLAUDE_CONFIG_DIR
+        names, and its path."""
+        path = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "cache", "changelog.md")
+        _write(path, text)
+        return path
+
     def test_a_watched_term_in_a_newer_version_reaches_the_next_prompt_once(self):
         p4 = os.path.join(self.project, ".claude", "p4")
-        os.makedirs(p4)
-        text = ("# Changelog\n\n## 2.1.402\n\n- Fixed the spinner\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a"
-                " new field\n\n## 2.1.300\n\n- `autoMemoryDirectory` added\n")
-        hits = p4conf.read_changelog(p4, "2.1.300", "2.1.401", text=text)
+        self.owe(p4, "2.1.300", "2.1.401")
+        self.cache("# Changelog\n\n## 2.1.402\n\n- Fixed the spinner\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a"
+                   " new field\n\n## 2.1.300\n\n- `autoMemoryDirectory` added\n")
+        hits = p4conf.read_changelog(p4)
         self.assertEqual([(t, v, i) for t, v, i, _ in hits], [("ConfigChange", "2.1.401", "ezexe/p4#246")],
                          "only the sections after the recorded version up to the new one")
+        self.assertNotIn("changelog", p4conf.read_record(p4), "read up to the new version: nothing is owed")
         with open(os.path.join(p4, *p4conf.WATCH_PAGE), encoding="utf-8") as f:
             self.assertIn("`ConfigChange` in 2.1.401", f.read())
         got = p4conf.claim_watch(p4)
@@ -1212,6 +1229,110 @@ class Watcher(unittest.TestCase):
         self.assertIn("2.1.401", got[0])
         self.assertIn("ezexe/p4#246", got[0])
         self.assertEqual(p4conf.claim_watch(p4), [], "one session gets the line once")
+
+    def test_the_changelog_is_claude_codes_cached_copy_and_nothing_is_fetched_or_started(self):
+        """Audit candidate 6. claude-directory.md, "Kept until you delete them": "`cache/changelog.md` | Cached copy
+        of the Claude Code changelog, shown by `/release-notes`. Refreshed in the background." So p4 holds no URL, no
+        web call and no process of its own for it: the layout hook's own time reads the file under the configuration
+        folder, and the watched terms are still searched."""
+        import socket
+        import subprocess
+        import urllib.request
+        from unittest import mock
+        import hook
+        for mod, names in ((p4conf, ("CHANGELOG_URL", "CHANGELOG_S")), (hook, ("start_changelog", "h_changelog"))):
+            for name in names:
+                self.assertFalse(hasattr(mod, name), name)
+        self.assertNotIn("changelog", hook.HANDLERS)
+        for copy in COPIES:
+            src = copy.read_text(encoding="utf-8")
+            self.assertNotIn("urllib", src, copy)
+            self.assertNotIn("raw.githubusercontent.com", src, copy)
+        self.assertEqual(p4conf.changelog_cache(),
+                         os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "cache", "changelog.md"))
+        with mock.patch.dict(os.environ):
+            os.environ.pop("CLAUDE_CONFIG_DIR")
+            self.assertEqual(p4conf.changelog_cache(),
+                             os.path.join(os.path.expanduser("~"), ".claude", "cache", "changelog.md"))
+        p4 = os.path.join(self.project, ".claude", "p4")
+        self.owe(p4, "2.1.300", "2.1.401")
+        self.cache("# Changelog\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a new field\n")
+
+        def refuse(*a, **k):
+            raise AssertionError("the changelog read made a web call or started a process")
+        with mock.patch.object(urllib.request, "urlopen", refuse), mock.patch.object(socket, "create_connection",
+                                                                                      refuse), \
+                mock.patch.object(subprocess, "Popen", refuse), mock.patch.dict(os.environ, {"P4_PHI_SETTINGS": "0"}):
+            self.assertEqual(hook.settings_watch(self.project, {"hook_event_name": "SessionStart"}), [])
+        got = p4conf.claim_watch(p4)
+        self.assertEqual(len(got), 1, got)
+        self.assertIn("ConfigChange", got[0])
+
+    def test_a_settings_change_reads_no_changelog(self):
+        """The read belongs to a start: a ConfigChange leaves what is owed as it is."""
+        import hook
+        p4 = os.path.join(self.project, ".claude", "p4")
+        self.owe(p4, "2.1.300", "2.1.401")
+        self.cache("# Changelog\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a new field\n")
+        hook.settings_watch(self.project, {"hook_event_name": "ConfigChange", "source": "local_settings"})
+        self.assertEqual(p4conf.read_record(p4)["changelog"], {"from": "2.1.300", "to": "2.1.401"})
+        self.assertEqual(p4conf.claim_watch(p4), [])
+
+    def test_a_cached_copy_older_than_the_binary_leaves_the_rest_owed_until_it_is_refreshed(self):
+        """What the cached copy lacks, by the same page: it is "Refreshed in the background", so it can be older than
+        the binary that runs. The sections it holds are read, the record owes the rest from the newest version read,
+        an unchanged copy is not opened again, and the refreshed copy is read from where the last read ended."""
+        from unittest import mock
+        p4 = os.path.join(self.project, ".claude", "p4")
+        self.owe(p4, "2.1.300", "2.1.400")
+        old = ("# Changelog\n\n## 2.1.350\n\n- Fixed the spinner\n\n## 2.1.340\n\n- `ConfigChange` hooks now get a"
+               " new field\n\n## 2.1.300\n\n- `autoMemoryDirectory` added\n")
+        path = self.cache(old)
+        os.utime(path, (1000, 1000))
+        hits = p4conf.read_changelog(p4)
+        self.assertEqual([(t, v) for t, v, _, _ in hits], [("ConfigChange", "2.1.340")])
+        self.assertEqual(p4conf.read_record(p4)["changelog"],
+                         {"from": "2.1.350", "to": "2.1.400", "seen": [1000.0, os.path.getsize(path)]})
+        with mock.patch.object(p4conf, "changelog_hits", side_effect=AssertionError("opened again")):
+            self.assertEqual(p4conf.read_changelog(p4), [], "the same copy as at the last read")
+        new = "# Changelog\n\n## 2.1.410\n\n- `SessionStart` moved\n\n## 2.1.380\n\n- `attribution` renamed\n\n" + \
+            old.split("\n\n", 1)[1]
+        self.cache(new)
+        os.utime(path, (2000, 2000))
+        hits = p4conf.read_changelog(p4)
+        self.assertEqual([(t, v) for t, v, _, _ in hits], [("attribution", "2.1.380")],
+                         "after the last version read, up to the binary's, and no section twice")
+        self.assertNotIn("changelog", p4conf.read_record(p4))
+        self.assertEqual(len(p4conf.claim_watch(p4)), 2, "both hits wait for a prompt")
+        with open(os.path.join(p4, *p4conf.WATCH_PAGE), encoding="utf-8") as f:
+            page = f.read()
+        self.assertIn(", 2.1.300 to 2.1.350\n", page)
+        self.assertIn(", 2.1.350 to 2.1.400\n", page)
+
+    def test_a_missing_cached_copy_reads_nothing_and_owes_all_of_it(self):
+        p4 = os.path.join(self.project, ".claude", "p4")
+        self.owe(p4, "2.1.300", "2.1.400")
+        self.assertEqual(p4conf.read_changelog(p4), [])
+        self.assertEqual(p4conf.read_record(p4)["changelog"], {"from": "2.1.300", "to": "2.1.400"})
+        self.assertFalse(os.path.exists(os.path.join(p4, *p4conf.WATCH_PAGE)))
+        self.assertEqual(p4conf.read_changelog(os.path.join(self.tmp, "no-store")), [], "nothing owed: nothing read")
+
+    def test_a_second_newer_binary_widens_what_is_owed_and_a_record_of_another_shape_owes_nothing(self):
+        from unittest import mock
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        stub = self.stub("2.1.400")
+        _write(os.path.join(p4, "claude-settings.json"), {
+            "claude": {"path": stub, "size": 1, "mtime": 1.0, "version": "2.1.350"},
+            "changelog": {"from": "2.1.300", "to": "2.1.350", "seen": [1.0, 2]}})
+        with mock.patch.dict(os.environ, {"CLAUDE_PID": "4242"}), \
+                mock.patch.object(p4conf, "exe_of_pid", lambda pid: stub if pid == 4242 else None):
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+        self.assertEqual(p4conf.read_record(p4)["changelog"], {"from": "2.1.300", "to": "2.1.400"},
+                         "from the oldest version still owed, and the copy is opened again")
+        _write(os.path.join(p4, "claude-settings.json"), {"changelog": ["2.1.300", "2.1.400"]})
+        self.assertNotIn("changelog", p4conf.read_record(p4))
+        self.assertEqual(p4conf.read_changelog(p4), [])
 
     def test_the_issues_workers_terms_are_watched_when_their_file_is_there(self):
         from unittest import mock

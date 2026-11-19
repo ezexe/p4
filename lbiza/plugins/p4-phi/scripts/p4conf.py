@@ -1310,6 +1310,10 @@ def read_record(p4):
         rec.pop("asked")
     if "claude" in rec and not isinstance(rec["claude"], dict):
         rec.pop("claude")
+    owed = rec.get("changelog")
+    if "changelog" in rec and not (isinstance(owed, dict) and isinstance(owed.get("from"), str)
+                                   and isinstance(owed.get("to"), str)):
+        rec.pop("changelog")
     seen = rec.get("claude") or {}
     if "binaries" in seen and not (isinstance(seen["binaries"], dict)
                                    and all(isinstance(b, dict) for b in seen["binaries"].values())):
@@ -1849,7 +1853,7 @@ def exclude_local(target):
 
 # --- The watcher, ezexe/p4#246 -------------------------------------------------------------------------------------
 # p4-phi's hook.py runs watch() at every SessionStart, from its layout handler, and at a ConfigChange of a settings
-# file, and starts read_changelog in a process of its own when a newer Claude Code runs.
+# file, and at a start runs read_changelog, which reads what the record owes from Claude Code's own cached changelog.
 MARKET = "p4-marketplace"
 
 
@@ -1863,8 +1867,11 @@ def _version(v):
 
 SETTINGS_ENV = "P4_PHI_SETTINGS"          # 0 turns the settings watcher off
 VERSION_S = 2.0                           # what one `--version` may take, inside the layout hook's 15 s
-CHANGELOG_URL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
-CHANGELOG_S = 20.0
+# claude-directory.md, "Kept until you delete them": "`cache/changelog.md` | Cached copy of the Claude Code changelog,
+# shown by `/release-notes`. Refreshed in the background." It is a path under `~/.claude/`, which CLAUDE_CONFIG_DIR
+# moves. p4 fetches no changelog of its own. What that copy lacks is the search for WATCHED and a record of the
+# versions read, and it can be older than the binary that runs, so the record keeps the versions still owed.
+CHANGELOG_CACHE = ("cache", "changelog.md")
 WATCH_PAGE = ("phi", "claude-code-watch.md")
 WATCH_PENDING = ("phi", "claude-code-watch.pending.json")
 CONFIG_SOURCES = ("local_settings", "project_settings", "user_settings")
@@ -1981,8 +1988,9 @@ def watch(project, payload):
     the record; any change runs keep_settings. Each binary is kept by its path, so the desktop app's copy and the
     `claude` command used in turn are each read once. At a ConfigChange of a settings file: keep_settings on the
     keys the record owns.
-    Returns {"asks": the lines for ezexe, "newer": (old, new) when a newer Claude Code runs, else None}."""
-    out = {"asks": [], "newer": None}
+    A newer Claude Code than any the record holds leaves the versions between the two in the record's `changelog`
+    part, as the sections read_changelog owes. Returns {"asks": the lines for ezexe}."""
+    out = {"asks": []}
     if os.environ.get(SETTINGS_ENV) == "0":
         return out
     p4 = os.path.join(main_root(project)[0], ".claude", "p4")
@@ -2009,7 +2017,7 @@ def watch(project, payload):
             top = seen.get("version") or ""
             note["claude"] = {"binaries": binaries, "version": max((top, v), key=_version), "path": binary}
             if v and top and _version(v) > _version(top):
-                out["newer"] = (top, v)
+                note["changelog"] = {"from": (rec.get("changelog") or {}).get("from") or top, "to": v}
     plugins = plugin_versions(project)
     if plugins != (rec.get("plugins") or {}):
         note["plugins"] = plugins
@@ -2064,16 +2072,70 @@ def changelog_hits(text, old, new, terms):
     return hits
 
 
-def read_changelog(p4, old, new, text=None, limits=None):
-    """Read the changelog between `old` and `new` and write each hit to the store's watch page and to its pending
-    file, which the next prompt's hook hands a session line by line. Returns the hits."""
+def changelog_cache():
+    """Claude Code's own cached copy of its changelog, under its configuration folder."""
+    return os.path.join(_config_dir(), *CHANGELOG_CACHE)
+
+
+def changelog_top(text):
+    """The newest version among the `## <version>` headings of a changelog, '' when it has none."""
+    import re
+    found = re.findall(r"(?m)^##\s+v?(\d+\.\d+\.\d+)", text or "")
+    return max(found, key=_version) if found else ""
+
+
+def read_changelog(p4, text=None, limits=None):
+    """Read the sections the record's `changelog` part owes, after its `from` up to its `to`, from Claude Code's
+    cached changelog, and write each hit of a watched term to the store's watch page and to its pending file, which
+    the next prompt's hook hands a session line by line. The cached copy can be older than the binary that runs, so
+    only the sections it holds are read and the record then owes the rest, from the newest version read; a missing
+    copy reads nothing and owes all of it. A copy with the time and size of the last read is not opened again. All of
+    it runs under the store's SETTINGS_LOCK, so the record never loses what the keeper writes. Returns the hits."""
+    owed = read_record(p4).get("changelog")
+    if not owed:
+        return []
+    seen = None
     if text is None:
-        import urllib.request
         try:
-            with urllib.request.urlopen(CHANGELOG_URL, timeout=CHANGELOG_S) as r:
-                text = r.read().decode("utf-8", "replace")
-        except (OSError, ValueError):
+            st = os.stat(changelog_cache())
+            seen = [st.st_mtime, st.st_size]
+        except OSError:
+            pass
+        if seen is None or owed.get("seen") == seen:
             return []
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not _take_lock(lock):
+        return []
+    try:
+        rec = read_record(p4)
+        owed = rec.get("changelog")
+        if not owed:
+            return []
+        if text is None:
+            try:
+                with open(changelog_cache(), encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                return []
+        old, new = owed["from"], owed["to"]
+        top = changelog_top(text)
+        upto = min(top, new, key=_version) if top else old
+        hits = _note_changelog(p4, old, upto, text, limits) if _version(upto) > _version(old) else []
+        if _version(upto) >= _version(new):
+            rec.pop("changelog")
+        else:
+            rec["changelog"] = {"from": max(old, upto, key=_version), "to": new, "seen": seen}
+        write_record(p4, rec)
+        return hits
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+
+
+def _note_changelog(p4, old, new, text, limits):
+    """The hits between `old` and `new`, written to the watch page and the pending file."""
     hits = changelog_hits(text, old, new, watched_terms(limits))
     page = os.path.join(p4, *WATCH_PAGE)
     os.makedirs(os.path.dirname(page), exist_ok=True)
