@@ -1,7 +1,7 @@
 name: tests
 
 # A second read of every push to main and of every pull request, on a machine that is not ezexe's: every test of the
-# repository under pytest, and Claude Code's own checks of the catalog and the two plugins.
+# repository under pytest, and Claude Code's own checks of the catalog and the three plugins.
 # It holds no secret and asks for no token beyond a read of the checkout.
 
 on:
@@ -66,9 +66,15 @@ jobs:
       - name: Validate p4-temportal
         if: ${{ !cancelled() }}
         run: claude plugin validate lbiza/plugins/p4-temportal --strict
+      - name: Validate p4-native
+        if: ${{ !cancelled() }}
+        run: claude plugin validate lbiza/plugins/p4-native --strict
       - name: Test p4-phi's hooks module
         if: ${{ !cancelled() }}
         run: claude plugin test lbiza/plugins/p4-phi
       - name: Test p4-temportal's hooks module
         if: ${{ !cancelled() }}
         run: claude plugin test lbiza/plugins/p4-temportal
+      - name: Test p4-native's hooks module
+        if: ${{ !cancelled() }}
+        run: claude plugin test lbiza/plugins/p4-native

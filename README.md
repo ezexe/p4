@@ -65,7 +65,7 @@ Whichever orchestrator receives ezexe's message runs the meta pass over every or
 The pass finds duplicate topics, orchestrators in conflict over the same files or issue, and topics that are stale or have landed, and it seeds the next generation of topics from what is left open.
 An orchestrator told of a finding settles a duplicate or a conflict with the other orchestrator through `SendMessage` and names a session whose work is over to ezexe as a link to open and archive, and only a conflict the two cannot settle goes to ezexe as a question.
 
-The marketplace's two plugins, p4-phi and p4-temportal, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](https://github.com/ezexe/p4/wiki/Install) gives the commands that install them.
+The marketplace's three plugins, p4-phi, p4-temportal and p4-native, and where each keeps its files are described in [`lbiza/README.md`](lbiza/README.md), and [Install](https://github.com/ezexe/p4/wiki/Install) gives the commands that install them.
 The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
 
 <div align="center">

@@ -1,9 +1,10 @@
 # p4-marketplace
 
-The marketplace `p4-marketplace` holds two Claude Code plugins, each with hooks, scripts and a skill.
+The marketplace `p4-marketplace` holds three Claude Code plugins, each with hooks and a skill.
 
 - **p4-temportal**, whose skill `plugins/p4-temportal/skills/temportal/SKILL.md` says what it does.
 - **p4-phi**, whose README `plugins/p4-phi/README.md` says what it does and how it is set.
+- **p4-native**, the host layer, whose README `plugins/p4-native/README.md` says what it does.
 
 ## Install
 
@@ -13,6 +14,7 @@ The marketplace's catalog is `.claude-plugin/marketplace.json` at the root of ez
 claude plugin marketplace add ezexe/p4
 claude plugin install p4-phi@p4-marketplace
 claude plugin install p4-temportal@p4-marketplace
+claude plugin install p4-native@p4-marketplace
 ```
 
 Each install is a copy in Claude Code's plugin cache, `~/.claude/plugins/cache/p4-marketplace/<plugin>/<version>/`, at user scope unless `--scope project` or `--scope local` says otherwise.
@@ -21,7 +23,7 @@ This folder holds no catalog of its own.
 ## Where each plugin keeps its files
 
 A project's store is the folder `<project>/.claude/p4/`, a git repository of its own.
-p4-temportal keeps its files in the store's `temportal/` and p4-phi in its `phi/`, and only `p4.json`, `.git`, `.github`, `.gitignore` and `.gitattributes` stay at the store's top.
+p4-temportal keeps its files in the store's `temportal/`, p4-phi in its `phi/` and p4-native in its `native/`, and only `p4.json`, `.git`, `.github`, `.gitignore` and `.gitattributes` stay at the store's top.
 Outside the store, the plugins keep the Claude Code settings they rely on in the project's `.claude/settings.local.json`, merged with what is there: `autoMemoryDirectory`, naming the store's `temportal/memory`, so Claude Code writes and loads the auto memory there itself, `plansDirectory`, naming the store's `temportal/plans` from the project's root, so Claude Code writes its plan files there, and `attribution.commit` only when the store's `p4.json` gives a text in its `claude` section.
 `plansDirectory` is written only where the store lies inside the project and no user, project or managed settings file names a folder for plans, and `"plansDirectory": false` in the `claude` section of `p4.json` leaves it unwritten.
 They also keep two allow rules ezexe approved under `permissions.allow`, for `phi.py` and `p4.py sync`, as entries of their own beside the user's rules; no other permission or security key is written, and a key changed by hand is left as it is.
@@ -43,12 +45,12 @@ A path a shell command writes, by a redirect or `cp`, is not an `Edit` path, so 
 
 ## Settings
 
-Both plugins read their settings from `<project>/.claude/p4/p4.json`, one section each for `memory`, `scratchpad`, `temportal`, `recall` and `phi`.
+p4-phi and p4-temportal read their settings from `<project>/.claude/p4/p4.json`, one section each for `memory`, `scratchpad`, `temportal`, `recall` and `phi`.
 The first plugin to run in a project writes it with the defaults of `p4conf.py`, and a newer plugin adds the keys it brings, keeping every value already set.
 A value a plugin wrote, recorded under `_written` with the generation of the defaults that wrote it, follows a later change of its default made by a newer generation, and a value set by hand stays. Two limits: a value set by hand that equals the value recorded as written moves at the next generation, and in a store from before the record, a value set by hand that equals a past default moves.
 p4-phi also reads `phi/phi.json`, and some environment variables set a value for one run.
 The `claude` section of `p4.json` names the Claude Code settings a store wants beyond the defaults, and is never written by a plugin.
-The copies of `p4conf.py` in the two plugins are identical.
+The copies of `p4conf.py` in those two plugins are identical, and p4-native carries none, since it writes no setting.
 
 ## p4-temportal's hooks module
 
@@ -83,11 +85,12 @@ A hooks module needs Claude Code v2.1.287 or later, and it does not load in a se
 
 ## Windows
 
-Every command hook of both plugins is a shell command that starts `sh`, which on Windows is Git Bash's.
+Every command hook of p4-phi and p4-temportal is a shell command that starts `sh`, which on Windows is Git Bash's.
 Without Git Bash, Claude Code runs the command in PowerShell, where `sh` is missing and the hook does not run.
 Installing Git for Windows, or setting `CLAUDE_CODE_GIT_BASH_PATH` to a Git Bash Claude Code does not find, lets the hooks run.
-Each hook of both plugins on which `onFailure` acts sets it to `continue`, so a hook that cannot start never blocks a call.
-Each plugin's hooks module starts python itself, with no `sh`, so p4-temportal's retention sweep runs without Git Bash.
+Each hook of those two plugins on which `onFailure` acts sets it to `continue`, so a hook that cannot start never blocks a call.
+Each of their hooks modules starts python itself, with no `sh`, so p4-temportal's retention sweep runs without Git Bash.
+p4-native runs no command hook and no python, so it needs neither.
 
 ## Tests
 

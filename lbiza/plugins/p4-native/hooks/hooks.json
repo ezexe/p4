@@ -1,0 +1,4 @@
+{
+  "description": "p4-native's hooks. register.ts is the hooks module, whose functions run inside Claude Code, and it is the whole plugin: no command hook runs and no process starts at a session's start. At session.start it asks the engine what this host is, the surfaces the session draws on, the Claude Code version and the tools that answer, and writes the capability map to .claude/p4/native/host.json under the session's id, without the session waiting for it. It reads the map again at the first turn of the main conversation and after the session's id changed. It registers the slash command /native and the tool native, whose map each print this session's entry.",
+  "modules": ["./register.ts"]
+}

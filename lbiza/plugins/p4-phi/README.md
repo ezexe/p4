@@ -12,6 +12,7 @@ The marketplace `p4-marketplace` is the repository ezexe/p4, whose root holds th
 claude plugin marketplace add ezexe/p4
 claude plugin install p4-phi@p4-marketplace
 claude plugin install p4-temportal@p4-marketplace
+claude plugin install p4-native@p4-marketplace
 ```
 
 Each install is a copy in Claude Code's plugin cache, `~/.claude/plugins/cache/p4-marketplace/<plugin>/<version>/`, at user scope unless `--scope project` or `--scope local` says otherwise.
