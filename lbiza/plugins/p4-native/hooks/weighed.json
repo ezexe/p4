@@ -270,7 +270,11 @@
    "open": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "would": {
+    "p4-phi": "replace the keeper's reads of the user, project and managed settings files from disk, where a module loads, with the merged settings the engine holds.",
+    "p4-temportal": "replace the keeper's reads of the user, project and managed settings files from disk, where a module loads, with the merged settings the engine holds."
+   }
   },
   "$.state.get": {
    "kind": "method",
@@ -1451,7 +1455,11 @@
   },
   "CwdChanged": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "every plugin reads the project by the session's root, which a `cd` in a shell does not move.",
+    "p4-temportal": "every plugin reads the project by the session's root, which a `cd` in a shell does not move.",
+    "p4-native": "every plugin reads the project by the session's root, which a `cd` in a shell does not move."
+   }
   },
   "DesignSync": {
    "kind": "tool",
@@ -1462,7 +1470,11 @@
   },
   "DirectoryAdded": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a store is read at the session's root alone, and a folder added later holds none of it.",
+    "p4-temportal": "a store is read at the session's root alone, and a folder added later holds none of it.",
+    "p4-native": "a store is read at the session's root alone, and a folder added later holds none of it."
+   }
   },
   "Edit": {
    "kind": "tool",
@@ -1473,11 +1485,19 @@
   },
   "Elicitation": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin runs an MCP server that asks for input, and answering another server's form is ezexe's.",
+    "p4-temportal": "no plugin runs an MCP server that asks for input, and answering another server's form is ezexe's.",
+    "p4-native": "no plugin runs an MCP server that asks for input, and answering another server's form is ezexe's."
+   }
   },
   "ElicitationResult": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin runs an MCP server that asks for input.",
+    "p4-temportal": "no plugin runs an MCP server that asks for input.",
+    "p4-native": "no plugin runs an MCP server that asks for input."
+   }
   },
   "EnterPlanMode": {
    "kind": "tool",
@@ -1537,7 +1557,11 @@
   },
   "InstructionsLoaded": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it only tells that a CLAUDE.md or a rules file was loaded, and no plugin keeps its rules in one.",
+    "p4-temportal": "it only tells that a CLAUDE.md or a rules file was loaded, and no plugin keeps its rules in one.",
+    "p4-native": "it only tells that a CLAUDE.md or a rules file was loaded, and no plugin keeps its rules in one."
+   }
   },
   "KillShell": {
    "kind": "tool",
@@ -1568,7 +1592,11 @@
   },
   "MessageDisplay": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it rewrites what ezexe's screen shows of an answer, which is ezexe's interface.",
+    "p4-temportal": "it rewrites what ezexe's screen shows of an answer, which is ezexe's interface.",
+    "p4-native": "it rewrites what ezexe's screen shows of an answer, which is ezexe's interface."
+   }
   },
   "Monitor": {
    "kind": "tool",
@@ -1590,7 +1618,16 @@
   },
   "Notification": {
    "kind": "hook",
-   "nobody": true
+   "open": [
+    "p4-native"
+   ],
+   "would": {
+    "p4-native": "add a push when a session waits at a permission prompt or sits idle, where the push today goes out at a turn's end alone."
+   },
+   "declined": {
+    "p4-phi": "a session's wait reaches its starter by the report of its turn.",
+    "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
+   }
   },
   "PauseGoal": {
    "kind": "tool",
@@ -1598,23 +1635,48 @@
   },
   "PermissionDenied": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it fires in auto mode alone, and auto mode and its denials are ezexe's to decide.",
+    "p4-temportal": "it fires in auto mode alone, and auto mode and its denials are ezexe's to decide.",
+    "p4-native": "it fires in auto mode alone, and auto mode and its denials are ezexe's to decide."
+   }
   },
   "PermissionRequest": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "allowing or denying a call in ezexe's place is ezexe's own, and the guard answers earlier, at `tool.check`.",
+    "p4-temportal": "allowing or denying a call in ezexe's place is ezexe's own to decide.",
+    "p4-native": "allowing or denying a call in ezexe's place is ezexe's own to decide."
+   }
   },
   "PostCompact": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "nothing it keeps changes at a compaction's end.",
+    "p4-temportal": "it hands the summary and can add nothing to it, and what a compaction must keep goes in before it, at `session.compact` and at PreCompact.",
+    "p4-native": "nothing it keeps changes at a compaction's end."
+   }
   },
   "PostModelSwitch": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "the session's model is ezexe's own choice.",
+    "p4-temportal": "the session's model is ezexe's own choice.",
+    "p4-native": "the session's model is ezexe's own choice."
+   }
   },
   "PostToolBatch": {
    "kind": "hook",
-   "nobody": true
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the one process its async PostToolUse entry starts for each call of a parallel batch with one start that writes every lookup row of the batch."
+   },
+   "declined": {
+    "p4-temportal": "it keeps nothing after a tool call.",
+    "p4-native": "a miss is read off one call, at `classic.PostToolUse`."
+   }
   },
   "PostToolUse": {
    "kind": "hook",
@@ -1646,7 +1708,11 @@
   },
   "PreModelSwitch": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "blocking or pricing a switch of model is ezexe's own choice.",
+    "p4-temportal": "blocking or pricing a switch of model is ezexe's own choice.",
+    "p4-native": "blocking or pricing a switch of model is ezexe's own choice."
+   }
   },
   "PreToolUse": {
    "kind": "hook",
@@ -1754,7 +1820,11 @@
   },
   "Setup": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it fires only on a launch with `--init`, `--init-only` or `--maintenance`, which no p4 flow makes.",
+    "p4-temportal": "it fires only on a launch with `--init`, `--init-only` or `--maintenance`, which no p4 flow makes.",
+    "p4-native": "it fires only on a launch with `--init`, `--init-only` or `--maintenance`, which no p4 flow makes."
+   }
   },
   "Skill": {
    "kind": "tool",
@@ -1803,7 +1873,11 @@
   },
   "TaskCompleted": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`.",
+    "p4-temportal": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`.",
+    "p4-native": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`."
+   }
   },
   "TaskCreate": {
    "kind": "tool",
@@ -1811,7 +1885,11 @@
   },
   "TaskCreated": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`.",
+    "p4-temportal": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`.",
+    "p4-native": "a desktop session has no Task tools, so it never fires there, and p4-phi mirrors the app's `update_plan`."
+   }
   },
   "TaskList": {
    "kind": "tool",
@@ -1832,7 +1910,11 @@
   },
   "TeammateIdle": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "agent teams are not in the desktop app, and the switch failed its check in a terminal session.",
+    "p4-temportal": "agent teams are not in the desktop app, and the switch failed its check in a terminal session.",
+    "p4-native": "agent teams are not in the desktop app, and the switch failed its check in a terminal session."
+   }
   },
   "TodoWrite": {
    "kind": "tool",
@@ -1855,7 +1937,11 @@
   },
   "UserPromptExpansion": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "no plugin gates or adds to a typed command, and a module hears its own at `command.run`.",
+    "p4-temportal": "no plugin gates or adds to a typed command, and a module hears its own at `command.run`.",
+    "p4-native": "no plugin gates or adds to a typed command, and a module hears its own at `command.run`."
+   }
   },
   "UserPromptSubmit": {
    "kind": "hook",
@@ -1892,11 +1978,19 @@
   },
   "WorktreeCreate": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "a hook here replaces git's own making of a worktree, which upkeep leaves to Claude Code and the app.",
+    "p4-temportal": "a hook here replaces git's own making of a worktree, which upkeep leaves to Claude Code and the app.",
+    "p4-native": "a hook here replaces git's own making of a worktree, which upkeep leaves to Claude Code and the app."
+   }
   },
   "WorktreeRemove": {
    "kind": "hook",
-   "nobody": true
+   "declined": {
+    "p4-phi": "it fires only for a worktree a WorktreeCreate hook made, and no plugin makes one.",
+    "p4-temportal": "it fires only for a worktree a WorktreeCreate hook made, and no plugin makes one.",
+    "p4-native": "it fires only for a worktree a WorktreeCreate hook made, and no plugin makes one."
+   }
   },
   "Worktrees": {
    "kind": "tool",
@@ -2128,7 +2222,10 @@
    ],
    "used": [
     "p4-native"
-   ]
+   ],
+   "would": {
+    "p4-phi": "replace the copies of a worker's reports it keeps itself in `reports.jsonl`, once the tool answers for a session at work."
+   }
   },
   "mcp__ccd_session_mgmt__list_sessions": {
    "kind": "tool",

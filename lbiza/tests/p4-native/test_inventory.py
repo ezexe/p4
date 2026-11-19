@@ -16,7 +16,8 @@ MODULE = (PLUGIN / "hooks" / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
 KINDS = ("command", "tool", "hook", "event", "method")
 # the kinds walked row by row, so none of their rows says weighed by nobody
-WALKED = ("command",)
+WALKED = ("command", "hook")
+PLUGIN_NAMES = sorted(p.name for p in PLUGINS.iterdir() if (p / ".claude-plugin" / "plugin.json").is_file())
 
 
 def verdict(row):
@@ -93,7 +94,7 @@ class RecordTest(unittest.TestCase):
 
     def test_no_row_of_a_walked_kind_says_weighed_by_nobody(self):
         """The slash commands of the desktop build were walked one by one, the seven the inventory found with no
-        row among them, so each comes to used, open or declined."""
+        row among them, and so were the hook events of hooks.md, so each comes to used, open or declined."""
         for key, row in ROWS.items():
             if row["kind"] in WALKED:
                 self.assertNotEqual(verdict(row), "nobody", key)
@@ -101,6 +102,34 @@ class RecordTest(unittest.TestCase):
         for key in ("/motion", "/artifact-design", "/whiteboard", "/keybindings-help", "/__remote-workflow",
                     "/workflow-launch-exec", "/extra-usage", "/send-to-project"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
+        self.assertEqual(sum(1 for row in ROWS.values() if row["kind"] == "hook"), 33)
+        for key in ("Setup", "WorktreeCreate", "PermissionRequest", "PostCompact", "TeammateIdle"):
+            self.assertEqual(verdict(ROWS[key]), "declined", key)
+        self.assertEqual(ROWS["Notification"]["open"], ["p4-native"])
+        self.assertEqual(ROWS["PostToolBatch"]["open"], ["p4-phi"])
+
+    def test_an_open_row_names_a_plugin_and_what_it_would_replace_or_add_there(self):
+        """`open` lists plugins of this repository, and `would` holds one sentence for each of them and for no
+        other, which begins with what the plugin would do: replace a copy it builds by hand or add what it cannot
+        do today."""
+        opened = {key: row for key, row in ROWS.items() if row.get("open")}
+        self.assertGreater(len(opened), 2)
+        for key, row in opened.items():
+            self.assertEqual(row["open"], sorted(row["open"]), key)
+            for plugin in row["open"]:
+                self.assertIn(plugin, PLUGIN_NAMES, key)
+                self.assertNotIn(plugin, row.get("declined") or {}, key)
+            would = row.get("would") or {}
+            self.assertEqual(sorted(would), row["open"], key)
+            for plugin, sentence in would.items():
+                self.assertRegex(sentence, r"^(replace|add|read) .{40,}\.$", f"{key}, {plugin}")
+        for key, row in ROWS.items():
+            self.assertFalse(row.get("would") and not row.get("open"), key)
+
+    def test_a_declined_row_gives_each_of_the_three_plugins_a_reason_once_walked(self):
+        for key, row in ROWS.items():
+            if row["kind"] == "hook" and verdict(row) == "declined":
+                self.assertEqual(sorted(row["declined"]), PLUGIN_NAMES, key)
 
 
 class ModuleTest(unittest.TestCase):

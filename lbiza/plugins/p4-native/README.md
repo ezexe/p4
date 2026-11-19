@@ -129,7 +129,7 @@ What the record comes to, by kind, as `/native weighed` prints it.
 
 - `command`: 131 rows, 19 used, 0 open, 112 declined, 0 weighed by nobody
 - `tool`: 122 rows, 46 used, 0 open, 67 declined, 9 weighed by nobody
-- `hook`: 33 rows, 13 used, 0 open, 0 declined, 20 weighed by nobody
+- `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 0 open, 0 declined, 36 weighed by nobody
 - `method`: 80 rows, 29 used, 1 open, 0 declined, 50 weighed by nobody
 
@@ -140,7 +140,11 @@ A plugin's own command and another server's tool are no part of the host and are
 
 A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
 So those three kinds are in the record as Claude Code 2.1.326 has them, read from that build's types file, and a newer build's are walked by hand.
-Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods are used by no p4 plugin and were weighed by nobody.
+Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
+The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, and 2 are open.
+An open row names each plugin it would serve and, under `would`, what it would replace or add there.
+`Notification` is open for p4-native, which would add a push when a session waits at a permission prompt or sits idle, and `PostToolBatch` for p4-phi, which would write the lookup rows of a parallel batch in one process start.
+The module events and methods are still to walk: 36 of the 51 and 50 of the 80.
 A test holds the record to the three plugins' own files, so an event a module hooks, a method it calls and a hook event it runs each have a row that names the plugin.
 
 Seen in the desktop app on Claude Code 2.1.326: every tool of the session had a row, and seven slash commands had none, `/motion`, `/artifact-design`, `/whiteboard`, `/keybindings-help`, `/__remote-workflow`, `/workflow-launch-exec` and `/extra-usage`.

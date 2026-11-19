@@ -7,12 +7,13 @@
 // or a module method such as `$.tool.call`. A key that ends in `__` stands for every tool of that server, and one
 // that ends in `*` for every name that begins with it.
 
-// One row of the record. `used` and `open` name plugins, `declined` gives each plugin's reason, and `nobody` marks
-// a name no audit weighed.
+// One row of the record. `used` and `open` name plugins, `would` says for each plugin that holds the row open what
+// it would replace or add there, `declined` gives each plugin's reason, and `nobody` marks a name no audit weighed.
 export type Row = {
   kind: 'command' | 'tool' | 'hook' | 'event' | 'method'
   used?: string[]
   open?: string[]
+  would?: Record<string, string>
   declined?: Record<string, string>
   nobody?: true
 }
