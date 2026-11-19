@@ -6,14 +6,17 @@ process that runs tests imports a test file, it gets:
   - a temp folder of its own, which is its working folder too, named as the file system holds it and with no
     repository above it,
   - a home folder of its own and, on Windows, app data folders of its own,
-  - git settings of its own, so git reads nothing of the caller's, and
+  - git settings of its own, so git reads nothing of the caller's, from a file or from the environment, and
   - none of the caller's variables whose names start with a prefix in STRIP, but for those in KEEP.
 
 So a test run from a Claude Code session sees none of that session's ids, no API key and no GitHub token, every P4_
-switch is off, a live test skips, and a run spends nothing. The variables of KEEP only point a test at fixtures on
-the machine, or at the folder its caller chose for the fixtures a test makes, as P4_PHI_TEST_TMP does for
-test_phi.py. After each test, what it left changed in os.environ, the working folder, sys.path, tempfile.tempdir or
-the temp folder is put back, so a test file runs beside any other in one process and in any order.
+switch is off, a live test skips, and a run spends nothing. A setting the caller hands git by environment reaches no
+test either: GIT_CONFIG_PARAMETERS, which git writes for `git -c`, and GIT_CONFIG_COUNT with its GIT_CONFIG_KEY_<n>
+and GIT_CONFIG_VALUE_<n> are removed with the caller's other GIT_CONFIG_ variables, before the process sets its own
+GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM. The variables of KEEP only point a test at fixtures on the machine, or at
+the folder its caller chose for the fixtures a test makes, as P4_PHI_TEST_TMP does for test_phi.py. After each test,
+what it left changed in os.environ, the working folder, sys.path, tempfile.tempdir or the temp folder is put back,
+so a test file runs beside any other in one process and in any order.
 
 A file that tests the code of a plugin sits in the folder of tests/ named after that plugin and reaches that code by
 its SRC folder. A hooks module's `*.test.ts` file stays inside its plugin, where `claude plugin test` reads it.
@@ -26,7 +29,7 @@ import tempfile
 
 import pytest
 
-STRIP = ("CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN")
+STRIP = ("CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN", "GIT_CONFIG_")
 KEEP = ("P4_FIXTURES", "P4_MAC_STORE", "P4_PHI_TEST_TMP")
 WORKERS_MOST = 8        # half the logical processors of ezexe's machine, so a second run there has the other half
 GIT_SETTINGS = "[core]\n\tautocrlf = false\n\tlongpaths = true\n[user]\n\tname = tests\n\temail = tests@localhost\n"
