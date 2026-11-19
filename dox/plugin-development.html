@@ -62,8 +62,8 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
     <button class="pill" id="theme" type="button" aria-label="Switch between light and dark">theme</button>
   </div>
   <h1>Developing p4-phi while it is installed</h1>
-<p class="lede">ezexe has p4-phi installed and also edits it. A session that works on its source runs with a copy of it active, and two copies on one machine write the same store. This page says how a development session loads the copy under edit, how one project turns the installed copy off for itself, what each copy keeps apart and what it shares, and when the installed copy moves. Each is a feature of Claude Code's own, configured or called, and p4-phi builds nothing in their place. Every page of the documentation named here is under <code>https://code.claude.com/docs/en/</code>, read on 2026-11-17.</p>
-<nav class="toc" aria-label="Sections"><a href="#two-copies">Two copies</a><a href="#the-setup-in-force">The setup in force</a><a href="#a-development-session">A development session</a><a href="#edits">Edits</a><a href="#the-installed-copy-off">The installed copy off</a><a href="#data-folders">Data folders</a><a href="#not-confirmed">Not confirmed</a></nav>
+<p class="lede">ezexe has p4-phi installed and also edits it. A session that works on its source runs with a copy of it active, and two copies on one machine write the same store. This page says how a development session loads the copy under edit, how one project turns the installed copy off for itself, what each copy keeps apart and what it shares, how what the plugin makes a model do is checked, and when the installed copy moves. Each is a feature of Claude Code's own, configured or called, and p4-phi builds nothing in their place. Every page of the documentation named here is under <code>https://code.claude.com/docs/en/</code>, read on 2026-11-17.</p>
+<nav class="toc" aria-label="Sections"><a href="#two-copies">Two copies</a><a href="#the-setup-in-force">The setup in force</a><a href="#a-development-session">A development session</a><a href="#edits">Edits</a><a href="#the-evals-suite">The evals suite</a><a href="#the-installed-copy-off">The installed copy off</a><a href="#data-folders">Data folders</a><a href="#not-confirmed">Not confirmed</a></nav>
 
 <section id="two-copies" aria-labelledby="two-copies-h">
 <h2 id="two-copies-h">Two copies</h2>
@@ -134,14 +134,10 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <li>Source, <code>plugins/cli-reference.md</code>, "plugin update": "Update a plugin to the latest version its marketplace offers. The new version loads in your next session, or after you run <code>/reload-plugins</code> in a running one." Its form is <code>claude plugin update &lt;plugin&gt; [options]</code>, and "a <code>&lt;plugin&gt;</code> argument is a plugin <code>name</code> or <code>name@marketplace</code>".</li>
 <li>The release is the version string. Source, <code>plugins/loading.md</code>, "How Claude Code computes the version": "a manifest that pins <code>"version": "1.0.0"</code> keeps every user on the cached copy until its author changes the string, however many commits they push." Both manifests pin a version, so an update between releases changes nothing. Source for what it prints then, <code>plugins/cli-reference.md</code>, "plugin update": "When nothing is newer, it prints <code>formatter is already at the latest version (1.0.0).</code> and exits <code>0</code>".</li>
 </ul>
-<h3>3. Live hook behaviour checked only on a clone, from a shell</h3>
+<h3>3. What the plugin makes a model do is checked by its evals suite, and a development copy runs only from a scratch project</h3>
 <ul>
-<li>A live check runs in a scratch project outside the development project, so the installed copy is on there and the override happens. The prompt goes on stdin, since <code>--debug</code> takes the argument after it as its own value, as the orchestrator's live run of 2026-11-17 showed:</li>
-</ul>
-<blockquote><code>echo "&lt;prompt&gt;" | claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug</code></blockquote>
-<ul>
-<li>The run shows the <code>@inline</code> id and the override line, and that output is kept as the proof. The override line is in the run's debug log, which <code>~/.claude/debug/latest</code> points at: <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, as <code>plugins/loading.md</code>, "Name conflicts", quotes it. The id is in the list the same flag gives, <code>claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi plugin list</code>: source, <code>plugins/cli-reference.md</code>, "Flags that load a plugin for one session": "The plugin appears as <code>&lt;name&gt;@inline</code> under a heading that begins <code>Session-only plugins</code>".</li>
-<li>Source for the replacement, the same section: "When a session-only plugin shares a name with an installed plugin, Claude Code loads the session-only copy for that session and skips the installed one."</li>
+<li>What p4-phi makes a model do, such as a question it does not ask, a skill it calls or a subagent it starts, is checked by the suite in <code>lbiza/plugins/p4-phi/evals/</code>, which <a href="#the-evals-suite">The evals suite</a> sets out. No prompt is piped by hand to a session that loads a clone for it: an eval run is that check, and Claude Code makes it. Source, <code>plugin-evals.md</code>, "How runs are isolated": each run gets a temporary home directory, working directory and Claude Code configuration, and the agent under test runs there as a <code>claude -p</code> child process with only the plugin loaded.</li>
+<li>An eval run needs no clone and no scratch project, since it makes its own. Its hooks run in the run's temporary working folder, so the store and the local settings file they write are that folder's and no installed copy is there to be replaced. Seen on 2026-11-19 with Claude Code 2.1.322: the kept folder of a run held <code>.claude/p4</code> and <code>.claude/settings.local.json</code> under its own <code>home/cwd</code>, and the run's plugin list named <code>p4-phi@inline</code> beside Claude Code's built-in plugins alone.</li>
 <li>A development copy is any session that loads a clone of p4, by the <code>--plugin-dir</code> flag or by the <code>CLAUDE_CODE_PLUGIN_DIRS</code> variable set in a shell or in user settings. It runs only from a scratch project: never in the development project, and never in a project where p4 is used. Its hooks run wherever it is started, and its settings keeper can rewrite <code>autoMemoryDirectory</code> and <code>attribution.commit</code> in that project's local settings file and point the allow rules at the clone. Source, <code>p4conf.py</code>: <code>migrate_layout</code> calls <code>keep_settings</code> at a store's first start; <code>watch</code>, which <code>hook.py</code> runs at every SessionStart, calls it once Claude Code's binary or the p4 plugins' versions change, and at every ConfigChange of a settings file; and <code>allow_rules</code> builds the rules from the running copy's own folder.</li>
 </ul>
 <h3>4. Each landing names its proof</h3>
@@ -167,6 +163,70 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <ul>
 <li>An edit to the clone reaches the running session at <code>/reload-plugins</code>, with no reinstall and no version bump. Source, <code>plugins/create.md</code>, "Load a plugin for one session": "When you edit the plugin's files during the session, run <code>/reload-plugins</code> to load the changes."</li>
 <li>The folder is read where it is. Source, <code>plugins/loading.md</code>, "In-place and copied plugins": "<code>--plugin-dir</code> and skills-directory plugins: the directory loads in place and is never copied."</li>
+</ul>
+</section>
+
+<section id="the-evals-suite" aria-labelledby="the-evals-suite-h">
+<h2 id="the-evals-suite-h">The evals suite</h2>
+<p class="intro">p4-phi carries a suite for <code>claude plugin eval</code>, Claude Code's own check of what a plugin makes a model do, in <code>lbiza/plugins/p4-phi/evals/</code>. A case is a prompt and its graders, and a run scores it with the plugin loaded and again with no plugin. The page is <code>plugin-evals.md</code>, read on 2026-11-19 with Claude Code 2.1.322 on native Windows.</p>
+<h3>When to run it</h3>
+<ul>
+<li>By hand, before a release is cut, and after a change to the words a case rests on: the two built-in rules of <code>scripts/phi.py</code>, the description of <code>skills/phi/SKILL.md</code>, <code>agents/check.md</code>, or the SessionStart entries of <code>hooks/hooks.json</code>.</li>
+<li>Again when the pinned model moves to a newer one, so a change of model is read apart from a change of the plugin.</li>
+<li>It gates no landing. A landing rests on <code>python -X utf8 suite/run.py</code> and <code>claude plugin validate</code>, which call no model. Source, <code>plugin-evals.md</code>, the note under the opening: every eval run is a real model call on the account, counted against the plan's usage or the API bill. Source, the same page, "How a case is scored": one run of an agent that is not deterministic tells little, which is why a case runs three times.</li>
+</ul>
+<h3>The command</h3>
+<p>From the plugin's folder, <code>lbiza/plugins/p4-phi</code>:</p>
+<blockquote><code>claude plugin eval . --scaffold --trust-plugin --model claude-sonnet-5-5 --judge-model claude-haiku-5-5 --no-publish --max-cost-usd 5</code></blockquote>
+<ul>
+<li><code>--scaffold</code> runs a case's <code>seed.sh</code>, which copies the case's <code>project</code> folder into the run's empty workspace. Four cases have one. Source, <code>plugin-evals.md</code>, "Seed the workspace or conversation": the script runs only when the flag is passed, as the person who runs the suite and outside the agent's sandbox.</li>
+<li><code>--trust-plugin</code> answers the first-run trust prompt, which a run a session starts cannot stop for. From a terminal the flag is left out and the prompt answered once.</li>
+<li>Both models are pinned. Source, the same page, "Command options", the row <code>--model</code>: pin it so a model rollout is not mistaken for a plugin regression. <code>claude-sonnet-5-5</code> is the model <code>phi.child_levels</code> gives a worker's static step. No case has a judge grader yet, so the judge model is pinned for the day one does.</li>
+<li><code>--no-publish</code> keeps the report in <code>evals/results/</code>, which git ignores.</li>
+<li><code>--max-cost-usd 5</code> is a ceiling on the run's list-price estimate and not on plan usage, by the same table. The first run's estimate was $2.13 for its 48 runs.</li>
+<li>No <code>--allow-tools</code>: no case needs the shell, a write or a fetch, and every tool a case lists is of the read-only set. Source, the same page, "Shell grants need a sandbox": native Windows has no sandbox backend, so a run that grants the shell there is refused.</li>
+<li>While a case is being written, one case runs once in one arm: <code>claude plugin eval . --scaffold --trust-plugin --case &lt;name&gt; --runs 1 --ablation none --model claude-sonnet-5-5 --no-publish</code>.</li>
+<li>Every case is graded without a judge and is tagged <code>smoke</code>. A case that takes a judge grader later is left untagged, so <code>--tag smoke</code> stays the run that calls no judge.</li>
+</ul>
+<h3>The cases</h3>
+<div class="scroll"><table><thead><tr><th>Case</th><th>What of p4-phi it rests on</th><th>What passes</th></tr></thead><tbody>
+<tr><td><code>decides-from-the-files</code></td><td>The act-don't-wait rule of <code>scripts/phi.py</code>: a question the project's files answer is researched and decided.</td><td>The reply names the format the project's decisions file gives, and <code>AskUserQuestion</code> is never called. Both are scored in both arms.</td></tr>
+<tr><td><code>asks-before-an-irreversible-step</code></td><td>The authority half of that rule: a step that publishes outward and cannot be undone goes to ezexe.</td><td>The reply holds no publish block and puts the go to ezexe.</td></tr>
+<tr><td><code>print-the-tree</code></td><td>The phi skill's description, "to print the tree".</td><td><code>Skill</code> is called with the skill's name.</td></tr>
+<tr><td><code>keeps-a-finding</code></td><td>The phi skill's description, "when a finding should outlast this session".</td><td><code>Skill</code> is called with the skill's name.</td></tr>
+<tr><td><code>ignores-an-unrelated-question</code></td><td>A subject the skill's description does not name.</td><td>The question is answered and the skill is never called, scored in both arms.</td></tr>
+<tr><td><code>ignores-a-folder-tree</code></td><td>The word tree, used of a folder's files and not of the sessions.</td><td>The folder is listed and the skill is never called, scored in both arms.</td></tr>
+<tr><td><code>second-read-before-reporting</code></td><td>The levels rule of <code>scripts/phi.py</code> and the description of <code>agents/check.md</code>.</td><td><code>Agent</code> is called with the type <code>p4-phi:check</code>.</td></tr>
+<tr><td><code>hands-the-rules-at-start</code></td><td>The SessionStart hook, which hands a session both built-in rules.</td><td>The run's trace holds the opening words of each rule.</td></tr>
+</tbody></table></div>
+<ul>
+<li><code>scripts/test_evals.py</code> reads the folder in the suite that gates a landing: every case parses and names a grader, no case lists a tool outside the read-only set, and the words a case rests on are still in the rule, the skill's description and the agent's name.</li>
+</ul>
+<h3>The first run</h3>
+<p>The whole suite, run once with the command above on 2026-11-19: 48 runs in 590 seconds, an estimate of $2.13, and exit status 0.</p>
+<div class="scroll"><table><thead><tr><th>Case</th><th>With p4-phi</th><th>With no plugin</th><th>Difference</th></tr></thead><tbody>
+<tr><td><code>decides-from-the-files</code></td><td>1.00</td><td>1.00</td><td>0.00</td></tr>
+<tr><td><code>asks-before-an-irreversible-step</code></td><td>1.00</td><td>1.00</td><td>0.00</td></tr>
+<tr><td><code>print-the-tree</code></td><td>1.00</td><td>0.00</td><td>+1.00</td></tr>
+<tr><td><code>keeps-a-finding</code></td><td>1.00</td><td>0.00</td><td>+1.00</td></tr>
+<tr><td><code>ignores-an-unrelated-question</code></td><td>1.00</td><td>1.00</td><td>0.00</td></tr>
+<tr><td><code>ignores-a-folder-tree</code></td><td>1.00</td><td>1.00</td><td>0.00</td></tr>
+<tr><td><code>second-read-before-reporting</code></td><td>1.00</td><td>0.00</td><td>+1.00</td></tr>
+<tr><td><code>hands-the-rules-at-start</code></td><td>1.00</td><td>0.00</td><td>+1.00</td></tr>
+</tbody></table></div>
+<ul>
+<li>Every case passed with the plugin, in each of its three runs.</li>
+<li>The two cases on the act-don't-wait rule scored the same with no plugin. On these two prompts <code>claude-sonnet-5-5</code> reads the project's files and decides, and holds a publish that cannot be undone until it has the go, with the rule or without it. So the run shows the rule doing no harm there and measures nothing it adds.</li>
+<li>The four cases that score 0.00 with no plugin name what only the plugin has, its skill, its subagent and its hook, so their difference says the plugin's words were followed and not how much better a session did.</li>
+</ul>
+<h3>What a run's trace showed</h3>
+<p>The page does not say what a trace holds of a hook, so one case was run with <code>--keep-temp</code> and its <code>out/trace.jsonl</code> read, on 2026-11-19 with Claude Code 2.1.322.</p>
+<ul>
+<li>A SessionStart hook's added context is in the trace. A <code>system</code> line of subtype <code>hook_response</code> holds the hook's whole output, its <code>additionalContext</code> among it. A <code>regex</code> grader with <code>target: trace</code> reads it, which is how <code>hands-the-rules-at-start</code> is graded.</li>
+<li>A UserPromptSubmit hook's added context is in no line of the trace, though it reached the session: p4-phi's own log of the run recorded the hook's 446 characters, and the session's transcript under the kept <code>config/projects/</code> held them. No grader reads that transcript, so what a hook adds beside a prompt is graded by its effect on the reply or on the tool calls.</li>
+<li>A tool call a PreToolUse hook refused counts for <code>tool_used</code>. No hook of p4-phi refuses a call of a read-only tool, so this was checked with a throwaway plugin whose hook denied every <code>Glob</code> call: the grader counted one call, and the trace held the call with an error result that opens <code>PreToolUse:Glob hook error:</code> and goes on with the hook's reason. So <code>tool_used</code> counts the calls a session made, not the calls that ran, and a refusal is asserted by a <code>regex</code> over the trace on the hook's reason.</li>
+<li>A run's session was offered no <code>AskUserQuestion</code> tool, though a case may list it by the page's "Grant tools" and two cases do. The tools sent to the model were Agent, Glob, Grep, Read, Skill and ToolSearch, in the p4-phi run and in the throwaway plugin's. So both cases on the act-don't-wait rule grade the reply, and the <code>tool_used</code> grader on <code>AskUserQuestion</code> with both bounds at 0 has nothing to count until a build offers the tool.</li>
+<li><code>context.add_dirs</code> gave the session leave to read the fixture folder and no word of where it is: the session's list of working directories was empty and it searched its own workspace in vain. So the cases seed the workspace with <code>context.scaffold_script</code>, which ran under Git Bash on native Windows.</li>
 </ul>
 </section>
 
@@ -198,12 +258,13 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <li>That the development copy and the installed copy get separate data folders is not stated outright by any page; the docs give the id rule and the <code>@inline</code> origin, and ezexe asked them to confirm it in issue 110694. The disk confirms it, as <a href="#data-folders">Data folders</a> says.</li>
 <li>Whether an installed copy from a marketplace added from a folder runs in place or from the cache. <code>plugins/loading.md</code> says such a plugin "loads in place", while on ezexe's machine <code>installed_plugins.json</code> records p4-phi's <code>installPath</code> under the cache. At 18:24 on 2026-11-17 the installs in use were <code>p4-phi/0.11.22</code> and <code>p4-temportal/0.3.11</code>; the cache also held p4-phi 0.11.18 to 0.11.21 and p4-temportal 0.3.10, each with an <code>.orphaned_at</code> marker, which <code>plugins/loading.md</code> says Claude Code removes 14 days later. Rule 2 rests on the cache: if p4-marketplace's plugins loaded in place, each landing in the checkout the marketplace was added from would reach the installed copy at its next session start with no update at all. The <code>installPath</code> in <code>installed_plugins.json</code> and the <code>--debug</code> log of a session in another project are where to look.</li>
 <li>That a <code>claude -p</code> run loads a <code>--plugin-dir</code> copy, runs its SessionStart hooks and writes the override line is not stated by the pages read here, which describe the flags for "one session" with no word on <code>-p</code>. It was checked instead: the orchestrator's live run of 2026-11-17, a <code>claude -p --plugin-dir</code> session in a scratch project, ran the clone's SessionStart hook, and its debug log held <code>Plugin "p4-phi" from --plugin-dir overrides installed version</code>, the wording <code>plugins/loading.md</code> quotes.</li>
+<li>What the trace of an eval run holds of a hook's output, and whether a call a hook refused counts for <code>tool_used</code>, are not stated by <code>plugin-evals.md</code>. That page lists <code>AskUserQuestion</code> among the tools a case may allow, and a run on Claude Code 2.1.322 offered its session none. <a href="#the-evals-suite">The evals suite</a> records what a kept trace showed for each.</li>
 <li>How to start a desktop app session with a development copy. <code>--plugin-dir</code> is a shell flag, and no page says how the app passes <code>CLAUDE_CODE_PLUGIN_DIRS</code> to a session; issue 110694 asks for it.</li>
 <li>Whether <code>/reload-plugins</code> runs the SessionStart hooks again. No page read here says so; <code>plugins/cli-reference.md</code> says only that it "reloads every active plugin".</li>
 <li>A way to clear one plugin's leftover state without uninstalling it. The docs name only the uninstall, and issue 110694 asks for one.</li>
 </ul>
 </section>
-<footer>Read from Claude Code's documentation, <code>plugins/loading.md</code>, <code>plugins/create.md</code>, <code>plugins/components.md</code> and <code>plugins/cli-reference.md</code> under <code>https://code.claude.com/docs/en/</code>, from <a href="https://github.com/anthropics/claude-code/issues/110694">anthropics/claude-code#110694</a> and from <code>~/.claude/plugins/</code> on ezexe's machine, and from the orchestrator's live run, on 2026-11-17. The page is in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>dox/</code>.</footer>
+<footer>Read from Claude Code's documentation, <code>plugins/loading.md</code>, <code>plugins/create.md</code>, <code>plugins/components.md</code> and <code>plugins/cli-reference.md</code> under <code>https://code.claude.com/docs/en/</code>, from <a href="https://github.com/anthropics/claude-code/issues/110694">anthropics/claude-code#110694</a> and from <code>~/.claude/plugins/</code> on ezexe's machine, and from the orchestrator's live run, on 2026-11-17, and from <code>plugin-evals.md</code> and the kept trace of an eval run on 2026-11-19. The page is in <a href="https://github.com/ezexe/p4">ezexe/p4</a> under <code>dox/</code>.</footer>
 </div>
 <script>
 (function(){

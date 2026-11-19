@@ -10,3 +10,6 @@ __pycache__/
 
 # the interpreter each plugin's hook runner proved once, written by hooks/run-hook.sh and hooks/recall-hook.sh
 lbiza/plugins/*/.python
+
+# what `claude plugin eval` writes for each run of a plugin's evals suite: its report and its result document
+lbiza/plugins/*/evals/results/

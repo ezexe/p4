@@ -1,0 +1,3 @@
+2026-11-02T02:13:58Z export started, 48211 records
+2026-11-02T02:14:03Z error: importer rejected record 311: amount "12.50" is not an integer
+2026-11-02T02:14:03Z export stopped, 310 records written

@@ -5,8 +5,9 @@
 
 Checked: the page is linked from the index and the README, says the commands and settings of Claude Code's own
 that a development session uses, shows the development project's local settings, cites its sources and keeps a
-section of what they do not confirm, and describes nothing p4-phi builds in their place; a live check's prompt on
-stdin, the override line, both installed plugins off, and every link of the page leading somewhere.
+section of what they do not confirm, and describes nothing p4-phi builds in their place; the evals suite's command
+and a row for each of its cases in place of a prompt piped by hand, both installed plugins off, and every link of
+the page leading somewhere.
 """
 
 import os
@@ -31,7 +32,7 @@ class Page(unittest.TestCase):
     def test_the_page_says_the_native_commands_and_settings_and_their_sources(self):
         page = read(PAGE)
         for said in ("claude --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug", "/reload-plugins",
-                     "claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug",
+                     "claude plugin eval .", "plugin-evals.md",
                      "claude plugin update p4-phi@p4-marketplace", "claude plugin update p4-temportal@p4-marketplace",
                      "settings.local.json", '"p4-phi@p4-marketplace": false', '"autoMemoryEnabled": false',
                      '"disableSkillShellExecution": false', "CLAUDE_PLUGIN_DATA", "P4_*",
@@ -46,11 +47,21 @@ class Page(unittest.TestCase):
             self.assertNotIn(gone, page, gone)
 
 
-    def test_a_live_check_takes_its_prompt_on_stdin_and_names_the_override_line(self):
+    def test_what_the_plugin_makes_a_model_do_is_checked_by_the_evals_suite_and_by_no_piped_prompt(self):
         page = read(PAGE)
-        self.assertIn('echo "&lt;prompt&gt;" | claude -p --plugin-dir &lt;clone&gt;/lbiza/plugins/p4-phi --debug', page)
-        self.assertIn('Plugin "p4-phi" from --plugin-dir overrides installed version', page)
-        self.assertIn("~/.claude/debug/latest", page)
+        self.assertIn('id="the-evals-suite"', page)
+        self.assertIn("<code>claude plugin eval . --scaffold --trust-plugin --model claude-sonnet-5-5 "
+                      "--judge-model claude-haiku-5-5 --no-publish --max-cost-usd 5</code>", page)
+        self.assertIn("It gates no landing.", page)
+        self.assertIn("<code>hook_response</code>", page)
+        self.assertIn("counts for <code>tool_used</code>", page)
+        evals = os.path.join(os.path.dirname(HERE), "evals")
+        named = [d for d in sorted(os.listdir(evals)) if os.path.isfile(os.path.join(evals, d, "prompt.md"))]
+        self.assertTrue(named)
+        for case in named:                             # every case of the suite has its row on the page
+            self.assertIn(f"<td><code>{case}</code></td>", page, case)
+        for gone in ("| claude -p", "~/.claude/debug/latest"):   # the by-hand check the cases took the place of
+            self.assertNotIn(gone, page, gone)
 
     def test_a_plugin_dir_session_runs_only_from_a_scratch_project(self):
         page = read(PAGE)

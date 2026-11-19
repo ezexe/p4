@@ -196,7 +196,8 @@ Each is for one run, a test or one machine's unusual layout.
 ## Developing p4-phi while it is installed
 
 A session that edits p4-phi runs with Claude Code's own features, and p4-phi builds nothing in their place.
-The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, live checks run on a clone in a scratch project, and `claude plugin update` run only when a release is cut.
+The page `dox/plugin-development.html` in ezexe/p4 says how: a clone loaded with `claude --plugin-dir <clone>/lbiza/plugins/p4-phi --debug`, edits picked up by `/reload-plugins`, the installed copies off for the development project in a `.claude/settings.local.json` ezexe writes, each copy's `CLAUDE_PLUGIN_DATA` folder checked on disk, and `claude plugin update` run only when a release is cut.
+What the plugin makes a model do is checked by the cases in `evals/`, run by hand from this folder with `claude plugin eval . --scaffold --trust-plugin --model claude-sonnet-5-5 --judge-model claude-haiku-5-5 --no-publish --max-cost-usd 5`, which gates no landing.
 
 ## What depends on the machine
 
