@@ -18,9 +18,13 @@ concurrency:
 
 jobs:
   pytest:
-    # Windows, where the hook runners are sh scripts that run under Git Bash and four skip marks of p4-phi's tests
-    # let their tests run.
-    runs-on: windows-latest
+    # The systems Claude Code runs the plugins on. On Windows the hook runners are sh scripts that run under Git Bash,
+    # and four skip marks of p4-phi's tests let their tests run only there.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -30,9 +34,9 @@ jobs:
       - name: Install the test tools
         run: python -m pip install --group dev
       - name: Run the tests
-        # Git Bash runs the command, as a session's Bash tool does, so one Git Bash lives through the run. Git for
-        # Windows maps /tmp for every sh from the temp folder of the first one alive, and with none alive a hook's sh
-        # can find /tmp in a temp folder a test has since removed, and warn of it on stderr.
+        # On Windows, Git Bash runs the command, as a session's Bash tool does, so one Git Bash lives through the run.
+        # Git for Windows maps /tmp for every sh from the temp folder of the first one alive, and with none alive a
+        # hook's sh can find /tmp in a temp folder a test has since removed, and warn of it on stderr.
         shell: bash
         run: python -m pytest
 
