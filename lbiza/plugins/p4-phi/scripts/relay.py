@@ -297,16 +297,21 @@ def command_word(p, n):
 
 # A git ref or a repository as a message writes it: `origin/main`, `upstream/release/2`, `refs/heads/main`, `ezexe/p4`.
 # gitrevisions, "<refname>": "e.g. master, heads/master, refs/heads/master", and a remote-tracking branch is its
-# remote's name and the branch. GitHub names a repository `owner/name`. Each is written as a relative path is.
-_CONFIGS = {}                    # a base folder -> its repository's config file, its time and the remotes it names
+# remote's name and the branch. GitHub names a repository `owner/name`. Each is written as a relative path is, and
+# so is a folder still to be made, such as `docs/guides`. So the two are told apart by what the repository at the
+# base knows, never by the word's shape: its remotes' names, the owner and name in their addresses, and its branches.
+_CONFIGS = {}                    # a base folder -> its repository's git folder, its config's time and what that names
+REMOTE = re.compile(r'^\s*\[remote "([^"]+)"\]((?:\n(?!\s*\[).*)*)', re.M)
+URL = re.compile(r"^\s*url\s*=\s*(\S+)", re.M)
 
 
-def remotes(base):
-    """The names of the remotes of the repository at `base`, read from its config file with no process started, and
-    read again when that file changed. A worktree's `.git` is a file that names its git folder, whose `commondir`
-    names the folder the config is in."""
+def _known(base):
+    """What the config of the repository at `base` names, as (its git folder, the names of its remotes, the
+    `owner/name` of each remote's address in lower case), read with no process started and read again when the file
+    changed. A worktree's `.git` is a file that names its git folder, whose `commondir` names the folder the config
+    and the branches are in. ('', (), ()) for a folder in no repository."""
     if not base:
-        return ()
+        return "", (), ()
     key = norm(base)
     held = _CONFIGS.get(key)
     try:
@@ -322,37 +327,65 @@ def remotes(base):
                     with open(common, encoding="utf-8", errors="replace") as f:
                         c = f.read().strip()
                     git = c if os.path.isabs(c) else os.path.join(git, c)
-            held = _CONFIGS[key] = [os.path.join(git, "config") if git else "", None, ()]
-        at = os.path.getmtime(held[0]) if held[0] else None
+            held = _CONFIGS[key] = [git, None, (), ()]
+        at = os.path.getmtime(os.path.join(held[0], "config")) if held[0] else None
         if at != held[1]:
-            with open(held[0], encoding="utf-8", errors="replace") as f:
-                held[1], held[2] = at, tuple(re.findall(r'^\s*\[remote "([^"]+)"\]', f.read(), re.M))
+            with open(os.path.join(held[0], "config"), encoding="utf-8", errors="replace") as f:
+                found = REMOTE.findall(f.read())
+            slugs = []
+            for _, body in found:                  # https://host/owner/name.git, git@host:owner/name.git
+                for url in URL.findall(body):
+                    tail = re.split(r"[/:]", re.sub(r"\.git$", "", url.rstrip("/"), flags=re.I))[-2:]
+                    if len(tail) == 2 and all(tail):
+                        slugs.append("/".join(tail).lower())
+            held[1], held[2], held[3] = at, tuple(n for n, _ in found), tuple(slugs)
     except (OSError, IndexError, ValueError):
-        return ()
-    return held[2]
+        return "", (), ()
+    return held[0], held[2], held[3]
+
+
+def remotes(base):
+    """The names of the remotes of the repository at `base`."""
+    return _known(base)[1]
+
+
+def branch(base, word):
+    """True when `word` is a branch of the repository at `base`: a file under its `refs/heads`, or a line of its
+    `packed-refs`, where git keeps the refs it packed."""
+    git = _known(base)[0]
+    if not git or ".." in word:
+        return False
+    if os.path.isfile(os.path.join(git, "refs", "heads", *word.split("/"))):
+        return True
+    try:
+        with open(os.path.join(git, "packed-refs"), encoding="utf-8", errors="replace") as f:
+            return any(line.rstrip().endswith(" refs/heads/" + word) for line in f)
+    except OSError:
+        return False
 
 
 def ref_word(p, n, base=""):
     """True when the words `p` name a git ref or a repository and no path, with nothing on disk at `n`, the path
-    those words would be: two parts of which the second has no file extension, as `origin/main` and `ezexe/p4`
-    are and as issues.without_slugs reads a repository's name, or any number of parts behind `refs` or behind the
-    name of a remote of the repository at `base`. A draft named `origin/main` and `ezexe/p4` as its area, joined to
-    the project's folder. A folder or file that is there stays a path, and so does a word that ends in a slash."""
+    those words would be, by what the repository at `base` knows: the words are behind the name of one of its
+    remotes, as `origin/main` is, they are the owner and name in a remote's address, as `ezexe/p4` is, they are one
+    of its branches, or they are behind `refs`, which is git's own folder of refs. A draft named `origin/main` and
+    `ezexe/p4` as its area, joined to the project's folder. A word the repository knows nothing of is a path, so a
+    folder still to be made, such as `docs/guides`, is one, and so is a folder or file that is there."""
     w = str(p or "").replace(chr(92), "/")
     if "/" not in w or w.startswith(("/", ".", "~")) or re.match(r"^[A-Za-z]:", w) or any(c in w for c in "*?["):
         return False
     parts = w.split("/")
     if not all(parts):
         return False
-    two = len(parts) == 2 and (not re.search(r"\.[A-Za-z0-9]{1,8}$", parts[1]) or parts[1].lower().endswith(".git"))
-    if not (two or parts[0] == "refs" or parts[0] in remotes(base)):
-        return False
-    return not (drive_ok(n) and os.path.lexists(n))
+    _, names, slugs = _known(base)
+    known = (parts[0] == "refs" or parts[0] in names or re.sub(r"\.git$", "", w, flags=re.I).lower() in slugs
+             or branch(base, w))
+    return known and not (drive_ok(n) and os.path.lexists(n))
 
 
 def paths_in(text, base=""):
     """The paths a note names: in backticks, or written with a slash. A slash command is no path, command_word, and
-    neither is a git ref or a repository's name, ref_word."""
+    neither is a git ref or a repository's name that the repository at `base` knows, ref_word."""
     out = []
     text = re.sub(r"[A-Za-z][\w+.-]*://\S+", " ", str(text or ""))       # a URL is not a path
     for m in PATH_RE.finditer(text):

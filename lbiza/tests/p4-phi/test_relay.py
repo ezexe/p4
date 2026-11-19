@@ -74,46 +74,82 @@ class Paths(unittest.TestCase):
     def test_a_git_ref_and_a_repositorys_name_are_no_path(self):
         """`origin/main` and `ezexe/p4` in a message are a remote-tracking branch, gitrevisions, and a repository as
         GitHub names one, `owner/name`. Each is written as a relative path is, and a start draft named both as its
-        area, joined to the project's folder. Two parts with no file extension and nothing on disk there are no
-        path, as issues.without_slugs reads a repository's name, and neither is anything behind `refs` or behind
-        the name of a remote of the project's repository. A folder that is there, a file still to be written, a
-        path of three parts and a word that ends in a slash stay paths. The remotes are read from the repository's
-        config with no process started, a worktree's through its `commondir`, and read again when it changed."""
+        area, joined to the project's folder. They are told by what the project's repository knows: the names of
+        its remotes, the owner and name in their addresses, its branches, and git's own `refs`. A folder that is
+        there stays a path. The config is read with no process started, a worktree's through its `commondir`, and
+        read again when it changed."""
         with tempfile.TemporaryDirectory() as tmp:
             base = os.path.join(tmp, "proj").replace("\\", "/")
             os.makedirs(os.path.join(base, "lib", "sub"))
-            subprocess.run(["git", "init", "-q", base], check=True)
-            said = ("Rebase onto origin/main of ezexe/p4, as `origin/main` and `anthropics/claude-code.git` say, see "
-                    "refs/heads/main, then fix lib/sub and lib/new.py and docs/guide/intro and notes/ and lib/.")
-            want = [relay.norm(x, base) for x in ("lib/sub", "lib/new.py", "docs/guide/intro", "lib")]
+            subprocess.run(["git", "init", "-q", "-b", "main", base], check=True)
+            for name, url in (("origin", "https://github.com/ezexe/p4.git"), ("fork", "git@github.com:Other/P4-fork")):
+                subprocess.run(["git", "-C", base, "remote", "add", name, url], check=True)
+            self.assertEqual(relay.remotes(base), ("origin", "fork"))
+            said = ("Rebase onto origin/main of ezexe/p4, as `origin/main` and `ezexe/p4.git` and other/p4-fork say, "
+                    "see refs/heads/main and fork/release/2, then fix lib/sub and lib/new.py and docs/guide/intro.")
+            want = [relay.norm(x, base) for x in ("lib/sub", "lib/new.py", "docs/guide/intro")]
             self.assertEqual(relay.paths_in(said, base), want)
-            for word in ("origin/main", "ezexe/p4", "refs/heads/main", "refs/remotes/origin/main", "user/repo.git"):
+            for word in ("origin/main", "ezexe/p4", "EZEXE/P4.git", "other/p4-fork", "refs/heads/main",
+                         "refs/remotes/origin/main", "fork/release/2"):
                 self.assertTrue(relay.ref_word(word, relay.norm(word, base), base), word)
             for word in ("lib/sub", "lib/new.py", "docs/guide/intro", "/origin/main", "./origin/main", "main",
-                         "lib/*", "origin/"):
+                         "lib/*", "origin/", "upstream/main", "anthropics/claude-code"):
                 self.assertFalse(relay.ref_word(word, relay.norm(word, base), base), word)
-            # a branch of a remote with a slash in its name is a ref only once the repository has that remote
-            deep = "upstream/release/2"
-            self.assertEqual(relay.remotes(base), ())
-            self.assertFalse(relay.ref_word(deep, relay.norm(deep, base), base))
+            # a remote added later is known once the config changed
             subprocess.run(["git", "-C", base, "remote", "add", "upstream", "https://example.invalid/u/r.git"],
                            check=True)
             config = os.path.join(base, ".git", "config")
             os.utime(config, (time.time() + 5, time.time() + 5))       # a later time, whatever the clock's grain
-            self.assertEqual(relay.remotes(base), ("upstream",), "the config is read again once it changed")
-            self.assertTrue(relay.ref_word(deep, relay.norm(deep, base), base))
-            self.assertEqual(relay.paths_in(f"merge {deep} into lib/sub", base), [relay.norm("lib/sub", base)])
-            os.makedirs(os.path.join(base, "upstream", "release", "2"))
-            self.assertEqual(relay.paths_in(f"read {deep}", base), [relay.norm(deep, base)], "a folder that is there")
-            # a worktree's `.git` is a file, and the remotes are in the config of the folder its commondir names
+            self.assertEqual(relay.remotes(base), ("origin", "fork", "upstream"), "read again once it changed")
+            self.assertTrue(relay.ref_word("upstream/main", relay.norm("upstream/main", base), base))
+            self.assertTrue(relay.ref_word("u/r", relay.norm("u/r", base), base))
+            os.makedirs(os.path.join(base, "upstream", "main"))
+            self.assertEqual(relay.paths_in("read upstream/main", base), [relay.norm("upstream/main", base)],
+                             "a folder that is there")
+            # the repository's own branches, as files under refs/heads and as lines of packed-refs
             subprocess.run(["git", "-C", base, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q",
                             "--allow-empty", "-m", "one"], check=True)
+            for name in ("claude/loose-one", "claude/packed-one"):
+                subprocess.run(["git", "-C", base, "branch", name], check=True)
+            subprocess.run(["git", "-C", base, "pack-refs", "--all"], check=True)
+            subprocess.run(["git", "-C", base, "branch", "claude/loose-two"], check=True)
+            for name in ("claude/loose-two", "claude/packed-one"):
+                self.assertTrue(relay.branch(base, name), name)
+                self.assertEqual(relay.paths_in(f"merge {name} into lib/sub", base), [relay.norm("lib/sub", base)])
+            self.assertFalse(relay.branch(base, "claude/none"))
+            self.assertFalse(relay.branch(base, "../config"))
+            # a worktree's `.git` is a file, and what the repository knows is in the folder its commondir names
             tree = os.path.join(tmp, "tree").replace("\\", "/")
             subprocess.run(["git", "-C", base, "worktree", "add", "-q", tree], check=True)
             self.assertTrue(os.path.isfile(os.path.join(tree, ".git")))
-            self.assertEqual(relay.remotes(tree), ("upstream",))
+            self.assertEqual(relay.remotes(tree), ("origin", "fork", "upstream"))
+            self.assertTrue(relay.branch(tree, "claude/packed-one"))
+            self.assertEqual(relay.paths_in("rebase onto origin/main of ezexe/p4", tree), [])
             self.assertEqual(relay.remotes(""), ())
             self.assertEqual(relay.remotes(os.path.join(tmp, "no-repository")), ())
+
+    def test_a_folder_still_to_be_made_is_a_path_whatever_its_shape(self):
+        """Row 12 told a ref and a repository's name by their shape, two parts with no file extension and nothing on
+        disk, so a folder still to be made, such as `docs/guides`, was read as no path, which it was before. A word
+        the repository knows nothing of is a path: in a project with the remote `origin` at ezexe/p4, in one with no
+        remote, and in a folder that is no repository."""
+        with tempfile.TemporaryDirectory() as tmp:
+            said = "Make the folder docs/guides and `notes/drafts`, rebased onto origin/main of ezexe/p4."
+            repo = os.path.join(tmp, "repo").replace("\\", "/")
+            subprocess.run(["git", "init", "-q", repo], check=True)
+            subprocess.run(["git", "-C", repo, "remote", "add", "origin", "https://github.com/ezexe/p4"], check=True)
+            self.assertEqual(relay.paths_in(said, repo), [relay.norm("docs/guides", repo),
+                                                          relay.norm("notes/drafts", repo)])
+            for word in ("docs/guides", "notes/drafts", "src/new", "anthropics/claude-code"):
+                self.assertFalse(relay.ref_word(word, relay.norm(word, repo), repo), word)
+            bare = os.path.join(tmp, "bare").replace("\\", "/")
+            subprocess.run(["git", "init", "-q", bare], check=True)
+            plain = os.path.join(tmp, "plain").replace("\\", "/")
+            os.makedirs(plain)
+            for base in (bare, plain):             # nothing known: every word with a slash is a path, as before
+                self.assertEqual(relay.paths_in(said, base),
+                                 [relay.norm(x, base) for x in ("docs/guides", "notes/drafts", "origin/main",
+                                                                "ezexe/p4")])
 
     def test_a_slash_command_is_no_path(self):
         """`/goal` and `/plan` in a message are Claude Code's commands, commands.md, and a plugin's is written
