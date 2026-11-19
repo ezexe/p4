@@ -48,7 +48,6 @@ import itertools
 import json
 import os
 import re
-import subprocess
 import sys
 import threading
 import time
@@ -1613,76 +1612,31 @@ def merge_all(home, sid):
 #
 # A session can be archived, or counted as archived when it finishes, while work it started is still unfinished. So
 # when a session under an orchestrator closes, what it started is reconciled once against what finished, from the
-# background tasks of its task list, its turns, the store's start requests and the machine's process list. A clean
-# session leaves nothing. Otherwise the items are kept on its session.json as `unfinishedAtArchive`, shown at the head
-# of its orchestrator's ledger, and its parent session is told once, beside its next message, one sentence an item.
+# background tasks of its task list, its turns and the store's start requests. A clean session leaves nothing.
+# Otherwise the items are kept on its session.json as `unfinishedAtArchive`, shown at the head of its orchestrator's
+# ledger, and its parent session is told once, beside its next message, one sentence an item.
+#
+# Running work is the archive's own to settle. The archive tool's description says "Archiving stops the session's
+# process" and "A session that is still working (mid-turn, or with live background work) is not archived and the
+# call says so", and desktop.md, "Archive a session", says "Cloud sessions and sessions that are still running don't
+# archive themselves." So p4-phi reads no process list of the machine, and names no background task of a session the
+# app holds archived. What that refusal lacks is a session p4-phi only counts as archived, which no archive call
+# closed: its process still runs, so a background task its last Stop listed is still named.
 
 ARCHIVE_LOOK_S = 24 * 3600.0     # a session closed longer ago than this is stamped as checked, not looked at
-PS_S = 6                         # the process listing, which a hook may be waiting on
-PROCESSES = None                 # a test's stand-in for the process list: a callable that gives pid and command pairs
 
 
-def process_rows():
-    """The pid and command line of each process on this machine, and an empty list when the listing fails."""
-    if PROCESSES is not None:
-        return list(PROCESSES())
-    try:
-        if os.name == "nt":
-            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                                "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
-                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=PS_S,
-                               stdin=subprocess.DEVNULL)
-        else:
-            r = subprocess.run(["ps", "-eo", "pid=,args="], capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", timeout=PS_S, stdin=subprocess.DEVNULL)
-    except (OSError, subprocess.SubprocessError):
-        return []
-    out = []
-    for line in (r.stdout or "").splitlines():
-        pid, _, cmd = line.strip().replace("\t", " ", 1).partition(" ")
-        if pid.isdigit() and cmd.strip():
-            out.append((int(pid), cmd.strip()))
-    return out
-
-
-def left_processes(home, s):
-    """The live processes a session started, told by its marks in their command lines: its id beside its own store,
-    as a phi.py command given `--p4` and `--session` carries both, and the app's scratchpad directory of each of its
-    CLI sessions, <id>/scratchpad under the temp folder, with the one phi keeps as `scratchpadDir`, where its clones
-    and test runs live.
-    The id alone is no mark, since a session of another store, such as a test's, can carry the same id."""
-    sid = str(s.get("sessionId") or "")
-    store = os.path.abspath(home).replace("\\", "/").lower() if home else ""
-    marks = [f"/{cli}/scratchpad".lower() for cli in s.get("cliSessionIds") or []
-             if isinstance(cli, str) and len(cli) >= 8]
-    pad = str(s.get("scratchpadDir") or "").replace("\\", "/").rstrip("/").lower()
-    if pad:
-        marks.append(pad)
-    if not marks and not (sid and store):
-        return []
-    out = []
-    for pid, cmd in process_rows():
-        low = cmd.replace("\\", "/").lower()
-        own = (sid and store and sid.lower() in low and store in low) or any(m in low for m in marks)
-        if pid != os.getpid() and own and "win32_process" not in low:
-            out.append((pid, _short(cmd, 140)))
-    return out[:12]
-
-
-def unfinished(home, sid, procs=True):
+def unfinished(home, sid):
     """What a session started and did not finish, one sentence an item, and an empty list for a clean session."""
     phi = _phi()
     s = relay._session(home, sid)
     if not s:
         return []
     items = []
-    for t in plans.in_flight(s):
+    for t in [] if relay.archived_in_app(s) else plans.in_flight(s):
         items.append(f"background task {t.get('id')}, {t.get('type') or 'a task'} "
                      f"\"{_short(t.get('description') or t.get('command'), 100)}\", was still running at its last "
                      f"turn's end, {s.get('backgroundAt') or 'earlier'}, and may still be running")
-    if procs:
-        for pid, cmd in left_processes(home, s):
-            items.append(f"process {pid} it started is still alive: {cmd}")
     try:
         files, _, commits, still = relay.outcome(home, sid, s)
     except Exception:  # noqa: BLE001
@@ -1710,7 +1664,7 @@ def unfinished(home, sid, procs=True):
     return items
 
 
-def archive_check(home, sid, procs=True):
+def archive_check(home, sid):
     """Checks once a session counted as archived or archived, and returns its unfinished items, which are kept on its
     session.json and told once to its parent session. Returns an empty list for a clean session and for one checked
     before."""
@@ -1718,7 +1672,7 @@ def archive_check(home, sid, procs=True):
     s = relay._read_json(path)
     if not s or s.get("archiveChecked"):
         return []
-    items = unfinished(home, sid, procs)
+    items = unfinished(home, sid)
     s = relay._read_json(path) or s
     s["archiveChecked"] = now()
     if items:

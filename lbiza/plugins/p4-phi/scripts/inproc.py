@@ -368,7 +368,7 @@ def plan(args, env=None, cwd=None):
 def run(args, **kw):
     """`subprocess.run(args, **kw)`, run in this process when `plan` knows the command line. Two more keywords:
     `clock`, a Clock the call's time reads, and `stand_ins`, {"module.name": value} set over the module globals for
-    the call, such as {"puppeteer.PROCESSES": lambda: []}."""
+    the call, such as {"puppeteer.ISSUE_TTL_S": 0.0}."""
     clock, stand_ins = kw.pop("clock", None), kw.pop("stand_ins", None)
     p = None
     if ENABLED and not _DEPTH[0] and set(kw) <= KNOWN_KW and kw.get("stdin") in (None, subprocess.DEVNULL,

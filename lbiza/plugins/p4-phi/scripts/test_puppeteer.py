@@ -461,26 +461,6 @@ class WatcherCaps(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
-class LeftProcesses(unittest.TestCase):
-    def test_a_sessions_processes_are_found_by_its_apps_scratchpad(self):
-        """ezexe/p4#131: a test run from the app's scratchpad of any of its CLI sessions, <id>/scratchpad, or from the
-        one phi keeps as scratchpadDir, is the session's own; the store's temportal/tmp is no mark, since no session
-        runs there since p4-temportal 0.3.10."""
-        cli = "aaaa1111-0000-4000-8000-000000000000"
-        rows = [(90001, f"python C:/Users/u/AppData/Local/Temp/claude/h/{cli}/scratchpad/run.py"),
-                (90002, f"python E:/proj/.claude/p4/temportal/tmp/{cli}/p4/test_x.py"),
-                (90003, "python E:/proj/other.py"),
-                (90004, "python D:/pads/first-turn/w/p4/suite/run.py")]
-        held = puppeteer.process_rows
-        puppeteer.process_rows = lambda: rows
-        try:
-            got = puppeteer.left_processes("", {"sessionId": "local_x", "cliSessionIds": [cli],
-                                                "scratchpadDir": "D:/pads/first-turn"})
-        finally:
-            puppeteer.process_rows = held
-        self.assertEqual([pid for pid, _ in got], [90001, 90004])
-
-
 class Recursive(unittest.TestCase):
     def setUp(self):
         if not shutil.which("git") or not shutil.which("sh"):
@@ -631,19 +611,42 @@ class AtArchive(Base):
         other = dict(call, tool_input={"command": "sh other.sh", "run_in_background": True}, tool_use_id="tu3")
         self.assertEqual(self.t.hook("restart-check", KID, other).stdout.strip(), "", "another command is no restart")
 
-    def test_processes_it_left_and_requests_nobody_started_are_named(self):
-        puppeteer.PROCESSES = lambda: [(4242, f"python phi.py ledger --p4 {self.t.p4} --session {KID}"),
-                                       (4343, f"python phi.py ledger --p4 /another/store --session {KID}"),
-                                       (7, "python other.py")]
-        try:
-            starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", to=TOP)
-            left = puppeteer.unfinished(self.t.p4, KID)
-        finally:
-            puppeteer.PROCESSES = None
-        self.assertTrue(any(x.startswith("process 4242 it started is still alive") for x in left), left)
-        self.assertFalse(any("process 7 " in x for x in left))
-        self.assertFalse(any("process 4343 " in x for x in left), "the same session id in another store is not its")
+    def test_a_request_nobody_started_is_named(self):
+        starts.add(self.t.p4, KID, "A follow-up nobody starts", "Do the follow-up in the exporter.", to=TOP)
+        left = puppeteer.unfinished(self.t.p4, KID)
         self.assertTrue(any("that it filed was never started" in x for x in left), left)
+
+    def test_no_process_list_is_read_and_running_work_is_the_archive_tools_own_to_refuse(self):
+        """Audit candidate 20. The archive tool's description: "Archiving stops the session's process" and "A session
+        that is still working (mid-turn, or with live background work) is not archived and the call says so", and
+        desktop.md, "Archive a session": "Cloud sessions and sessions that are still running don't archive
+        themselves." So p4-phi reads no process list of the machine at an archive, with a process of the session's
+        own running, and names no background task of a session the app holds archived. What the refusal lacks is a
+        session p4-phi only counts as archived, which no archive call closed: its task is still named."""
+        from unittest import mock
+        for name in ("process_rows", "left_processes", "PS_S", "PROCESSES"):
+            self.assertFalse(hasattr(puppeteer, name), name)
+        import inspect
+        for fn in (puppeteer.unfinished, puppeteer.archive_check):
+            self.assertEqual(list(inspect.signature(fn).parameters), ["home", "sid"], fn.__name__)
+        self.background(KID, "sh run-suites.sh", "bg77777777")
+        ran = []
+        real = subprocess.run
+
+        def run(args, *a, **k):
+            ran.append(" ".join(map(str, args)) if isinstance(args, (list, tuple)) else str(args))
+            return real(args, *a, **k)
+        with mock.patch.object(subprocess, "run", run), mock.patch.dict(os.environ, self.t.env(KID)),                 mock.patch.dict(phi.RECORDS, clear=True):         # the app's records, as a hook process reads them
+            left = puppeteer.unfinished(self.t.p4, KID)
+        self.assertFalse([c for c in ran if "Win32_Process" in c or c.startswith("ps ")], "no process list is read")
+        self.assertFalse(any(x.startswith("process ") for x in left), left)
+        self.assertTrue(any("background task bg77777777" in x for x in left),
+                        "counted as archived by p4-phi alone, its process still runs: named")
+        app = os.path.join(self.t.app, KID + ".json")
+        write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))      # archived in the app
+        with mock.patch.dict(os.environ, self.t.env(KID)), mock.patch.dict(phi.RECORDS, clear=True):
+            left = puppeteer.unfinished(self.t.p4, KID)
+        self.assertFalse(any("bg77777777" in x for x in left), "the archive stopped its process, or was refused")
 
     def test_a_self_archive_is_never_held_by_a_background_task(self):
         """The archive tool itself refuses a session with live background work, audit row S24, so p4-phi neither
@@ -664,7 +667,7 @@ class AtArchive(Base):
         call = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_use_id": "tu4",
                 "tool_input": {"command": "sh run-suites.sh", "run_in_background": True}}
         self.assertEqual(self.t.hook("restart-check", KID, call).stdout.strip(), "", "ended: started again freely")
-        self.assertFalse(any("bg44444444" in x for x in puppeteer.unfinished(self.t.p4, KID, procs=False)))
+        self.assertFalse(any("bg44444444" in x for x in puppeteer.unfinished(self.t.p4, KID)))
 
     def test_a_task_stop_clears_the_saved_entry(self):
         """A stop sends no notice, so a TaskStop or KillShell call ends the entry, through the lookup-record gate."""
