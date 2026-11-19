@@ -41,6 +41,7 @@ import puppeteer  # noqa: E402
 import starts  # noqa: E402
 import inproc  # noqa: E402
 from test_phi import CLI, KID, KID2, GRAND, TASK, TOP, Tree, context, jload, read, transcript, write  # noqa: E402
+from test_phi import PROMPT  # noqa: E402
 from test_issues import FAKE_GH, GhTree  # noqa: E402
 
 TOP2 = "local_top00002"
@@ -597,8 +598,60 @@ class Recursive(unittest.TestCase):
         self.assertNotIn("route that landed", context(t.say(TOP2, "Add a dark theme to the billing dashboard's "
                                                                   "settings page")), "no match: a fresh draft")
         self.state(**{"7": "OPEN"})
+        past = "What did we decide about the narwhal exporter flush that drops the last row of the ports table?"
+        self.assertEqual(puppeteer.earlier_text(t.p4, past), "", "a registered route matches: no line")
+        self.state(**{"7": "OPEN"})
         self.assertIn(f"withdrawn {row['id']}: ezexe/demo#7 was reopened", self.why())
         self.assertEqual(puppeteer.all_routes(t.p4), {})
+        self.assertIn(puppeteer.SEARCH_TOOL, puppeteer.earlier_text(t.p4, past), "no route is left to match")
+
+
+class Earlier(Base):
+    """A message of ezexe's own that asks about earlier work and matches no registered route is handed one line
+    that names the desktop app's tool for searching its sessions' transcripts, in a session the app holds a record
+    of."""
+    PAST = "What did we decide about the fence in an earlier session?"
+
+    def setUp(self):
+        super().setUp()
+        self.t.say(TOP, TASK)
+        self.t.stop(TOP, TASK, report="planned")
+
+    def said(self, host, prompt, prompt_id="", **more):
+        return context(self.t.hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit", "prompt": prompt,
+                                                  "prompt_id": prompt_id}, **more))
+
+    def test_ezexes_message_about_earlier_work_with_no_route_gets_the_one_line(self):
+        ctx = self.said(TOP, self.PAST)
+        line = [x for x in ctx.splitlines() if puppeteer.SEARCH_TOOL in x]
+        self.assertEqual(len(line), 1, ctx)
+        self.assertEqual(line[0], "phi (p4-phi): this message of ezexe's asks about earlier work and matches no "
+                         "registered route, and p4-phi finds no earlier turn by a message's words: search the app's "
+                         "transcripts for it with `mcp__ccd_session_mgmt__search_session_transcripts`.")
+        for words in ("Did we already fix the flush last week?", "which chat was it, the previous conversation?"):
+            self.assertIn(puppeteer.SEARCH_TOOL, self.said(TOP, words), words)
+
+    def test_no_line_for_a_message_that_asks_nothing_of_earlier_work(self):
+        for words in (ASK, RETRY, "also, what colour should the fence be?"):
+            self.assertNotIn(puppeteer.SEARCH_TOOL, self.said(TOP, words), words)
+
+    def test_no_line_for_another_sessions_message_or_an_event(self):
+        peer = f'<cross-session-message from="{KID}">{self.PAST}</cross-session-message>'
+        event = f"<task-notification>{self.PAST}</task-notification>"
+        for words in (peer, event):
+            self.assertNotIn(puppeteer.SEARCH_TOOL, self.said(TOP, words), words)
+        for k, kind in enumerate(("peer", "task-notification")):   # by the origin, whatever the text opens with
+            write(os.path.join(self.t.dir(TOP), "origin.json"), json.dumps({"promptId": f"p-{k}", "kind": kind}))
+            self.assertNotIn(puppeteer.SEARCH_TOOL, self.said(TOP, self.PAST, f"p-{k}"), kind)
+        write(os.path.join(self.t.dir(TOP), "origin.json"), json.dumps({"promptId": "p-9", "kind": "composer"}))
+        self.assertIn(puppeteer.SEARCH_TOOL, self.said(TOP, self.PAST, "p-9"))
+
+    def test_no_line_in_a_session_the_app_holds_no_record_of_or_with_routing_off(self):
+        """The tool is the desktop app's, so a session started in a terminal, which the app holds no record of, has
+        none to be pointed at."""
+        self.t.say("local_noapp001", TASK)
+        self.assertNotIn(puppeteer.SEARCH_TOOL, self.said("local_noapp001", self.PAST))
+        self.assertNotIn(puppeteer.SEARCH_TOOL, self.said(TOP, self.PAST, P4_PHI_PUPPETEER="0"))
 
 
 class AtArchive(Base):

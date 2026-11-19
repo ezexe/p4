@@ -1073,6 +1073,29 @@ def score_routes(home, req):
     return sorted(out, key=lambda x: (-x[0], -x[1], str(x[2].get("id"))))
 
 
+# a message that asks about earlier work: it names an earlier session or conversation, asks whether something was
+# done before, or asks what was decided, concluded, landed or settled
+EARLIER = re.compile(r"\b(?:earlier|previous|prior|past|older|last|another|other)\s+(?:sessions?|conversations?|"
+                     r"chats?|transcripts?)\b|"
+                     r"\b(?:did|have|had|didn't|haven't)\s+(?:we|you|i)\b[^.?!\n]*\b(?:before|earlier|already|"
+                     r"previously|yesterday|ago|last\s+(?:time|week|month))\b|"
+                     r"\b(?:what|which|where|when|why)\b[^.?!\n]*\b(?:did|had|have)\s+(?:we|you|i)\b[^.?!\n]*"
+                     r"\b(?:decided?|concluded?|land(?:ed)?|settled?)\b", re.I)
+SEARCH_TOOL = "mcp__ccd_session_mgmt__search_session_transcripts"
+
+
+def earlier_text(home, req):
+    """The one line for a message of ezexe's that asks about earlier work and matches no registered route: the
+    desktop app's own tool that searches the transcripts of its sessions by words, which p4-phi builds no copy of.
+    '' for any other message, and where routing is off. Whose message it is and whether the app hosts the session,
+    which alone has the tool, are the caller's to tell."""
+    if not on(home) or not EARLIER.search(str(req or "")) or score_routes(home, req):
+        return ""
+    return (f"phi (p4-phi): this message of ezexe's asks about earlier work and matches no registered route, and "
+            f"p4-phi finds no earlier turn by a message's words: search the app's transcripts for it with "
+            f"`{SEARCH_TOOL}`.")
+
+
 # --- routing: the message read against the tree's records -------------------------------------------------------------
 
 def readings_of(req):

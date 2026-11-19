@@ -2383,6 +2383,12 @@ def h_user_prompt_submit(payload):
         except Exception:  # noqa: BLE001
             pup = verdict = ""
         RAN["puppeteer"] = verdict or bool(pup)
+    # ezexe's own message about earlier work, in a session the app holds a record of, which alone has the tool
+    if ezexes and me.rec and not verdict and not puppeteer.from_session(payload.get("prompt"), by):
+        try:
+            parts.append(puppeteer.earlier_text(me.home, req))
+        except Exception:  # noqa: BLE001
+            pass
     try:                                           # it reads the app's records: a failure costs only its own line
         route = relay.route_text(me.home, s, req, me.store) if req and not verdict else ""
     except Exception:  # noqa: BLE001
