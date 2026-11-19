@@ -36,6 +36,11 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - On such a line, tell ezexe which decision can be reopened and what was seen, and change nothing by yourself: reopening a decision is ezexe's.
 - A line that begins `p4-native: Claude Code changed from` names the conditions no probe reads by itself, and `/release-notes` is where ezexe reads what changed.
 
+## Options
+
+- `push` and `status` are options of the plugin that are off until ezexe turns them on, and a session turns on neither.
+- With `push` on, the plugin itself calls `PushNotification` at the end of a turn of a session ezexe is at, so send no second notification for the same turn.
+
 ## What to do with it
 
 - Before a step that needs a tool of the desktop app, check that `tools.app` names it, and take the terminal route the step has where it does not.

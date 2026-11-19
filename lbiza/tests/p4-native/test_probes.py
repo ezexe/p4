@@ -110,7 +110,10 @@ class HarmlessTest(unittest.TestCase):
                                  "SELF": "mcp__ccd_session_mgmt__get_session",
                                  "SESSIONS": "mcp__ccd_session_mgmt__list_sessions",
                                  "EVENTS": "mcp__ccd_session_mgmt__list_events"})
-        self.assertEqual(sorted(re.findall(r"\bcall\(\$, ([A-Z]+),", MODULE)), ["EVENTS", "SELF", "SESSIONS"])
+        asked = MODULE.split("async function askOne(", 1)[1].split("\n}\n", 1)[0]
+        self.assertEqual(sorted(re.findall(r"\bcall\(\$, ([A-Z]+),", asked)), ["EVENTS", "SELF", "SESSIONS"])
+        self.assertEqual(sorted(set(re.findall(r"\bcall\(\$, ([A-Z]+),", MODULE))), ["EVENTS", "PUSH", "SELF", "SESSIONS"],
+                         "beside the probes, the option `push` calls Claude Code's own tool that notifies")
         self.assertEqual(MODULE.count("$.tool.call("), 1, "the one call site, in `call`")
 
     def test_the_start_tool_is_watched_and_never_called(self):

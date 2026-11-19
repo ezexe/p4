@@ -93,6 +93,9 @@ type Seen = {
   prompts: { text: string; context: readonly string[] | undefined }[]
   compacted: number
   files: Record<string, string>
+  // Each call of a tool with its input, and the status lines pinned.
+  inputs: { tool: string; input: Record<string, unknown> }[]
+  status: (string | undefined)[]
 }
 
 function plain(path: string): string {
@@ -112,7 +115,14 @@ function machine(on: On, has: Machine): Seen {
     prompts: [],
     compacted: 0,
     files,
+    inputs: [],
+    status: [],
   }
+  on('ui.status', (_, e) => {
+    seen.status.push(e.text)
+
+    return { value: undefined }
+  })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -143,6 +153,7 @@ function machine(on: On, has: Machine): Seen {
   on('tool.call', (_, e) => {
     const { tool: name, tool_use_id: _id, ...input } = e as Record<string, unknown>
     seen.calls.push(String(name))
+    seen.inputs.push({ tool: String(name), input })
     const said = has.app?.(String(name), input)
     // A session with no such tool: nothing beneath answers, and the plugin's call rejects.
     if (said === undefined) throw new Error(`no tool named "${String(name)}" in this session`)
@@ -744,4 +755,102 @@ test('each probe names its decision, and an asked probe is read off what the eng
   expect(seenAtStart({ initiation: 'user_asked' }, { text: '{}' }, 'sdk')).toBeUndefined()
   expect(seenAtStart({ initiation: 'offer' }, { text: '{}' }, 'peer')).toBeUndefined()
   expect(seenAtStart({ initiation: 'user_asked' }, { text: '{}' }, 'task-notification')?.answer).toBe('open')
+})
+
+// A session at a terminal's prompt in the project, with Claude Code's own tool that notifies.
+const PROMPT = { surfaces: () => ['terminal'], files: { [BOOK]: ranOn('terminal/interactive', '2.1.326') } }
+
+test('with no option on, a session pushes nothing and pins no status line', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { ...PROMPT, app: () => 'sent' })
+
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await $.turn.complete(TURN)
+  await clock.settle()
+
+  expect(seen.calls).toEqual([])
+  expect(seen.status).toEqual([])
+})
+
+test('push calls PushNotification once at the end of a turn of a session ezexe is at', { options: { push: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { ...PROMPT, app: () => 'sent' })
+
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await $.turn.complete({ ...TURN, answer: '**The flush is ported.**\nThree files changed.' })
+  await clock.settle()
+
+  expect(seen.inputs).toEqual([
+    { tool: 'PushNotification', input: { message: 'project: The flush is ported.', status: 'proactive' } },
+  ])
+
+  // A turn that was stopped and a subagent's turn push nothing.
+  await $.turn.complete({ ...TURN, isAborted: true })
+  await $.turn.complete({ ...TURN, agentId: 'a1' })
+  await clock.settle()
+  expect(seen.inputs.length).toBe(1)
+})
+
+test('push sends nothing in a scripted run, and cuts a long line under the tool\'s 200 characters', { options: { push: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  let surfaces: string[] = []
+  const seen = machine(on, { surfaces: () => surfaces, files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') }, app: () => 'sent' })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(seen.inputs).toEqual([])
+
+  surfaces = ['terminal']
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: 'x'.repeat(400) })
+  await clock.settle()
+  const message = String(seen.inputs[0]?.input.message)
+  expect(message.length).toBe(180)
+  expect(message.endsWith('...')).toBe(true)
+})
+
+test('in the desktop app push names the session by its title and leaves out a session another session started', { options: { push: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  let own: Record<string, unknown> = { sessionId: 'local_1', title: 'Port the flush', parentSessionId: 'local_0', detached: false }
+  let id = 'cli-0001'
+  const seen = machine(on, {
+    id: () => id,
+    tools: () => [...OWN, ...OF_THE_APP],
+    files: { [BOOK]: ranOn('desktop/interactive', '2.1.326') },
+    app: name => (name.endsWith('get_session') ? JSON.stringify(own) : 'sent'),
+  })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(seen.calls).toEqual(['mcp__ccd_session_mgmt__get_session'])
+
+  own = { sessionId: 'local_2', title: 'Port the flush' }
+  id = 'cli-0002'
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.complete(TURN)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  const pushes = seen.inputs.filter(call => call.tool === 'PushNotification')
+  expect(pushes.map(call => call.input.message)).toEqual(['Port the flush: done', 'Port the flush: done'])
+  expect(seen.calls.filter(name => name.endsWith('get_session')).length).toBe(2)
+})
+
+test('status pins one line that names the host and the version', { options: { status: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { ...PROMPT })
+
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+
+  expect(seen.status).toEqual(['terminal, interactive, Claude Code 2.1.326'])
 })

@@ -222,15 +222,6 @@ export const PROBES: readonly Probe[] = [
     check: 'load a module that hooks one unknown event beside a known one and read whether the known hook ran',
   },
   {
-    id: 'file-changed-for-a-new-file',
-    decision: 'p4-temportal moves no notebook file at a `FileChanged` hook.',
-    fault: 'https://code.claude.com/docs/en/hooks.md does not say `FileChanged` fires for a new file in a watched folder.',
-    was: 'blocked',
-    fits: anywhere,
-    kind: 'by hand',
-    check: 'read the page again, or watch a folder by `watchPaths` and write a new file into it',
-  },
-  {
     id: 'reload-plugins-and-session-start',
     decision: 'No p4 plugin relies on `/reload-plugins` running its SessionStart hooks again.',
     fault: 'No page of the docs says whether `/reload-plugins` runs the SessionStart hooks again.',

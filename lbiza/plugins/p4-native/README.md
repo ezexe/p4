@@ -1,7 +1,7 @@
 # p4-native
 
 The host layer of ezexe/p4, in one plugin.
-It is the one place that knows what this host can do, and it watches the conditions that would reopen a decision the platform blocked.
+It is the one place that knows what this host can do, it watches the conditions that would reopen a decision the platform blocked, and it holds the native features that fit neither p4-phi nor p4-temportal.
 The rule it works by is "Native first", on https://github.com/ezexe/p4/wiki/Contributing: where Claude Code or the desktop app does a thing, a plugin configures or calls it and builds no copy.
 
 ## Install
@@ -103,16 +103,16 @@ The probe of a plugin's own compaction asks for a compaction that this module's 
 - `message-held-across-permission-modes`, by hand: a message to a session in another permission mode is not relied on.
 - `skills-copy-named-like-an-installed-plugin`, by hand: a development copy is checked live through a session's mods folder.
 - `unknown-event-in-a-module`, by hand: each p4 hooks module hooks only events of Claude Code 2.1.326.
-- `file-changed-for-a-new-file`, by hand: p4-temportal moves no notebook file at a `FileChanged` hook.
 - `reload-plugins-and-session-start`, by hand: no p4 plugin relies on `/reload-plugins` running its SessionStart hooks again.
 - `output-styles-stacking`, by hand: p4-phi ships its rule to act and not wait as no output style.
 - `wake-when-done-on-a-card`, by hand: no card p4-phi's upkeep proposes carries `wake_when_done`.
 
 The tool `mcp__p4-native__native` and `/native` take `probes`, which lists every condition that fits this host with its decision, its fault, its check and the answer kept, and `probe`, which reads the asked probes anew and prints each answer.
 
-Two rows of the list this began from are sorted otherwise here.
+Three rows of the list this began from are sorted otherwise here.
 A hooks module's `$.tool.call` reached the app's tools on Claude Code 2.1.326 and not in a scripted run on 2.1.328 because the scripted run has none of those tools, not because of the version, so it is two probes, one for each kind of host.
 The desktop app's `list_events` answered a session at work with its messages when the probe first read it, on Claude Code 2.1.326, so that condition reads `open` and its decision can be reopened.
+`FileChanged` for a new file in a watched folder was seen to fire on Claude Code 2.1.328, and p4-temportal 0.3.35 moves a notebook's log at that event, so nothing is blocked there and no probe watches it.
 
 ## ezexe's own choices
 
@@ -124,6 +124,34 @@ These were declined by choice and not by a block, so each stays a setting of Cla
 - Permission modes, plan mode, auto mode and the sandbox: `/permissions`, `/plan`, `/auto-mode-setup` and `/sandbox`.
 - `autoCompactWindow`, `idleCompaction`, the memory toggle `/memory`, and `cleanupPeriodDays` for how long transcripts stay.
 
+## Native features behind an option
+
+Two features of Claude Code that fit neither p4-phi nor p4-temportal are here.
+Each is an option of the plugin's `userConfig`, off until ezexe turns it on, and each is one call of Claude Code's own that the module makes and does not wrap.
+The options are rows of `/config` in a terminal session, and they are kept under `pluginConfigs` in `~/.claude/settings.json`, by https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration".
+
+```json
+{"pluginConfigs": {"p4-native@p4-marketplace": {"options": {"push": true, "status": true}}}}
+```
+
+- `push`: ezexe hears on the desktop, and on the phone where Remote Control is connected, that a session ezexe is at ended its turn, so it waits or is done.
+- `status`: ezexe sees under the prompt which host a session runs on and which Claude Code version, which differ between the desktop app and a terminal on one machine.
+
+`push` calls the tool `PushNotification` by `$.tool.call` at the end of a turn of the main conversation, with the session's title or the project folder's name and the first line of the turn's answer, 180 characters at most.
+It sends nothing in a scripted run, nothing after a turn that was stopped, and nothing in a session another session started, whose turn's end is told to that session.
+The tool keeps its own rule and sends nothing while ezexe is at the keyboard, by https://code.claude.com/docs/en/env-vars.md, `CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK`.
+`status` calls `$.ui.status` after each reading of the map, which https://code.claude.com/docs/en/plugins/mods/api.md describes as one line under the prompt that stays until it is changed.
+
+Seen in a terminal session at its prompt on Claude Code 2.1.328, with the plugin loaded by `--plugin-dir` and both options on in a `--settings` file: the line `p4-native: terminal, interactive, Claude Code 2.1.328` stood under the prompt, and at the turn's end the module's call of `PushNotification` was answered in 9 ms with `Not sent`, since the terminal was active.
+Not seen: a notification that was sent, either option in the desktop app, and the rows in `/config`.
+
+Left out, each with its reason.
+
+- The agent teams switch for a terminal session: the module set `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` to `1` by `$.env.set` at the start of a terminal session on Claude Code 2.1.328, and a teammate asked for by name ran as a background subagent with no folder under `~/.claude/teams/`, so the check failed and the option is not shipped.
+- A team is still led from a terminal session by setting that variable in the shell or in a settings file's `env` before the session starts, by https://code.claude.com/docs/en/agent-teams.md.
+- Scheduled runs: ezexe's own choice, under the heading above.
+- Which copy of each p4 plugin a session runs, and whether the session's window is on screen: a module is told its own folder and no other plugin's, and neither was checked.
+
 ## Seen live
 
 Seen on Claude Code 2.1.328, in a `claude -p` run with the plugin loaded by `--plugin-dir`, started from a desktop session's shell with that session's variables in its environment: the entry read `terminal`, `scripted`, no surface and no tool of the desktop app, and it listed 31 tools of Claude Code, `PushNotification`, `CronCreate` and `SendMessage` among them.
@@ -132,7 +160,11 @@ Seen in the desktop app on Claude Code 2.1.326, with a development copy loaded f
 In that desktop session `probe` read four conditions: `list_events` answered a session at work with `showing 1 of 6779 messages`, the module's call of `get_session` answered, `SetGoal` was not in the tool list, and `session.start` carried `cwd`, `surface` and `isInteractive`.
 In a `claude -p` run on Claude Code 2.1.328 the first turn kept three answers and the turn's end a fourth: the plugin's `$.session.compact` was rejected with `not available in a headless (-p / SDK) session yet`, before any hook heard it, so the veto was not reached.
 Seen in the desktop app on Claude Code 2.1.326: `$.session.compact` called while a `tool.call` hook is held is rejected with `called from a tool.call hook`, which is why that probe waits for the turn's end.
-Not seen live: a session at a terminal's prompt, a session whose id a `/clear` changed, a change of version between two runs, a notice carried by a prompt, and a call of `start_session` passing through the hook that watches it.
+At that turn's end the same desktop session kept `session-compact-from-a-module` as `blocked`, with the same refusal as the scripted run.
+The notice of the changed `list_events` answer reached the model once, as context of the session's next prompt, and was gone from the file.
+Seen with the installed copy, version 0.2.0, in a `claude -p` run on Claude Code 2.1.328: the session loaded the tool with ToolSearch, and `map` and `probes` answered.
+Seen in a terminal session at its prompt on Claude Code 2.1.328: the entry read `terminal`, `interactive` and the one surface `terminal`, and the probes ran for `terminal/interactive`.
+Not seen live: a session whose id a `/clear` changed, a change of version between two runs, a call of `start_session` passing through the hook that watches it, and the installed copy in a desktop session, where every check ran a development copy.
 
 ## Tests
 

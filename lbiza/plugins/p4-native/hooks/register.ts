@@ -26,6 +26,11 @@
 // that differs from the one kept, or from the one its decision was made on where none is kept, becomes a notice in
 // the file, which the next prompt of any session of the project carries to the model once and which ezexe reads as
 // a line of the transcript.
+//
+// Two native features that fit neither p4-phi nor p4-temportal are here, each behind an option of the plugin's
+// `userConfig` that is off unless ezexe turns it on, and each a call of Claude Code's own: a push notification by
+// the `PushNotification` tool when a turn of a session ezexe is at ends, and a status line that names the host.
+// The module wraps neither.
 
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 
@@ -65,6 +70,11 @@ const TRIES = 3
 
 // How long one call of a probe may take.
 const CALL_MS = 8_000
+
+// Claude Code's own tool that notifies ezexe, on the desktop and, with Remote Control connected, on the phone.
+const PUSH = 'PushNotification'
+// The most characters of a notification, under the 200 the tool's own description gives.
+const PUSH_MOST = 180
 
 // What the name of each tool of the desktop app begins with. A session the app hosts has them and no other has.
 const APP = 'mcp__ccd_'
@@ -139,6 +149,14 @@ let owed: Probe[] = []
 let origin: string | undefined
 // The session id whose first turn of the main conversation was seen.
 let turnOf: string | undefined
+
+// The options ezexe turned on, read at each load of the module. Each is off by default.
+let wants = { push: false, status: false }
+// In the desktop app: the session id this was asked for, whether that session was started by another, and its
+// title.
+let askedFor: string | undefined
+let isChild = false
+let title = ''
 
 // What was said to the debug log, each line once.
 const said = new Set<string>()
@@ -277,6 +295,7 @@ async function read($: EngineInterface): Promise<void> {
     if (isNew) keptIn = await keep($, id, host)
     keptFor = id
     kept = host
+    if (wants.status) $.ui.status(`${host.host}, ${host.run}, Claude Code ${host.claude}`)
   } catch (error) {
     note($, `the capability map was not read: ${reason(error)}`)
   }
@@ -460,6 +479,42 @@ async function seen($: EngineInterface, id: string, now: Said | undefined): Prom
   }
 }
 
+// In the desktop app, whether another session started this one, and this session's title, asked once for a
+// session id of the app's own `get_session`.
+async function place($: EngineInterface): Promise<void> {
+  if (askedFor === keptFor) return
+  askedFor = keptFor
+  isChild = false
+  title = ''
+  try {
+    const own = JSON.parse((await call($, SELF, { session_id: 'self' }))?.text ?? '{}') as Record<string, unknown>
+    isChild = typeof own.parentSessionId === 'string' && own.detached !== true
+    title = typeof own.title === 'string' ? own.title : ''
+  } catch {
+    // no answer: the session is taken as one ezexe is at
+  }
+}
+
+// One push to ezexe at the end of a turn of the main conversation, where ezexe turned the option on: in a session
+// with a person at it, which a scripted run is not, and not in a session another session started, whose turn's
+// end is told to that session. The tool itself sends nothing while ezexe is at the keyboard.
+async function push($: EngineInterface, answer: string): Promise<void> {
+  try {
+    const host = kept
+    if (host === undefined || host.run !== 'interactive' || !host.tools.native.includes(PUSH)) return
+    if (host.host === 'desktop') await place($)
+    if (isChild) return
+    const where = title || slashed(await $.session.root()).split('/').at(-1) || 'Claude Code'
+    const line = (answer.trim().split('\n')[0] ?? '').replace(/[*_`#]/g, '').trim() || 'the turn ended'
+    const message = `${where}: ${line}`
+    const cut = message.length > PUSH_MOST ? `${message.slice(0, PUSH_MOST - 3)}...` : message
+    const out = await call($, PUSH, { message: cut, status: 'proactive' })
+    $.ui.log(`push: ${out?.text ?? out?.refused ?? 'no answer'}`, { to: 'debug' })
+  } catch (error) {
+    note($, `the push was not sent: ${reason(error)}`)
+  }
+}
+
 // The notices of the file, taken out of it: each is told once, by whichever session's prompt comes first.
 async function take($: EngineInterface): Promise<string[]> {
   hasNotices = false
@@ -565,7 +620,9 @@ function field(e: unknown, name: string): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  wants = { push: options.push === true, status: options.status === true }
+
   // The session does not wait for the map, and it does wait for the command and the tool, which are then listed
   // from the first prompt.
   on('session.start', async ($, e, next) => {
@@ -612,6 +669,7 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const out = await next(e)
     if (e.agentId === undefined && owed.length > 0) await pay($)
+    if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)
 
     return out
   })
