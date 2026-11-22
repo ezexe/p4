@@ -765,6 +765,14 @@ class ThreeSessions(unittest.TestCase):
         while not os.path.exists(mark) and time.time() < end:
             time.sleep(0.2)
         self.assertTrue(os.path.exists(mark), "the process of its own made the commit")
+        # The mark is not that process's end: after it, track_first still stages what a hook owed meanwhile, removes
+        # its state file and gives up its lock, which is the last thing it does in the store. The test's folder is
+        # removed when the test ends, so the test waits for that lock to go, where a wait for the mark alone left
+        # the process writing under the store's git directory while the folder was being removed.
+        lock = os.path.join(gd, relay.TRACK_LOCK)
+        while os.path.exists(lock) and time.time() < end:
+            time.sleep(0.05)
+        self.assertFalse(os.path.exists(lock), "the process of its own has done with the store")
         self.assertEqual(self._subjects().count(relay.TRACK_SUBJECT), 1)
         shown = subprocess.run(["git", "-C", self.t.p4, "show", "--name-only", "--format=", "HEAD"],
                                capture_output=True, text=True).stdout.split()

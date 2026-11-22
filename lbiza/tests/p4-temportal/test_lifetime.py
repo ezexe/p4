@@ -237,11 +237,12 @@ class Tick(unittest.TestCase):
         is a real process, as the module starts it at a session's end."""
         due = put(os.path.join(self.t, "notebook", "due.md"))
         lifetime.write_expires(self.p4, {"notebook/due.md": {"expires": 1.0}})
-        calls = []
+        calls, started = [], []
         real = subprocess.Popen
         def popen(argv, **kw):
             calls.append((argv[1:4] + argv[5:], sorted(k for k, v in kw.items() if v)))
-            return real(argv, **dict(kw, env=dict(os.environ, CLAUDE_PROJECT_DIR=self.root)))
+            started.append(real(argv, **dict(kw, env=dict(os.environ, CLAUDE_PROJECT_DIR=self.root))))
+            return started[-1]
         import warnings
         try:
             subprocess.Popen = popen
@@ -254,6 +255,10 @@ class Tick(unittest.TestCase):
             if not os.path.exists(due):
                 break
             time.sleep(0.05)
+        # The sweep goes on in that process once the cookie is cleared, and it leaves nothing on disk that says it
+        # has ended, so the test waits for the process itself before its folder is removed.
+        for process in started:
+            process.wait(timeout=60)
         own = "creationflags" if os.name == "nt" else "start_new_session"
         self.assertEqual((answer, os.path.exists(due), calls),
                          ({"let_go": True}, False,

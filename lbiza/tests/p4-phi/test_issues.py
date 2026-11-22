@@ -586,7 +586,7 @@ class NoConsoleWindow(unittest.TestCase):
     own console's window and that of a python it starts, after starting git."""
 
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self._tmp = tempfile.TemporaryDirectory()
         self.tmp = os.path.realpath(self._tmp.name)
         self.fake = os.path.join(self.tmp, "scripts")
         os.makedirs(self.fake)
@@ -610,13 +610,24 @@ class NoConsoleWindow(unittest.TestCase):
         self.assertEqual(os.path.basename(argv[0]).lower(), "sh.exe")
         self.assertNotIn("system32", argv[0].lower())
 
+    def ended(self, start):
+        """What `start` answers, once every process it started has ended. Each start under test lets its process go
+        and keeps no handle to it, so the test keeps one: every process is started as it was asked for, kept and
+        waited for. That process runs in the test's folder, which is removed when the test ends."""
+        kept, real = [], subprocess.Popen
+
+        def popen(*args, **kw):
+            kept.append(real(*args, **kw))
+            return kept[-1]
+        with unittest.mock.patch.object(subprocess, "Popen", popen):
+            answer = start()
+        for process in kept:
+            process.wait(timeout=60)
+        return answer
+
     def windows(self, out):
-        """Each reporter's console window, once both have written."""
+        """Each reporter's console window, read once the process that ran them has ended."""
         files = [os.path.join(out, f) for f in ("child.json", "grandchild.json")]
-        end = time.time() + 60
-        while time.time() < end and not all(os.path.exists(f) and os.path.getsize(f) for f in files):
-            time.sleep(0.1)
-        time.sleep(0.2)
         return {os.path.basename(f)[:-5]: json.load(open(f)).get("window") for f in files if os.path.exists(f)}
 
     def assertNoWindow(self, out, what):
@@ -627,7 +638,7 @@ class NoConsoleWindow(unittest.TestCase):
         out = os.path.join(self.tmp, "proof")
         os.makedirs(out)
         cmd = f'"{sys.executable}" -I "{os.path.join(self.fake, "console.py")}" "{out}"'.replace("\\", "/")
-        issues.run_background(self.tmp, "local_proof0001", cmd, out, "abc1234")
+        self.ended(lambda: issues.run_background(self.tmp, "local_proof0001", cmd, out, "abc1234"))
         self.assertNoWindow(out, "issues.run_background")
 
     def test_catchups_background_sync_opens_no_console_window(self):
@@ -637,7 +648,7 @@ class NoConsoleWindow(unittest.TestCase):
         saved = catchup.HERE
         catchup.HERE = self.fake
         try:
-            self.assertTrue(catchup.start_sync(out))
+            self.assertTrue(self.ended(lambda: catchup.start_sync(out)))
         finally:
             catchup.HERE = saved
         self.assertNoWindow(out, "catchup.start_sync")
