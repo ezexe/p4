@@ -103,7 +103,7 @@ class TheSet(unittest.TestCase):
         status, lines = cards.switch(self.p4, True, sid)
         self.assertEqual(status, 0)
         self.assertIn("The set is not in force yet", lines[0])
-        self.assertIn("0 of the 6 allow rules", lines[1])
+        self.assertEqual(len(lines), 1, "the keeper runs once for the command, when the yes is kept")
         self.assertFalse(p4conf.cards_on(self.p4), "the command where no card was raised for it")
         self.assertEqual(tools(), [], "the keeper writes no rule of a set that is not in force")
         self.assertIn("no yes of ezexe's is kept for it", cards.text(self.p4)[0])
@@ -136,7 +136,7 @@ class TheSet(unittest.TestCase):
         self.assertFalse(p4conf.cards_on(self.p4))
         say_yes(self.p4)
         cards.switch(self.p4, True, sid)
-        self.assertFalse(p4conf.cards_on(self.p4), "the command run again asks again")
+        self.assertTrue(p4conf.cards_on(self.p4), "the command run again where the set is in force writes nothing")
 
     def as_an_older_keeper_left_it(self, in_force):
         """A store as a keeper from before the record of a yes left it: the key names the set, and where the set was
@@ -155,7 +155,7 @@ class TheSet(unittest.TestCase):
         rec["kept"][p4conf.fwd(self.local)]["keeper"] = 10
         write(p4conf.record_path(self.p4), json.dumps(rec))
         self.assertEqual("toolRules" in rec, in_force)
-        self.assertFalse(p4conf.cards_on(self.p4), "this keeper reads no yes in that record")
+        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "that record holds no yes")
 
     def tools(self):
         return sorted(r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__"))
@@ -222,6 +222,50 @@ class TheSet(unittest.TestCase):
         p4conf.keep_settings(other)
         self.assertFalse(p4conf.cards_on(store), "a set that changed is in force nowhere until a new yes")
         self.assertIs(p4conf.read_record(store)[p4conf.CARRIED]["carried"], False)
+
+    def test_the_first_read_of_the_set_carries_the_yes_over_before_any_whole_check(self):
+        """A guard can read the set before a whole check of this keeper has run for the store, as a session that
+        starts first after the upgrade does. The read makes the one look itself, under the settings lock and with no
+        wait for it, so a set ezexe said yes to is not read as off, and a read made while the lock is held, as one
+        inside the keeper is, changes nothing."""
+        self.as_an_older_keeper_left_it(in_force=True)
+        lock = os.path.join(self.p4, p4conf.SETTINGS_LOCK)
+        open(lock, "w").close()
+        self.assertFalse(p4conf.cards_on(self.p4), "the lock is held, so this read carries nothing")
+        self.assertNotIn(p4conf.CARRIED, p4conf.read_record(self.p4))
+        os.remove(lock)
+        self.assertTrue(p4conf.cards_on(self.p4), "in force at the first read, with no whole check before it")
+        rec = p4conf.read_record(self.p4)
+        self.assertIs(rec[p4conf.CARRIED]["carried"], True)
+        self.assertRegex(rec[p4conf.YES]["carried"], r"^\d{4}-\d\d-\d\d$")
+        self.assertFalse(os.path.exists(lock), "the lock is given back")
+
+    def test_a_read_carries_nothing_over_for_a_store_that_was_never_in_force(self):
+        self.as_an_older_keeper_left_it(in_force=False)
+        self.assertFalse(p4conf.cards_on(self.p4))
+        rec = p4conf.read_record(self.p4)
+        self.assertIs(rec[p4conf.CARRIED]["carried"], False, "looked at once, by the read")
+        self.assertNotIn(p4conf.YES, rec)
+
+    def test_cards_on_where_the_set_is_in_force_writes_nothing(self):
+        """`phi.py cards on` took a standing yes out before it wrote the key, so a second run of it, or one in the
+        app's Terminal panel where no hook of p4-phi keeps a yes, left a set that was in force off. Where the set
+        is in force the command writes nothing and says so."""
+        sid = p4conf.card_set_id()
+        say_yes(self.p4)
+        yes = p4conf.read_record(self.p4)[p4conf.YES]
+        status, lines = cards.switch(self.p4, True, sid)
+        self.assertEqual(status, 0)
+        self.assertIn("in force already", lines[0])
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(p4conf.read_record(self.p4)[p4conf.YES], yes, "the standing yes is not taken out")
+        self.assertTrue(p4conf.cards_on(self.p4))
+        # where the set is off the command asks as before, and runs no keeper of its own: `kept` runs the one
+        self.assertEqual(cards.switch(self.p4, False)[0], 0)
+        status, lines = cards.switch(self.p4, True, sid)
+        self.assertEqual((status, len(lines)), (0, 1))
+        self.assertIn(cards.ASKED, lines[0])
+        self.assertFalse(p4conf.cards_on(self.p4))
 
     def test_the_keeper_writes_the_tool_rules_only_while_the_set_is_in_force(self):
         """The `tools` part of the set: an allow rule for each tool a p4 hooks module declares, as entries of
@@ -677,6 +721,29 @@ class Guards(unittest.TestCase):
         self.assertEqual(hook.PHI_YES, {"Bash": "cards-yes", "PowerShell": "cards-yes"})
         for tool in ("Bash", "PowerShell"):
             self.assertIn(tool, hook.WAITED, "the yes is kept in the entry the call waits on")
+
+    def test_a_press_is_not_lost_where_the_settings_lock_is_held(self):
+        """Where another run of the keeper held the store's settings lock, the yes was not kept and the hook said
+        nothing, so a press was lost with no word. The yes is tried once more, and where the lock is held through
+        both waits the hook says that the set is not in force and that the command asks again."""
+        sid = p4conf.card_set_id()
+        cmd = f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_lock")["permissionDecision"], "ask")
+        self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
+        lock = os.path.join(self.t.p4, p4conf.SETTINGS_LOCK)
+        open(lock, "w").close()
+        said = self.after(TOP, cmd, "toolu_lock")
+        self.assertIn("ezexe's yes to the set is not kept", said)
+        self.assertIn("The set is not in force", said)
+        self.assertIn("Run the command again", said)
+        os.remove(lock)
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        # the command run again asks once more, and that press is kept
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_lock2")["permissionDecision"], "ask")
+        self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
+        said = self.after(TOP, cmd, "toolu_lock2")
+        self.assertIn(f"ezexe's yes to the set {sid} is kept for the store", said)
+        self.assertTrue(p4conf.cards_on(self.t.p4))
 
     def runner(self, name, host, payload):
         """One entry of p4-phi's hooks.json as Claude Code runs it: `sh hooks/recall-hook.sh <name>` with the hook's

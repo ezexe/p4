@@ -1792,7 +1792,10 @@ def cards_on(p4):
         sid = card_set_id()
         if not p4 or cards_asked(p4) != sid:
             return False
-        yes = read_record(p4).get(YES)
+        rec = read_record(p4)
+        if YES not in rec and CARRIED not in rec:
+            rec = _carry_now(p4)                        # a yes from before YES, at the set's first read
+        yes = rec.get(YES)
         return isinstance(yes, dict) and yes.get("set") == sid and _norm(yes.get("store")) == _norm(p4)
     except Exception:  # noqa: BLE001 — a store that cannot be read has the set off
         return False
@@ -1858,6 +1861,28 @@ def _carry_yes(p4, rec):
     if was:
         rec[YES] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"), "carried": today}
     return was
+
+
+def _carry_now(p4):
+    """_carry_yes at the set's first read, for a store no whole check of a keeper that knows YES has looked at yet:
+    a guard can read the set before such a check has run for the store, and would read a set ezexe said yes to as
+    off. It runs under the store's settings lock and does not wait for it, so a read made inside the keeper, which
+    holds the lock and carries the yes itself, changes nothing. Returns the record as it then stands, and the next
+    read looks again where the lock was held."""
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not os.path.isdir(p4) or not _take_lock(lock, wait_s=0.0):
+        return read_record(p4)
+    try:
+        rec = read_record(p4)
+        if CARRIED not in rec:
+            _carry_yes(p4, rec)
+            write_record(p4, rec)
+        return rec
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
 
 
 def cards_no(p4):
@@ -2145,8 +2170,9 @@ def _mtime(p):
 def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec = read_record(p4)
     before = json.dumps(rec, sort_keys=True)
-    if not owned_only and _carry_yes(p4, rec):
-        write_record(p4, rec)                           # a yes from before YES, in the file before cards_on reads it
+    if not owned_only and CARRIED not in rec:
+        _carry_yes(p4, rec)                             # a yes from before YES
+        write_record(p4, rec)                           # in the file, carried or not, before cards_on reads it
     name = fwd(target)
     data = read_json(target)
     if data is None:

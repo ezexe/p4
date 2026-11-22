@@ -829,7 +829,10 @@ def h_lookup_record(payload):
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit"):
         return out
-    yes = phi_route(payload, PHI_YES) if payload.get("hook_event_name") == "PostToolUse" else None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    cmd = str(inp.get("command") or "")                 # the one command the yes is kept for, read before any route
+    asks = payload.get("hook_event_name") == "PostToolUse" and "phi.py" in cmd and "cards" in cmd
+    yes = phi_route(payload, PHI_YES) if asks else None
     said = ((yes or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
     import lookups
     p4 = ready(payload)

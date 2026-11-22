@@ -42,7 +42,9 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name"
       *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear line answers beside the result
       # the command that asks for the set of what p4-phi settles with no approval card, which prints no word that
       # reads like an error: phi.py keeps ezexe's yes at this call's end, and says so beside the result
-      *phi.py*cards[!A-Za-z0-9]*on[!A-Za-z0-9]*) ;;
+      # `cards` and `on` each as a word of its own, one character or more apart, so `session ` ends no match
+      *phi.py*[!A-Za-z0-9]cards[!A-Za-z0-9]on[!A-Za-z0-9]*) ;;
+      *phi.py*[!A-Za-z0-9]cards[!A-Za-z0-9]*[!A-Za-z0-9]on[!A-Za-z0-9]*) ;;
       *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;

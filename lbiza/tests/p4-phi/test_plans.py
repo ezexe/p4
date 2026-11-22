@@ -2151,6 +2151,20 @@ class NativeGoal(unittest.TestCase):
         self.assertEqual((goal["own"], "set" in goal), (True, False), "the one before it is replaced, and not yet set")
         self.assertNotIn("goal", self.phi("look", **self.ON), "the brief's line is not answered again")
 
+    def test_a_goal_row_is_the_kept_condition_with_other_spaces_or_cut_short(self):
+        """A goal that is set and whose `Goal set` answer was lost is known by the transcript's goal row. Claude Code
+        writes that row, so its condition is compared as the row can hold it, with other spaces or cut short, and a
+        goal that is set is not run again, which would start a turn."""
+        kept = self.worded(self.LINE)
+        self.assertTrue(phi.same_condition(kept, kept))
+        self.assertTrue(phi.same_condition("  " + kept.replace(" ", "  ", 3) + "\n", kept))
+        self.assertTrue(phi.same_condition(kept[:60] + "…", kept), "cut short, with the mark of a cut")
+        self.assertTrue(phi.same_condition(kept[:60], kept))
+        self.assertFalse(phi.same_condition(kept[:20], kept), "too few words to tell one condition from another")
+        self.assertFalse(phi.same_condition("another condition of some length, which is not the one kept", kept))
+        self.assertFalse(phi.same_condition("", kept))
+        self.assertFalse(phi.same_condition(None, kept))
+
     def test_a_workers_condition_says_its_starters_later_word_settles_a_part(self):
         """Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326: a worker's line named "a session you start"
         and a push, its starter then made that start and that push itself and wrote that the work was taken as done,

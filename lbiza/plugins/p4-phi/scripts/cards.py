@@ -242,18 +242,22 @@ def held_line(store):
 def switch(store, on, given=""):
     """`phi.py cards on <id>` and `cards off`. `on` writes `phi.cards` to the store's p4.json and takes out a yes
     kept before, so the key asks for the set and one press of ezexe's answers one writing of it: the set comes in
-    force only when `kept` runs for the call that ran the command. `off` takes the key and the kept yes out. Either
-    way the settings keeper runs for the project the store sits in, so the allow rules of the set go at once. `on`
+    force only when `kept` runs for the call that ran the command. `off` takes the key and the kept yes out, and
+    the settings keeper then runs for the project the store sits in, so the allow rules of the set go at once. After
+    `on` the keeper runs once, in `kept`, when the yes is in the record. `on` where the set is in force already
+    writes nothing, so a second run of it, or one where no hook of p4-phi runs, never takes a standing yes out. `on`
     with an id that is not this copy's set writes nothing. Returns (the exit status, the lines to print)."""
     sid = p4conf.card_set_id()
     if on and given != sid:
         return 2, [f"phi: the set as this copy of p4-phi has it is {sid}, not {given or 'named'}: nothing is "
                    f"written. `phi.py cards` prints the set."]
+    if on and p4conf.cards_on(store):
+        return 0, [f"The set {sid} is in force already for the store {p4conf.fwd(store)}: nothing is written."]
     p4conf.cards_no(store)
     p4conf.set_key(store, p4conf.CARDS_KEY, sid if on else None)
     out = [f"phi.cards is {sid if on else 'off'} in {p4conf.fwd(p4conf.path(store))}."
            + (f" {ASKED}" if on else " The set is not in force.")]
-    line = held_line(store)
+    line = "" if on else held_line(store)
     return 0, out + ([line] if line else [])
 
 

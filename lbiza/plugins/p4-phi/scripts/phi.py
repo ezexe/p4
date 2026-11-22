@@ -2969,6 +2969,15 @@ def goal_ask(home, s, condition):
 GOAL_TRIES = 3
 
 
+def same_condition(row, kept):
+    """Whether the condition of a transcript's goal row is the one kept for the session. Claude Code writes the row,
+    so it is compared as that row can hold it: with other spaces between its words, or cut short, where the row's
+    words open the kept condition and are 40 characters at least."""
+    a, b = " ".join(str(row or "").split()), " ".join(str(kept or "").split())
+    cut = a.rstrip(".…").rstrip()
+    return bool(a) and (a == b or (len(cut) >= 40 and b.startswith(cut)))
+
+
 def goal_again(home, s, flying=False):
     """The condition of a goal that was asked for and is not set, answered to one more look, or ''. Where the
     transcript's last goal row shows the condition set, the module's word of it was lost: the goal is marked set
@@ -2980,7 +2989,7 @@ def goal_again(home, s, flying=False):
     if not isinstance(g, dict) or not g.get("condition") or g.get("set") or g.get("over"):
         return ""
     row = plans.goal_row(s.get("transcript") or "")
-    if row.get("condition") == g["condition"] and not plans.goal_over(row):
+    if same_condition(row.get("condition"), g["condition"]) and not plans.goal_over(row):
         g["set"] = now()                           # Claude Code holds it as set
         g.pop("failed", None)
         save_session(home, s)
@@ -3649,8 +3658,14 @@ def h_cards_yes(payload):
         pass
     if spawned_from(load_session(me.home, me.id)):
         return None
-    lines = cards.kept(str(asked["store"]), me.id, str(payload.get("tool_use_id") or ""))
+    store, call = str(asked["store"]), str(payload.get("tool_use_id") or "")
+    lines = cards.kept(store, me.id, call) or cards.kept(store, me.id, call)   # once more where the lock was held
     RAN["cards_yes"] = bool(lines)
+    if not lines and p4conf.cards_asked(store) == p4conf.card_set_id():
+        # the key names the set and the yes is not in the record: the press is not lost with no word
+        return ("phi (p4-phi): ezexe's yes to the set is not kept: the store's settings lock was held by another run "
+                "of the keeper for the whole of two waits. The set is not in force. Run the command again, which asks "
+                "once more.")
     return "phi (p4-phi): " + " ".join(lines) if lines else None
 
 
