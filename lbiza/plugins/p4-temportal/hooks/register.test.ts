@@ -250,9 +250,11 @@ function machine(on: On, has: Machine): Seen {
     const at = e.argv.findIndex(arg => arg.endsWith('/hooks/lifetime.py'))
     let stdout = ''
     if (at >= 0) {
-      const args = e.argv.slice(at + 1)
-      seen.ran.push([...args])
+      const all = e.argv.slice(at + 1)
+      seen.ran.push([...all])
       seen.calls.push({ argv: e.argv, env: e.init?.env, timeoutMs: e.init?.timeoutMs })
+      // The command's own words: what the module hands of Claude Code's retention period comes ahead of its name.
+      const args = all[0] === '--cleanup-days' ? all.slice(2) : all
       if (args[0] !== 'tick') {
         const said = has.says?.(args) ?? {}
         const value = { exitCode: said.code ?? 0, stdout: said.out ?? '', stderr: said.err ?? '' }
@@ -1233,6 +1235,41 @@ test('where the settings cannot be read the input goes down as it came, and the 
   expect(said.length).toBe(1)
   expect(said[0]).toContain("so the plugin's python reads the settings files")
   expect(said[0]).toContain('the settings are closed to this plugin')
+})
+
+test("each run of lifetime.py is handed Claude Code's cleanupPeriodDays as it merged the settings, ahead of the command's name", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  // The merge of every source is the read that names no source.
+  const seen = machine(on, { settings: { '': { cleanupPeriodDays: 14, model: 'opus' } } })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run({ command: 'lifetime', args: 'now', ...TYPED })
+  await $.session.end(EXIT)
+
+  expect(seen.ran).toEqual([
+    ['--cleanup-days', '14', 'tick'],
+    ['--cleanup-days', '14', 'now'],
+    ['--cleanup-days', '14', 'tick', '--let-go'],
+  ])
+  expect(seen.sources).toEqual([undefined, undefined, undefined])
+})
+
+test('where no settings source holds cleanupPeriodDays nothing is handed, and a value that is no number is handed as it is', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const merged: Record<string, unknown> = { model: 'opus' }
+  const seen = machine(on, { settings: { '': merged } })
+
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.ran).toEqual([['tick']])
+
+  // lifetime.py judges the value, and clears no plan by an age it cannot read.
+  merged.cleanupPeriodDays = 'a month'
+  await $.command.run({ command: 'lifetime', args: 'list', ...TYPED })
+  expect(seen.ran[1]).toEqual(['--cleanup-days', '"a month"', 'list'])
 })
 
 // p4-native's capability map in the store of the machine's project, with one entry for each session id given.

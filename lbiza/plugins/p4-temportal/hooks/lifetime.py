@@ -15,11 +15,15 @@ src/, plans/ or expires.json themselves: tmp/ holds only the folders an earlier 
 scratchpad, and the others are never cleared whole.
 
 plans/ holds the project's plan files, where Claude Code writes them itself once the settings keeper of p4conf.py
-has written `plansDirectory`. A plan file takes a cookie as any other file does, and a cache rule on `plans` clears
-the plans past its age or size. Without either a plan stays, where Claude Code's own folder clears one after
-`cleanupPeriodDays`. The key holds from the session after the one whose start wrote it, so `tick` copies the plan
-files the hooks module names with `--plan` and `--plan-edited` from Claude Code's own folder into plans/, by
-keep_plans, and leaves each original.
+has written `plansDirectory`. Claude Code's own cleanup clears a plan in `~/.claude/plans` once it is older than
+`cleanupPeriodDays` and does not reach a folder a project names, so the retention sweep clears the plans here at that
+same age, by sweep_plans: the days the hooks module read from Claude Code's own merge of the settings and handed
+after `--cleanup-days`, the key as the settings files hold it where none is handed, and 30 where no file sets it.
+Where the period cannot be told, as with a settings file that cannot be read, no plan is cleared by age, as Claude
+Code pauses its own sweep there. A cache rule on `plans` in p4.json stands in place of that age, an empty one keeps
+every plan, and a plan file takes a cookie as any other file does. The key holds from the session after the one
+whose start wrote it, so `tick` copies the plan files the hooks module names with `--plan` and `--plan-edited` from
+Claude Code's own folder into plans/, by keep_plans, and leaves each original.
 
 No lifetime ends with a session. A file that goes when its session goes belongs in that session's scratchpad
 directory, which Claude Code makes for the session and deletes with its transcript, by
@@ -53,13 +57,15 @@ the session runs, and at the session's end.
                            one is read from the working folder, and from temportal/ when the working folder holds
                            none there, which is how `list` prints a cookie. The lifetime is `30m`, `12h`, `7d`, `2w`
                            or an ISO date or time.
-  list                     every cookie with its expiry, then every cache rule. An entry of expires.json that cannot
-                           be read is listed as unreadable, and the retention sweep leaves it as it is.
+  list                     every cookie with its expiry, then every cache rule, and the age at which a plan is
+                           cleared where no rule names plans/. An entry of expires.json that cannot be read is
+                           listed as unreadable, and the retention sweep leaves it as it is.
   clear <path>             removes a cookie and keeps the file, reading a relative path as `set` reads it.
   now                      the retention sweep, run by hand.
 
 The module registers these four as the slash command `/lifetime` and as the tool `lifetime` for the model, and runs
-each as this script's command of the same name.
+each as this script's command of the same name. Ahead of the command's name it hands `--cleanup-days <value>`, the
+setting `cleanupPeriodDays` as Claude Code merged it, where a settings source holds the key.
 
 No command hook runs this script. `sweep` and `session-end`, which the command hooks ran at a session's start and end
 before the module did, are gone, and so is the option `--session` of `set`: an installed version runs the scripts of
@@ -97,6 +103,9 @@ NAME = "p4-temportal: "                 # what a line of the sweep starts with, 
 LEAST_WAIT_S = 60.0                     # the module's timer never sweeps sooner after a sweep than this
 MOST_WAIT_S = 3600.0                    # nor later: a cache rule counts days, so an hour is soon enough for one
 COMPACT_AT = 70                         # percent of a session's context at which the module compacts it when quiet
+CLEANUP_DAYS = 30.0                     # Claude Code's `cleanupPeriodDays` where no settings source holds the key
+CLEANUP_KEY = "cleanupPeriodDays"
+HANDED_DAYS = "--cleanup-days"          # the option after which the hooks module hands that setting's value
 
 
 project_root = hookio.project_root
@@ -366,6 +375,62 @@ def _clear(d, rule, now, by_folder=False):
     return gone
 
 
+def cleanup_days(root, handed=None):
+    """How many days Claude Code keeps what it cleans up by itself -> the days, or None where they cannot be told.
+    `handed` is what the hooks module read by `$.settings.read({ key: "cleanupPeriodDays" })`, as JSON: Claude
+    Code's own merge of every settings source, what `--settings` carried among them. With none handed, as in a
+    command run by hand, the key is read from the settings files of the project at `root`, the managed file over
+    the local one over the project's over the user's, and it is CLEANUP_DAYS where no file holds it.
+
+    https://code.claude.com/docs/en/claude-directory.md, "Cleaned up automatically", gives the default as 30 days
+    and the least as 1, and says Claude Code pauses its sweep where it "can't safely determine the retention
+    period", as with a settings file that "can't be read or parsed". So a file that cannot be read and a value that
+    is no number of 1 or more both answer None, and nothing is cleared by an age nobody set."""
+    value = None
+    if handed is not None:
+        try:
+            value = json.loads(handed)
+        except ValueError:
+            return None
+    else:
+        managed = next((files for name, files in p4conf.MANAGED.items() if sys.platform.startswith(name)), [])
+        files = [os.path.join(p4conf._config_dir(), "settings.json"), os.path.join(root, ".claude", "settings.json"),
+                 p4conf.settings_file(root), *managed]
+        for file in files:                              # rising in precedence: the last file that holds the key
+            held = p4conf.read_json(file)
+            if held is None:
+                return None
+            value = held.get(CLEANUP_KEY, value)
+    if value is None:
+        return CLEANUP_DAYS
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not value >= 1:
+        return None
+    return float(value)
+
+
+def own_rule(p4):
+    """True where temportal.cache holds an entry for plans/, of any shape: the age of the plans is then ezexe's
+    word, and an entry with no limit keeps every plan."""
+    return any((rel_in(p4, key.strip("/")) or "").lower() == PLANS for key in rules(p4, warn=False))
+
+
+def sweep_plans(p4, days, now=None, removed=None):
+    """Clear the plan files older than `days`, the age at which Claude Code clears a plan in its own folder -> the
+    count cleared. None for `days` clears nothing, and so does an entry for plans/ in temportal.cache, which
+    sweep_cache then applies in its place. A plans/ that is a link or resolves to another place is left alone, as
+    a cache rule's folder is. Each file removed is added to `removed` when it is a list."""
+    if days is None or own_rule(p4) or rel_in(p4, PLANS) != PLANS:
+        return 0
+    gone = _clear(os.path.join(home(p4), PLANS), {"max_age_days": days}, time.time() if now is None else now)
+    if removed is not None:
+        removed.extend(gone)
+    return len(gone)
+
+
+def _days(days):
+    return f"{days:g}"
+
+
 def sweep_cookies(p4, now=None):
     """Clear every cookie whose time is up -> [rel cleared]. An entry whose expiry cannot be read is left as it is,
     and so is one an earlier version set to end with a session."""
@@ -409,30 +474,35 @@ def _stage_removals(p4, paths):
             pass
 
 
-def sweep(p4, now=None):
-    """The retention sweep: the cache rules, then the cookies, with the removal of each tracked file it cleared
-    staged and no other change -> the line to print, or ''."""
+def sweep(p4, now=None, days=None):
+    """The retention sweep: the cache rules, then the plans older than `days`, then the cookies, with the removal of
+    each tracked file it cleared staged and no other change -> the line to print, or ''. `days` is what
+    cleanup_days answered, and None clears no plan by age."""
     if not os.path.isdir(home(p4)):
         return ""
     removed = []
     cache = sweep_cache(p4, now, removed)
+    plans = sweep_plans(p4, days, now, removed)
     cookies = sweep_cookies(p4, now)
-    if not cache and not cookies:
+    if not cache and not plans and not cookies:
         return ""
     if _own_repo(p4):
         _stage_removals(p4, removed + [os.path.join(home(p4), *rel.split("/")) for rel in cookies])
     parts = [f"files past the cache rule: {n}, in {rel}/" for rel, n in cache]
+    if plans:
+        parts.append(f"plans older than the {_days(days)} days of {CLEANUP_KEY}: {plans}, in {PLANS}/")
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
         parts.append(f"expired files: {len(cookies)}, {shown}")
     return NAME + "cleared " + "; ".join(parts) + "."
 
 
-def start_sweep(p4):
+def start_sweep(p4, days=None):
     """What a start runs: the move of files left in an earlier place of the store's layout, then the retention
-    sweep -> the lines to print, the move's first, each starting with NAME."""
+    sweep, which clears the plans older than `days` -> the lines to print, the move's first, each starting with
+    NAME."""
     moved = p4conf.migrate_layout(p4)
-    line = sweep(p4)
+    line = sweep(p4, days=days)
     return ([NAME + "; ".join(moved) + "."] if moved else []) + ([line] if line else [])
 
 
@@ -584,26 +654,30 @@ def carry_over(root):
             "into the main checkout's store, where they stay when the worktree is removed."]
 
 
-def tick(root, to_let_go=False, made=(), edited=()):
+def tick(root, to_let_go=False, made=(), edited=(), handed=None):
     """The module's sweep for the project at `root` -> what it prints as one JSON line. With `to_let_go` the sweep
     runs in a process let go of, and here only when none could be started. `made` and `edited` are the plan files
     the process's sessions created and wrote again in a folder named `plans`, which keep_plans copies into the store
-    before the sweep, in the process that sweeps. A failure is said, never raised."""
+    before the sweep, in the process that sweeps. `handed` is what the module handed after HANDED_DAYS, which
+    cleanup_days reads and the process let go of is handed too. A failure is said, never raised."""
     named = [word for path in made for word in ("--plan", path)]
     named += [word for path in edited for word in ("--plan-edited", path)]
-    if to_let_go and let_go(["tick", *named]):
+    if to_let_go and let_go([*([] if handed is None else [HANDED_DAYS, handed]), "tick", *named]):
         return {"let_go": True}
     p4 = store_of(root)
     try:
         said = keep_plans(root, made, edited)
         said += carry_over(root)
-        said += [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4)]
+        days = cleanup_days(root, handed)
+        said += [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4, days)]
         return {"said": said, "wait_s": round(next_wait(p4), 3), "compact_at": compact_at(p4)}
     except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises
         return {"said": [f"the retention sweep degraded: {type(e).__name__}: {e}"], "wait_s": MOST_WAIT_S}
 
 
-def listing(p4, now=None):
+def listing(p4, now=None, days=None, is_told=False):
+    """Every cookie, then every cache rule, then the age at which a plan is cleared where no rule names plans/.
+    `days` is what cleanup_days answered, and with `is_told` a None of it is listed as an age that cannot be told."""
     now = time.time() if now is None else now
     lines = []
     for rel, v in sorted(read_expires(p4).items()):
@@ -628,6 +702,11 @@ def listing(p4, now=None):
     for rel, rule in sorted(rules(p4, warn=False).items()):
         lines.append(f"cache   {rel}/  " + (", ".join(f"{k}={v}" for k, v in rule.items()) if isinstance(rule, dict)
                      else f"not an object, so never applied: {json.dumps(rule)}"))
+    if not own_rule(p4) and days is not None:
+        lines.append(f"cache   {PLANS}/  max_age_days={_days(days)}, the {CLEANUP_KEY} at which Claude Code clears "
+                     "a plan in its own folder, since no cache rule names plans/")
+    elif not own_rule(p4) and is_told:
+        lines.append(f"cache   {PLANS}/  no plan is cleared by age: {CLEANUP_KEY} cannot be told from the settings")
     return lines
 
 
@@ -636,15 +715,20 @@ def main():
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace")
     args = sys.argv[1:]
+    handed = None
+    if args[:1] == [HANDED_DAYS] and len(args) > 1:     # the module's, ahead of the command's name
+        handed, args = args[1], args[2:]
     sub = args[0] if args else ""
     if sub == "tick":                   # the module's: it reads no stdin, and the project is CLAUDE_PROJECT_DIR
         made = [args[i + 1] for i, word in enumerate(args[:-1]) if word == "--plan"]
         edited = [args[i + 1] for i, word in enumerate(args[:-1]) if word == "--plan-edited"]
-        print(json.dumps(tick(project_root({}), "--let-go" in args[1:], made, edited), ensure_ascii=False))
+        print(json.dumps(tick(project_root({}), "--let-go" in args[1:], made, edited, handed), ensure_ascii=False))
         return 0
     import argparse
     ap = argparse.ArgumentParser(prog="lifetime.py", description="p4-temportal: cookie and cache lifetimes")
     ap.add_argument("--p4", default=None, help="the store, <project>/.claude/p4, by default from CLAUDE_PROJECT_DIR")
+    ap.add_argument(HANDED_DAYS, dest="handed", default=handed,
+                    help="cleanupPeriodDays as Claude Code merged it, as JSON, by default read from the settings files")
     sp = ap.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("set", help="give a file or folder under temportal/ an expiry")
     s.add_argument("path")
@@ -655,6 +739,7 @@ def main():
     sp.add_parser("now", help="run the retention sweep now")
     a = ap.parse_args(args)
     p4 = a.p4 or store_of(project_root({}))
+    days = cleanup_days(p4conf.session_project(p4) or project_root({}), a.handed)
     if a.cmd == "set":
         places = named(p4, a.path)
         try:
@@ -666,9 +751,9 @@ def main():
     elif a.cmd == "clear":
         print("cleared" if any(clear_cookie(p4, p) for p in named(p4, a.path)) else "no expiry was set")
     elif a.cmd == "list":
-        print("\n".join(listing(p4)) or "nothing has a lifetime")
+        print("\n".join(listing(p4, days=days, is_told=True)) or "nothing has a lifetime")
     else:
-        print(sweep(p4) or "nothing has expired")
+        print(sweep(p4, days=days) or "nothing has expired")
     return 0
 
 

@@ -35,6 +35,10 @@
 // `claude -p` run from a scratch project: each source came back as its file holds it, `flag` as `--settings` gave
 // it and `policy` empty with no managed settings, and a field the module added to the input was on the stdin of
 // a command hook of the same event.
+//
+// Each run of lifetime.py is handed the setting `cleanupPeriodDays` as Claude Code merged it, read by
+// `$.settings.read({ key })`. lifetime.py clears the plan files of the store's `temportal/plans` at that age, as
+// Claude Code's own cleanup clears a plan in `~/.claude/plans` and does not reach a folder `plansDirectory` names.
 
 import type {
   EngineInterface,
@@ -163,6 +167,11 @@ const PERMISSIONS = ['blockWritesOutsideWorkingDirectories', 'additionalDirector
 // p4-native's capability map, from the project's root: the file that plugin's README gives as the one way to read
 // what the host is.
 const MAP = '.claude/p4/native/host.json'
+
+// The option after which each run of lifetime.py is handed Claude Code's own retention period, which is
+// lifetime.py's HANDED_DAYS, and the setting that holds it.
+const HANDED_DAYS = '--cleanup-days'
+const CLEANUP_KEY = 'cleanupPeriodDays'
 
 // What `lifetime.py tick` prints: the lines of what it moved and cleared, the seconds until the next sweep, and
 // the line `temportal.compact_at`.
@@ -320,6 +329,21 @@ async function findPython($: EngineInterface): Promise<string | undefined> {
   return python
 }
 
+// How long Claude Code keeps what it cleans up by itself, as the words lifetime.py takes ahead of a command's name:
+// the setting `cleanupPeriodDays` as Claude Code merged every settings source, what `--settings` carried among
+// them, as JSON. lifetime.py clears a plan file in the store at that age, since Claude Code's own cleanup clears
+// one in `~/.claude/plans` at it and does not reach a folder `plansDirectory` names. Nothing is handed where no
+// source holds the key or the read is refused, and lifetime.py then reads the settings files itself.
+async function cleanupDays($: EngineInterface): Promise<string[]> {
+  try {
+    const days: unknown = await $.settings.read({ key: CLEANUP_KEY })
+
+    return days === undefined ? [] : [HANDED_DAYS, JSON.stringify(days)]
+  } catch {
+    return []
+  }
+}
+
 // Runs one command of lifetime.py for this session's project, as the plugin's runner runs it. The project is told
 // to lifetime.py as a command hook's environment tells it, and a relative path is read from the session's folder.
 async function run(
@@ -331,8 +355,9 @@ async function run(
   if (python === undefined) return undefined
   const script = `${slashed($.plugin.root)}/hooks/lifetime.py`
   const env = { CLAUDE_PROJECT_DIR: await $.session.root() }
+  const days = await cleanupDays($)
   try {
-    return await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs })
+    return await $.process.run([python, '-I', '-X', 'utf8', script, ...days, ...args], { env, timeoutMs })
   } catch (error) {
     finding = undefined
     note($, `lifetime.py ${args[0] ?? ''} did not run: ${reason(error)}`)

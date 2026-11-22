@@ -776,8 +776,9 @@ class Lifetime(unittest.TestCase):
 
     def test_plan_files_come_under_lifetimes_and_the_plans_folder_is_never_cleared_whole(self):
         """temportal/plans/ is where plansDirectory points Claude Code. A plan file takes a cookie and is cleared when
-        it is due, a cache rule on `plans` clears the plans past its age, a plan with neither stays however old, and
-        the folder itself takes no cookie, as the notebook and src/ take none."""
+        it is due, a cache rule on `plans` clears the plans past its age, and the folder itself takes no cookie, as
+        the notebook and src/ take none. A sweep that is given no retention period clears no plan by age: PlansAge
+        holds the age Claude Code's own cleanup gives one."""
         old = put(os.path.join(self.t, "plans", "old-plan.md"), age_days=400)
         due = put(os.path.join(self.t, "plans", "due-plan.md"))
         kept = put(os.path.join(self.t, "plans", "kept-plan.md"))
@@ -787,7 +788,7 @@ class Lifetime(unittest.TestCase):
         self.assertEqual((whole.returncode, whole.stdout), (2, ""))
         self.assertIn("plans takes no cookie: notebook/, src/, plans/ and expires.json are never cleared whole",
                       whole.stderr)
-        self.assertEqual(lifetime.sweep(self.p4), "", "a plan with no lifetime stays, however old")
+        self.assertEqual(lifetime.sweep(self.p4), "", "with no retention period given, no plan is cleared by age")
         self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, True, True])
         self.assertEqual(lifetime.sweep(self.p4, now=time.time() + 8 * DAY),
                          "p4-temportal: cleared expired files: 1, plans/due-plan.md.")
@@ -827,6 +828,152 @@ class Lifetime(unittest.TestCase):
         r = run("--p4", self.p4, "list")
         self.assertIn("cookie  notebook/n.md  expires", r.stdout)
         self.assertIn("cache   notebook/.out/", r.stdout)
+
+
+class PlansAge(unittest.TestCase):
+    """Claude Code's own cleanup clears a plan in `~/.claude/plans` once it is older than `cleanupPeriodDays` and
+    does not reach a folder `plansDirectory` names, so the retention sweep clears the plans of the store's
+    temportal/plans/ at that same age. A cache rule on `plans` stands in its place, and where the period cannot be
+    told no plan is cleared by age, as Claude Code pauses its own sweep there."""
+    maxDiff = None
+
+    def setUp(self):
+        from unittest import mock
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-age-")
+        self.addCleanup(wipe, self.base)
+        self.root = os.path.join(self.base, "proj")
+        self.p4 = os.path.join(self.root, ".claude", "p4")
+        self.t = os.path.join(self.p4, "temportal")
+        os.makedirs(self.t)
+        self.config = os.path.join(self.base, "config")
+        os.makedirs(self.config)
+        self.managed = os.path.join(self.base, "managed-settings.json")
+        for patch in (mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.config}),
+                      mock.patch.object(p4conf, "MANAGED", {sys.platform[:3]: [self.managed]})):
+            patch.start()
+            self.addCleanup(patch.stop)
+        self.old = put(os.path.join(self.t, "plans", "old-plan.md"), age_days=40)
+        self.young = put(os.path.join(self.t, "plans", "young-plan.md"), age_days=20)
+
+    def settings(self, where, value):
+        """One settings file of the project holding `cleanupPeriodDays`, or text that is no JSON for None."""
+        path = {"user": os.path.join(self.config, "settings.json"),
+                "project": os.path.join(self.root, ".claude", "settings.json"),
+                "local": os.path.join(self.root, ".claude", "settings.local.json"),
+                "managed": self.managed}[where]
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("{ not json" if value is None else json.dumps({"cleanupPeriodDays": value, "model": "opus"}))
+
+    def here(self):
+        return [os.path.exists(p) for p in (self.old, self.young)]
+
+    def test_a_plan_older_than_the_period_is_cleared_and_a_younger_one_stays(self):
+        """With no settings file naming the key the period is Claude Code's own default of 30 days."""
+        self.assertEqual(lifetime.cleanup_days(self.root), 30.0)
+        said = lifetime.sweep(self.p4, days=lifetime.cleanup_days(self.root))
+        self.assertEqual(said, "p4-temportal: cleared plans older than the 30 days of cleanupPeriodDays: 1, in plans/.")
+        self.assertEqual(self.here(), [False, True])
+        self.assertTrue(os.path.isdir(os.path.join(self.t, "plans")), "the folder is never cleared whole")
+        self.assertEqual(lifetime.sweep(self.p4, days=30.0), "", "a second sweep finds nothing past the age")
+
+    def test_the_period_is_the_one_claude_code_merged_when_the_module_hands_it(self):
+        """What is handed is JSON, and it stands ahead of every settings file."""
+        self.settings("user", 365)
+        self.assertEqual(lifetime.cleanup_days(self.root, "25"), 25.0)
+        self.assertEqual(lifetime.cleanup_days(self.root, "7.5"), 7.5)
+        r = run("--cleanup-days", "25", "now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertEqual((r.returncode, r.stderr), (0, ""))
+        self.assertIn("plans older than the 25 days of cleanupPeriodDays: 1, in plans/", r.stdout)
+        self.assertEqual(self.here(), [False, True])
+        r = run("--cleanup-days", "10", "tick", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertIn("plans older than the 10 days of cleanupPeriodDays: 1, in plans/", json.loads(r.stdout)["said"][0])
+        self.assertEqual(self.here(), [False, False])
+
+    def test_with_none_handed_the_period_is_read_from_the_settings_files_the_higher_one_over_the_lower(self):
+        self.settings("user", 100)
+        self.assertEqual(lifetime.cleanup_days(self.root), 100.0)
+        r = run("now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertEqual((r.stdout.strip(), self.here()), ("nothing has expired", [True, True]))
+        self.settings("project", 50)
+        self.assertEqual(lifetime.cleanup_days(self.root), 50.0)
+        self.settings("local", 35)
+        self.assertEqual(lifetime.cleanup_days(self.root), 35.0)
+        self.settings("managed", 21)
+        self.assertEqual(lifetime.cleanup_days(self.root), 21.0)
+        r = run("now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertIn("plans older than the 21 days of cleanupPeriodDays: 1, in plans/", r.stdout)
+        self.assertEqual(self.here(), [False, True])
+
+    def test_where_the_period_cannot_be_told_no_plan_is_cleared_by_age(self):
+        """A settings file that cannot be read, a value that is no number of 1 or more, and a handed value that is
+        no JSON or no such number: Claude Code pauses its own sweep where it cannot safely determine the period."""
+        for handed in ("0", "-3", "true", '"30"', "null1", "[30]"):
+            self.assertIsNone(lifetime.cleanup_days(self.root, handed), handed)
+        self.settings("user", 0)
+        self.assertIsNone(lifetime.cleanup_days(self.root), "0 fails Claude Code's own validation")
+        self.settings("user", "30")
+        self.assertIsNone(lifetime.cleanup_days(self.root))
+        self.settings("user", 20)
+        self.settings("local", None)
+        self.assertIsNone(lifetime.cleanup_days(self.root), "a file that is no JSON may set the key")
+        self.assertEqual(lifetime.sweep(self.p4, days=lifetime.cleanup_days(self.root)), "")
+        r = run("now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertEqual((r.stdout.strip(), self.here()), ("nothing has expired", [True, True]))
+        r = run("list", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertIn("cache   plans/  no plan is cleared by age: cleanupPeriodDays cannot be told from the settings",
+                      r.stdout)
+
+    def test_a_cache_rule_on_plans_stands_in_place_of_the_period_and_an_empty_one_keeps_every_plan(self):
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
+            json.dump({"temportal": {"cache": {"plans": {}}}}, fh)
+        self.assertTrue(lifetime.own_rule(self.p4))
+        self.assertEqual((lifetime.sweep(self.p4, days=30.0), self.here()), ("", [True, True]))
+        listed = "\n".join(lifetime.listing(self.p4, days=30.0, is_told=True))
+        self.assertIn("cache   plans/  ", listed)
+        self.assertNotIn("cleanupPeriodDays", listed)
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
+            json.dump({"temportal": {"cache": {"plans/": {"max_age_days": 10}}}}, fh)
+        said = lifetime.sweep(self.p4, days=30.0)
+        self.assertEqual(said, "p4-temportal: cleared files past the cache rule: 2, in plans/.")
+        self.assertEqual(self.here(), [False, False])
+
+    def test_list_shows_the_age_at_which_a_plan_is_cleared(self):
+        self.settings("user", 45)
+        r = run("list", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
+        self.assertIn("cache   plans/  max_age_days=45, the cleanupPeriodDays at which Claude Code clears a plan in "
+                      "its own folder, since no cache rule names plans/", r.stdout)
+        self.assertEqual(self.here(), [True, True], "list clears nothing")
+
+    def test_a_plan_the_stores_git_tracks_goes_with_its_removal_staged(self):
+        """Its last version stays in the store's history, as with every tracked file a lifetime clears."""
+        git(self.p4, "init", "-q")
+        git(self.p4, "add", "-A")
+        git(self.p4, "commit", "-q", "-m", "plans")
+        lifetime.sweep(self.p4, days=30.0)
+        staged = subprocess.run(["git", "-C", self.p4, "diff", "--cached", "--name-status"], capture_output=True,
+                                text=True, check=True).stdout.split()
+        self.assertEqual(staged, ["D", "temportal/plans/old-plan.md"])
+
+    def test_a_plans_folder_that_is_a_link_is_left_alone(self):
+        elsewhere = os.path.join(self.base, "elsewhere")
+        shutil.move(os.path.join(self.t, "plans"), elsewhere)
+        try:
+            os.symlink(elsewhere, os.path.join(self.t, "plans"), target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this account cannot make a link")
+        self.assertEqual(lifetime.sweep(self.p4, days=30.0), "")
+        self.assertTrue(os.path.exists(os.path.join(elsewhere, "old-plan.md")))
+
+    def test_the_process_let_go_of_is_handed_the_period_too(self):
+        started = []
+        old = lifetime.let_go
+        try:
+            lifetime.let_go = lambda args: started.append(args) or True
+            self.assertEqual(lifetime.tick(self.root, True, ["a.md"], [], "14"), {"let_go": True})
+            self.assertEqual(lifetime.tick(self.root, True), {"let_go": True})
+        finally:
+            lifetime.let_go = old
+        self.assertEqual(started, [["--cleanup-days", "14", "tick", "--plan", "a.md"], ["tick"]])
 
 
 class Layout(unittest.TestCase):

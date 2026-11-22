@@ -187,6 +187,21 @@ class Page(unittest.TestCase):
         # what one run did not show: its project began with both keys in its settings file
         self.assertNotIn("the settings keeper wrote both keys", text)
 
+    def test_old_plans_in_the_stores_folder_are_cleared_at_claude_codes_own_age(self):
+        """The plans row says that the sweep clears a plan at the age of cleanupPeriodDays, where that age comes
+        from, when no plan is cleared by age, what stands in its place, and that only tests have shown it."""
+        text = page()
+        row = rows(text)["plans"]
+        for said in ("does not reach a folder a project names", "since p4-temportal 0.3.45",
+                     "at that same age", "<code>$.settings.read</code>", "takes 30 days where no file sets the key",
+                     "no plan is cleared by age", "pauses its own sweep", "an empty one keeps every plan",
+                     "with its removal staged", "<code>/lifetime list</code> shows the age in force",
+                     "no live session was kept until a plan came of age"):
+            self.assertIn(said, row, said)
+        self.assertNotIn("a plan with neither stays", text)
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        self.assertIn("with no rule written", open_still)
+
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
         original stays, and what the live checks showed of a move and of the copy."""
