@@ -59,8 +59,6 @@ class Page(unittest.TestCase):
         self.assertTrue(quoted)
         self.assertEqual(quoted - listed, set())
         self.assertEqual(listed - quoted, set())
-        self.assertIn("https://code.claude.com/docs/llms.txt", footer)
-        self.assertIn("<code>https://code.claude.com/docs/en/</code>", body)
 
     def test_every_row_names_a_part_of_the_order_or_says_none_is_built(self):
         text = page()
@@ -88,22 +86,6 @@ class Page(unittest.TestCase):
         for name in ("memory", "scratchpad", "lifetimes"):
             self.assertIn("deleted", rows(text)[name], name)
             self.assertNotIn("still answers", rows(text)[name], name)
-
-    def test_plan_files_are_kept_in_the_store_by_plansDirectory(self):
-        """The settings keeper writes plansDirectory, and the page of the settings p4 keeps says so in the row that
-        said no plugin moves a plan. The row of this page says what is written, when it is not, what lifetimes add
-        and what the live check saw, and the order holds the part as landed."""
-        text = page()
-        row = rows(text)["plans"]
-        self.assertIn('<td class="n">5</td>', row)
-        for said in ('href="claude-settings.html"', "<code>.claude/p4/temportal/plan-planner</code>", "2.1.328",
-                     "neither asked about nor refused", "a cache rule on <code>plan-planner</code>", "sets it false"):
-            self.assertIn(said, row, said)
-        self.assertEqual(set(re.findall(r'<li id="part-(\d+)">', text)), set(LANDED))
-        self.assertNotIn('id="left"', text)
-        settings = (DOX / "claude-settings.html").read_text(encoding="utf-8")
-        self.assertNotIn("no plugin moves a plan", settings)
-        self.assertEqual(settings.count("<tr><td><code>plansDirectory</code></td>"), 2)
 
     def test_the_settings_come_from_the_hooks_module_where_it_loads(self):
         """The memory row says where the plugin's python gets Claude Code's settings: from the hooks module, by

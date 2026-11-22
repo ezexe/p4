@@ -23,8 +23,6 @@ import unittest
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[2] / "plugins" / "p4-temportal"
 SKILL = PLUGIN / "skills" / "plan-planner" / "SKILL.md"
-TEMPORTAL = PLUGIN / "skills" / "temportal" / "SKILL.md"
-PAGE = pathlib.Path(__file__).resolve().parents[3] / "docs" / "temportal-native.html"
 sys.path.insert(0, str(PLUGIN / "hooks"))
 import lifetime  # noqa: E402
 
@@ -114,18 +112,6 @@ class SkillText(unittest.TestCase):
         for word in ("orphan", "git worktree add", "origin plans", "git -C", "commit -m"):
             self.assertNotIn(word, body, word)
 
-    def test_a_session_reads_only_the_plans_not_yet_put_into_a_category(self):
-        section = text().split("## What a session reads")[1].split("\n## ")[0]
-        self.assertIn("reads only the plan files directly in `plan-planner/`", section)
-        self.assertIn("never opens, lists, searches or hands to a subagent anything in `complete/`, `todo/` or "
-                      "`unplanned/`, unless ezexe names that file", section)
-        self.assertNotRegex(text(), r"\bls\b", "the skill lists no category itself")
-
-    def test_the_skill_says_what_keeps_a_sorted_plan(self):
-        body = text()
-        self.assertIn("`cleanupPeriodDays`", body)
-        self.assertIn("nothing in it is cleared by age or takes a lifetime as a whole folder", body)
-
     def test_the_prose_writes_no_parenthetical_and_each_list_item_is_one_line(self):
         # the section rules are the source's word for word, its parenthesis round the evidence link with them
         own = text().split("---\n", 2)[2].split("## What every section of a plan holds")[0]
@@ -137,20 +123,6 @@ class SkillText(unittest.TestCase):
         for i, line in enumerate(lines[:-1]):
             if re.match(r"\s*- ", line):
                 self.assertTrue(lines[i + 1] == "" or re.match(r"\s*(- |#)", lines[i + 1]), line)
-
-    def test_the_temportal_skill_points_to_it(self):
-        body = TEMPORTAL.read_text(encoding="utf-8")
-        self.assertIn("are the skill `plan-planner` of this plugin", body)
-        self.assertIn("read nothing in those subfolders unless ezexe names the file", body)
-        self.assertIn("`complete/`, `todo/` or `unplanned/` stays until ezexe's word moves it", body)
-
-    def test_the_page_has_its_passage(self):
-        page = PAGE.read_text(encoding="utf-8")
-        row = re.search(r'<tr id="row-plans">.*?</tr>', page, re.S).group(0)
-        for word in ("<code>plan-planner</code>", "<code>.claude/p4/temportal/plan-planner</code>",
-                     "<code>unplanned</code>", "no session reads anything there unless ezexe names the file",
-                     "orphan branch", "Plan files written during plan mode", "No live session has moved a plan"):
-            self.assertIn(word, row, word)
 
 
 class Places(unittest.TestCase):

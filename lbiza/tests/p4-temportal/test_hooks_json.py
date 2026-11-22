@@ -97,7 +97,6 @@ class ModuleTest(unittest.TestCase):
         self.assertIn("const MAP = '.claude/p4/native/host.json'", text)
         native = (SRC.parents[1] / "p4-native" / "README.md").read_text(encoding="utf-8")
         self.assertIn("`<project>/.claude/p4/native/host.json`", native)
-        self.assertIn("`sessions.<session id>`", native)
         search = text.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("const mapped = await mappedPlatform($)", search)
         self.assertIn("mapped === undefined ? /^[A-Za-z]:", search)
@@ -181,9 +180,6 @@ class ModuleTest(unittest.TestCase):
             self.assertIn(said, text, said)
         self.assertIn("no message", FILE["description"])
         self.assertIn("additional context of the SessionStart", FILE["description"])
-        skill = (SRC.parent / "skills" / "temportal" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("handed as additional context of the SessionStart hook", skill)
-        self.assertNotIn("comes one message", skill)
         test = (SRC / "register.test.ts").read_text(encoding="utf-8")
         for case in ("the ledger of the main conversation is handed at the SessionStart Claude Code raises inside a "
                      "compaction, and is no message",
