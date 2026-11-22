@@ -148,18 +148,30 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(sum(1 for row in ROWS.values() if row["kind"] == "hook"), 33)
         for key in ("Setup", "WorktreeCreate", "PermissionRequest", "PostCompact", "TeammateIdle"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
-        self.assertEqual(ROWS["Notification"]["open"], ["p4-native"])
         self.assertEqual(ROWS["PostToolBatch"]["open"], ["p4-phi"])
         counts = {kind: sum(1 for row in ROWS.values() if row["kind"] == kind) for kind in KINDS}
         self.assertEqual((counts["event"], counts["method"]), (51, 93))
         for key in ("$.mcp.call", "$.store.get", "$.model.complete", "$.ui.ask", "tool.describe", "ui.press"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
-        # p4-phi's module took it up, and p4-temportal's still builds its children's environment by hand
-        self.assertEqual(ROWS["$.process.hookEnv"]["used"], ["p4-phi"])
-        self.assertEqual(ROWS["$.process.hookEnv"]["open"], ["p4-temportal"])
-        self.assertEqual(ROWS["$.ui.notify"]["open"], ["p4-native"])
-        self.assertEqual(ROWS["session.attach"]["open"], ["p4-native"])
-        self.assertEqual(ROWS["session.detach"]["open"], ["p4-native"])
+
+    def test_the_rows_that_were_open_for_p4_native_and_p4_temportal_are_used(self):
+        """Five rows stood open for the two plugins. Each module now hooks the event or calls the method, so the
+        row names the plugin under `used` and says nothing more of what it would do. p4-phi's module took
+        `$.process.hookEnv` up too, so that row is open for nobody."""
+        found = uses()
+        for kind, key in (("hook", "Notification"), ("event", "session.attach"), ("event", "session.detach"),
+                          ("method", "$.ui.notify")):
+            self.assertIn((kind, key, "p4-native"), found, key)
+            self.assertEqual(ROWS[key]["used"], ["p4-native"], key)
+            self.assertNotIn("open", ROWS[key], key)
+            self.assertNotIn("would", ROWS[key], key)
+        self.assertIn(("method", "$.process.hookEnv", "p4-temportal"), found)
+        self.assertEqual(ROWS["$.process.hookEnv"]["used"], ["p4-phi", "p4-temportal"])
+        self.assertNotIn("open", ROWS["$.process.hookEnv"])
+        self.assertNotIn("would", ROWS["$.process.hookEnv"])
+        temportal = (PLUGINS / "p4-temportal" / "hooks" / "register.ts").read_text(encoding="utf-8")
+        self.assertIn("const env = { ...(await hookEnv($)), CLAUDE_PROJECT_DIR: await $.session.root() }", temportal)
+        self.assertIn("const told = (await hookEnv($))?.CLAUDE_PLUGIN_DATA", temportal)
 
     def test_the_state_library_counts_as_the_methods_it_calls(self):
         """p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, which no pattern

@@ -56,7 +56,8 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - `push` and `status` are options of the plugin that are off until ezexe turns them on, `hints` is on until ezexe turns it off, and a session changes none.
 - Each row of the table that is checked at a call has an option of its own, `refuse_` and the row's id, off until ezexe turns it on: with it on, the by-hand call is refused before it runs, and the refusal names the native feature and the option.
 - On such a refusal, take the feature it names, and where the by-hand call was the right one, tell ezexe which option refused it.
-- With `push` on, the plugin itself calls `PushNotification` at the end of a turn of a session ezexe is at, so send no second notification for the same turn.
+- With `push` on, the plugin itself calls `PushNotification` at the end of a turn of a session ezexe is at, and when the session waits at a permission prompt or sits idle, so send no second notification for the same turn.
+- In a session with no such tool the plugin notifies on ezexe's own channel at the turn's end, by `$.ui.notify`.
 
 ## What to do with it
 

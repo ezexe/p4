@@ -240,7 +240,20 @@ function reason(error: unknown): string {
   return String((error as Error)?.message ?? error).slice(0, 200)
 }
 
-// The folders that hold each plugin's data folder. The manifest reference puts `${CLAUDE_PLUGIN_DATA}` at
+// The variables that name the session and this plugin, as Claude Code hands them to the plugin's command hooks, by
+// `$.process.hookEnv`: the session's id and process, the project, the plugin's own folder and, as
+// `CLAUDE_PLUGIN_DATA`, the plugin's data folder, which the call makes. Nothing on a Claude Code that lacks the
+// call, where it throws as it is made, and where it rejects: the module then finds what it needs by hand.
+async function hookEnv($: EngineInterface): Promise<Record<string, string> | undefined> {
+  try {
+    return await $.process.hookEnv()
+  } catch {
+    return undefined
+  }
+}
+
+// The folders that hold each plugin's data folder, for a Claude Code with no `$.process.hookEnv`. The manifest
+// reference puts `${CLAUDE_PLUGIN_DATA}` at
 // `~/.claude/plugins/data/<id>/`, and the loading reference puts an installed plugin at
 // `cache/<marketplace>/<plugin>/<version>/` under the same plugins root, which `CLAUDE_CODE_PLUGIN_CACHE_DIR` moves.
 async function dataRoots($: EngineInterface): Promise<string[]> {
@@ -257,9 +270,12 @@ async function dataRoots($: EngineInterface): Promise<string[]> {
 }
 
 // Where find-python.sh keeps the interpreter it proved: `.python` in the plugin's data folder, and in the plugin's
-// own folder where a runner had no data folder. A data folder is named after the plugin's id, `<name>@<origin>`
-// with `@` as `-`, and the module is told only the name, so each folder that starts with the name is read.
+// own folder where a runner had no data folder. Claude Code names the data folder by `$.process.hookEnv`. Where it
+// has no such call the folder is searched for: it is named after the plugin's id, `<name>@<origin>` with `@` as
+// `-`, and the module is told only the name, so each folder that starts with the name is read.
 async function keptFiles($: EngineInterface): Promise<string[]> {
+  const told = (await hookEnv($))?.CLAUDE_PLUGIN_DATA
+  if (told) return [`${slashed(told)}/.python`, `${slashed($.plugin.root)}/.python`]
   const files: string[] = []
   const data = await $.env.get('CLAUDE_PLUGIN_DATA')
   if (data) files.push(`${slashed(data)}/.python`)
@@ -381,8 +397,11 @@ async function cleanupDays($: EngineInterface): Promise<string[]> {
   }
 }
 
-// Runs one command of lifetime.py for this session's project, as the plugin's runner runs it. The project is told
-// to lifetime.py as a command hook's environment tells it, and a relative path is read from the session's folder.
+// Runs one command of lifetime.py for this session's project, as the plugin's runner runs it, in the environment
+// a command hook of the plugin gets, by `$.process.hookEnv`. The project alone is the module's own to name: it is
+// the session's root, which is the worktree for a session in a git worktree, where the variable a command hook of a
+// session the desktop app made gets names the main checkout, and lifetime.py clears a worktree's own store first.
+// A relative path is read from the session's folder.
 async function run(
   $: EngineInterface,
   args: readonly string[],
@@ -391,7 +410,7 @@ async function run(
   const python = await findPython($)
   if (python === undefined) return undefined
   const script = `${slashed($.plugin.root)}/hooks/lifetime.py`
-  const env = { CLAUDE_PROJECT_DIR: await $.session.root() }
+  const env = { ...(await hookEnv($)), CLAUDE_PROJECT_DIR: await $.session.root() }
   const days = await cleanupDays($)
   try {
     return await $.process.run([python, '-I', '-X', 'utf8', script, ...days, ...args], { env, timeoutMs })

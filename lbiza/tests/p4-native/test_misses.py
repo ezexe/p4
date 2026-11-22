@@ -143,7 +143,7 @@ class HookTest(unittest.TestCase):
         for word in ("deny", "block", "preventContinuation"):
             self.assertNotIn(word, self.HOOK)
         self.assertNotIn("$.process.", MODULE)
-        self.assertEqual(MODULE.count("on('classic."), 1)
+        self.assertEqual(MODULE.count("on('classic."), 2, "after a tool call, and at a notification of Claude Code's own")
         self.assertNotIn("on('classic.PreToolUse'", MODULE)
 
     def test_the_option_turns_it_off_and_a_modules_own_call_is_no_miss(self):

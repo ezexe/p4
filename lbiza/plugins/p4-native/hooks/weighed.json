@@ -248,14 +248,9 @@
   "$.process.hookEnv": {
    "kind": "method",
    "used": [
-    "p4-phi"
-   ],
-   "open": [
+    "p4-phi",
     "p4-temportal"
    ],
-   "would": {
-    "p4-temportal": "replace the environment the module builds by hand for each python child, and its search of the plugins folders for its own data folder."
-   },
    "declined": {
     "p4-native": "it starts no process."
    },
@@ -683,16 +678,14 @@
   },
   "$.ui.notify": {
    "kind": "method",
-   "open": [
+   "used": [
     "p4-native"
    ],
-   "would": {
-    "p4-native": "add a notification on ezexe's own channel at a turn's end in a session with no `PushNotification` tool, where the push today sends nothing."
-   },
    "declined": {
     "p4-phi": "a turn's end reaches its starter by the report of the turn.",
     "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
-   }
+   },
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.open": {
    "kind": "method",
@@ -2109,16 +2102,14 @@
   },
   "Notification": {
    "kind": "hook",
-   "open": [
+   "used": [
     "p4-native"
    ],
-   "would": {
-    "p4-native": "add a push when a session waits at a permission prompt or sits idle, where the push today goes out at a turn's end alone."
-   },
    "declined": {
     "p4-phi": "a session's wait reaches its starter by the report of its turn.",
     "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
-   }
+   },
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PauseGoal": {
    "kind": "tool",
@@ -3241,16 +3232,14 @@
   },
   "session.attach": {
    "kind": "event",
-   "open": [
+   "used": [
     "p4-native"
    ],
-   "would": {
-    "p4-native": "read the map's surfaces again when a surface joins the session, where the map today keeps them as its first turn found them."
-   },
    "declined": {
     "p4-phi": "the pane is drawn for whichever surface asks.",
     "p4-temportal": "it draws nothing."
-   }
+   },
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.compact": {
    "kind": "event",
@@ -3262,16 +3251,14 @@
   },
   "session.detach": {
    "kind": "event",
-   "open": [
+   "used": [
     "p4-native"
    ],
-   "would": {
-    "p4-native": "read the map's surfaces again when a surface leaves the session, where the map today keeps them as its first turn found them."
-   },
    "declined": {
     "p4-phi": "the pane is drawn for whichever surface asks.",
     "p4-temportal": "it draws nothing."
-   }
+   },
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.end": {
    "kind": "event",

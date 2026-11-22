@@ -34,6 +34,7 @@ A session is read as `desktop` when a tool of the desktop app answers in it or i
 No environment variable is read: a `claude -p` run started from a desktop session's shell inherits `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_HOST_SESSION_ID` from that session.
 The session does not wait for the map.
 The map is read again at the first turn of the main conversation, when a tool server that was still connecting at the start has answered, and after the session's id changed, as a `/clear` changes it.
+It is read again too when a surface joins the session or leaves it, as a phone that opens the session or the desktop app that connects: the module hooks `session.attach` and `session.detach`, so the entry's surfaces are those of now.
 An entry is written again only where it says something new.
 
 ## The command and the skill
@@ -149,10 +150,10 @@ What the record comes to, by kind, as `/native weighed` prints it.
 
 - `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
 - `tool`: 122 rows, 49 used, 6 open, 67 declined, 0 weighed by nobody
-- `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
-- `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
-- `method`: 93 rows, 35 used, 1 open, 57 declined, 0 weighed by nobody
-- `used`: 132 rows, 53 watched by a row of misses.ts, 79 with no by-hand call to watch, 0 with neither
+- `hook`: 33 rows, 14 used, 1 open, 18 declined, 0 weighed by nobody
+- `event`: 51 rows, 17 used, 0 open, 34 declined, 0 weighed by nobody
+- `method`: 93 rows, 36 used, 0 open, 57 declined, 0 weighed by nobody
+- `used`: 136 rows, 53 watched by a row of misses.ts, 83 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -162,15 +163,18 @@ A plugin's own command and another server's tool are no part of the host and are
 A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
 So those three kinds are in the record as Claude Code 2.1.326 has them, the hook events read from `hooks.md` and the module's events and methods from that build's types file, and a newer build's are walked by hand.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
-The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, and 2 are open.
+The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, one is open, and one that was open is used.
 An open row names each plugin it would serve and, under `would`, what it would replace or add there.
-`Notification` is open for p4-native, which would add a push when a session waits at a permission prompt or sits idle, and `PostToolBatch` for p4-phi, which would write the lookup rows of a parallel batch in one process start.
+`PostToolBatch` is open for p4-phi, which would write the lookup rows of a parallel batch in one process start.
+`Notification` was open for p4-native, whose module hooks it since 0.5.27 and pushes when a session waits at a permission prompt or sits idle.
 The 36 module events and the 50 module methods are walked too, each against its own comment in the types file.
 The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
 The walk found one use the record had missed: p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, so `$.state.get` and `$.state.set` are used, and the test reads those two helpers as the two methods.
-Of the events, 34 are declined, and `session.attach` and `session.detach` are open for p4-native, which would read the map's surfaces again when a surface joins or leaves.
-Of the methods, 57 are declined, and one is open: `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
-`$.process.hookEnv` is used by p4-phi, whose module hands its python children the variables a command hook gets, and is still open for p4-temportal, where it would replace the environment that module builds by hand for a python child.
+Of the events, 34 are declined, and `session.attach` and `session.detach`, which were open for p4-native, are used since 0.5.27: its module reads the map again when a surface joins or leaves.
+Of the methods, 57 are declined and none is open.
+`$.ui.notify`, which was open for p4-native, is used since 0.5.27, where a session has no `PushNotification` tool.
+`$.process.hookEnv` is used by p4-phi, whose module hands its python children the variables a command hook gets, and by p4-temportal since 0.3.57, for the environment of its python child and for its data folder.
+p4-temportal's module names the project itself, since for a session in a git worktree that the desktop app made the variable names the main checkout, and lifetime.py clears a worktree's own store first.
 Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
 The nine tools the record had as weighed by nobody are walked as well, so no row of any kind says so now.
 `SetGoal`, `GetGoal` and `PauseGoal` are in the build's types file and in no session's tool list here: ToolSearch found none of the three in a desktop session on Claude Code 2.1.326, with a goal in force and with none, nor in a scripted run and in a terminal session at its prompt on 2.1.328, and `$.tool.list` held none of them in either of those two.
@@ -195,7 +199,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 132 used rows, 53 are watched by a row of the table and 79 say why none watches them: the 63 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
+Of the 136 used rows, 53 are watched by a row of the table and 83 say why none watches them: the 67 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
@@ -319,11 +323,19 @@ The options are rows of `/config` in a terminal session, and they are kept under
 
 `push` calls the tool `PushNotification` by `$.tool.call` at the end of a turn of the main conversation, with the session's title or the project folder's name and the first line of the turn's answer, 180 characters at most.
 It sends nothing in a scripted run, nothing after a turn that was stopped, and nothing in a session another session started, whose turn's end is told to that session.
+In a session with no such tool it calls `$.ui.notify` at the turn's end in its place, which raises the notification on ezexe's own channel, the one `preferredNotifChannel` names.
+A session that waits on ezexe pushes too.
+Claude Code raises its own notification of a permission prompt that has waited about six seconds and of a session idle for about a minute, by https://code.claude.com/docs/en/hooks.md, "Notification", and the module hears both at the classic event `Notification` and calls the tool with Claude Code's own words.
+A session that sits idle after a turn whose push went out is not told twice, and a session with no tool is not notified again there, since Claude Code's own notification is already on that channel.
+No other type starts a push: a `plugin_notification` is what `$.ui.notify` itself raises.
 The tool keeps its own rule and sends nothing while ezexe is at the keyboard, by https://code.claude.com/docs/en/env-vars.md, `CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK`.
 `status` calls `$.ui.status` after each reading of the map, which https://code.claude.com/docs/en/plugins/mods/api.md describes as one line under the prompt that stays until it is changed.
 
 Seen in a terminal session at its prompt on Claude Code 2.1.328, with the plugin loaded by `--plugin-dir` and both options on in a `--settings` file: the line `p4-native: terminal, interactive, Claude Code 2.1.328` stood under the prompt, and at the turn's end the module's call of `PushNotification` was answered in 9 ms with `Not sent`, since the terminal was active.
+Seen in a scripted run on Claude Code 2.1.328 and on 2.1.330, with a probe plugin: `$.ui.notify` answered `{"isSent":false,"reason":"no-surface"}`, and a `classic.Notification` hook of the same plugin heard that notification with the type `plugin_notification`.
 Not seen: a notification that was sent, either option in the desktop app, and the rows in `/config`.
+Not seen live: `$.ui.notify` in a session with a surface, the push of a session that waits, and a surface that joins or leaves, each of which ran under `claude plugin test` alone.
+A terminal session started in a hidden console for this stopped at the trust dialog of its scratch folder, whose default is No, and no session answered it.
 
 Left out, each with its reason.
 

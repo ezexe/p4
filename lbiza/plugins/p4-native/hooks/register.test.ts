@@ -109,6 +109,8 @@ type Seen = {
   // Each call of a tool with its input, and the status lines pinned.
   inputs: { tool: string; input: Record<string, unknown> }[]
   status: (string | undefined)[]
+  // Each notification raised on ezexe's own channel, as `$.ui.notify` was called.
+  notified: { text: string; title: string | undefined }[]
 }
 
 function plain(path: string): string {
@@ -130,6 +132,7 @@ function machine(on: On, has: Machine): Seen {
     files,
     inputs: [],
     status: [],
+    notified: [],
   }
   on('ui.status', (_, e) => {
     seen.status.push(e.text)
@@ -137,6 +140,16 @@ function machine(on: On, has: Machine): Seen {
     return { value: undefined }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  // A surface that joins the session or leaves it, the settings hooks beneath a notification, and ezexe's own
+  // notification channel, which here is a terminal's bell.
+  on('session.attach', (_, e) => ({ clientId: e.clientId }))
+  on('session.detach', (_, e) => ({ clientId: e.clientId }))
+  on('classic.Notification', () => ({}))
+  on('ui.notify', (_, e) => {
+    seen.notified.push({ text: e.text, title: e.title })
+
+    return { value: { isSent: true, channel: 'terminal_bell' } as const }
+  })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   // What the settings hooks beneath the module answer after a tool call.
@@ -1444,4 +1457,103 @@ test('a refusal needs no line: with hints off and a row\'s option on the call is
   const out = (await $.tool.call({ tool: 'Bash', command: 'grep -rn "TODO" src' } as never)) as { deny?: string }
   expect(out.deny).toContain('refuse_text_searched_by_a_shell')
   expect(seen.calls).toEqual([])
+})
+
+test('a surface that joins the session or leaves it has the map read again', async ($, on) => {
+  const clock = mock.clock(on)
+  let surfaces: string[] = []
+  const seen = machine(on, { surfaces: () => surfaces, files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  expect(entries(seen)['cli-0001']?.surfaces).toEqual([])
+  expect(entries(seen)['cli-0001']?.host).toBe('terminal')
+
+  // The desktop app connects: the hook passes the engine's answer on and the entry holds the surface.
+  surfaces = ['desktop']
+  const joined = await $.session.attach({ surface: 'desktop', clientId: 'desktop:default' } as never)
+  expect(joined).toEqual({ clientId: 'desktop:default' })
+  await clock.settle()
+  expect(entries(seen)['cli-0001']?.surfaces).toEqual(['desktop'])
+  expect(entries(seen)['cli-0001']?.host).toBe('desktop')
+
+  surfaces = []
+  await $.session.detach({ surface: 'desktop', clientId: 'desktop:default', reason: 'detach' } as never)
+  await clock.settle()
+  expect(entries(seen)['cli-0001']?.surfaces).toEqual([])
+  expect(maps(seen)).toBe(3)
+})
+
+test('with the push on, a session with no PushNotification tool notifies on ezexe\'s own channel at a turn\'s end', { options: { push: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { surfaces: () => ['terminal'], tools: () => ['Read', 'Bash'].map(tool) })
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await $.turn.complete({ ...TURN, answer: '**The flush is ported.**\nThree files changed.' })
+  await clock.settle()
+
+  expect(seen.notified).toEqual([{ text: 'The flush is ported.', title: 'project' }])
+  expect(seen.calls).toEqual([])
+  expect(seen.debugged).toContain('notify: terminal_bell')
+
+  // A notification of Claude Code's own for a session that waits is not notified again on that channel.
+  await $.classic.Notification({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' } as never)
+  await clock.settle()
+  expect(seen.notified.length).toBe(1)
+})
+
+test('with the push on, a session that waits at a permission prompt or sits idle pushes in Claude Code\'s own words', { options: { push: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  let answer = 'Not sent: the terminal is active.'
+  const seen = machine(on, { ...PROMPT, app: () => answer })
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+
+  const waits = { hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' }
+  const out = await $.classic.Notification(waits as never)
+  await clock.settle()
+  expect(out).toEqual({})
+  expect(seen.inputs).toEqual([
+    { tool: 'PushNotification', input: { message: 'project: Claude needs your permission to use Bash', status: 'proactive' } },
+  ])
+
+  // A plugin's own notification and a sign-in are no wait.
+  await $.classic.Notification({ ...waits, notification_type: 'plugin_notification' } as never)
+  await $.classic.Notification({ ...waits, notification_type: 'auth_success' } as never)
+  await clock.settle()
+  expect(seen.inputs.length).toBe(1)
+
+  // The turn's end was not pushed, since ezexe was at the keyboard, so the idle minute after it is.
+  await $.turn.complete(TURN)
+  await clock.settle()
+  await $.classic.Notification({ ...waits, notification_type: 'idle_prompt', message: 'Claude is waiting for your input' } as never)
+  await clock.settle()
+  expect(seen.inputs.map(one => one.input.message)).toEqual([
+    'project: Claude needs your permission to use Bash',
+    'project: done',
+    'project: Claude is waiting for your input',
+  ])
+
+  // A turn whose end was pushed is not told again when the session sits idle.
+  answer = 'Sent.'
+  await $.turn.start({ ...BEGUN, turnId: 't2' })
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.settle()
+  await $.classic.Notification({ ...waits, notification_type: 'idle_prompt', message: 'Claude is waiting for your input' } as never)
+  await clock.settle()
+  expect(seen.inputs.length).toBe(4)
+})
+
+test('with the push off, a notification of Claude Code\'s own starts nothing', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { ...PROMPT, app: () => 'sent' })
+  await $.session.start(AT_A_PROMPT)
+  await clock.settle()
+
+  await $.classic.Notification({ hook_event_name: 'Notification', notification_type: 'permission_prompt', message: 'Claude needs your permission to use Bash' } as never)
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(seen.inputs).toEqual([])
+  expect(seen.notified).toEqual([])
 })

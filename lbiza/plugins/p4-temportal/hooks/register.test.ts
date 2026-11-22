@@ -1628,3 +1628,53 @@ test('a file outside a folder named plans, one a folder deeper, one that is no m
 
   expect(seen.ran.at(-1)).toEqual(['tick', '--let-go'])
 })
+
+// The data folder Claude Code names for the plugin, which no search of the plugins folders would find.
+const TOLD = '/elsewhere/data/p4-temportal-p4-marketplace'
+// What `$.process.hookEnv` answers: the variables a command hook of the plugin gets. In a session of the desktop
+// app in a git worktree the project among them is the main checkout.
+const HOOK_ENV = {
+  CLAUDE_CODE_SESSION_ID: 'cli-0001',
+  CLAUDE_PID: '4242',
+  CLAUDE_PROJECT_DIR: '/main/checkout',
+  CLAUDE_PLUGIN_ROOT: '/plugins/p4-temportal',
+  CLAUDE_PLUGIN_DATA: TOLD,
+}
+
+test('the python child gets the environment of the plugin\'s command hooks, and the data folder is the one Claude Code names', async ($, on) => {
+  const clock = mock.clock(on)
+  // The call is answered through a glob, so that this file still loads on a Claude Code with no such event.
+  let isAsked = false
+  on('process.*', (_, e, next) => {
+    if (next.event !== 'process.hookEnv') return next(e)
+    isAsked = true
+
+    return { value: HOOK_ENV } as never
+  })
+  const seen = machine(on, { files: { [`${TOLD}/.python`]: `${KEPT}\n`, [KEPT]: '' } })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  // A Claude Code with no such call never asks, and the test after this one holds what the module does there.
+  if (!isAsked) return
+  expect(seen.ran).toEqual([['tick']])
+  // Every variable is the engine's but the project, which is the session's own root.
+  expect(seen.calls[0]?.env).toEqual({ ...HOOK_ENV, CLAUDE_PROJECT_DIR: '/work/project' })
+  // The kept interpreter is read from the folder that was named, and no folder is searched for it.
+  expect(seen.read).toEqual([`${TOLD}/.python`])
+  expect(seen.tried).toEqual([])
+})
+
+test('on a Claude Code with no $.process.hookEnv the module names the project and finds the data folder by hand', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {})
+
+  await $.session.start(START)
+  await clock.settle()
+
+  // Nothing answers the call here, so it rejects in the module, as a build that lacks it throws.
+  expect(seen.calls[0]?.env).toEqual({ CLAUDE_PROJECT_DIR: '/work/project' })
+  expect(seen.read).toEqual([`${DATA}/.python`])
+})

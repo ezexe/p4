@@ -6,8 +6,9 @@
 // here. Each fact is asked of the engine: `e.isInteractive` of `session.start`, `$.session.surfaces`,
 // `$.session.version`, `$.session.info` and `$.tool.list`. No environment variable is read, since a `claude -p` run
 // started from a desktop session's shell inherits that session's variables. The map is read again at the first turn
-// of the main conversation, when a tool server that was still connecting has answered, and whenever the session's
-// id has changed, as a `/clear` changes it with no `session.start` after it.
+// of the main conversation, when a tool server that was still connecting has answered, whenever the session's
+// id has changed, as a `/clear` changes it with no `session.start` after it, and when a surface joins the session
+// or leaves it, at `session.attach` and `session.detach`.
 //
 // The map is kept in the project's store, in `.claude/p4/native/host.json`, under `sessions.<session id>`, where
 // the session id is `$.session.id()`, which a command hook reads as `session_id` and a shell as
@@ -31,7 +32,9 @@
 // Two native features that fit neither p4-phi nor p4-temportal are here, each behind an option of the plugin's
 // `userConfig` that is off unless ezexe turns it on, and each a call of Claude Code's own: a push notification by
 // the `PushNotification` tool when a turn of a session ezexe is at ends, and a status line that names the host.
-// The module wraps neither.
+// The module wraps neither. With the push on, a session with no such tool notifies on ezexe's own channel by
+// `$.ui.notify` at the turn's end, and a session that waits on ezexe, at a permission prompt or idle, pushes when
+// Claude Code raises its own notification of that, which the module hears at the classic event `Notification`.
 //
 // And it hands one line at the moment of a miss, a situation of misses.ts in which a session does by hand what a
 // native feature of this host does: after the tool call that shows it, as context beside that call's result, or
@@ -92,6 +95,9 @@ const CALL_MS = 8_000
 const PUSH = 'PushNotification'
 // The most characters of a notification, under the 200 the tool's own description gives.
 const PUSH_MOST = 180
+// The notifications of Claude Code that say a session waits on ezexe, by the `notification_type` hooks.md lists: a
+// permission prompt that has waited about six seconds, and a session idle for about a minute after its answer.
+const WAITING = new Set(['permission_prompt', 'idle_prompt'])
 
 // What the name of each tool of the desktop app begins with. A session the app hosts has them and no other has.
 const APP = 'mcp__ccd_'
@@ -181,6 +187,8 @@ let refused = new Set<string>()
 let askedFor: string | undefined
 let isChild = false
 let title = ''
+// Whether the push of the last turn's end went out, so a session that then sits idle pushes no second time.
+let wasSent = false
 
 // What this session's own calls showed: a scripted worker started in a Terminal tab, a notice asked for another
 // session's exit, something set that wakes this session, the plugin's own tool or command asked, the deferred
@@ -619,24 +627,46 @@ async function place($: EngineInterface): Promise<void> {
   }
 }
 
-// One push to ezexe at the end of a turn of the main conversation, where ezexe turned the option on: in a session
-// with a person at it, which a scripted run is not, and not in a session another session started, whose turn's
-// end is told to that session. The tool itself sends nothing while ezexe is at the keyboard.
-async function push($: EngineInterface, answer: string): Promise<void> {
+// One push to ezexe, where ezexe turned the option on: in a session with a person at it, which a scripted run is
+// not, and not in a session another session started, whose turn's end is told to that session. `said` is what
+// the push says: the answer of a turn that ended, or Claude Code's own words for a session that waits. The tool
+// itself sends nothing while ezexe is at the keyboard. In a session with no such tool, a turn's end is told on
+// ezexe's own notification channel by `$.ui.notify`, the one `preferredNotifChannel` names. A session that waits
+// is told by the tool alone, since Claude Code has then raised its own notification on that channel. It answers
+// whether the push went out.
+async function push($: EngineInterface, said: string, isTurnEnd: boolean): Promise<boolean> {
   try {
     const host = kept
-    if (host === undefined || host.run !== 'interactive' || !host.tools.native.includes(PUSH)) return
+    if (host === undefined || host.run !== 'interactive') return false
+    const hasTool = host.tools.native.includes(PUSH)
+    if (!hasTool && !isTurnEnd) return false
     if (host.host === 'desktop') await place($)
-    if (isChild) return
+    if (isChild) return false
     const where = title || slashed(await $.session.root()).split('/').at(-1) || 'Claude Code'
-    const line = (answer.trim().split('\n')[0] ?? '').replace(/[*_`#]/g, '').trim() || 'the turn ended'
+    const line = (said.trim().split('\n')[0] ?? '').replace(/[*_`#]/g, '').trim() || 'the turn ended'
+    if (!hasTool) {
+      const sent = await $.ui.notify(line.length > PUSH_MOST ? `${line.slice(0, PUSH_MOST - 3)}...` : line, { title: where })
+      $.ui.log(`notify: ${sent.isSent ? sent.channel : sent.reason}`, { to: 'debug' })
+
+      return sent.isSent
+    }
     const message = `${where}: ${line}`
     const cut = message.length > PUSH_MOST ? `${message.slice(0, PUSH_MOST - 3)}...` : message
     const out = await call($, PUSH, { message: cut, status: 'proactive' })
     $.ui.log(`push: ${out?.text ?? out?.refused ?? 'no answer'}`, { to: 'debug' })
+
+    return out?.text !== undefined && !/\bnot sent\b/i.test(out.text)
   } catch (error) {
     note($, `the push was not sent: ${reason(error)}`)
+
+    return false
   }
+}
+
+// The map read once more after the reading in flight, if any, for a change that reading may have come before.
+async function again($: EngineInterface): Promise<void> {
+  await reading?.catch(() => undefined)
+  await look($)
 }
 
 // Whether a tool answers in this session, by the map: one of Claude Code's own, one of the desktop app's, or one of
@@ -885,6 +915,7 @@ export const register: Register = (on, options) => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       isPut = false
+      wasSent = false
       const id = await $.session.id().catch(() => undefined)
       if (id !== undefined && id !== turnOf) {
         turnOf = id
@@ -906,7 +937,11 @@ export const register: Register = (on, options) => {
       origin = undefined
     }
     if (e.agentId === undefined && owed.length > 0) await pay($)
-    if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)
+    if (e.agentId === undefined && wants.push && !e.isAborted) {
+      void push($, e.answer, true).then(isSent => {
+        wasSent = isSent
+      })
+    }
     if (e.agentId === undefined && wants.hints && !e.isAborted) {
       const lines = hints(atEnd({ isWorkerOut, isNoticed, isWoken, hasAsked, hasSearched, isPut }, e.answer))
       for (const line of lines) $.ui.log(line)
@@ -915,6 +950,32 @@ export const register: Register = (on, options) => {
 
     return out
   })
+
+  // A notification Claude Code raises, heard after the settings hooks beneath: where it says the session waits on
+  // ezexe and the push is on, the tool tells ezexe so, in Claude Code's own words. A session that sits idle after
+  // a turn whose push went out says nothing twice, and a plugin's own notification is no wait.
+  on('classic.Notification', async ($, e, next) => {
+    const out = await next(e)
+    const isTold = e.notification_type === 'idle_prompt' && wasSent
+    if (wants.push && WAITING.has(e.notification_type) && !isTold) void push($, e.message, false)
+
+    return out
+  }).catch(($, e, next) => next(e))
+
+  // A surface joined the session or left it, as a phone that opens it or the desktop app that connects: the map
+  // is read again once the engine has the change, without the hook waiting for the reading.
+  on('session.attach', async ($, e, next) => {
+    const out = await next(e)
+    void again($)
+
+    return out
+  }).catch(($, e, next) => next(e))
+  on('session.detach', async ($, e, next) => {
+    const out = await next(e)
+    void again($)
+
+    return out
+  }).catch(($, e, next) => next(e))
 
   // A compaction a probe asked for is vetoed, so the probe learns only whether the call reached the hooks.
   on('session.compact', ($, e, next) => (e.instructions === NO_COMPACTION ? { skip: VETO } : next(e)))

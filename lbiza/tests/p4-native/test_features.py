@@ -33,7 +33,7 @@ class OptionsTest(unittest.TestCase):
         self.assertIn("wants = { push: options.push === true, status: options.status === true, hints: options.hints !== false }",
                       MODULE)
         self.assertIn("let wants = { push: false, status: false, hints: true }", MODULE)
-        self.assertEqual(MODULE.count("wants.push"), 1)
+        self.assertEqual(MODULE.count("wants.push"), 2, "at a turn's end, and where Claude Code says the session waits")
         self.assertEqual(MODULE.count("wants.status"), 1)
 
 
@@ -44,13 +44,38 @@ class CallsTest(unittest.TestCase):
         self.assertIn("const PUSH = 'PushNotification'", MODULE)
         self.assertEqual(MODULE.count("call($, PUSH,"), 1)
         self.assertIn("call($, PUSH, { message: cut, status: 'proactive' })", MODULE)
-        end = MODULE.split("on('turn.complete'", 1)[1].split("\n  })", 1)[0]
-        self.assertIn("if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)", end)
+        end = MODULE.split("on('turn.complete'", 1)[1].split("\n  })\n\n", 1)[0]
+        self.assertIn("if (e.agentId === undefined && wants.push && !e.isAborted) {\n      void push($, e.answer, true)", end)
         push = MODULE.split("async function push(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("host.run !== 'interactive'", push, "never in a scripted run")
         self.assertIn("if (isChild) return", push, "never in a session another session started")
-        for word in ("$.ui.notify", "$.http.", "$.process."):
-            self.assertNotIn(word, MODULE, "no notification of the plugin's own making")
+        for word in ("$.http.", "$.process."):
+            self.assertNotIn(word, MODULE, "no request and no process of the plugin's own making")
+
+    def test_a_session_with_no_push_tool_notifies_on_ezexes_own_channel_at_a_turns_end_alone(self):
+        """`$.ui.notify` is Claude Code's own call for a notification on the channel `preferredNotifChannel`
+        names. The module makes it once, where the session has no `PushNotification` tool and a turn ended, and
+        never for a session that waits, since Claude Code has then raised its own notification there."""
+        self.assertEqual(MODULE.count("$.ui.notify("), 1)
+        push = MODULE.split("async function push(", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("if (!hasTool && !isTurnEnd) return false", push)
+        self.assertLess(push.index("if (isChild) return"), push.index("$.ui.notify("))
+        self.assertIn("{ title: where })", push)
+
+    def test_a_session_that_waits_on_ezexe_pushes_when_claude_code_raises_its_own_notification(self):
+        """https://code.claude.com/docs/en/hooks.md, "Notification": `permission_prompt` fires once a prompt "has
+        waited about six seconds" and `idle_prompt` about 60 seconds after an answer. The hook passes on what the
+        settings hooks beneath answered, and acts on those two types alone: a `plugin_notification` is what
+        `$.ui.notify` raises, and a hook that pushed on it would answer its own plugin."""
+        self.assertIn("const WAITING = new Set(['permission_prompt', 'idle_prompt'])", MODULE)
+        hook = MODULE.split("on('classic.Notification'", 1)[1].split("\n  }).catch(", 1)[0]
+        self.assertLess(hook.index("const out = await next(e)"), hook.index("void push($, e.message, false)"))
+        self.assertIn("if (wants.push && WAITING.has(e.notification_type) && !isTold) void push($, e.message, false)", hook)
+        self.assertIn("const isTold = e.notification_type === 'idle_prompt' && wasSent", hook)
+        self.assertIn("return out", hook)
+        for words in ("In a session with no such tool it calls `$.ui.notify`", "the classic event `Notification`",
+                      "`plugin_notification`"):
+            self.assertIn(words, SECTION)
 
     def test_status_is_one_call_of_the_engines_status_line(self):
         self.assertEqual(MODULE.count("$.ui.status("), 1)
