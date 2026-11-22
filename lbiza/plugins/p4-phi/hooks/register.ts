@@ -366,9 +366,14 @@ let paged: string | undefined
 // of an `unload` of its pane all the same leaves it closed too.
 // Until p4-phi 0.11.130 a look asked `$.ui.panes` whether the pane was still there, once after each look.
 // `claude plugin test` has no call that raises the event, and the module a test file imports is a second copy of
-// the one the kit loads, so the function takes how the pane stood and a test calls it with the event's input. Seen
-// in a scripted session on Claude Code 2.1.328 and on 2.1.330, with a probe plugin: a `$.ui.close` raised
-// `ui.close` with `{ id, origin: { kind: "plugin" } }` at a hook of the plugin.
+// the one the kit loads, so the function takes how the pane stood and a test calls it with the event's input.
+// Seen in the desktop app on Claude Code 2.1.326, with a probe plugin: a person's click on a placed pane's own
+// close mark raised `ui.close` with `{ id, origin: { kind: "person" } }` at a hook of the plugin, by name and by
+// glob, and the pane was gone from `$.ui.panes` at the next turn. Seen in scripted sessions on 2.1.326, 2.1.328
+// and 2.1.330 and in the desktop app, with the same probe: a `$.ui.close` asked for inside an event raised
+// `ui.close` with `{ id, origin: { kind: "plugin" } }` at a hook of the plugin. A plugin's own `$.ui.close` asked
+// for outside an event, as from a timer, closed the pane and reached no hook on 2.1.326, 2.1.328 and 2.1.330, and
+// this module makes no such call, since it closes no pane.
 export function paneAfterClose(isOpen: boolean, e: { id: string; origin?: { kind?: string } }): boolean {
   return e.id === PANE ? false : isOpen
 }

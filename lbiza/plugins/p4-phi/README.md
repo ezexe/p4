@@ -17,8 +17,11 @@ claude plugin install p4-native@p4-marketplace
 
 Each install is a copy in Claude Code's plugin cache, `~/.claude/plugins/cache/p4-marketplace/<plugin>/<version>/`, at user scope unless `--scope project` or `--scope local` says otherwise.
 Claude Code updates installed plugins only from a marketplace whose auto-update is on, and it is off by default for a marketplace like this one: turn it on in a session with `/plugin`, the **Marketplaces** tab, `p4-marketplace`, **Enable auto-update**, or update by hand with `claude plugin update <plugin>@p4-marketplace`.
-With auto-update on, a new version reaches the installed copy at the pass Claude Code runs after a session's first message, and a session that is running keeps the version it loaded until `/reload-plugins` or its next start.
+With auto-update on, a new version reaches the installed copy at the pass Claude Code runs after a session's first message, and by the docs a session that is running keeps the version it loaded until `/reload-plugins` or its next start.
 Source: https://code.claude.com/docs/en/plugins/install.md, Keep plugins updated, and https://code.claude.com/docs/en/plugins/loading.md, When auto-update runs.
+A session of the desktop app is not to be counted on to keep the copy it started with, by what was seen on Claude Code 2.1.326: a session whose process had run for four hours ran the command hooks, the scripts and the hooks module of p4-phi 0.11.130 five minutes after `claude plugin update p4-phi@p4-marketplace --scope user` was run from another session, with no `/reload-plugins` typed in it and no line of a reload in its transcript.
+Its module was shown to be the new one by what a `PostToolBatch` command hook was handed there, the field the module adds from 0.11.116 on, which was committed two hours after that process started.
+What carried the update into the running session was not found.
 
 ## Delegation
 
@@ -66,8 +69,9 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 The pane's pages are read anew after each look while the pane is open, and the module hears the pane close at `ui.close`, which by the types of `claude-code` every close raises with the pane's `id` and an `origin`, `person` for the person's close mark or key and `plugin` for a plugin's `$.ui.close`.
 Until p4-phi 0.11.130 a look asked `$.ui.panes` whether the pane was still there, once after each look, and the module lists no pane now.
 At an `unload` a pane's own opener is not told, by the same types, and p4-phi's drawing answers for its own faults, so its pane goes that way only with the plugin itself.
-Seen in a scripted session on Claude Code 2.1.328 and on 2.1.330, with a probe plugin: a `$.ui.close` raised `ui.close` at a hook of the plugin.
-Not seen: a person's own close, which takes ezexe's click.
+Seen in the desktop app on Claude Code 2.1.326, with a probe plugin: a person's click on a placed pane's own close mark raised `ui.close` at a hook of the plugin, by name and by glob, with the origin `person`, and the pane was gone from `$.ui.panes` at the next turn.
+Seen in scripted sessions on Claude Code 2.1.326, 2.1.328 and 2.1.330 and in the desktop app, with the same probe: a `$.ui.close` asked for inside an event raised `ui.close` at a hook of the plugin, with the origin `plugin`.
+A plugin's own `$.ui.close` asked for outside an event, as from a timer, closed the pane and reached no hook on 2.1.326, 2.1.328 and 2.1.330, and p4-phi's module makes no such call, since it closes no pane.
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 `phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
