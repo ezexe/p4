@@ -53,7 +53,6 @@ import json
 import os
 import re
 import sys
-import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -147,26 +146,10 @@ def _make(folder):
 
 
 def _write(path, text):
+    """`text` written to `path` by the kit's one writer, which waits out the readers that hold the file open for
+    REPLACE_S and leaves no temp where it gives up."""
     _make(os.path.dirname(path))
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
-    try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        end = time.time() + REPLACE_S
-        while True:
-            try:
-                os.replace(tmp, path)
-                break
-            except PermissionError:                # Windows refuses a replace while a reader holds the file open
-                if time.time() >= end:
-                    raise
-                time.sleep(0.02)
-    except OSError:
-        try:                                       # a replace Windows refused leaves no temp file behind
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    p4conf.write_whole(path, text, wait=REPLACE_S)
 
 
 def _read(path):

@@ -767,10 +767,7 @@ def write_cache(p4, disk):
     import marshal
     try:
         s = os.stat(index_path(p4))
-        tmp = cache_path(p4) + f".{os.getpid()}.tmp"
-        with open(tmp, "wb") as f:
-            f.write(marshal.dumps({**disk, "_key": [s.st_mtime_ns, s.st_size, INDEX_VERSION]}))
-        os.replace(tmp, cache_path(p4))
+        p4conf.write_whole(cache_path(p4), marshal.dumps({**disk, "_key": [s.st_mtime_ns, s.st_size, INDEX_VERSION]}))
     except (OSError, ValueError):
         pass
 

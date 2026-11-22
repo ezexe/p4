@@ -100,23 +100,9 @@ def keep_pending(path, d):
 
 
 def _write_raw(path, d):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
-    end = time.time() + REPLACE_WAIT_S
-    while True:
-        try:
-            os.replace(tmp, path)
-            return
-        except PermissionError:                   # Windows, while a reader that takes no lock has `path` open
-            if time.time() > end:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
-                raise
-            time.sleep(0.01)
+    """The record `d` written to `path` by the kit's one writer, which waits out a reader that takes no lock and
+    has `path` open, for REPLACE_WAIT_S."""
+    p4conf.write_whole(path, json.dumps(d, ensure_ascii=False, indent=1, sort_keys=True) + "\n", wait=REPLACE_WAIT_S)
 
 
 def _rows(path):
@@ -2231,12 +2217,8 @@ def ready_page(home):
                       "session archived in the app or live again drops off then.", ""]
                      + (rows or ["None."])) + "\n"
     path = ready_path(home)
-    try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
-        os.replace(tmp, path)
+    try:                                           # best effort: the page is made again at the next count
+        p4conf.write_whole(path, text)
     except OSError:
         pass
     return path

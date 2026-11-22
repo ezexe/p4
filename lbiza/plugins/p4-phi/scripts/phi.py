@@ -164,11 +164,9 @@ def read_json(path):
 
 
 def write_atomic(path, text):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    """`text` written to `path` whole or not at all, by the kit's one writer, which waits out a reader that has
+    the file open and leaves no temp: a move made once lost a session's whole save, and the hook with it."""
+    p4conf.write_whole(path, text)
 
 
 def append_line(path, row):

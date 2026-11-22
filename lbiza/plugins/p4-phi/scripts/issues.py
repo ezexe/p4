@@ -1033,10 +1033,10 @@ def cut_back(home, cwd="", commands=()):
 
 
 def _write(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    """A memory file written by the kit's one writer: Claude Code and other sessions' hooks read these files, and
+    the temp is this writer's own, where two writers of one file shared `<path>.tmp`."""
+    import p4conf
+    p4conf.write_whole(path, text)
 
 
 def _reindex(folder, name, short):

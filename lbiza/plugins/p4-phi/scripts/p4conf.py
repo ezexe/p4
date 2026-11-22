@@ -33,6 +33,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 FILE = "p4.json"
@@ -754,12 +755,14 @@ def _merge(base, over, unknown, prefix=""):
 
 
 def _write(p4, data):
-    """Write p4.json through a temp file of this call's own, since the hooks of one event load at once."""
+    """Write p4.json through a temp file of this call's own, since the hooks of one event load at once, and with
+    the move that waits out a reader, move_over: every hook of every session reads this file."""
+    sweep_temps(path(p4))
     fd, tmp = tempfile.mkstemp(prefix=FILE + ".", suffix=".tmp", dir=p4)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
-        os.replace(tmp, path(p4))
+        move_over(tmp, path(p4))
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -1312,6 +1315,79 @@ def read_json(p):
     return d if isinstance(d, dict) else None
 
 
+# How long a write waits out a reader, the other side of READ_WAIT_S. On Windows os.replace fails with
+# PermissionError, WinError 5, while another process has the file open, as a reader that takes no lock has for the
+# length of its read. A move made once lost the write and left its temp. Seen on 2026-11-22: three
+# `session.json.<pid>.tmp` beside the records of two sessions, each a whole hook that died at the move by its
+# session's log, a prompt hook that handed nothing beside its prompt and two Stop hooks, one of which left its
+# turn with no row. Measured on Windows 11 with two processes reading one file in a loop and a third writing it:
+# 11455 of 12014 single moves failed. A reader holds the file for one read, so the move is made again every few
+# thousandths of a second. The wait is a third of the session lock's, relay.LOCK_WAIT_S, since a save waits
+# while it holds that lock, and a small part of what a hook has.
+WRITE_WAIT_S = 1.0
+WRITE_AGAIN_S = 0.005
+# How old a temp of a file is before the next write of that file removes it: one a process that died left, or one
+# of a move an older copy gave up on. A live write holds its temp for thousandths of a second.
+TEMP_OLD_S = 60.0
+
+
+def move_over(tmp, p, wait=None):
+    """Moves the temp file `tmp` over `p` with os.replace, the one move of the kit's writers. A move that meets
+    PermissionError is made again until `wait` seconds have passed, WRITE_WAIT_S where none is given. Then the
+    temp is removed and the error raised, so a write that is lost says so and leaves nothing behind."""
+    wait = WRITE_WAIT_S if wait is None else wait
+    end = None
+    while True:
+        try:
+            os.replace(tmp, p)
+            return
+        except PermissionError:
+            now = time.monotonic()
+            end = now + wait if end is None else end
+            if now >= end:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(WRITE_AGAIN_S)
+
+
+def sweep_temps(p):
+    """Removes each temp of `p` that is older than TEMP_OLD_S, by the names the kit's writers give one: `<p>.tmp`
+    and `<p>.<anything>.tmp`. A younger one is another writer's, under way, and is left."""
+    old = time.time() - TEMP_OLD_S
+    for t in [p + ".tmp"] + glob.glob(glob.escape(p) + ".*.tmp"):
+        try:
+            if os.path.getmtime(t) < old:
+                os.remove(t)
+        except OSError:
+            pass
+
+
+def write_whole(p, data, wait=None, sync=False):
+    """Writes `data`, text or bytes, to `p` whole or not at all: to a temp file of this writer's own beside it,
+    then move_over, which waits out a reader. A temp an earlier write of `p` left is removed first, sweep_temps.
+    With `sync` the temp is flushed to the disk before the move. Raises what the write or the move raised, with
+    no temp left."""
+    os.makedirs(os.path.dirname(os.path.abspath(p)), exist_ok=True)
+    sweep_temps(p)
+    tmp = f"{p}.{os.getpid()}.{threading.get_ident()}.tmp"     # one writer's temp file never another's
+    try:
+        with (open(tmp, "wb") if isinstance(data, bytes) else open(tmp, "w", encoding="utf-8", newline="\n")) as f:
+            f.write(data)
+            if sync:
+                f.flush()
+                os.fsync(f.fileno())
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    move_over(tmp, p, wait)
+
+
 def _strs(v):
     return isinstance(v, list) and all(isinstance(x, str) for x in v)
 
@@ -1378,23 +1454,17 @@ def read_record(p4):
     return rec
 
 
-def replace_text(p, text, tries=5):
-    """Write `text` to `p` through a temp file in the same folder and os.replace, retried while another process holds
-    the file on Windows."""
+def replace_text(p, text):
+    """Write `text` to `p` through a temp file in the same folder, which mkstemp makes for this user alone since a
+    settings file is written this way, and the move that waits out a reader, move_over."""
     d = os.path.dirname(p)
     os.makedirs(d, exist_ok=True)
+    sweep_temps(p)
     fd, tmp = tempfile.mkstemp(prefix=os.path.basename(p) + ".", suffix=".tmp", dir=d)
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        for i in range(tries):
-            try:
-                os.replace(tmp, p)
-                break
-            except PermissionError:
-                if i == tries - 1:
-                    raise
-                time.sleep(0.05 * (i + 1))
+        move_over(tmp, p)
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)

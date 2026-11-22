@@ -2406,5 +2406,148 @@ class ReadDuringAReplace(unittest.TestCase):
         self.assertEqual(lost, 0, f"{lost} of {reads} reads took a move under way for no record")
 
 
+class WriteDuringARead(unittest.TestCase):
+    """The other side of ReadDuringAReplace. A file is written whole to a temp file and moved over the old one with
+    os.replace, and on Windows that move fails with PermissionError, WinError 5, while another process has the file
+    open, as a reader that takes no lock has for the length of its read. Seen on 2026-11-22: three
+    `session.json.<pid>.tmp` beside the records of two sessions, each a whole hook that died at a move made once.
+    Measured on Windows 11 with two processes reading one file in a loop and a third writing it: 11455 of 12014 single
+    moves failed, and with the move made again, none of 127. p4conf.write_whole is the kit's one writer, and its move,
+    p4conf.move_over, the one move."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.folder = self._tmp.name
+
+    def refused(self, times):
+        """os.replace as a writer meets it while a reader has the file open: refused `times` times, and then as it
+        is. Returns the files it was asked to move over and the patch that puts it in os.replace's place."""
+        from unittest import mock
+        real, asked = os.replace, []
+
+        def replace(src, dst, **kw):
+            asked.append(dst)
+            if len(asked) <= times:
+                raise PermissionError(13, "Access is denied", dst)
+            return real(src, dst, **kw)
+        return asked, mock.patch.object(p4conf.os, "replace", replace)
+
+    def temps(self):
+        return sorted(x for x in os.listdir(self.folder) if x.endswith(".tmp"))
+
+    def held(self, name, text='{"n": 0}\n'):
+        path = os.path.join(self.folder, name)
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        return path
+
+    def writers(self):
+        """Each writer that moves a temp over a file, as a call that writes {"n": 1} to a path."""
+        import issues
+        import phi
+        import puppeteer
+        import relay
+        return (("phi.write_atomic", lambda p: phi.write_atomic(p, '{"n": 1}\n')),
+                ("relay._write_raw", lambda p: relay._write_raw(p, {"n": 1})),
+                ("puppeteer._write", lambda p: puppeteer._write(p, '{"n": 1}\n')),
+                ("issues._write", lambda p: issues._write(p, '{"n": 1}\n')),
+                ("p4conf.replace_text", lambda p: p4conf.replace_text(p, '{"n": 1}\n')),
+                ("p4conf.write_whole of bytes", lambda p: p4conf.write_whole(p, b'{"n": 1}\n')))
+
+    def test_a_write_that_meets_a_reader_and_then_succeeds_lands_and_leaves_no_temp(self):
+        for k, (name, write) in enumerate(self.writers()):
+            path = self.held(f"record-{k}.json")
+            asked, patch = self.refused(3)
+            with patch:
+                write(path)
+            self.assertEqual(len(asked), 4, f"{name}: refused three times and moved at the fourth")
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"n": 1}, name)
+            self.assertEqual(self.temps(), [], name)
+        # p4.json's own writer, whose file every hook of every session reads
+        asked, patch = self.refused(3)
+        with patch:
+            p4conf._write(self.folder, {"phi": {"upkeep": True}})
+        self.assertEqual(len(asked), 4)
+        self.assertEqual(p4conf.read_json(p4conf.path(self.folder)), {"phi": {"upkeep": True}})
+        self.assertEqual(self.temps(), [])
+
+    def test_a_write_that_stays_refused_says_so_once_its_wait_is_over_and_leaves_no_temp(self):
+        import contextlib
+        import time
+        from unittest import mock
+        for k, (name, write) in enumerate(self.writers()):
+            path = self.held(f"record-{k}.json")
+            asked, patch = self.refused(10 ** 9)
+            waits = [mock.patch.object(p4conf, "WRITE_WAIT_S", 0.05)]
+            if name == "relay._write_raw":
+                import relay
+                waits.append(mock.patch.object(relay, "REPLACE_WAIT_S", 0.05))
+            if name == "puppeteer._write":
+                import puppeteer
+                waits.append(mock.patch.object(puppeteer, "REPLACE_S", 0.05))
+            began = time.monotonic()
+            with contextlib.ExitStack() as stack:
+                for one in [patch] + waits:
+                    stack.enter_context(one)
+                with self.assertRaises(PermissionError, msg=name):
+                    write(path)
+            took = time.monotonic() - began
+            self.assertGreaterEqual(took, 0.04, f"{name}: the wait was waited out")
+            self.assertLess(took, 5, name)
+            self.assertGreater(len(asked), 2, f"{name}: and the move made again meanwhile")
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(json.load(f), {"n": 0}, f"{name}: the file is as it was")
+            self.assertEqual(self.temps(), [], name)
+
+    def test_a_temp_an_earlier_write_left_is_removed_at_the_next_write_of_its_file(self):
+        """The three temps seen were each `<path>.<pid>.tmp` of a hook that had died hours before. The next write of
+        that file removes a temp older than p4conf.TEMP_OLD_S, by any name the kit's writers gave one. A young one
+        is another writer's, under way, and a temp of another file waits for that file's own next write."""
+        import time
+        import phi
+        path = self.held("session.json")
+        long_ago = time.time() - p4conf.TEMP_OLD_S - 5
+        dead = [self.held(name) for name in ("session.json.12228.tmp", "session.json.33692.7044.tmp",
+                                             "session.json.tmp", "session.json.k3x9q2ab.tmp")]
+        elsewhere = self.held("ledger.json.12228.tmp")
+        for old in dead + [elsewhere]:
+            os.utime(old, (long_ago, long_ago))
+        under_way = self.held("session.json.4321.tmp")
+        phi.write_atomic(path, '{"n": 1}\n')
+        self.assertEqual(self.temps(), ["ledger.json.12228.tmp", "session.json.4321.tmp"])
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"n": 1})
+        self.assertTrue(os.path.exists(under_way) and os.path.exists(elsewhere))
+
+    @unittest.skipUnless(os.name == "nt", "a move meets a reader as PermissionError on Windows")
+    def test_no_write_is_lost_to_a_reader_that_has_the_file_open(self):
+        """The race itself, for a second: a process reads the file in a loop, as the hooks of other sessions read a
+        session's record, and every write here lands."""
+        import subprocess
+        import phi
+        path = self.held("session.json")
+        reader = ("import sys, time\n"
+                  "path, end = sys.argv[1], time.time() + 1.0\n"
+                  "while time.time() < end:\n"
+                  "    try:\n"
+                  "        with open(path, encoding='utf-8') as f:\n"
+                  "            f.read()\n"
+                  "    except OSError:\n"
+                  "        pass\n")
+        process = subprocess.Popen([sys.executable, "-I", "-c", reader, path])
+        self.addCleanup(process.wait)               # before the folder goes, whatever the test met
+        writes = 0
+        while process.poll() is None:
+            phi.write_atomic(path, json.dumps({"n": writes}) + "\n")
+            writes += 1
+        self.assertEqual(process.returncode, 0)
+        self.assertGreater(writes, 3)
+        with open(path, encoding="utf-8") as f:
+            self.assertEqual(json.load(f), {"n": writes - 1}, "the last write is the one the file holds")
+        self.assertEqual(self.temps(), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
