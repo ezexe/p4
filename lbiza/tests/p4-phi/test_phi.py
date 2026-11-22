@@ -1605,6 +1605,31 @@ class Rules(unittest.TestCase):
         self.assertNotIn(p4conf.PLANS, source, "phi.py spells the folder nowhere")
         self.assertNotIn(p4conf.PLANS, phi.PLAN_STARTED, "a started session's plan goes by message and names no file")
 
+    def test_the_plan_rule_has_a_switch_of_its_own(self):
+        """`phi.plan_mode: false` in the project's p4.json leaves the plan rule out, for a session ezexe is at and for
+        one another session started, and the other two rules stay. A project whose sessions enter plan mode only
+        when asked sets it and keeps the act-don't-wait rule."""
+        self.assertIn(phi.PLAN_AT, self.t.rules(TOP))
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": False}}))
+        for host in (TOP, KID):
+            got = self.t.rules(host)
+            self.assertNotIn("built-in, plan-mode", got, host)
+            self.assertIn(phi.BUILT_IN, got, host)
+            self.assertIn(phi.LEVELS, got, host)
+        try:
+            phi.project_conf(self.t.p4)
+            self.assertEqual(phi.built_in(), [phi.BUILT_IN, phi.LEVELS])
+            self.assertEqual(phi.built_in(started=True), [phi.BUILT_IN, phi.LEVELS])
+            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": True}}))
+            phi.project_conf(self.t.p4)
+            self.assertEqual(phi.built_in(), [phi.BUILT_IN, phi.PLAN_AT, phi.LEVELS])
+            self.assertEqual(phi.built_in(started=True), [phi.BUILT_IN, phi.PLAN_STARTED, phi.LEVELS])
+        finally:
+            phi.project_conf("")
+        import p4conf
+        self.assertIs(p4conf.DEFAULTS["phi"]["plan_mode"], True)
+        self.assertEqual(p4conf.env_name("phi.plan_mode"), "P4_PHI_PLAN_MODE")
+
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
         self.assertIn("that go is ezexe's to give", phi.BUILT_IN)
@@ -1612,17 +1637,18 @@ class Rules(unittest.TestCase):
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
         got = self.t.rules(TOP)
         self.assertNotIn("act-don't-wait", got)
-        self.assertNotIn("plan-mode", got, "the plan rule goes with it: both say what goes to ezexe and how")
-        self.assertNotIn("plan-mode", self.t.rules(KID))
+        self.assertIn(phi.PLAN_AT, got, "the plan rule has a switch of its own and stays")
+        self.assertIn(phi.PLAN_STARTED, self.t.rules(KID))
         self.assertIn("built-in, levels", got, "the other built-in rule still comes")
         try:
             phi.project_conf(self.t.p4)
             self.assertNotIn("act-don't-wait", phi.builtin_text())
             self.assertIn("built-in, levels", phi.builtin_text(), "the other built-in rule stands on its own")
-            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False, "levels": False}}))
+            off = {"act_dont_wait": False, "plan_mode": False, "levels": False}
+            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": off}))
             phi.project_conf(self.t.p4)
             self.assertEqual(phi.builtin_text(), "")
-            self.assertEqual(self.t.rules(TOP), "", "both rules off: the system prompt gets no section")
+            self.assertEqual(self.t.rules(TOP), "", "every rule off: the system prompt gets no section")
         finally:
             phi.project_conf("")
 

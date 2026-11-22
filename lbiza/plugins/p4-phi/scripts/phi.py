@@ -35,7 +35,7 @@ asks for, and `goal set` is the hooks module's word that the goal command set it
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
 off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
-section of p4.json: `act_dont_wait`, `levels`, `top_orchestrates` and `child_levels`, read from the
+section of p4.json: `act_dont_wait`, `plan_mode`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
@@ -1416,7 +1416,8 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
 # GOAL_STARTER already count toward a condition. An allow at `classic.PermissionRequest` settles `ExitPlanMode` with
 # no person, seen in the desktop app on Claude Code 2.1.326, and p4-phi builds nothing on it: that would be a part
 # of the set of what it settles with no approval card, which is ezexe's to say yes to.
-# The rule rides with the act-don't-wait rule's switch, `phi.act_dont_wait`: both say what goes to ezexe and how.
+# The rule has a switch of its own, `phi.plan_mode`, as each built-in rule has: a project whose sessions enter plan
+# mode only when asked, as an output style can say, leaves this rule out and keeps the act-don't-wait rule.
 PLANS_DIR = p4conf.PLANS            # from the store's root, as the keeper has it: no line names a place under the app's own folder
 PLAN_OPEN = ("a change that could be made in more than one way, that decides a structure, or that reaches past two "
              "or three files")
@@ -1440,6 +1441,7 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
                 "no plan.")
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, PLAN_AT, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
+PLAN_MODE = True              # p4.json phi.plan_mode: false leaves the plan rule out of a project
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
 
@@ -1447,7 +1449,7 @@ UPKEEP = False                # p4.json phi.upkeep: true has a session that star
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, UPKEEP
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, UPKEEP
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
@@ -1457,6 +1459,7 @@ def project_conf(store):
     ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     LEVELS_ON = d.get("levels") is not False
+    PLAN_MODE = d.get("plan_mode") is not False
     UPKEEP = d.get("upkeep") is True
     relay.UPKEEP = controls.UPKEEP = UPKEEP     # the words that leave an archive to ezexe go with it on
     plans.LEVELS = LEVELS_ON
@@ -1805,7 +1808,7 @@ def fair_cut(texts, room):
 
 def builtin_text(started=False):
     """The rules p4-phi carries itself, so they hold in every project, with memories or none, a store or none; ''
-    where the project's p4.json turns both off. `started` says the session was started by another session, which
+    where the project's p4.json turns each off. `started` says the session was started by another session, which
     the plan rule reads."""
     own = built_in(started)
     if not own:
@@ -1815,9 +1818,10 @@ def builtin_text(started=False):
 
 
 def built_in(started=False):
-    """The built-in rules that are on, each as its line. The plan rule comes with the act-don't-wait rule, in the
-    words for a session ezexe is at or, with `started`, in the words for a session another session started."""
-    return ([BUILT_IN, PLAN_STARTED if started else PLAN_AT] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
+    """The built-in rules that are on, each as its line. The plan rule is in the words for a session ezexe is at or,
+    with `started`, in the words for a session another session started."""
+    return (([BUILT_IN] if ACT_DONT_WAIT else []) + ([PLAN_STARTED if started else PLAN_AT] if PLAN_MODE else [])
+            + ([LEVELS] if LEVELS_ON else []))
 
 
 def rules_section():
@@ -1827,7 +1831,7 @@ def rules_section():
     }`, a list of `{ id, text, scope }` in the order they're sent". The system prompt goes with every request and is
     sent anew after a compaction, so no hook hands the rules at a start, a clear or a compaction.
     '' where a setting turns the rules off: P4_PHI=0, P4_PHI_RULES=0, `rules: false` in the store's phi.json, or
-    both `phi.act_dont_wait` and `phi.levels` false in the project's p4.json, which Me reads from the session's own
+    `phi.act_dont_wait`, `phi.plan_mode` and `phi.levels` all false in the project's p4.json, which Me reads from the session's own
     store. A project with no store has no phi.json and gets the rules, as every session does.
     The store's feedback and user memories are no part of it: memory.md, "Auto memory", says the app loads the first
     200 lines of MEMORY.md at the start of every conversation, and CLAUDE.md is read again after a compaction, so

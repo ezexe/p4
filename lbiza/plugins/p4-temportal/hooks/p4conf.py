@@ -57,6 +57,7 @@ DEFAULTS = {
         "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
         "levels": True,                  # false: no delegation rule
+        "plan_mode": True,               # false: p4-phi's plan rule, which hands plan mode, is left out
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line
         # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
@@ -772,8 +773,8 @@ WRITTEN = "_written"
 # settings keeper gains a key, as at 11 for plansDirectory: an installed copy of a lower GEN then leaves the key to
 # the copy that wrote it, where it would otherwise remove it at each of its starts. 12 came with the plans folder's
 # move to temportal/plan-planner, so a copy of 11 leaves the new value of plansDirectory and never writes the old one
-# back.
-GEN = 12
+# back. 13 came with the default `phi.plan_mode`, the switch of p4-phi's plan rule.
+GEN = 13
 
 
 def _leaves(d, prefix=""):

@@ -66,8 +66,8 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 The watcher keeps one look in flight at most and `phi.watch_s` seconds between two looks.
 A session that is no orchestrator pays one check, and its timer's wait then doubles to ten minutes at most.
 `phi.usage_of` in `scripts/phi.py` reads `usage.json` back for the python scripts, since a command hook's input holds neither figure.
-The section of the system prompt is left out where `P4_PHI=0`, `P4_PHI_RULES=0`, `rules: false` in `phi.json`, or both `phi.act_dont_wait` and `phi.levels` false in `p4.json` turn the rules off, and a rule one of those two keys turns off is left out of it.
-The rule `plan-mode` goes with `phi.act_dont_wait`, since both say what goes to ezexe and how, and it reads in one of two ways, by whether another session started the session, which the app's record of it says.
+The section of the system prompt is left out where `P4_PHI=0`, `P4_PHI_RULES=0`, `rules: false` in `phi.json`, or `phi.act_dont_wait`, `phi.plan_mode` and `phi.levels` all false in `p4.json` turn the rules off, and a rule one of those three keys turns off is left out of it.
+The rule `plan-mode` has a switch of its own, `phi.plan_mode`, so a project whose sessions enter plan mode only when asked leaves it out and keeps the act-don't-wait rule, and it reads in one of two ways, by whether another session started the session, which the app's record of it says.
 In a session ezexe is at it names which change is one whose approach is open in the words of the `EnterPlanMode` tool's own text, one that could be made in more than one way, that decides a structure, or that reaches past two or three files, and it names the plans folder from `p4conf.PLANS`, relative to the store, where the settings keeper points `plansDirectory`.
 How a plan is shaped and where it moves once it is done is p4-temportal's skill `plan-planner`, which the rule names.
 What would settle `ExitPlanMode` with no person in a started session is not built: seen in the desktop app on Claude Code 2.1.326, an allow at `classic.PermissionRequest` with the input handed back as `updatedInput` settled it, and an allow at `tool.check` or at `classic.PreToolUse` did not, but a hook that answers that card would be a part of the set of what p4-phi settles with no approval card, which is ezexe's to say yes to.
@@ -400,7 +400,8 @@ Every key is optional.
 | :- | :- | :- |
 | `levels` | `true` | `false`: no delegation rule |
 | `child_levels` | the table under Delegation | an object: a kind, `static`, `build`, `design`, `review` or `top`, with its `model`, an id or `inherit`, and its `effort`, a level or `inherit` |
-| `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out, and the plan rule with it |
+| `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
+| `plan_mode` | `true` | `false`: the built-in plan rule, which hands plan mode, is left out |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
