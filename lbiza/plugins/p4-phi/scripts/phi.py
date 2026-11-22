@@ -681,7 +681,7 @@ def _save_session(home, s):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "rootLeft", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
-              "handedFrom", "effort", "kidCommits"):
+              "handedFrom", "effort", "kidCommits", "planMode"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
@@ -2035,6 +2035,31 @@ def h_plan(payload):
     return text or None
 
 
+def h_plan_mode(payload):
+    """PostToolUse on EnterPlanMode and ExitPlanMode: whether this session plans, kept for mode_now, since no hook
+    event tells of a change of the permission mode and the two tools change it inside a turn. hooks.md has
+    PostToolUse run "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval, and at
+    it an orchestrator is handed what plan mode held back: the advice on its open work steps and the feature
+    line, as h_plan builds them."""
+    me = Me(payload)
+    if not me.home or not me.id or payload.get("hook_event_name") != "PostToolUse":
+        return None                                # a call that failed, such as a plan sent back, changed no mode
+    s = ensure_session(me.home, me.id, me.rec, me.cli)
+    s["planMode"] = str(payload.get("tool_name") or "") == "EnterPlanMode"
+    save_session(me.home, s)
+    RAN["pair"] = "planning" if s["planMode"] else "approved"
+    if s["planMode"] or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, me.store):
+        return None
+    plan = plans.load(me.home, me.id)
+    if not plan.get("steps"):
+        return None
+    owner = s.get("turnBy", "user") == "user"
+    advice = plans.top_advice(me.home, s, plan, owner, caps_text(me.home, s))
+    feat = feature_steps_text(me.home, s, plan, owner)
+    nudge_arm(me, load_session(me.home, me.id) or s)
+    return "\n\n".join(p for p in (feat, advice) if p) or None
+
+
 # --- the nudge: an orchestrator doing a work step itself ------------------------------------------------------
 #
 # The marker <store>/phi/.nudge/<CLI session id> exists while an orchestrator's step in progress is a work step it
@@ -2556,6 +2581,7 @@ def h_user_prompt_submit(payload):
     s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
     if payload.get("permission_mode"):             # hooks.md: the mode the session is in, kept for mode_now
         s["permissionMode"] = str(payload["permission_mode"])
+        s["planMode"] = s["permissionMode"] == "plan"   # a prompt's own mode, over what a plan mode tool said before
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
     plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
@@ -3586,8 +3612,16 @@ def mode_now(me, s, payload):
     """The permission mode this session is in, or '' where nothing says: as the hook's own input gives it, hooks.md's
     `permission_mode`, else as the app's record holds it, else as h_user_prompt_submit kept it at the session's last
     prompt. The app's record holds none for a session it did not start and for one whose record is not read, and
-    the hooks module's check hands a PreToolUse input with no mode."""
-    return str(payload.get("permission_mode") or upkeep.mode_of(me.id) or s.get("permissionMode") or "")
+    the hooks module's check hands a PreToolUse input with no mode. Both of those were read before a call of
+    `EnterPlanMode` or `ExitPlanMode` inside the turn, so the yes or no h_plan_mode kept at that call comes ahead of
+    them: a yes is `plan`, and a no takes `plan` out of what they said."""
+    said = str(payload.get("permission_mode") or "")
+    if said:
+        return said
+    kept = str(upkeep.mode_of(me.id) or s.get("permissionMode") or "")
+    if isinstance(s.get("planMode"), bool):
+        return "plan" if s["planMode"] else "" if kept == "plan" else kept
+    return kept
 
 
 def first_message(path):
@@ -4116,6 +4150,7 @@ ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 HOOKS["issue-tie"] = ROUTED["issue-tie"] = ("PostToolUse", h_issue_tie)
 HOOKS["cards-yes"] = ROUTED["cards-yes"] = ("PostToolUse", h_cards_yes)
+HOOKS["plan-mode"] = ROUTED["plan-mode"] = ("PostToolUse", h_plan_mode)
 
 
 def hook_main(name):

@@ -18,6 +18,7 @@ import unittest
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
+import hook  # noqa: E402
 import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
@@ -1350,6 +1351,58 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual(self.check(TOP, "Edit", edit, "toolu_pm1", permission_mode="plan"), "")
         self.assertTrue(self.check(TOP, "Edit", edit, "toolu_pm2", permission_mode="default"),
                         "the step is nudged once the session is out of plan mode")
+
+    def test_plan_mode_entered_and_left_inside_a_turn_is_known_and_the_approval_hands_out_the_advice(self):
+        """hooks.md names no event for a change of the permission mode, and the hooks module's check hands python
+        no mode, so the records of `EnterPlanMode` and `ExitPlanMode` are the word of it. PostToolUse runs
+        "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval."""
+        p = self.t.proj
+        tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}
+        r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "EnterPlanMode"})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), r.stderr)
+        self.assertNotIn("orchestrator of its tree", self.plan(TOP, items(
+            f"Port the exporter in {p}/src/export/flush.py to the new writer")) or "", "no mode in the input")
+        edit = {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"}
+        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1"), "", "no nudge while the session plans")
+        r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode",
+                                           "hook_event_name": "PostToolUseFailure"})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a plan sent back is no approval")
+        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1b"), "", "and the session still plans")
+        r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("orchestrator of its tree", r.stdout, "the advice plan mode held back, at the approval")
+        self.assertIn("(a) step 1 \\\"Port the exporter", r.stdout)
+        self.assertTrue(self.check(TOP, "Edit", edit, "toolu_in2"), "and the step is nudged again")
+
+    def test_a_prompts_own_mode_is_over_what_a_plan_mode_tool_said_before_it(self):
+        tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}
+        self.t.hook("plan-mode", TOP, {**tool, "tool_name": "EnterPlanMode"})
+        self.t.hook("user-prompt-submit", TOP, {"hook_event_name": "UserPromptSubmit", "prompt": "carry on",
+                                                "permission_mode": "default"})
+        self.assertIn("orchestrator of its tree", self.plan(TOP, items(
+            f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer")))
+        self.assertEqual(hook.PHI_RECORD["EnterPlanMode"], hook.PHI_RECORD["ExitPlanMode"])
+
+    def test_the_two_plan_mode_tools_reach_their_record_through_the_runner_as_hooks_json_runs_it(self):
+        """recall-hook.sh ends a call that worked and printed no word that reads like an error before python
+        starts, unless an arm of it names the call. Run without P4_RECALL_SYNC, as a session runs it, the two tools
+        reach phi.py's record, and the approval's answer comes back beside the result."""
+        runner = os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")
+        env = self.t.env(TOP)
+        env.pop("P4_RECALL_SYNC", None)
+
+        def ran(tool, tid):
+            body = {"session_id": CLI[TOP], "cwd": self.t.proj, "hook_event_name": "PostToolUse", "tool_name": tool,
+                    "tool_input": {}, "tool_response": {}, "tool_use_id": tid}
+            r = subprocess.run(["sh", runner, "lookup-record"], input=json.dumps(body), capture_output=True,
+                               text=True, env=env, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return r.stdout
+
+        self.assertNotIn("orchestrator of its tree", ran("EnterPlanMode", "toolu_run_in"))
+        self.assertNotIn("orchestrator of its tree", self.plan(TOP, items(
+            f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer")) or "")
+        self.assertIn("orchestrator of its tree", ran("ExitPlanMode", "toolu_run_out"))
 
     def test_a_top_sessions_work_step_is_advised_to_a_child_and_landing_stays(self):
         p = self.t.proj

@@ -722,7 +722,8 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
              "NotebookEdit": ("nudge", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",
-              "Edit": "memory-gap", "TaskStop": "task-stop"}
+              "Edit": "memory-gap", "TaskStop": "task-stop", "EnterPlanMode": "plan-mode",
+              "ExitPlanMode": "plan-mode"}
 
 
 # The tools whose PostToolUse entry a call waits on, as the first matcher of hooks.json lists them: a record of
@@ -731,7 +732,7 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
 # the one async entry of PostToolBatch, `lookup-batch`, which writes the same row h_lookup_record would, and a call
 # that failed has the PostToolUseFailure entry whatever its tool.
 WAITED = ("Bash", "PowerShell", "Write", "Edit", "TaskStop", "mcp__ccd_turn__update_plan",
-          "mcp__ccd_turn__wrap_up")
+          "mcp__ccd_turn__wrap_up", "EnterPlanMode", "ExitPlanMode")
 
 # After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
 # nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
@@ -758,7 +759,8 @@ def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
     plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and a record added to phi.py
-    needs no hook of its own in hooks.json, only its tool in WAITED and in the PostToolUse matcher there. A check added to phi.py
+    needs no hook of its own in hooks.json, only its tool in WAITED, in the PostToolUse matcher there and, for a call
+    that prints no word of an error, in an arm of hooks/recall-hook.sh. A check added to phi.py
     needs none either, and its tool must be one hooks/register.ts lists, where the plugin's hooks module tells
     which calls python has a check for."""
     names = table.get(str(payload.get("tool_name") or ""))
@@ -850,14 +852,15 @@ def h_lookup_batch(payload):
 def h_lookup_record(payload):
     """After a tool ran or failed, phi.py's
     records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
-    task under its step; their answer is returned for `update_plan`, `wrap_up`, Write and Edit. Otherwise lookups.py writes the
+    task under its step; their answer is returned for `update_plan`, `wrap_up`, Write, Edit and `ExitPlanMode`. Otherwise lookups.py writes the
     call's row, and a failure other sessions already met is told what they did about it. A call a plugin's hooks
     module made itself gets none of it."""
     if plugins_own(payload):
         return None
     phi_route(payload, PHI_TIE)                    # as h_lookup_batch does behind a clean call, and a tie is made once
     out = phi_route(payload, PHI_RECORD)
-    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit"):
+    if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up",
+                                                       "Write", "Edit", "ExitPlanMode"):
         return out
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     cmd = str(inp.get("command") or "")                 # the one command the yes is kept for, read before any route

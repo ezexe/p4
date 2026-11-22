@@ -43,6 +43,9 @@ elif [ "$name" = lookup-record ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
       *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear line answers beside the result
+      # the two tools that change the permission mode inside a turn: phi.py keeps whether the session plans, and
+      # answers the approval with the advice plan mode held back
+      *EnterPlanMode*|*ExitPlanMode*) ;;
       # the command that asks for the set of what p4-phi settles with no approval card, which prints no word that
       # reads like an error: phi.py keeps ezexe's yes at this call's end, and says so beside the result
       # `cards` and `on` each as a word of its own, one character or more apart, so `session ` ends no match

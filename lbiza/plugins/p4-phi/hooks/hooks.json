@@ -121,7 +121,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Bash|PowerShell|Write|Edit|TaskStop|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up",
+        "matcher": "Bash|PowerShell|Write|Edit|TaskStop|mcp__ccd_turn__update_plan|mcp__ccd_turn__wrap_up|EnterPlanMode|ExitPlanMode",
         "hooks": [
           {
             "type": "command",
