@@ -1786,7 +1786,7 @@
   "/subtask": {
    "kind": "command",
    "declined": {
-    "p4-phi": "a read or a check goes to `Explore` or `p4-phi:check` by the Agent tool.",
+    "p4-phi": "a read goes to its own subagent `p4-phi:finder` and a check to `p4-phi:check`, by the Agent tool.",
     "p4-temportal": "agents."
    }
   },
