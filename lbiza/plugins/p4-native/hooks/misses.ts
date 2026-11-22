@@ -101,8 +101,10 @@ export const MISSES: readonly Miss[] = [
     native: [],
     names: [],
     line:
-      'p4-native: this command polls `gh run` and sleeps. `gh run watch <run id> --exit-status` ends by itself when ' +
-      'the run does, so run it once with `run_in_background` and wait for its notice.',
+      'p4-native: this command polls `gh run` in a loop that holds the turn. Run the wait once with ' +
+      '`run_in_background`, which gives one notice at its exit: `gh run watch <run id> --exit-status` ends by itself ' +
+      'when the run does, and a background `until` loop over `gh run list --commit <full hash>` waits for a run that ' +
+      'is not listed yet.',
     at: 'call',
   },
   {
@@ -294,22 +296,24 @@ export const MISSES: readonly Miss[] = [
   },
   {
     id: 'long-sleep-in-a-shell',
-    hand: 'A shell command sleeps for a minute or longer.',
+    hand: 'A shell command in the foreground sleeps for a minute or longer.',
     native: ['ScheduleWakeup'],
-    names: ['ScheduleWakeup'],
+    names: [],
     line:
-      'p4-native: this shell command sleeps for a minute or longer. A command run with `run_in_background` gives a ' +
-      'notice at its exit, and `ScheduleWakeup` wakes a session in a `/loop` after a delay.',
+      'p4-native: this shell command sleeps for a minute or longer and holds the turn. A command run with ' +
+      '`run_in_background` gives one notice at its exit, so a wait is one background command that ends when what it ' +
+      'waits for holds.',
     at: 'call',
   },
   {
     id: 'loop-with-a-sleep-in-a-shell',
-    hand: 'A shell loop runs a step again and again with a sleep between.',
+    hand: 'A shell loop in the foreground runs a step again and again with a sleep between.',
     native: ['/loop'],
     names: ['Skill'],
     line:
-      'p4-native: this shell loop repeats a step on an interval. `/loop` runs a prompt or a command on an interval ' +
-      'in the session, and a session starts it by the `Skill` tool.',
+      'p4-native: this shell loop repeats a step on an interval and holds the turn. `/loop` runs a prompt or a ' +
+      'command on an interval in the session, and a session starts it by the `Skill` tool. A loop that only waits ' +
+      'for one thing is run once with `run_in_background`, which gives one notice at its exit.',
     at: 'call',
   },
   {
@@ -487,9 +491,8 @@ const RESUMES = /\bclaude(?:\.exe)?\b[^|;&\n]*\s(?:--resume|-r|--continue|-c|--f
 const FANS = /\b(?:for|while|until|foreach|xargs|parallel)\b|ForEach-Object/
 // A command line that runs one script file, whose path is the first group.
 const SCRIPT = /^\s*(?:[&.]|sh|bash|pwsh|powershell)\s+['"]?([^'"]+\.(?:ps1|sh))['"]?\s*$/
-// A polled `gh run`, a wait between polls, and a short hash handed to `--commit`.
+// A polled `gh run`, and a short hash handed to `--commit`.
 const GH_RUN = /\bgh\s+run\s+(?:list|view)\b/
-const WAITS = /\b(?:sleep|Start-Sleep)\b/
 const SHORT = /\bgh\s+run\s+list\b[^|;&\n]*--commit[=\s]+['"]?([0-9a-fA-F]{4,39})['"]?(?![0-9a-fA-F])/
 // A transcript file of Claude Code, as its path is spelled on either system.
 const TRANSCRIPT = /[\\/]\.claude[\\/]projects[\\/][^\s"'|;]*\.jsonl/
@@ -521,7 +524,12 @@ const ENGINE = /https?:\/\/(?:www\.)?(?:google\.[a-z.]+\/search|bing\.com\/searc
 const PROCESSES = /\b(?:tasklist|Get-Process|gps|ps|pgrep|wmic\s+process|Get-CimInstance\s+Win32_Process)\b[^\n]*\bclaude\b/i
 const NOTIFIES = /\bnotify-send\b|\bterminal-notifier\b|display\s+notification|New-BurntToastNotification|\[console\]::beep|\bmsg(?:\.exe)?\s+\*|ToastNotificationManager/i
 const SLEEPS = /\b(?:sleep|Start-Sleep)\s+(?:-(?:s|Seconds)\s+)?(\d+)([smh]?)\b|\btimeout\s+\/t\s+(\d+)/i
-const LOOPS = /\b(?:while|until|for)\b[\s\S]*\b(?:sleep|Start-Sleep)\b/i
+// A loop that sleeps, read off the loop's own words: a POSIX `while`, `until` or `for` with a sleep between its
+// `do` and its `done`, or a PowerShell `while`, `for` or `foreach` with its bracket and its brace, or a `do` with
+// its brace, and a sleep before the block closes. The word `for` in a sentence is no loop, and neither is a sleep
+// after one.
+const LOOPS =
+  /\b(?:while|until|for)\b[^\n]*?(?:;|\n)\s*do\b(?:(?!\bdone\b)[\s\S])*?\b(?:sleep|Start-Sleep)\b|(?:\b(?:while|for|foreach)\s*\([^{}]*\)\s*\{|\bdo\s*\{)[^}]*\b(?:sleep|Start-Sleep)\b/i
 const SKILL_FILE = /[\\/]skills[\\/][^\\/\s"']+[\\/]SKILL\.md\b/i
 const PRINTER = /\b(?:cat|head|tail|less|more|type|Get-Content|gc)\b/i
 const BACKUP = /\b(?:cp|copy|Copy-Item|cpi)\b[^|;&\n]*\.(?:bak|orig|backup|old|save)\b/i
@@ -595,15 +603,17 @@ export function isWake(tool: string, input: Record<string, unknown>): boolean {
   return tool === 'CronCreate' || tool === 'ScheduleWakeup' || isNotice(tool, input)
 }
 
-// The misses a shell command shows, by id. `isBash` tells the two shell tools apart, and `own` is this session's id.
-function ofShell(command: string, isBash: boolean, own: string): string[] {
+// The misses a shell command shows, by id. `isBash` tells the two shell tools apart, `own` is this session's id, and
+// `isBackground` says the call runs with `run_in_background`, which is the documented way to wait, so no row of a
+// wait is set off by it.
+function ofShell(command: string, isBash: boolean, own: string, isBackground: boolean): string[] {
   const out: string[] = []
   const heads = stages(command, true)
   const every = stages(command, false)
   const file = TRANSCRIPT.exec(command)?.[0]
   const isOwn = file !== undefined && own !== '' && file.includes(own)
 
-  const isPolled = GH_RUN.test(command) && WAITS.test(command)
+  const isPolled = !isBackground && GH_RUN.test(command) && LOOPS.test(command)
   if (isPolled) out.push('gh-run-polled-in-a-loop')
   if (SHORT.test(command)) out.push('gh-run-list-short-commit')
   if (file !== undefined && !isOwn) out.push('transcript-read-from-disk')
@@ -636,8 +646,8 @@ function ofShell(command: string, isBash: boolean, own: string): string[] {
   if (heads.some(head => OPENS.test(head))) out.push('page-opened-from-a-shell')
   if (PROCESSES.test(command)) out.push('sessions-found-by-their-processes')
   if (NOTIFIES.test(command)) out.push('notification-raised-from-a-shell')
-  if (!isPolled && LOOPS.test(command)) out.push('loop-with-a-sleep-in-a-shell')
-  else if (!isPolled && slept(command) >= LONG) out.push('long-sleep-in-a-shell')
+  if (!isPolled && !isBackground && LOOPS.test(command)) out.push('loop-with-a-sleep-in-a-shell')
+  else if (!isPolled && !isBackground && slept(command) >= LONG) out.push('long-sleep-in-a-shell')
   if (every.some(stage => KILLS.test(stage))) out.push('process-killed-in-a-shell')
   if (BACKUP.test(command)) out.push('backup-copy-made-by-hand')
   if (WORKTREE.test(command)) out.push('worktree-removed-in-a-shell')
@@ -651,7 +661,9 @@ function ofShell(command: string, isBash: boolean, own: string): string[] {
 
 // The misses one call shows, by id. `own` is this session's id, whose transcript file is its own to read.
 export function atCall(tool: string, input: Record<string, unknown>, own: string): string[] {
-  if (tool === 'Bash' || tool === 'PowerShell') return ofShell(text(input, 'command'), tool === 'Bash', own)
+  if (tool === 'Bash' || tool === 'PowerShell') {
+    return ofShell(text(input, 'command'), tool === 'Bash', own, input.run_in_background === true)
+  }
   const out: string[] = []
   const path = text(input, 'file_path')
   const read = [path, text(input, 'path'), text(input, 'pattern')].join('\n')

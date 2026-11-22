@@ -1363,6 +1363,10 @@ const SHELL: readonly [string, string, readonly string[]][] = [
   ['Bash', 'sleep 5 && curl -s http://localhost:3000/', []],
   ['PowerShell', 'Start-Sleep -Milliseconds 500', []],
   ['Bash', 'while true; do npm test; sleep 30; done', ['loop-with-a-sleep-in-a-shell']],
+  ['Bash', 'sleep 20; gh run list --limit 3', []],
+  ['Bash', 'echo "waiting for the server"; sleep 5', []],
+  ['Bash', 'for i in 1 2 3; do echo $i; done; sleep 2', []],
+  ['Bash', 'echo "waiting for (staging)"; sleep 5', []],
   ['Bash', 'cat ~/.claude/skills/review/SKILL.md', ['skill-read-as-a-file']],
   ['Bash', 'kill -9 4242', ['process-killed-in-a-shell']],
   ['PowerShell', 'Get-Process node | Stop-Process -Force', ['process-killed-in-a-shell']],
@@ -1394,6 +1398,10 @@ const OTHER: readonly [string, Record<string, unknown>, readonly string[]][] = [
   ['Agent', { description: 'Review the diff', prompt: 'Review this diff for bugs.' }, ['review-handed-to-an-agent']],
   ['Agent', { description: 'Find the callers', prompt: 'List every caller of flush().' }, []],
   ['TaskCreate', { subject: 'port the flush' }, ['task-list-kept-by-another-tool']],
+  ['Bash', { command: 'while true; do gh run list --limit 3; sleep 30; done', run_in_background: true }, []],
+  ['Bash', { command: 'sleep 300', run_in_background: true }, []],
+  ['PowerShell', { command: 'while ($true) { npm test; Start-Sleep 30 }', run_in_background: true }, []],
+  ['PowerShell', { command: 'while ($true) { npm test; Start-Sleep 30 }' }, ['loop-with-a-sleep-in-a-shell']],
 ]
 
 test('each row written from the record is set off by its by-hand call and by none that only looks alike', () => {
@@ -1464,7 +1472,12 @@ test('a row written from the record hands its line beside the call, and only whe
   expect(seen.shown[0]).toContain('put to ezexe as buttons by `AskUserQuestion`.')
 })
 
-const REFUSING = { refuse_text_searched_by_a_shell: true, refuse_files_found_by_a_shell: true, refuse_backup_copy_made_by_hand: true }
+const REFUSING = {
+  refuse_text_searched_by_a_shell: true,
+  refuse_files_found_by_a_shell: true,
+  refuse_backup_copy_made_by_hand: true,
+  refuse_long_sleep_in_a_shell: true,
+}
 
 test('with a row\'s option on, its by-hand call is refused before it runs, with the line that names the native tool', { options: REFUSING }, async ($, on) => {
   const clock = mock.clock(on)
@@ -1494,6 +1507,13 @@ test('with a row\'s option on, its by-hand call is refused before it runs, with 
   const own = (await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_plugin_1', command: 'grep -rn "TODO" src' } as never)) as { deny?: string }
   expect(own.deny).toBeUndefined()
   expect(seen.calls.length).toBe(4)
+
+  // A long sleep is refused in the foreground and goes on with `run_in_background`, the documented way to wait.
+  const held = (await $.tool.call({ tool: 'Bash', command: 'sleep 300' } as never)) as { deny?: string }
+  expect(held.deny).toContain('refuse_long_sleep_in_a_shell')
+  const waited = (await $.tool.call({ tool: 'Bash', command: 'sleep 300', run_in_background: true } as never)) as { deny?: string; text?: string }
+  expect([waited.deny, waited.text]).toEqual([undefined, 'ran'])
+  expect(seen.calls.length).toBe(5)
 })
 
 test('with no such option on, a by-hand call goes on and gets its line, and with hints off it is refused all the same', async ($, on) => {

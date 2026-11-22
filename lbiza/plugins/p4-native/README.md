@@ -266,7 +266,7 @@ A miss a turn's end shows is a line of the transcript for ezexe at once and cont
 
 - `worker-with-no-exit-notice`, at a turn's end: a `claude -p` worker was started in a Terminal tab and no notice was asked for its exit, where `SendMessage` with `notify_when_idle` gives one.
 - `turn-ended-with-a-worker-out`, at a turn's end: such a worker is out and nothing is set to wake the session, where `CronCreate` schedules a prompt.
-- `gh-run-polled-in-a-loop`, after a call: a shell command polls `gh run` and sleeps, where `gh run watch` run in the background ends by itself.
+- `gh-run-polled-in-a-loop`, after a call: a shell loop in the foreground polls `gh run` and sleeps, where one command run in the background ends by itself, `gh run watch` or an `until` loop that waits for the run to be listed.
 - `gh-run-list-short-commit`, after a call: `gh run list --commit` is given a short hash, which matches no run.
 - `transcript-read-from-disk`, after a call: another session's transcript file is read from disk, where `mcp__ccd_session_mgmt__list_events`, `search_session_transcripts` and `export_transcript` exist.
 - `host-limit-from-memory`, at a turn's end: the answer states a limit of the host in a session that never asked the plugin, where the map and the probes hold what was measured.
@@ -290,8 +290,8 @@ The rows written from the record, each with the by-hand way it is read off and t
 - `page-opened-from-a-shell`, after a call: a shell command opens an HTML file in a browser with `start`, `open`, `xdg-open` or `Invoke-Item`. It stands for `Artifact`.
 - `sessions-found-by-their-processes`, after a call: a shell command lists the machine's processes and picks out Claude Code's. It stands for `ListAgents`, `mcp__ccd_session_mgmt__list_sessions`, `/list-agents`.
 - `notification-raised-from-a-shell`, after a call: a shell command raises a notification of the system or rings its bell. It stands for `PushNotification`.
-- `long-sleep-in-a-shell`, after a call: a shell command sleeps for a minute or longer. It stands for `ScheduleWakeup`.
-- `loop-with-a-sleep-in-a-shell`, after a call: a shell loop runs a step again and again with a sleep between. It stands for `/loop`.
+- `long-sleep-in-a-shell`, after a call: a shell command in the foreground sleeps for a minute or longer. It stands for `ScheduleWakeup`.
+- `loop-with-a-sleep-in-a-shell`, after a call: a shell loop in the foreground runs a step again and again with a sleep between. It stands for `/loop`.
 - `skill-read-as-a-file`, after a call: a `Read` call or a shell command prints a skill's `SKILL.md`. It stands for `Skill`.
 - `process-killed-in-a-shell`, after a call: a shell command stops a process with `kill`, `pkill`, `taskkill` or `Stop-Process`. It stands for `TaskStop`, `mcp__terminal__stop_terminal_tab`, `mcp__ccd_session_mgmt__stop_session`.
 - `backup-copy-made-by-hand`, after a call: a shell command copies a file to a `.bak`, `.orig`, `.old` or `.backup` beside it. It stands for `/rewind`, `Checkpoints`.
@@ -360,7 +360,7 @@ Each stays a setting of Claude Code or of the desktop app that p4-native neither
 Three that sessions had called declined are reopened on ezexe's word, as open rows of `weighed.json` for p4-phi to take up the way it took up `/goal`: plan mode, with `/plan`, `EnterPlanMode` and `ExitPlanMode`, the prompts on a schedule inside a session, with `CronCreate`, `CronDelete` and `CronList`, and the scheduled runs of `/schedule`.
 The prompts on a schedule are taken up since p4-phi 0.11.119, and since 0.11.132 by `CronCreate` itself: while any worker of a session is out, its upkeep hands one `CronCreate` call on a long fixed schedule, after a read of `CronList`, and once nothing is live it hands the end, `CronList` and `CronDelete`.
 `/loop` and `ScheduleWakeup` are declined by p4-phi since 0.11.132: its upkeep handed the sweep by `/loop` until then, and what brings an orchestrator back now is an idle notice from each worker in the Terminal panel, the app's own note for a session the app started, and that one schedule.
-The notices `loop-with-a-sleep-in-a-shell` and `long-sleep-in-a-shell` still name them to a session whose shell polls or sleeps, since `scheduled-tasks.md` gives `/loop` for "quick polling during a session".
+The notice `loop-with-a-sleep-in-a-shell` still names `/loop` to a session whose shell loop polls in the foreground, since `scheduled-tasks.md` gives `/loop` for "quick polling during a session", and `long-sleep-in-a-shell` names `run_in_background` alone since 0.5.47, since by the tools reference `ScheduleWakeup` is a tool "you don't call it directly".
 The scheduled runs are taken up since p4-phi 0.11.122: for a step a session says falls due when no session may be open, `phi.py upkeep wait "<the step>" --at "<when>"` prints `/schedule` with the time and the prompt written, for ezexe to type, since making a run that starts sessions later is ezexe's, and with `--local`, for a step that needs the project's local store, it prints a Desktop scheduled task's instructions in its place, to be made on ezexe's yes.
 The desktop app's tool that makes such a task, `mcp__scheduled-tasks__create_scheduled_task`, has its row since 0.5.39, with p4-phi under used: p4-phi names it in the line of a step that needs the local store and calls it nowhere itself.
 The server's other tools, which list, change, run and delete a task, have the server's own row since 0.5.42, `mcp__scheduled-tasks__`, declined by all three plugins: to keep a task once it is made is ezexe's in the app.

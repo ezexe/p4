@@ -155,13 +155,13 @@
     "refuse_long_sleep_in_a_shell": {
       "type": "boolean",
       "title": "Refuse: long sleep in a shell",
-      "description": "A shell command sleeps for a minute or longer. With this on, the call is refused before it runs and the refusal names `ScheduleWakeup`.",
+      "description": "A shell command in the foreground sleeps for a minute or longer. With this on, the call is refused before it runs and the refusal names `run_in_background`.",
       "default": false
     },
     "refuse_loop_with_a_sleep_in_a_shell": {
       "type": "boolean",
       "title": "Refuse: loop with a sleep in a shell",
-      "description": "A shell loop runs a step again and again with a sleep between. With this on, the call is refused before it runs and the refusal names `/loop`.",
+      "description": "A shell loop in the foreground runs a step again and again with a sleep between. With this on, the call is refused before it runs and the refusal names `/loop`.",
       "default": false
     },
     "refuse_skill_read_as_a_file": {
