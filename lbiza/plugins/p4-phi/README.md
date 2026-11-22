@@ -246,6 +246,7 @@ The page `docs/claude-settings.html`, "Approval cards and a session's start", li
 - It is in force for a store only while `phi.cards` in that store's `p4.json` holds the set's name, which `phi.py cards` prints with the set and every kind of card, and the store's record `claude-settings.json` holds ezexe's yes to that set.
 - `phi.py cards on <id>` asks for it and `phi.py cards off` takes it out. For the first, p4-phi's guard raises one approval card in every permission mode, with the set whole as its text, and p4-phi's hook after that call keeps the yes, so the yes is ezexe's own press in the top session. A session another session started is refused the command.
 - The key alone puts nothing in force. Written by an edit of `p4.json`, or by the command run where no hook of p4-phi runs, such as the app's Terminal panel, it has no yes beside it and the set stays off.
+- A yes given before the record of one existed is carried over once, with no card: where the store's record holds the set's allow rules as an earlier keeper wrote them and the key still names the set, the first whole check of this keeper keeps the yes itself, marked as carried over. The record then holds that the look was made, so a key written later with no press leaves the set off.
 - A copy of p4-phi whose set differs has another name, so a changed set is in force nowhere until ezexe has said yes to it.
 - With the set off nothing changes: each guard raises Claude Code's approval card as before.
 

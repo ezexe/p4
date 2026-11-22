@@ -1260,7 +1260,7 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at,
 # 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with YES, so the rules of a set whose key
-# has no yes beside it go.
+# has no yes beside it go and a yes given before YES is carried over, by _carry_yes.
 KEEPER = 11
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
@@ -1350,6 +1350,8 @@ def read_record(p4):
         rec.pop("asked")
     if YES in rec and not (isinstance(rec[YES], dict) and isinstance(rec[YES].get("set"), str)):
         rec.pop(YES)
+    if CARRIED in rec and not isinstance(rec[CARRIED], dict):
+        rec[CARRIED] = {}                               # looked at already, whatever a hand made of the entry
     if "claude" in rec and not isinstance(rec["claude"], dict):
         rec.pop("claude")
     owed = rec.get("changelog")
@@ -1830,6 +1832,34 @@ def cards_yes(p4, **by):
     return True
 
 
+# A yes given before YES existed. Until the keeper knew YES, `phi.cards` alone put the set in force, and ezexe's yes
+# of 2026-11-19 was given under that rule: an answer to a question that named the set, on which the key was written
+# with no card. An upgrade neither takes that yes back nor asks for it a second time, so the first whole check of a
+# keeper that knows YES looks at the store's record once, _carry_yes, and keeps what it found under CARRIED, so it
+# never looks again.
+CARRIED = "cardsCarried"
+
+
+def _carry_yes(p4, rec):
+    """The one look at whether the set was in force for the store under a keeper from before YES, and the yes
+    carried over where it was. It was where `phi.cards` names the set as this copy has it and the record holds,
+    under `toolRules`, an allow rule of the set that a keeper wrote: a keeper wrote those rules only while the set
+    was in force, so they show it stood under the rule of that time. What they cannot show is how the key of that
+    time came to be written, since that rule kept no record of it. The yes is written marked `carried` with the
+    date, and CARRIED is written whether one was carried or not, so a key that appears later with no press leaves
+    the set off. True when the record took a yes, which the caller writes at once, since cards_on reads the file."""
+    if CARRIED in rec:
+        return False
+    sid = card_set_id()
+    wrote = [t for v in (rec.get("toolRules") or {}).values() for t in v.get("entries") or [] if t in CARD_TOOLS]
+    was = YES not in rec and bool(wrote) and cards_asked(p4) == sid
+    today = time.strftime("%Y-%m-%d")
+    rec[CARRIED] = {"at": today, "carried": was}
+    if was:
+        rec[YES] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"), "carried": today}
+    return was
+
+
 def cards_no(p4):
     """Takes the kept yes out of the store's record, as the command's `off` does and as its `on` does before it
     writes the key, so each yes is one press for one writing of the key. True when one was there."""
@@ -2115,6 +2145,8 @@ def _mtime(p):
 def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec = read_record(p4)
     before = json.dumps(rec, sort_keys=True)
+    if not owned_only and _carry_yes(p4, rec):
+        write_record(p4, rec)                           # a yes from before YES, in the file before cards_on reads it
     name = fwd(target)
     data = read_json(target)
     if data is None:

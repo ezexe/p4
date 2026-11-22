@@ -138,6 +138,91 @@ class TheSet(unittest.TestCase):
         cards.switch(self.p4, True, sid)
         self.assertFalse(p4conf.cards_on(self.p4), "the command run again asks again")
 
+    def as_an_older_keeper_left_it(self, in_force):
+        """A store as a keeper from before the record of a yes left it: the key names the set, and where the set was
+        `in_force` then, the local settings file holds the set's six allow rules and the record holds them under
+        `toolRules`. The record holds no yes and nothing of a carry-over, and names the keeper of that time."""
+        sid = p4conf.card_set_id()
+        if in_force:
+            say_yes(self.p4)
+        else:
+            p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
+        p4conf.keep_settings(self.proj)
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        rec = p4conf.read_record(self.p4)
+        for part in (p4conf.YES, p4conf.CARRIED):
+            rec.pop(part, None)
+        rec["kept"][p4conf.fwd(self.local)]["keeper"] = 10
+        write(p4conf.record_path(self.p4), json.dumps(rec))
+        self.assertEqual("toolRules" in rec, in_force)
+        self.assertFalse(p4conf.cards_on(self.p4), "this keeper reads no yes in that record")
+
+    def tools(self):
+        return sorted(r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__"))
+
+    def test_a_yes_given_under_the_earlier_rule_is_carried_over_once_with_no_card(self):
+        """Until the keeper knew the record of a yes, `phi.cards` alone put the set in force, and ezexe's yes of
+        2026-11-19 was given under that rule. An upgrade takes no yes back and asks for none again: the first whole
+        check of this keeper finds the set's allow rules that the earlier keeper wrote and recorded, which it wrote
+        only while the set was in force, and with the key still naming the set it keeps the yes itself, marked as
+        carried over with the date. No card is raised, and none of the six rules leaves the file."""
+        sid = p4conf.card_set_id()
+        self.as_an_older_keeper_left_it(in_force=True)
+        before = self.rules(p4conf.ALLOW_KEY)
+        self.assertEqual(self.tools(), sorted(p4conf.CARD_TOOLS))
+        p4conf.keep_settings(self.proj)
+        self.assertTrue(p4conf.cards_on(self.p4), "in force across the upgrade")
+        self.assertEqual(self.rules(p4conf.ALLOW_KEY), before, "no rule of the set left the file and came back")
+        rec = p4conf.read_record(self.p4)
+        self.assertEqual((rec[p4conf.YES]["set"], rec[p4conf.YES]["store"]), (sid, p4conf.fwd(self.p4)))
+        self.assertRegex(rec[p4conf.YES]["carried"], r"^\d{4}-\d\d-\d\d$", "marked as carried over, with the date")
+        self.assertNotIn("call", rec[p4conf.YES], "no press is claimed for it")
+        self.assertIs(rec[p4conf.CARRIED]["carried"], True)
+        self.assertIn("in force", cards.text(self.p4)[0])
+        # it is done once: the yes withdrawn, a key written afterwards with no press leaves the set off
+        self.assertEqual(cards.switch(self.p4, False)[0], 0)
+        self.assertEqual(self.tools(), [])
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        for _ in range(2):
+            p4conf.keep_settings(self.proj)
+        self.assertFalse(p4conf.cards_on(self.p4))
+        self.assertEqual(self.tools(), [])
+        # and no record made up afterwards brings the look back
+        rec = p4conf.read_record(self.p4)
+        rec["toolRules"] = {p4conf.fwd(self.local): {"entries": list(p4conf.CARD_TOOLS), "hand": [], "gen": p4conf.GEN}}
+        write(p4conf.record_path(self.p4), json.dumps(rec))
+        p4conf.keep_settings(self.proj)
+        self.assertFalse(p4conf.cards_on(self.p4), "the carry-over was made, so it never runs again")
+
+    def test_a_key_with_no_record_of_the_set_in_force_carries_nothing_over(self):
+        """The carry-over trusts the record and nothing else. A store whose key names the set while its record holds
+        no rule of the set was never in force under the earlier keeper, so it is off, the look is recorded as made,
+        and a key or a record written after that is carried over by no later check. A key that names another set
+        than this copy's carries nothing over either."""
+        sid = p4conf.card_set_id()
+        self.as_an_older_keeper_left_it(in_force=False)
+        p4conf.keep_settings(self.proj)
+        self.assertFalse(p4conf.cards_on(self.p4), "the key and no record of the set in force")
+        rec = p4conf.read_record(self.p4)
+        self.assertNotIn(p4conf.YES, rec)
+        self.assertIs(rec[p4conf.CARRIED]["carried"], False, "looked at once, and nothing carried")
+        self.assertEqual(self.tools(), [])
+        rec["toolRules"] = {p4conf.fwd(self.local): {"entries": list(p4conf.CARD_TOOLS), "hand": [], "gen": p4conf.GEN}}
+        write(p4conf.record_path(self.p4), json.dumps(rec))
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        p4conf.keep_settings(self.proj)
+        self.assertFalse(p4conf.cards_on(self.p4), "a second key, and a record written after the look")
+        # a store the earlier keeper left in force under another set's name
+        other = os.path.join(self._tmp.name, "other")
+        store = os.path.join(other, ".claude", "p4")
+        os.makedirs(store)
+        p4conf.set_key(store, p4conf.CARDS_KEY, "0123456789")
+        write(p4conf.record_path(store), json.dumps({"toolRules": {"f": {"entries": list(p4conf.CARD_TOOLS),
+                                                                         "hand": [], "gen": p4conf.GEN}}}))
+        p4conf.keep_settings(other)
+        self.assertFalse(p4conf.cards_on(store), "a set that changed is in force nowhere until a new yes")
+        self.assertIs(p4conf.read_record(store)[p4conf.CARRIED]["carried"], False)
+
     def test_the_keeper_writes_the_tool_rules_only_while_the_set_is_in_force(self):
         """The `tools` part of the set: an allow rule for each tool a p4 hooks module declares, as entries of
         `permissions.allow` p4 owns under the record's `toolRules`. They come with the yes and go with it, a rule a
