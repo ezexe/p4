@@ -593,6 +593,46 @@ class Guards(unittest.TestCase):
         for tool in ("Bash", "PowerShell"):
             self.assertIn(tool, hook.WAITED, "the yes is kept in the entry the call waits on")
 
+    def runner(self, name, host, payload):
+        """One entry of p4-phi's hooks.json as Claude Code runs it: `sh hooks/recall-hook.sh <name>` with the hook's
+        input on stdin, and no P4_RECALL_SYNC, so the runner ends a clean call before python starts as it does in a
+        session -> the hook's `hookSpecificOutput`, {} where it printed nothing."""
+        env = self.t.env(host)
+        env.pop("P4_RECALL_SYNC", None)
+        r = subprocess.run(["sh", os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh"), name],
+                           input=json.dumps({"session_id": CLI.get(host, host), "cwd": self.t.proj, **payload}),
+                           capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout).get("hookSpecificOutput") or {} if r.stdout.strip() else {}
+
+    def test_the_yes_is_kept_through_the_runner_as_hooks_json_runs_it(self):
+        """The guard and the handler through `recall-hook.sh`, the runner hooks.json names. That runner ends a call
+        that worked and printed no word that reads like an error before python starts, and the command's own
+        output holds no such word, so without an arm for it no yes was ever kept in a session: p4-phi 0.11.100 to
+        0.11.103. The runner passes a payload that holds the command on to python, in the entry the call waits
+        on, and the entry that runs in the background leaves that call to it."""
+        sid = p4conf.card_set_id()
+        for n, (tool, cmd) in enumerate((("Bash", f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'),
+                                         ("PowerShell", f"python 'C:/plugins/p4-phi/scripts/phi.py'   cards   on {sid}"))):
+            call = {"tool_name": tool, "tool_input": {"command": cmd}, "tool_use_id": f"toolu_run{n}"}
+            asked = self.runner("lookup-check", TOP, {"hook_event_name": "PreToolUse", **call})
+            self.assertEqual(asked.get("permissionDecision"), "ask", tool)
+            ran = self.t.cli(TOP, "cards", "on", sid)
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            self.assertFalse(p4conf.cards_on(self.t.p4))
+            done = {"hook_event_name": "PostToolUse", **call, "tool_response": {"stdout": ran.stdout, "stderr": ""}}
+            self.assertEqual(self.runner("lookup-record-async", TOP, done), {}, "left to the entry the call waits on")
+            self.assertFalse(p4conf.cards_on(self.t.p4))
+            said = self.runner("lookup-record", TOP, done).get("additionalContext") or ""
+            self.assertIn(f"phi (p4-phi): ezexe's yes to the set {sid} is kept for the store", said, tool)
+            self.assertTrue(p4conf.cards_on(self.t.p4), tool)
+            self.assertEqual(self.t.cli(TOP, "cards", "off").returncode, 0)
+        # a shell call that only names the script is ended before python starts, as before
+        other = {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "toolu_run9",
+                 "tool_input": {"command": 'python "C:/plugins/p4-phi/scripts/phi.py" cards'},
+                 "tool_response": {"stdout": "The set is not in force.", "stderr": ""}}
+        self.assertEqual(self.runner("lookup-record", TOP, other), {})
+
 
 if __name__ == "__main__":
     unittest.main()

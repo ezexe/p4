@@ -610,6 +610,17 @@ class HooksJson(unittest.TestCase):
             clean = {"hook_event_name": "PostToolUse", "tool_response": {"stdout": "a.txt"}}
             self.assertEqual(ran("lookup-record", "Read", clean), [], "a clean read: nothing waits")
             self.assertEqual(ran("lookup-record", "Bash", clean), [], "a clean shell call: p4-phi keeps no record")
+            # the one clean shell call phi.py answers: the command that asks for the set of what p4-phi settles with
+            # no approval card, whose end is where ezexe's yes is kept
+            for line in ('python -I -X utf8 "C:/x/scripts/phi.py" cards on 0f35ebdac4',
+                         "python 'C:/x/scripts/phi.py'   cards   on 0f35ebdac4"):
+                asks = dict(clean, tool_input={"command": line})
+                self.assertEqual(ran("lookup-record", "Bash", asks), ["lookup-record"], line)
+                self.assertEqual(ran("lookup-record", "PowerShell", asks), ["lookup-record"], line)
+                self.assertEqual(ran("lookup-record-async", "Bash", asks), [], "left to the entry the call waits on")
+            for line in ('python "C:/x/scripts/phi.py" cards', 'python "C:/x/scripts/phi.py" cards off',
+                         'python "C:/x/scripts/phi.py" upkeep on'):
+                self.assertEqual(ran("lookup-record", "Bash", dict(clean, tool_input={"command": line})), [], line)
             self.assertEqual(ran("lookup-record", "Write", clean), ["lookup-phi"], "phi's memory-gap check waits")
             self.assertEqual(ran("lookup-record", "TaskStop", clean), ["lookup-phi"], "a stop ends a saved entry")
             self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), [],
