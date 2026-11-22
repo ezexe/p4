@@ -7,6 +7,7 @@ description: Where this project keeps its auto memory, its notebook and its save
 
 p4-temportal keeps the project's lasting files in `.claude/p4/temportal/` and clears them by their lifetimes.
 Each session's scratchpad directory is Claude Code's own: it is made under the system temp directory for the session, temporary files go there, and Claude Code deletes it with the session's transcript.
+That is Claude Code's retention sweep, which deletes a transcript once it is older than `cleanupPeriodDays`, and keeps the transcript of a session of the desktop app at any age unless ezexe sets `desktopSessionCleanupPeriodDays`, so such a session's scratchpad stays until then or until the system clears its temp folder.
 Transcripts, plans, file history and subagent memory stay where Claude Code puts them too.
 
 - `temportal/memory/` is the project's auto memory directory once `autoMemoryDirectory` in `.claude/settings.local.json` names it: Claude Code writes memory files and their `MEMORY.md` index there and loads the index at each start itself, and nothing in it is ever cleared.
@@ -63,5 +64,6 @@ Where no such tool exists, as in a session whose Claude Code loads no hooks modu
 What is set can be read without the command: the cookies are in `.claude/p4/temportal/expires.json` and the cache rules in `.claude/p4/p4.json`.
 A path is read from the working folder, or from `temportal/` as `/lifetime list` prints it, and one with a space goes in quotes.
 No lifetime ends with a session: a file that goes when its session goes belongs in that session's scratchpad, which Claude Code deletes with the session's transcript.
+Nothing the store keeps waits on that sweep: the plugin's own sweep clears the store, plan files among them.
 A path under `memory/` is refused.
 A tracked file that is cleared keeps its last version in the store's git history.
