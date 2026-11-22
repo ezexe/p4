@@ -18,14 +18,24 @@
 // answered "no tool.call hook answered this call".
 //
 // It also keeps a compaction from losing what a session needs afterwards, at `session.compact`, the event of every
-// compaction, whoever started it. On the way down it adds the keep list to what the summary is told. On the way up
-// it adds one message after the summary, the ledger: the paths of the files the session wrote or edited, read from
-// the transcript's own tool calls with no model, an earlier ledger's paths among them. And it starts a compaction
-// itself in a quiet moment, a minute after a turn of the main conversation ended with none begun since, once the
-// context is at or past the line `temportal.compact_at`: 70 percent unless the store's p4.json sets it, and 0 for
-// none. It starts one as the slash command `/compact`, by `$.command.run`. Seen in the desktop app on Claude Code
-// 2.1.326: `$.session.compact` is refused in a session a program started, "compaction here runs inside a turn (a
-// /compact prompt)", and the command compacts there, with this module's own `session.compact` hook hearing it.
+// compaction, whoever started it. On the way down it adds the keep list to what the summary is told, and builds the
+// ledger: the paths of the files the session wrote or edited, read from the transcript's own tool calls with no
+// model, an earlier ledger's paths among them. The ledger of the main conversation reaches the model as additional
+// context of the SessionStart that Claude Code raises inside a compaction, the documented way to put text behind a
+// summary: context-window.md, "What survives compaction", says of SessionStart hooks that match the `compact`
+// source that "Claude Code runs them and adds their output to the compacted context". Claude Code keeps that text
+// as an attachment of the hook's, so no row of the transcript reads as a message ezexe typed and the session's
+// last prompt stays the one a person sent. Where no SessionStart came inside a compaction, and for the transcript
+// of a subagent, which has no SessionStart of its own, the ledger is one message after the summary, as it was.
+//
+// And it starts a compaction itself in a quiet moment, a minute after a turn of the main conversation ended with
+// none begun since, once the context is at or past the line `temportal.compact_at`: 70 percent unless the store's
+// p4.json sets it, and 0 for none. It asks by `$.session.compact`, the plugin's own call, whose compaction reads
+// `plugin` and leaves no command in the transcript. Claude Code refuses that call in a session a program started,
+// with "not available in a headless (-p / SDK) session yet: compaction here runs inside a turn (a /compact prompt);
+// catch it and carry on", seen in the desktop app on Claude Code 2.1.326 and in a scripted session on 2.1.328. So
+// where the call is refused the module runs the slash command `/compact` by `$.command.run`, with no words after
+// it, since this module's own `session.compact` hook hears that compaction and tells the summary the keep list.
 //
 // And it hands the plugins' python the settings Claude Code loaded. At `classic.SessionStart`, above every
 // SessionStart command hook, it reads each source by `$.settings.read({ source })`, keeps the few keys p4 reads,
@@ -121,7 +131,7 @@ const KEEP =
   'hand-over note.'
 
 // The ledger: its first line, by which the next compaction finds it, the line above its paths, and the line that
-// counts the paths it left out.
+// counts the paths it left out. Nobody typed it, whichever way it reaches the model.
 const LEDGER =
   'p4-temportal kept this list across a compaction. Nobody typed it: the plugin built it from the tool calls of ' +
   'the session.'
@@ -196,6 +206,9 @@ let isCompacting = false
 let isFresh = false
 // The first reading after a compaction was already at or past the line, so compacting does not reach under it.
 let isHeld = false
+// The ledger of the compaction of the main conversation that is under way: built on the way down of
+// `session.compact`, and taken by the SessionStart Claude Code raises inside that compaction.
+let owed: string | undefined
 
 // The plan files a session of this process created in a folder named `plans`, and the ones it wrote again, MOST_PLANS
 // of each at most. Claude Code names a plan file `<slug>.md` in `~/.claude/plans` until `plansDirectory` is in force,
@@ -609,6 +622,46 @@ function ledger(messages: readonly SessionMessage[]): SessionMessage | undefined
   return { role: 'user', text: lines.join('\n'), toolUses: [] }
 }
 
+// The ledger of the compaction before, as one message, or none. It reached the model as a SessionStart hook's
+// additional context, which Claude Code keeps as an attachment: `session.compact` hands a hook the messages of the
+// transcript and no attachment, so the ledger is read from the conversation as the model is sent it, where the
+// attachment is a block of text. The last block that holds the ledger's first line is the one, cut where its lines
+// end. Seen on Claude Code 2.1.328 in a scripted session: the additional context of the compaction before was in
+// that reading at the next compaction and in none of the event's messages.
+async function earlier($: EngineInterface): Promise<SessionMessage[]> {
+  const sent = await $.session.messages({ as: 'api' })
+  if ('deny' in sent) return []
+  let found: string | undefined
+  for (const message of sent) {
+    const blocks = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content
+    for (const block of blocks) {
+      const text = 'text' in block && typeof block.text === 'string' ? block.text : ''
+      const at = text.lastIndexOf(LEDGER)
+      if (at >= 0) found = text.slice(at)
+    }
+  }
+  if (found === undefined) return []
+  const [first = LEDGER, ...rest] = found.split('\n')
+  const end = rest.findIndex(text => !(text === LEDGER_FILES || text.startsWith('- ') || text.startsWith(LEFT_OUT)))
+
+  return [{ role: 'user', text: [first, ...(end < 0 ? rest : rest.slice(0, end))].join('\n'), toolUses: [] }]
+}
+
+// Compacts the session with the keep list. The plugin's own call is `$.session.compact`, whose compaction reads
+// `plugin` and puts no command into the transcript. Where Claude Code refuses it, as it does in a session a program
+// started, the slash command runs, with no words after it: this module's own `session.compact` hook tells every
+// summary the keep list, so the command's row holds nothing but its name.
+async function compact($: EngineInterface): Promise<void> {
+  try {
+    await $.session.compact({ instructions: KEEP })
+
+    return
+  } catch (error) {
+    note($, `$.session.compact was refused, so /compact runs: ${reason(error)}`)
+  }
+  await $.command.run({ command: 'compact' })
+}
+
 // Runs when the main conversation was quiet for QUIET_MS: it compacts the session where its context is at or past
 // the line. It starts none where ezexe turned Claude Code's own compaction off, none at the point where Claude Code
 // compacts by itself, and none where the first reading after a compaction is already at or past the line, since a
@@ -632,7 +685,7 @@ async function compactWhenDue($: EngineInterface): Promise<void> {
     if (isHeld || !breakdown.isAutoCompactEnabled || isNear) return
     isCompacting = true
     $.ui.log(`The context is at ${percent} percent, at or past temportal.compact_at ${line}, so the session compacts.`)
-    await $.command.run({ command: 'compact', args: KEEP })
+    await compact($)
   } catch (error) {
     note($, `the compaction at a quiet moment did not run: ${reason(error)}`)
   } finally {
@@ -689,11 +742,16 @@ async function settingsRead($: EngineInterface): Promise<Record<string, unknown>
 
 export const register: Register = on => {
   // Above every SessionStart command hook: the settings as Claude Code loaded them, added to the input those hooks
-  // read on stdin. With none read the input goes down as it came.
+  // read on stdin. With none read the input goes down as it came. The SessionStart of a compaction takes the ledger
+  // that compaction owes and hands it as additional context, after what the hooks beneath handed.
   on('classic.SessionStart', async ($, e, next) => {
     const settings = await settingsRead($)
+    const out = await next(settings === undefined ? e : ({ ...e, [HANDED]: settings } as typeof e))
+    if (e.source !== 'compact' || owed === undefined) return out
+    const text = owed
+    owed = undefined
 
-    return next(settings === undefined ? e : ({ ...e, [HANDED]: settings } as typeof e))
+    return { ...out, additionalContext: [...(out.additionalContext ?? []), text] }
   })
 
   // After a tool call: a file the Write tool created in a folder named `plans` is remembered for the last sweep as
@@ -724,26 +782,39 @@ export const register: Register = on => {
   })
 
   // Every compaction, of the main conversation and of a subagent's own transcript. A `precompute` installs
-  // nothing, and its result is kept for the compaction that follows, so the ledger is added at that one. A ledger
-  // the result already holds is replaced, so there is never a second. A ledger that cannot be built is left out
-  // and said, and the compaction stands as Claude Code made it.
+  // nothing, and its result is kept for the compaction that follows, so the ledger is built at that one. The ledger
+  // is built on the way down, from the ledger before it and the tool calls of the event's messages, since Claude
+  // Code raises the SessionStart of a compaction inside the event, before the result comes up: seen on Claude Code
+  // 2.1.328. That SessionStart takes the main conversation's ledger. One it did not take, and a subagent's, is
+  // added to the result as one message. A ledger the result already holds as a message is taken out, so there is
+  // never a second. A ledger that cannot be built is left out and said, and the compaction stands as Claude Code
+  // made it.
   on('session.compact', async ($, e, next) => {
+    const isMain = e.agentId === undefined
+    let kept: SessionMessage | undefined
+    if (e.trigger !== 'precompute') {
+      try {
+        // A reading of the ledger before that fails leaves the paths of this stretch of the transcript.
+        const before = isMain ? await earlier($).catch(() => []) : []
+        kept = ledger([...before, ...e.messages])
+      } catch (error) {
+        note($, `the list of written files was not built at a compaction: ${reason(error)}`)
+      }
+      if (isMain) owed = kept?.text
+    }
     const out = await next({ ...e, instructions: told(e.instructions) })
-    if (out.skip !== undefined || e.trigger === 'precompute') return out
-    if (e.agentId === undefined) {
+    if (e.trigger === 'precompute') return out
+    const isTaken = isMain && kept !== undefined && owed === undefined
+    if (isMain) owed = undefined
+    if (out.skip !== undefined) return out
+    if (isMain) {
       isFresh = true
       isHeld = false
     }
-    try {
-      const kept = ledger(e.messages)
-      if (kept === undefined) return out
+    if (kept === undefined) return out
+    const rest = out.messages.filter(message => !isLedger(message))
 
-      return { ...out, messages: [...out.messages.filter(message => !isLedger(message)), kept] }
-    } catch (error) {
-      note($, `the list of written files was not added after a compaction: ${reason(error)}`)
-
-      return out
-    }
+    return { ...out, messages: isTaken ? rest : [...rest, kept] }
   })
 
   // A turn of the main conversation ends the quiet, and the end of one starts it.

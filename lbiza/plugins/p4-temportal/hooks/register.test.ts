@@ -29,6 +29,17 @@ const LEFT_OUT = 'Older paths left out of this list: '
 const WHY = (percent: number, line: number): string =>
   `The context is at ${percent} percent, at or past temportal.compact_at ${line}, so the session compacts.`
 
+// What Claude Code answers a plugin's own `$.session.compact` in a session a program started, as seen in the
+// desktop app on Claude Code 2.1.326 and in a scripted session on 2.1.328.
+const REFUSED =
+  '$.session.compact: not available in a headless (-p / SDK) session yet: compaction here runs inside a turn ' +
+  '(a /compact prompt); catch it and carry on'
+// How the line of the debug log opens that says why the slash command ran, and the debug log apart from it.
+const FELL_BACK = '$.session.compact was refused, so /compact runs: '
+function apart(lines: readonly string[]): string[] {
+  return lines.filter(text => !text.startsWith(FELL_BACK))
+}
+
 // What Claude Code's own compaction leaves: the summary as a message of the user's, the engine's own.
 const SUMMARY: SessionMessage = {
   role: 'user',
@@ -102,6 +113,17 @@ type Machine = {
   compacted?: SessionCompactResult
   // What a slash command the module runs waits on before it answers, or why the engine rejects it.
   command?: () => Promise<void>
+  // What the SessionStart command hooks beneath the module hand as additional context.
+  context?: readonly string[]
+  // The conversation as the model is sent it, which `$.session.messages({ as: 'api' })` answers. With none given
+  // the read is refused.
+  sent?: readonly { role: 'user' | 'assistant'; content: readonly { type: 'text'; text: string }[] }[]
+  // Whether Claude Code lets a plugin compact by `$.session.compact` here, as at a terminal's prompt. With none
+  // given the session is one a program started, as the desktop app's is, and the call is refused.
+  isOpen?: boolean
+  // What Claude Code does inside a compaction before its result comes up: it raises the SessionStart of the source
+  // `compact`, whose additional context it keeps behind the summary.
+  inside?: () => Promise<void>
   // What each source of the settings holds, as Claude Code loaded it. With none given, every read is refused.
   settings?: Readonly<Record<string, Record<string, unknown>>>
 }
@@ -157,7 +179,7 @@ function machine(on: On, has: Machine): Seen {
   on('classic.SessionStart', (_, e) => {
     seen.starts.push({ ...e })
 
-    return {}
+    return has.context === undefined ? {} : { additionalContext: [...has.context] }
   })
   // The PostToolUse command hooks, beneath every hooks module.
   on('classic.PostToolUse', () => ({}))
@@ -174,11 +196,17 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: (has.usage ?? (() => usageAt(10)))() }
   })
-  on('session.compact', (_, e) => {
+  on('session.compact', async (_, e) => {
+    // The plugin's own call comes with no trigger here, where the engine stamps one on it. A stub that throws is
+    // skipped, and with no stub left to answer the call rejects in the plugin, as the engine's refusal does.
+    const isOwn = (e.trigger as string | undefined) === undefined || e.trigger === 'plugin'
+    if (isOwn && has.isOpen !== true) throw new Error(REFUSED)
     seen.summarized.push({ trigger: e.trigger, instructions: e.instructions, agentId: e.agentId })
+    await has.inside?.()
 
     return has.compacted ?? { messages: [SUMMARY], tokensBefore: 194_336, tokensAfter: 30_108 }
   })
+  on('session.messages', () => (has.sent === undefined ? { deny: 'no transcript here' } : { value: has.sent }) as never)
   // A slash command the module runs. Its own `command.run` hook answers /lifetime above this one.
   on('command.run', async (_, e) => {
     seen.commands.push({ command: e.command, args: e.args })
@@ -732,7 +760,7 @@ test('a compaction that was skipped stays skipped', async ($, on) => {
   expect(out).toEqual({ skip: 'a PreCompact hook blocked it' })
 })
 
-test('a quiet minute after a turn, a context at or past the line compacts by /compact with the keep list', async ($, on) => {
+test('in a session a program started, a quiet minute after a turn compacts by /compact with no words after it', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   const seen = machine(on, { usage: () => usageAt(72) })
@@ -746,10 +774,98 @@ test('a quiet minute after a turn, a context at or past the line compacts by /co
   await clock.settle()
 
   expect(early).toEqual([])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
   expect(seen.measured).toEqual([{ breakdown: 'summary' }])
   expect(seen.shown).toEqual([WHY(72, 70)])
+  // Claude Code refused the plugin's own call, which the debug log says once, and no compaction came of that call.
+  expect(seen.debugged.length).toBe(1)
+  expect(seen.debugged[0]?.startsWith(FELL_BACK)).toBe(true)
+  expect(seen.summarized).toEqual([])
+})
+
+test("at a terminal's prompt the quiet minute compacts by $.session.compact with the keep list, and no command runs", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { usage: () => usageAt(72), isOpen: true })
+  await $.session.start(START)
+  await clock.settle()
+
+  await $.turn.complete(TURN)
+  await clock.advance(60_000)
+  await clock.settle()
+
+  expect(seen.commands).toEqual([])
+  expect(seen.summarized.map(told => told.instructions)).toEqual([KEEP])
+  expect(seen.shown).toEqual([WHY(72, 70)])
   expect(seen.debugged).toEqual([])
+})
+
+test('the ledger of the main conversation is handed at the SessionStart Claude Code raises inside a compaction, and is no message', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const handed: unknown[] = []
+  const seen = machine(on, {
+    inside: async () => {
+      handed.push(await $.classic.SessionStart({ source: 'compact' }))
+    },
+  })
+  const wrote = [ASKED, called('Write', { file_path: '/p/a.md' }), called('Edit', { file_path: '/p/b.md' })]
+
+  const out = await $.session.compact({ trigger: 'auto', messages: wrote })
+  // A start that is no compaction's, and a second one of a compaction, take nothing.
+  handed.push(await $.classic.SessionStart({ source: 'resume' }))
+  handed.push(await $.classic.SessionStart({ source: 'compact' }))
+
+  expect(out.messages).toEqual([SUMMARY])
+  expect(handed).toEqual([{ additionalContext: [ledger(['/p/a.md', '/p/b.md']).text] }, {}, {}])
+  expect(seen.starts.map(start => start.source)).toEqual(['compact', 'resume', 'compact'])
+  expect(seen.debugged.filter(text => text.includes('list of written files'))).toEqual([])
+})
+
+test('the context the hooks beneath hand at that SessionStart comes first, and the ledger after it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const handed: unknown[] = []
+  // A SessionStart command hook of another plugin, beneath this module, hands its own.
+  machine(on, {
+    context: ['the address book'],
+    inside: async () => {
+      handed.push(await $.classic.SessionStart({ source: 'compact' }))
+    },
+  })
+
+  await $.session.compact({ trigger: 'manual', messages: [called('Write', { file_path: '/p/a.md' })] })
+
+  expect(handed).toEqual([{ additionalContext: ['the address book', ledger(['/p/a.md']).text] }])
+})
+
+test('the ledger of the compaction before is read from the conversation as the model is sent it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const handed: unknown[] = []
+  // What Claude Code kept of the SessionStart hook's additional context, as the model reads it, with another
+  // hook's words around it.
+  const before = `<system-reminder>\nSessionStart hook additional context: ${ledger(['/p/old.md', '/p/b.md'], 3).text}\n</system-reminder>`
+  machine(on, {
+    sent: [
+      { role: 'user', content: [{ type: 'text', text: 'This session is being continued.' }] },
+      { role: 'user', content: [{ type: 'text', text: 'the address book' }, { type: 'text', text: before }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'On it.' }] },
+    ],
+    inside: async () => {
+      handed.push(await $.classic.SessionStart({ source: 'compact' }))
+    },
+  })
+
+  await $.session.compact({ trigger: 'auto', messages: [ASKED, called('Edit', { file_path: '/p/b.md' }), called('Write', { file_path: '/p/new.md' })] })
+
+  expect(handed).toEqual([{ additionalContext: [ledger(['/p/old.md', '/p/b.md', '/p/new.md'], 3).text] }])
+})
+
+test('a compaction that was skipped owes no ledger to a later SessionStart', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  machine(on, { compacted: { skip: 'a PreCompact hook blocked it' } })
+
+  await $.session.compact({ trigger: 'manual', messages: [called('Write', { file_path: '/p/a.md' })] })
+
+  expect(await $.classic.SessionStart({ source: 'compact' })).toEqual({})
 })
 
 test('a module loaded anew one second after a turn ended still compacts when the minute is over', async ($, on) => {
@@ -768,10 +884,10 @@ test('a module loaded anew one second after a turn ended still compacts when the
   await clock.settle()
 
   expect(early).toEqual([])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
   expect(seen.shown).toEqual([WHY(72, 70)])
   expect(seen.ends).toEqual([0])
-  expect(seen.debugged).toEqual([])
+  expect(apart(seen.debugged)).toEqual([])
 })
 
 test('a module loaded anew after the minute was over looks at the context at once, and one loaded with no turn ended does not', async ($, on) => {
@@ -792,7 +908,7 @@ test('a module loaded anew after the minute was over looks at the context at onc
   await clock.settle()
 
   expect(none).toEqual([])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
 })
 
 test('the end of a turn is kept in the state of the session, and a turn that begins takes it out again', async ($, on) => {
@@ -834,7 +950,7 @@ test('a turn that begins inside the minute ends the quiet, and a turn of a subag
 
   expect(whileBusy).toBe(0)
   expect(early).toEqual([])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
 })
 
 test('the line is the one the sweep answered, 70 until then, and under it nothing compacts', async ($, on) => {
@@ -865,7 +981,7 @@ test('the line is the one the sweep answered, 70 until then, and under it nothin
 
   expect(underSeventy).toEqual([])
   expect(underForty).toEqual([])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
   expect(seen.shown).toEqual([WHY(45, 40)])
 })
 
@@ -950,7 +1066,7 @@ test('a context at or past the line right after a compaction starts none, until 
   const again = await quiet()
 
   expect([first, rightAfter, later, under, again]).toEqual([1, 1, 1, 1, 2])
-  expect(seen.debugged).toEqual([
+  expect(apart(seen.debugged)).toEqual([
     'the context is at 75 percent right after a compaction, so temportal.compact_at 70 starts none',
   ])
 })
@@ -972,7 +1088,7 @@ test('the compaction of a subagent gets its own ledger and does not hold the mai
   await clock.settle()
 
   expect(out.messages).toEqual([SUMMARY, ledger(['/p/child.md'])])
-  expect(seen.commands).toEqual([{ command: 'compact', args: KEEP }])
+  expect(seen.commands).toEqual([{ command: 'compact', args: '' }])
 })
 
 test('while a compaction the module started runs it starts no second', async ($, on) => {

@@ -337,7 +337,8 @@
   "$.session.compact": {
    "kind": "method",
    "used": [
-    "p4-native"
+    "p4-native",
+    "p4-temportal"
    ]
   },
   "$.session.cwd": {
@@ -375,9 +376,11 @@
    "kind": "method",
    "declined": {
     "p4-phi": "its python reads the transcript file, from command hooks too, where no module answers.",
-    "p4-temportal": "`session.compact` hands the messages the ledger is built from.",
     "p4-native": "the map and the probes read no message."
-   }
+   },
+   "used": [
+    "p4-temportal"
+   ]
   },
   "$.session.model": {
    "kind": "method",

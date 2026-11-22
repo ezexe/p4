@@ -141,12 +141,14 @@ class ModuleTest(unittest.TestCase):
         self.assertIn(f"const LEAST_WAIT_MS = {int(lifetime.LEAST_WAIT_S * 1000):_}", text)
         self.assertIn(f"const MOST_WAIT_MS = {int(lifetime.MOST_WAIT_S * 1000):_}", text)
 
-    def test_the_module_hooks_every_compaction_and_starts_one_by_the_slash_command(self):
+    def test_the_module_hooks_every_compaction_and_starts_one_by_its_own_call_first(self):
         """The types of Claude Code 2.1.326 give `session.compact` as the event of every compaction, whose `next`
-        takes the instructions and resolves to the messages the conversation reads afterwards. Seen in the desktop
-        app on that build, `$.session.compact` is refused in a session a program started, and `/compact` run by
-        `$.command.run` compacts there with the module's own hook hearing it. So the module starts a compaction by
-        the command alone, and the line of the two files agrees."""
+        takes the instructions and resolves to the messages the conversation reads afterwards, and
+        `$.session.compact` as a plugin's own call, whose compaction leaves no command in the transcript. Seen in
+        the desktop app on that build and in a scripted session on 2.1.328, that call is refused in a session a
+        program started, and `/compact` run by `$.command.run` compacts there with the module's own hook hearing
+        it. So the module makes its own call first and runs the command where the call is refused, with no words
+        after the command, since its hook tells every summary the keep list, and the line of the two files agrees."""
         import re
         import sys
         if str(SRC) not in sys.path:
@@ -156,11 +158,41 @@ class ModuleTest(unittest.TestCase):
         hooked = re.findall(r"(?m)^  on\('([\w.]+)'", text)
         for event in ("session.compact", "turn.start", "turn.complete"):
             self.assertEqual(hooked.count(event), 1, event)
-        self.assertIn("await $.command.run({ command: 'compact', args: KEEP })", text)
-        self.assertNotIn("$.session.compact(", text)
+        self.assertIn("await $.session.compact({ instructions: KEEP })", text)
+        self.assertIn("await $.command.run({ command: 'compact' })", text)
+        self.assertNotIn("args: KEEP", text, "the keep list is no word of a command")
+        self.assertLess(text.index("await $.session.compact({ instructions: KEEP })"),
+                        text.index("await $.command.run({ command: 'compact' })"))
         self.assertRegex(text, rf"(?m)^const COMPACT_AT = {lifetime.COMPACT_AT}$")
         self.assertIn("$.session.usage({ breakdown: 'summary' })", text)
         self.assertIn("$.clock.after(QUIET_MS,", text)
+
+    def test_the_list_of_written_files_is_handed_at_the_sessionstart_of_a_compaction(self):
+        """context-window.md, "What survives compaction": of SessionStart hooks that match the `compact` source,
+        "Claude Code runs them and adds their output to the compacted context". The module's `classic.SessionStart`
+        hook hands the list as additional context where the source is `compact`, reads the list before from the
+        conversation as the model is sent it, and keeps the message for a compaction no SessionStart came inside
+        of and for a subagent's transcript. The description and the skill page say the list is no message."""
+        text = (SRC / "register.ts").read_text(encoding="utf-8")
+        for said in ("if (e.source !== 'compact' || owed === undefined) return out",
+                     "additionalContext: [...(out.additionalContext ?? []), text]",
+                     "await $.session.messages({ as: 'api' })",
+                     "messages: isTaken ? rest : [...rest, kept]"):
+            self.assertIn(said, text, said)
+        self.assertIn("no message", FILE["description"])
+        self.assertIn("additional context of the SessionStart", FILE["description"])
+        skill = (SRC.parent / "skills" / "temportal" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("handed as additional context of the SessionStart hook", skill)
+        self.assertNotIn("comes one message", skill)
+        test = (SRC / "register.test.ts").read_text(encoding="utf-8")
+        for case in ("the ledger of the main conversation is handed at the SessionStart Claude Code raises inside a "
+                     "compaction, and is no message",
+                     "the ledger of the compaction before is read from the conversation as the model is sent it",
+                     "at a terminal's prompt the quiet minute compacts by $.session.compact with the keep list, "
+                     "and no command runs",
+                     "in a session a program started, a quiet minute after a turn compacts by /compact with no "
+                     "words after it"):
+            self.assertIn(case, test, case)
 
     def test_the_keep_list_names_what_a_session_needs_after_a_compaction(self):
         import re
@@ -309,7 +341,7 @@ class PreCompactTest(unittest.TestCase):
         self.assertEqual(self.keep({}), self.module_keep() + "\n", "an input with no instructions hands the list")
 
     def test_the_hook_is_silent_where_the_instructions_already_hold_the_list(self):
-        """The module adds the list at `session.compact`, and runs `/compact` with the list as its words. Seen on
+        """The module adds the list at `session.compact`, whoever started the compaction. Seen on
         Claude Code 2.1.328, a PreCompact hook beneath the module is handed the list as `custom_instructions`, so
         this hook prints nothing there and the summary is told the list once."""
         for told in (self.module_keep(), "Stress the open review.\n\n" + self.module_keep()):

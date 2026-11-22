@@ -133,11 +133,12 @@ export const PROBES: readonly Probe[] = [
   {
     id: 'session-compact-from-a-module',
     decision:
-      'p4-temportal compacts a quiet session by running `/compact` with `$.command.run`, and never by ' +
-      '`$.session.compact`.',
+      'p4-temportal asks for the compaction of a quiet session by `$.session.compact` and, where that call is ' +
+      'refused, runs `/compact` with `$.command.run`, whose row the desktop app draws like a typed message.',
     fault:
       'A plugin\'s `$.session.compact` is refused in a session a program started, with "not available in a ' +
-      'headless (-p / SDK) session yet", seen in the desktop app on Claude Code 2.1.326.',
+      'headless (-p / SDK) session yet", seen in the desktop app on Claude Code 2.1.326 and in a scripted ' +
+      'session on 2.1.328.',
     was: 'blocked',
     fits: isStarted,
     kind: 'asked',

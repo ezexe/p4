@@ -1,6 +1,6 @@
 {
   "name": "p4-temportal",
-  "version": "0.3.45",
+  "version": "0.3.46",
   "description": "Keeps the project's auto memory, notebook and saved code in its .claude/p4 store, where Claude Code writes the memory itself by autoMemoryDirectory, leaves each session's scratchpad to the app, clears what is no longer relevant by lifetimes, and keeps a compaction from losing what a session needs.",
   "author": {
     "name": "ezexe"

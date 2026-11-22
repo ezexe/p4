@@ -202,6 +202,28 @@ class Page(unittest.TestCase):
         open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
         self.assertIn("with no rule written", open_still)
 
+    def test_the_plugins_compaction_puts_no_typed_looking_list_into_the_transcript(self):
+        """The compaction row says how the list reaches the model since 0.3.46, by which call the module compacts
+        and where it falls back, and what a scripted session showed. What the desktop app still draws like a typed
+        message, what was tried against it and what was not seen is among what the docs do not confirm."""
+        text = page()
+        row = rows(text)["compaction"]
+        for said in ("Since p4-temportal 0.3.46", "additional context of the SessionStart",
+                     "no row of the transcript reads as a message ezexe typed", "recorded as the session's last prompt",
+                     "It asks by <code>$.session.compact</code>", "with no words after it",
+                     "not available in a headless (-p / SDK) session yet", "35,449 tokens to 8,704",
+                     "nothing after the command's name", "no row of the user's that holds the list",
+                     "stayed the prompt a person had sent", "the first carried from the list before",
+                     "adds their output to the compacted context", "with no new version",
+                     "<code>session-compact-from-a-module</code>"):
+            self.assertIn(said, row, said)
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        for said in ('id="drawn"', "The list is no message any more", "<code>list_events</code>",
+                     "each a turn of the user's", "did not draw", "What is left is the command's own row",
+                     "It cannot be taken out by a plugin", "<code>$.prompt.submit</code>",
+                     "<code>session.append</code>", "Not seen on screen with 0.3.46"):
+            self.assertIn(said, open_still, said)
+
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
         original stays, and what the live checks showed of a move and of the copy."""
