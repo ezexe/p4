@@ -2045,12 +2045,42 @@ def h_plan(payload):
     return text or None
 
 
+def approved_runs_text(payload, s):
+    """At a plan's approval: the command that prints one start call for each run of the approved plan, with how many
+    sections and runs it holds. hooks.md, "ExitPlanMode": "In `PostToolUse`, `tool_response` is an object with `plan`
+    and `filePath` fields holding the approved plan". '' where the response names no file that is there, and for a
+    plan with no section that names files on a `Files:` line."""
+    resp = payload.get("tool_response") if isinstance(payload.get("tool_response"), dict) else {}
+    path = str(resp.get("filePath") or "")
+    if not path or not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, encoding="utf-8") as f:
+            _, found = sections.parse(f.read(), str(payload.get("cwd") or s.get("cwd") or ""))
+    except (OSError, ValueError):
+        return ""
+    if not found:
+        return ""
+    shown = path.replace("\\", "/")
+    n, k = len(found), len(sections.runs(found))
+    head = (f"phi (p4-phi): the approved plan `{shown}` holds {n} section{'s' * (n != 1)} that change files, in "
+            f"{k} run{'s' * (k != 1)}. `{commands()} sections \"{shown}\"` prints one start call for each run, each "
+            "an integrator's in a git worktree of its own.")
+    RAN["runs"] = k
+    if spawned_from(s):
+        return (head + " Another session started this one, so put that command in this session's report, and the "
+                       "session that started it runs it and makes the calls, unless this session's brief has it "
+                       "land the plan itself.")
+    return head + " Run it now and make the calls it prints, in this turn."
+
+
 def h_plan_mode(payload):
     """PostToolUse on EnterPlanMode and ExitPlanMode: whether this session plans, kept for mode_now, since no hook
     event tells of a change of the permission mode and the two tools change it inside a turn. hooks.md has
     PostToolUse run "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval, and at
-    it an orchestrator is handed what plan mode held back: the advice on its open work steps and the feature
-    line, as h_plan builds them."""
+    it every session is handed the command that prints the approved plan's runs, approved_runs_text, and an
+    orchestrator what plan mode held back: the advice on its open work steps and the feature line, as h_plan
+    builds them."""
     me = Me(payload)
     if not me.home or not me.id or payload.get("agent_id") or payload.get("hook_event_name") != "PostToolUse":
         return None                                # a subagent's call, or one that failed, such as a plan sent
@@ -2059,16 +2089,17 @@ def h_plan_mode(payload):
     s["planMode"] = str(payload.get("tool_name") or "") == "EnterPlanMode"
     save_session(me.home, s)
     RAN["pair"] = "planning" if s["planMode"] else "approved"
+    runs = "" if s["planMode"] else approved_runs_text(payload, s)
     if s["planMode"] or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, me.store):
-        return None
+        return runs or None
     plan = plans.load(me.home, me.id)
     if not plan.get("steps"):
-        return None
+        return runs or None
     owner = s.get("turnBy", "user") == "user"
     advice = plans.top_advice(me.home, s, plan, owner, caps_text(me.home, s))
     feat = feature_steps_text(me.home, s, plan, owner)
     nudge_arm(me, load_session(me.home, me.id) or s)
-    return "\n\n".join(p for p in (feat, advice) if p) or None
+    return "\n\n".join(p for p in (runs, feat, advice) if p) or None
 
 
 # --- the nudge: an orchestrator doing a work step itself ------------------------------------------------------

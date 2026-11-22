@@ -1387,6 +1387,35 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn("(a) step 1 \\\"Port the exporter", r.stdout)
         self.assertTrue(self.check(TOP, "Edit", edit, "toolu_in2"), "and the step is nudged again")
 
+    def test_the_approval_names_the_command_that_prints_the_approved_plans_runs(self):
+        """hooks.md, "ExitPlanMode": "In `PostToolUse`, `tool_response` is an object with `plan` and `filePath`
+        fields holding the approved plan". At the approval the session is handed `phi.py sections` with that path."""
+        path = os.path.join(self._tmp.name, "the-plan.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n"
+                    "## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Depends on:** none\n\n"
+                    "## 2. The flush\n\n- **Files:** `src/export/flush.py`\n- **Depends on:** 1\n\n"
+                    "## 3. The page\n\n- **Files:** `docs/export.md`\n- **Depends on:** none\n")
+        shown = path.replace("\\", "/")
+        tool = {"hook_event_name": "PostToolUse", "tool_name": "ExitPlanMode", "tool_input": {}}
+
+        def said(host, response):
+            r = self.t.hook("plan-mode", host, {**tool, "tool_response": response})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+
+        top = said(TOP, {"plan": "the plan", "filePath": path})
+        self.assertIn(f"the approved plan `{shown}` holds 3 sections that change files, in 2 runs", top)
+        self.assertIn(f'phi.py" sections "{shown}"`', top)
+        self.assertIn("Run it now and make the calls it prints", top)
+        kid = said(A, {"plan": "the plan", "filePath": path})
+        self.assertIn("put that command in this session's report", kid)
+        self.assertNotIn("Run it now", kid)
+        self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path + ".gone"}), "", "no such file: no line")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# A plan\n\n## Context\n\nNothing to land.\n")
+        self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path}), "", "no Files line: no run to start")
+
     def test_a_prompts_own_mode_is_over_what_a_plan_mode_tool_said_before_it(self):
         tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}
         self.t.hook("plan-mode", TOP, {**tool, "tool_name": "EnterPlanMode"})
