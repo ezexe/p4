@@ -411,7 +411,7 @@ LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap
 # in "Check the data pipeline passes the schema test" the test is the measure, and the pipeline is code of the
 # repository, which is work for a child
 ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
-                          r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
+                          r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?|runs?)\b"
                           r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b", re.I)
 # starts a check, test or session, which is orchestration, such as "Start ezexe's-eye acceptance check". The doer
 # and the object decide: running or re-running checks or tests oneself is work for a child, such as "Re-run failed
@@ -689,7 +689,7 @@ def top_groups(plan, cwd):
 # the Read tool".
 
 READS = re.compile(r"^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|"
-                   r"inventory|explore|trace|identify|count|collect|gather|sweep)\b", re.I)
+                   r"inventory|explore|trace|identify|count|collect|gather|sweep|research)\b", re.I)
 RUNS = re.compile(r"^\W*(?:run|re-?run|execute)\b", re.I)
 WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|"
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"

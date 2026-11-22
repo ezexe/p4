@@ -1033,6 +1033,8 @@ class Levels(unittest.TestCase):
     def test_each_step_is_named_for_the_level_it_runs_at(self):
         for text, level in (("Find where the exporter is configured across src/", "read"),
                             ("Read the hooks docs and list what PreToolUse may return", "read"),
+                            ("Research how the exporter reads its table layout", "read"),
+                            ("Research and write the exporter's page", "session"),
                             ("Run test_flush.py", "run"), ("Re-run the build", "run"),
                             ("Run the tests and fix what fails", "session"),
                             ("Port the exporter to the new writer", "session"),
@@ -1330,6 +1332,8 @@ class TopOrchestrates(unittest.TestCase):
                      "Write the floor plan renderer in src/render.py", "Put the fixtures under tests/plan/"):
             self.assertEqual(plans.top_stays(work), "", work)
         self.assertEqual(plans.top_stays("Land section 2 of the plan"), "checks or lands the work")
+        for stays in ("Start run A and run B", "Launch the two runs of the plan"):
+            self.assertEqual(plans.top_stays(stays), "starts a check, test or session, which is orchestration", stays)
 
     def test_in_plan_mode_a_task_list_is_answered_with_no_start(self):
         """hooks.md, "Common input fields": `permission_mode` is the current permission mode, `"plan"` among its

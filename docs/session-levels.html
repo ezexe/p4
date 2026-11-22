@@ -387,7 +387,7 @@ function steps(kind,ask){
 }
 
 /* ---------- steps of a task list, as plans.level_of and plans.child_kind read them ---------- */
-var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep)\b/i;
+var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep|research)\b/i;
 var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
 var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
 function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "read";if(RUNS.test(t))return "run";return "session"}
@@ -401,7 +401,7 @@ var LANDS=/^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b|^\W*(?
 var SYNCS=/^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b/i;
 var WATCHES_RUN=/\b(?:watch|follow|monitor|poll|a?wait|check|verify|confirm)\w*\b[^.;]*?\b(?:(?:workflow|ci|release|action|pipeline|github(?:'s|’s)?(?:\s+actions?)?)\s+runs?\b|(?:the|its|each|every)\s+runs?\s+on\b|this\s+run\s+on\b|ci(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|green|red)\b|\W*$)|(?:workflows?|pipelines?)(?:\s+(?:on|for|to|until|through|results?|green|red)\b|\W*$))/i;
 var INSTALLS=/\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?(?=\s*(?:$|[.;,:!?)])|\s+(?:from|to|for|with|in|on|at|and|of|after|before|via|by|once|then|using|so|when|until)\b)|\bplugin\s+update\b/i;
-var ORCHESTRATES=/^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b/i;
+var ORCHESTRATES=/^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?|runs?)\b|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b/i;
 function staysWhy(t){if(LANDS.test(t)||SYNCS.test(t)||WATCHES_RUN.test(t)||INSTALLS.test(t))return "it checks or lands the work";if(ORCHESTRATES.test(t))return "it starts a check, test or session, which is orchestration";return ""}
 var KIND_WORDS={static:"static or mechanical work, an integrator's, so it starts on <code>claude-sonnet-5-5</code> at <code>medium</code> effort",
   build:"a build that changes behaviour, a writer's, so it starts on <code>claude-opus-5-5</code> at <code>medium</code> effort",
