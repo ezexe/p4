@@ -3719,7 +3719,7 @@
     "p4-phi"
    ],
    "would": {
-    "p4-phi": "replace the sentence of its plan rule that keeps a session another session started from calling `EnterPlanMode` with that tool's absence from the session's model, on a build that has the event."
+    "p4-phi": "replace the sentence of its plan rule that keeps a session another session started from calling `EnterPlanMode` with that tool's absence from the session's model, where Claude Code has the event, from 2.1.328 on."
    },
    "declined": {
     "p4-temportal": "it registers its one tool and changes what no loop is offered.",
@@ -3733,7 +3733,7 @@
     "p4-phi"
    ],
    "would": {
-    "p4-phi": "replace the read of `$.ui.panes` after each look, which tells whether the person closed its pane, with the pane's own close, on a build that has the event."
+    "p4-phi": "replace the read of `$.ui.panes` after each look, which tells whether the person closed its pane, with the pane's own close, once a test can raise that event."
    },
    "declined": {
     "p4-temportal": "it draws nothing.",
