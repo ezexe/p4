@@ -170,9 +170,11 @@ class RecordTest(unittest.TestCase):
     def test_a_glob_counts_as_the_events_its_hook_tests(self):
         """p4-temportal names `tool.*` and answers where `next.event` is `tool.run`, so it loads on a Claude Code
         with no such event. It still uses `tool.run`, and it reads the version to register no tool where the
-        event is missing."""
+        event is missing. It answers at `tool.call` too, where Claude Code 2.1.330 hands no `tool.run` to a glob."""
         found = uses()
         self.assertIn(("event", "tool.run", "p4-temportal"), found)
+        self.assertIn(("event", "tool.call", "p4-temportal"), found)
+        self.assertEqual(ROWS["tool.call"]["used"], ["p4-native", "p4-temportal"])
         self.assertIn(("method", "$.session.version", "p4-temportal"), found)
         self.assertEqual(ROWS["tool.run"]["used"], ["p4-phi", "p4-temportal"])
         self.assertEqual(ROWS["$.session.version"]["used"], ["p4-native", "p4-temportal"])

@@ -231,23 +231,39 @@ class ModuleTest(unittest.TestCase):
 
     def test_the_tool_runs_the_same_commands_once_its_call_is_allowed(self):
         """The module registers one tool, `lifetime`, and serves it at `tool.run`, which the API types of Claude Code
-        2.1.326 give as the event that fires once a call is allowed. It answers at no `tool.call`, where
-        https://code.claude.com/docs/en/plugins/mods/api.md, "Add a tool", serves a tool and an answer skips the
-        permission check: a `set`, a `clear` and a `now` end in deleted files. The tool takes the four commands the
-        slash command takes, and hands a path after `--`, which lifetime.py's parser reads as the end of options."""
+        2.1.326 give as the event that fires once a call is allowed. It answers no `tool.call` before the call went
+        down, where https://code.claude.com/docs/en/plugins/mods/api.md, "Add a tool", serves a tool and an answer
+        skips the permission check: a `set`, a `clear` and a `now` end in deleted files. On Claude Code 2.1.330 no
+        glob selects `tool.run`, so there it serves the call at `tool.call` after `next(e)`, once Claude Code
+        answered that the allowed call found no hook at its run. The tool takes the four commands the slash command
+        takes, and hands a path after `--`, which lifetime.py's parser reads as the end of options."""
         import re
         text = (SRC / "register.ts").read_text(encoding="utf-8")
         self.assertEqual(re.findall(r"on\('(tool\.[\w*]+)'", text), ["tool.*"])
-        self.assertIn("on('tool.*', { tool: TOOL_ID }, ($, e, next) => "
-                      "(next.event === 'tool.run' ? called($, e) : next(e)))", text)
+        hook = text.split("on('tool.*', { tool: TOOL_ID }, async ($, e, next) => {", 1)[1].split("\n  })", 1)[0]
+        self.assertEqual([line.strip() for line in hook.strip().split("\n") if line.strip()], [
+            "if (next.event === 'tool.run') return called($, e)",
+            "const out = await next(e)",
+            "return next.event === 'tool.call' && isUnserved(out) ? called($, e) : out",
+        ], "the call goes down before anything is served at tool.call")
+        self.assertIn("const UNSERVED = 'registered the tool lifetime but no hook answered this call'", text)
+        self.assertIn("out.isError === true || typeof out.deny === 'string'", text)
         self.assertIn("const TOOL_ID = 'mcp__p4-temportal__lifetime'", text)
         self.assertEqual(text.count("$.tool.register("), 1)
         self.assertIn("name: 'lifetime',\n  description:", text)
         self.assertIn("enum: ['list', 'set', 'clear', 'now']", text)
         self.assertEqual(re.findall(r"\['(\w+)', \d\],", text), ["list", "set", "clear", "now"])
         self.assertIn("['--', ...rest]", text)
-        caught = text.split("on('tool.*'", 1)[1].split("\n\n", 1)[0]
-        self.assertIn("next.event === 'tool.run' ? { deny: 'p4-temportal could not run lifetime.py.' } : next(e)", caught)
+        caught = text.split("on('tool.*'", 1)[1].split(".catch(", 1)[1].split("\n  )", 1)[0]
+        self.assertIn("next.event === 'tool.run' || (next.event === 'tool.call' && next.called)", caught)
+        self.assertIn("{ deny: 'p4-temportal could not run lifetime.py.' }", caught)
+        test = (SRC / "register.test.ts").read_text(encoding="utf-8")
+        self.assertNotIn("$.tool.run(", test, "a call enters at tool.call, as a session's call does")
+        for case in ("a call the permission check refused comes back with its refusal, and lifetime.py does not run",
+                     "a call that came back up as allowed and unserved runs lifetime.py once, at tool.call",
+                     "where a glob reaches tool.run, as on Claude Code 2.1.326 to 2.1.328, the allowed call is served "
+                     "there"):
+            self.assertIn(case, test, case)
 
     def test_a_module_loaded_anew_inside_the_quiet_minute_takes_it_up_again(self):
         """https://code.claude.com/docs/en/plugins/mods/reference.md says of a reload that `register` runs again in

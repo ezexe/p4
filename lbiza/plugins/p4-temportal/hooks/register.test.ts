@@ -29,6 +29,30 @@ const LEFT_OUT = 'Older paths left out of this list: '
 const WHY = (percent: number, line: number): string =>
   `The context is at ${percent} percent, at or past temportal.compact_at ${line}, so the session compacts.`
 
+// What Claude Code 2.1.330 answers a call of the plugin's tool that came to its run and found no hook there, as a
+// scripted session on that build printed it.
+const UNSERVED =
+  'p4-temportal registered the tool lifetime but no hook answered this call: add on("tool.run", { tool: ' +
+  '"mcp__p4-temportal__lifetime" }, ($, e) => ({ result: ... })) to the plugin.'
+
+// The words a call of the tool was refused with. A call enters at `tool.call`, and its error comes back to the
+// caller in one of two shapes: `{ deny }` where the module answered at `tool.call`, as on Claude Code 2.1.330,
+// and the error Claude Code makes of a `{ deny }` given at `tool.run`, with the words as its `text`, as on 2.1.326
+// to 2.1.328. Nothing for a call that was served.
+function refusal(out: unknown): string | undefined {
+  const answer = out as { deny?: unknown; text?: unknown; isError?: unknown }
+  if (typeof answer.deny === 'string') return answer.deny
+
+  return answer.isError === true && typeof answer.text === 'string' ? answer.text : undefined
+}
+
+// Whether the module answered a call at `tool.run`, which it does where a glob reaches that event, as on Claude
+// Code 2.1.326 to 2.1.328. What is beneath `tool.call` was never asked then: on those builds the engine's own
+// permission check stands before `tool.run`, which the live sessions showed and no test of this file can.
+function ranAbove(seen: Seen): boolean {
+  return seen.ran.length > 0
+}
+
 // What Claude Code answers a plugin's own `$.session.compact` in a session a program started, as seen in the
 // desktop app on Claude Code 2.1.326 and in a scripted session on 2.1.328.
 const REFUSED =
@@ -102,6 +126,10 @@ type Machine = {
   isTaken?: boolean
   // Whether the name of the tool lifetime is taken.
   isToolTaken?: boolean
+  // What comes back up to the module's `tool.call` hook from beneath it. With none given the call was allowed,
+  // came to its run and found no hook there, and it is what Claude Code 2.1.330 answers then. A refusal of the
+  // permission check comes back as a `{ deny }`.
+  comes?: () => unknown
   // What the session's state holds of the last turn's end as this copy of the module starts: what the copy before
   // a reload wrote. With none given the state is the kit's own, empty at the start.
   ended?: () => number
@@ -223,6 +251,10 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: { command: e.name } }
   })
+  // What is beneath the module at `tool.call`: the permission check and the run. This stands for Claude Code
+  // 2.1.330, where no glob selects `tool.run`, so an allowed call finds no hook at its run and the engine's answer
+  // comes back up. It names no `tool.run`, which an older Claude Code's test kit refuses a file for.
+  on('tool.call', () => (has.comes?.() ?? { result: `Error: ${UNSERVED}`, text: UNSERVED, isError: true }) as never)
   // A tool the module registers, named as the engine names a plugin's tool.
   on('tool.register', (_, e) => {
     if (has.isToolTaken === true) return { deny: '"lifetime" refused: the name is taken' }
@@ -1147,9 +1179,9 @@ test('a call of the tool runs the command of lifetime.py it names, and what that
   const clock = mock.clock(on)
   const seen = machine(on, { says: args => ({ out: `ran ${args[0]}\n` }) })
 
-  const list = await $.tool.run({ tool: TOOL, command: 'list' } as never)
-  const now = await $.tool.run({ tool: TOOL, command: ' now ' } as never)
-  const clear = await $.tool.run({ tool: TOOL, command: 'clear', path: '-old notes.md' } as never)
+  const list = await $.tool.call({ tool: TOOL, command: 'list' } as never)
+  const now = await $.tool.call({ tool: TOOL, command: ' now ' } as never)
+  const clear = await $.tool.call({ tool: TOOL, command: 'clear', path: '-old notes.md' } as never)
   await clock.settle()
 
   expect([list, now, clear]).toEqual([{ result: 'ran list' }, { result: 'ran now' }, { result: 'ran clear' }])
@@ -1172,7 +1204,7 @@ test('a set by the tool takes a path and a lifetime, and the sweep after it sets
   await $.session.start(START)
   await clock.settle()
 
-  const set = await $.tool.run({ tool: TOOL, command: 'set', path: 'notebook/a page.html', lifetime: '5m' } as never)
+  const set = await $.tool.call({ tool: TOOL, command: 'set', path: 'notebook/a page.html', lifetime: '5m' } as never)
   await clock.settle()
   const after = seen.ran.map(args => [...args])
   await clock.advance(300_000)
@@ -1187,25 +1219,23 @@ test('a call that fits none of the four commands is refused with what the tool t
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   const seen = machine(on, {})
-  const refused = {
-    deny:
-      'p4-temportal: `command` is list, set, clear or now. set takes `path` and `lifetime`, clear takes `path`, ' +
-      'and list and now take neither.',
-  }
+  const refused =
+    'p4-temportal: `command` is list, set, clear or now. set takes `path` and `lifetime`, clear takes `path`, ' +
+    'and list and now take neither.'
 
   const answers = [
-    await $.tool.run({ tool: TOOL } as never),
-    await $.tool.run({ tool: TOOL, command: 'sweep' } as never),
-    await $.tool.run({ tool: TOOL, command: 'set', path: 'notebook/a.md' } as never),
-    await $.tool.run({ tool: TOOL, command: 'set', path: '  ', lifetime: '7d' } as never),
-    await $.tool.run({ tool: TOOL, command: 'clear' } as never),
-    await $.tool.run({ tool: TOOL, command: 'clear', path: 'notebook/a.md', lifetime: '7d' } as never),
-    await $.tool.run({ tool: TOOL, command: 'now', path: 'notebook/a.md' } as never),
-    await $.tool.run({ tool: TOOL, command: 'list', path: 7 } as never),
+    await $.tool.call({ tool: TOOL } as never),
+    await $.tool.call({ tool: TOOL, command: 'sweep' } as never),
+    await $.tool.call({ tool: TOOL, command: 'set', path: 'notebook/a.md' } as never),
+    await $.tool.call({ tool: TOOL, command: 'set', path: '  ', lifetime: '7d' } as never),
+    await $.tool.call({ tool: TOOL, command: 'clear' } as never),
+    await $.tool.call({ tool: TOOL, command: 'clear', path: 'notebook/a.md', lifetime: '7d' } as never),
+    await $.tool.call({ tool: TOOL, command: 'now', path: 'notebook/a.md' } as never),
+    await $.tool.call({ tool: TOOL, command: 'list', path: 7 } as never),
   ]
   await clock.settle()
 
-  expect(answers.slice(0, 7)).toEqual(Array.from({ length: 7 }, () => refused))
+  expect(answers.slice(0, 7).map(refusal)).toEqual(Array.from({ length: 7 }, () => refused))
   expect(answers[7]).toEqual({ result: 'lifetime.py list printed nothing and exited 0.' })
   expect(seen.ran).toEqual([['list']])
 })
@@ -1216,10 +1246,10 @@ test('a refusal of lifetime.py is the error of the call, and so is a call with n
   const refused = 'lifetime.py: memory/MEMORY.md is in memory/, which is never cleared'
   const seen = machine(on, { says: () => ({ code: 2, err: `${refused}\n` }) })
 
-  const set = await $.tool.run({ tool: TOOL, command: 'set', path: 'memory/MEMORY.md', lifetime: '7d' } as never)
+  const set = await $.tool.call({ tool: TOOL, command: 'set', path: 'memory/MEMORY.md', lifetime: '7d' } as never)
   await clock.settle()
 
-  expect(set).toEqual({ deny: refused })
+  expect(refusal(set)).toBe(refused)
   expect(seen.ran).toEqual([['set', '--', 'memory/MEMORY.md', '7d']])
 })
 
@@ -1228,10 +1258,10 @@ test('with no python the tool says that lifetime.py did not run', async ($, on) 
   const clock = mock.clock(on)
   const seen = machine(on, { files: {}, pythons: {} })
 
-  const list = await $.tool.run({ tool: TOOL, command: 'list' } as never)
+  const list = await $.tool.call({ tool: TOOL, command: 'list' } as never)
   await clock.settle()
 
-  expect(list).toEqual({ deny: 'lifetime.py list did not run, and the debug log says why.' })
+  expect(refusal(list)).toBe('lifetime.py list did not run, and the debug log says why.')
   expect(seen.debugged).toEqual(['no working python found, so no retention sweep runs'])
 })
 
@@ -1289,7 +1319,59 @@ for (const [what, version] of RUNS) {
   })
 }
 
-test('a call of the tool goes down at tool.call as it came, so lifetime.py runs once, at the tool.run beneath it', async ($, on) => {
+test('a call the permission check refused comes back with its refusal, and lifetime.py does not run', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { comes: () => ({ deny: 'a deny rule names this tool' }) })
+
+  const out = await $.tool.call({ tool: TOOL, command: 'now' } as never)
+  if (ranAbove(seen)) return
+
+  expect(refusal(out)).toBe('a deny rule names this tool')
+  expect(seen.ran).toEqual([])
+})
+
+test("an error of the call that is not Claude Code's own answer for an unserved tool goes up as it came", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {
+    comes: () => ({ result: 'Error: the server is gone', text: 'the server is gone', isError: true }),
+  })
+
+  const out = await $.tool.call({ tool: TOOL, command: 'now' } as never)
+  if (ranAbove(seen)) return
+
+  expect(refusal(out)).toBe('the server is gone')
+  expect(seen.ran).toEqual([])
+})
+
+test('a result that only quotes the words of an unserved call is no error, and runs nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { comes: () => ({ result: UNSERVED, text: UNSERVED }) })
+
+  const out = await $.tool.call({ tool: TOOL, command: 'list' } as never)
+  if (ranAbove(seen)) return
+
+  expect(out).toEqual({ result: UNSERVED, text: UNSERVED })
+  expect(seen.ran).toEqual([])
+})
+
+test('where a glob reaches tool.run, as on Claude Code 2.1.326 to 2.1.328, the allowed call is served there', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { says: args => ({ out: `ran ${args[0]}
+` }) })
+  let out: unknown
+  try {
+    out = await ($.tool as unknown as { run: (e: unknown) => Promise<unknown> }).run({ tool: TOOL, command: 'now' })
+  } catch (error) {
+    out = String(error)
+  }
+
+  // On a Claude Code whose glob does not select tool.run, and on one with no such event, nothing answers a run.
+  if (seen.ran.length === 0) expect(String(out)).toMatch(/no implementation for tool\.run|not a function/)
+  else expect(out).toEqual({ result: 'ran now' })
+  expect(seen.ran.length).toBeLessThanOrEqual(1)
+})
+
+test('a call that came back up as allowed and unserved runs lifetime.py once, at tool.call', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const seen = machine(on, { says: args => ({ out: `ran ${args[0]}
 ` }) })

@@ -239,6 +239,20 @@ class Page(unittest.TestCase):
                      "<code>CLAUDE_PROJECT_DIR</code> at the main checkout's root"):
             self.assertIn(said, row, said)
 
+    def test_the_tool_is_served_on_a_build_that_hands_no_glob_tool_run(self):
+        """What Claude Code 2.1.330 does with a glob, what was tried to name the event and still load on the older
+        builds, how the module serves the call since 0.3.48, what a live session showed, and what it rests on."""
+        text = page()
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        for said in ('id="newer-build"', "Seen on Claude Code 2.1.330: no glob is handed <code>tool.run</code>",
+                     "no hook answered this call", "served no call on that build",
+                     "names one hooks module per plugin", "no string literal",
+                     "Since p4-temportal 0.3.48", "lets the call go down at <code>tool.call</code> first",
+                     "a refused call ran no command", "passes 81 cases on 2.1.311, 2.1.322, 2.1.328 and 2.1.330",
+                     "It rests on the words of that error", "which fails closed", "<code>engines</code>"):
+            self.assertIn(said, open_still, said)
+        self.assertIn("as the entry on that build below sets out", rows(text)["lifetimes"])
+
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
         original stays, and what the live checks showed of a move and of the copy."""

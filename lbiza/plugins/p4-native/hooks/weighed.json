@@ -3064,7 +3064,8 @@
   "tool.call": {
    "kind": "event",
    "used": [
-    "p4-native"
+    "p4-native",
+    "p4-temportal"
    ]
   },
   "tool.check": {

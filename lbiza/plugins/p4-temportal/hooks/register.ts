@@ -8,7 +8,8 @@
 // It registers the same four commands as the tool `lifetime` for the model, `mcp__p4-temportal__lifetime`, so a
 // session sets, clears and lists lifetimes itself. The tool is served at `tool.run`, the event that fires once
 // Claude Code allowed the call, so its permission check stands before a `set`, a `clear` and a `now`, which end in
-// deleted files. plugins/mods/api.md, "Add a tool", serves a tool at `tool.call`, where an answer skips that
+// deleted files. On Claude Code 2.1.330 no glob selects `tool.run`, so there the allowed call is served at
+// `tool.call`, once Claude Code answered that it came to its run and found no hook. plugins/mods/api.md, "Add a tool", serves a tool at `tool.call`, where an answer skips that
 // check. `tool.run` is in the API types of Claude Code 2.1.326 and is no event on 2.1.322, where a module that
 // names it does not load. So the module names the glob `tool.*` under the tool's matcher and answers where
 // `next.event` is `tool.run`, as the API types say of `on`: "To span versions, ... hook a glob such as `prompt.*`
@@ -532,6 +533,18 @@ async function called($: EngineInterface, e: unknown): Promise<ToolCallResult> {
   return isDone ? { result: text } : { deny: text }
 }
 
+// What Claude Code answers a call of a registered tool that came to its run and found no hook to serve it, as
+// 2.1.330 words it: "p4-temportal registered the tool lifetime but no hook answered this call: add
+// on("tool.run", ...) to the plugin." It is an error of the call that names the plugin's own tool.
+const UNSERVED = 'registered the tool lifetime but no hook answered this call'
+
+// Whether what came back up to `tool.call` is that answer: an error of the call, or a refusal, with those words.
+function isUnserved(out: unknown): boolean {
+  if (!isRecord(out) || !(out.isError === true || typeof out.deny === 'string')) return false
+
+  return [out.deny, out.text, out.result].some(said => typeof said === 'string' && said.includes(UNSERVED))
+}
+
 // Whether this Claude Code raises `tool.run`, by the release its version is built from. A version that cannot be
 // read or is spelled as no release counts as one that does, which every build since 2.1.326 is.
 async function hasRun($: EngineInterface): Promise<boolean> {
@@ -866,12 +879,25 @@ export const register: Register = on => {
 
   on('command.run', { command: 'lifetime' }, async ($, e) => ({ text: await lifetime($, e.args) }))
 
-  // A call of the tool, once it is allowed: of the tool's events the glob selects, `tool.run` alone is answered,
-  // and nothing runs beneath it, since the tool is nothing but that command. Every other event of the tool goes
-  // down as it came, `tool.call` among them, so the permission check stands. The glob stands for `tool.run`
-  // because a module that names an event its Claude Code lacks is refused whole.
-  on('tool.*', { tool: TOOL_ID }, ($, e, next) => (next.event === 'tool.run' ? called($, e) : next(e))).catch(
-    ($, e, next) => (next.event === 'tool.run' ? { deny: 'p4-temportal could not run lifetime.py.' } : next(e)),
+  // A call of the tool. Of the tool's events the glob selects, two are answered, and each only once Claude Code
+  // allowed the call, so the permission check stands before a file is deleted. `tool.run` fires once a call is
+  // allowed, and there the command runs: on Claude Code 2.1.326 to 2.1.328 the glob selects that event. On
+  // 2.1.330 no glob selects it, seen there under `claude plugin test` and in a scripted session: the allowed call
+  // comes to its run, finds no hook, and Claude Code answers with the words of UNSERVED. That answer comes back
+  // up to `tool.call`, where the module runs the command in its place. A call the permission check refused comes
+  // back with its refusal and goes up as it came. The glob stands for `tool.run` because a module that names an
+  // event its Claude Code lacks is refused whole, as 2.1.311 and 2.1.322 refuse one that names `tool.run`. Tried
+  // on those builds and on 2.1.330: a second module file in hooks.json is refused, an event name that is no
+  // string literal is refused, and a naming inside a try is read from the source and refused all the same.
+  on('tool.*', { tool: TOOL_ID }, async ($, e, next) => {
+    if (next.event === 'tool.run') return called($, e)
+    const out = await next(e)
+
+    return next.event === 'tool.call' && isUnserved(out) ? called($, e) : out
+  }).catch(($, e, next) =>
+    next.event === 'tool.run' || (next.event === 'tool.call' && next.called)
+      ? { deny: 'p4-temportal could not run lifetime.py.' }
+      : next(e),
   )
 
   // After a /clear or a resume the process goes on, and the timer with it. Every other reason ends the process.
