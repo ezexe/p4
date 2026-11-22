@@ -81,6 +81,9 @@ In a session ezexe is at it names which change is one whose approach is open in 
 How a plan is shaped and where it moves once it is done is p4-temportal's skill `plan-planner`, which the rule names.
 The rule also says that a plan is looped until two dry rounds in a row or five rounds, as p4-temportal's skill `plan-planner` counts them, that no session that writes is started and no file but the plan is edited before ezexe approves the whole plan, and that `phi.py sections <the plan file>` then prints one start call for each run of its sections.
 A step of a task list that plans stays with the orchestrator, and in plan mode the advice after a task list names no start, a feature step is given no new orchestrator and no work step is nudged to a worker.
+No hook event tells of a change of the permission mode, so p4-phi keeps whether a session plans at each call of `EnterPlanMode` and `ExitPlanMode`, by a record of its own after each, and reads that ahead of the mode it kept at the last prompt.
+At the approval, which is `ExitPlanMode`'s record, an orchestrator is handed the advice on its open work steps and the feature line that plan mode held back.
+A change of the mode by hand inside a turn is seen at the next prompt.
 Where Claude Code has the event `tool.offer`, from 2.1.328 on, the hooks module also keeps `EnterPlanMode` from the model of a session another session started: `phi.py rules` answers the module with the rules' text and with the tools the session's model is not offered, and the module answers the offer of that tool with `isOffered` false under its one glob `tool.*`.
 By the types of `claude-code` a hook of that event answers "whether the loop's model is offered the tool, in its tool list and at its call".
 `ExitPlanMode` is offered as before, so where ezexe types `/plan` in such a session the plan is still put to ezexe, and in a session ezexe is at, with the rule off, or with no answer from python, every tool is offered.
