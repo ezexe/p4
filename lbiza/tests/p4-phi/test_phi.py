@@ -1630,6 +1630,21 @@ class Rules(unittest.TestCase):
         self.assertIs(p4conf.DEFAULTS["phi"]["plan_mode"], True)
         self.assertEqual(p4conf.env_name("phi.plan_mode"), "P4_PHI_PLAN_MODE")
 
+    def test_a_started_sessions_model_is_not_offered_the_tool_its_plan_rule_keeps_it_from(self):
+        """`phi.py rules` answers the hooks module with the rules' text and with the tools the session's model is not
+        offered: `EnterPlanMode` for a session another session started, none for a session ezexe is at, and none
+        where the project leaves the plan rule out."""
+        def answer(host):
+            r = self.t.cli(host, "rules")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual(answer(KID)["withholds"], [phi.PLAN_TOOL])
+        self.assertEqual(answer(TOP)["withholds"], [])
+        self.assertEqual(answer(KID)["rules"], self.t.rules(KID), "beside the text, which is as it was")
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": False}}))
+        self.assertEqual(answer(KID)["withholds"], [], "no plan rule, so nothing is withheld by it")
+        self.assertEqual(phi.withheld_tools(""), [])
+
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
         self.assertIn("that go is ezexe's to give", phi.BUILT_IN)

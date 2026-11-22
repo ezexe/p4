@@ -154,9 +154,9 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `command`: 131 rows, 22 used, 0 open, 109 declined, 0 weighed by nobody
 - `tool`: 124 rows, 55 used, 1 open, 68 declined, 0 weighed by nobody
 - `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
-- `event`: 60 rows, 17 used, 2 open, 41 declined, 0 weighed by nobody
+- `event`: 60 rows, 18 used, 1 open, 41 declined, 0 weighed by nobody
 - `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
-- `used`: 146 rows, 54 watched by a row of misses.ts, 92 with no by-hand call to watch, 0 with neither
+- `used`: 147 rows, 54 watched by a row of misses.ts, 93 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -169,8 +169,13 @@ So those three kinds are in the record as Claude Code 2.1.330 has them, the hook
 The record was made on Claude Code 2.1.326, and the types file of 2.1.330 holds nine events and seven methods more: the events `agent.report`, `tool.offer`, `ui.close`, `vcs.detect`, `vcs.diff`, `vcs.isolate`, `vcs.list`, `vcs.release` and `vcs.status`, and the methods `$.session.machine`, `$.vcs.detect`, `$.vcs.diff`, `$.vcs.isolate`, `$.vcs.list`, `$.vcs.release` and `$.vcs.status`.
 Each has a row since 0.5.32, with the verdict of p4-temportal and of p4-native, which both declined all sixteen: neither draws a pane, answers for a version control system or makes a working copy, the calls of `$.vcs` are marked experimental, and `$.session.machine` names the kernel, the hardware and the JavaScript runtimes, which no p4 plugin asks for.
 p4-phi weighed them in 0.5.38 and declined fourteen: it answers for no version control system, its upkeep reads a worktree by git itself, since that also runs as a command hook where no hooks module loads, it rewrites no agent's report, and it reads the platform from p4-native's map.
-It holds two open: `tool.offer`, by which it would keep `EnterPlanMode` from the model of a session another session started, where its plan rule says so in a sentence today, and `ui.close`, by which it would hear its pane close, where it reads `$.ui.panes` after each look.
-`tool.offer` is in the types of Claude Code from 2.1.328 on and not in those of 2.1.326, which the desktop app's sessions run, and a module that must load on older builds can name it only under its one glob `tool.*`, which would stand in the call of `EnterPlanMode` in every session.
+It held two open, `tool.offer` and `ui.close`.
+`tool.offer` is used since p4-phi 0.11.129: where python says a session was started by another session and its plan rule is on, the module answers the offer of `EnterPlanMode` with `isOffered` false, so the session's model is not given the tool its rule keeps it from.
+The event is in the types of Claude Code from 2.1.328 on, the module names it under its one glob `tool.*`, which a build with no such event hands nothing, and there the rule's sentence stands alone.
+`ExitPlanMode` stays offered, so a plan made where ezexe typed `/plan` in such a session is still put to ezexe.
+Seen in a scripted session on 2.1.328 and on 2.1.330, with a probe plugin that answered so for `Read`: the model replied that it has no such tool.
+Not seen: `EnterPlanMode` withheld in a session, since a scripted run has no such tool and the desktop app's sessions run 2.1.326.
+`ui.close` is open, by which p4-phi would hear its pane close, where it reads `$.ui.panes` after each look.
 `ui.close` is in the types of 2.1.326, 2.1.328 and 2.1.330, and under `claude plugin test` of 2.1.328 and 2.1.330 `$.ui.close` is not a function, so no test can raise it.
 So the record holds 60 module events and 100 module methods, where the paragraphs below count the 51 and the 93 of 2.1.326.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
@@ -240,7 +245,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 146 used rows, 54 are watched by a row of the table and 92 say why none watches them: the 69 hook events, module events and module methods, which only a hooks module hooks or calls, and 23 commands and tools whose work no file or command a session reaches does.
+Of the 147 used rows, 54 are watched by a row of the table and 93 say why none watches them: the 70 hook events, module events and module methods, which only a hooks module hooks or calls, and 23 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.

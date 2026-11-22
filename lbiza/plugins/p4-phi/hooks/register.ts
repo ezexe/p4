@@ -195,9 +195,22 @@ const TOOLS = [
 ] as const
 // How long one of those commands may run.
 const TOOL_MS = 30_000
-// The four as a call names them, which the one hook that serves them is matched on: an array matches any of its
-// names, by the API types of a matcher.
-const OWN_TOOLS = ['mcp__p4-phi__note', 'mcp__p4-phi__done', 'mcp__p4-phi__tree', 'mcp__p4-phi__goal']
+// The four as a call names them, and PLAN_TOOL below as its name stands, which the one glob hook that holds them is
+// matched on: an array matches any of its names, by the API types of a matcher, and it is written out so that the
+// validator reads each name.
+const GLOB_TOOLS = ['mcp__p4-phi__note', 'mcp__p4-phi__done', 'mcp__p4-phi__tree', 'mcp__p4-phi__goal', 'EnterPlanMode']
+
+// The tool the model of a session another session started is not offered, where python's answer to `rules` says so:
+// the plan rule tells such a session to enter no plan mode, since no person answers a plan's approval there, and
+// `tool.offer` keeps the tool out of what its model is given. By the types of `claude-code`, a hook of that event
+// answers "whether the loop's model is offered the tool, in its tool list and at its call", and it comes "Before
+// the loop's first request (or when the tool joins the pool later) and when the model calls the tool". The event is
+// in the types from Claude Code 2.1.328 on. Seen in a scripted session on 2.1.328 and on 2.1.330, with a probe
+// plugin that answered `{ isOffered: false }` for `Read` under a glob `tool.*`: the model replied that it has no
+// such tool. On a build with no such event the glob is handed none, and the rule's sentence stands alone.
+// `ExitPlanMode` is offered as before, so a plan made where ezexe typed `/plan` in such a session is still put to
+// ezexe.
+const PLAN_TOOL = 'EnterPlanMode'
 // The first Claude Code whose API types declare `tool.run`: the types of 2.1.325 have none.
 const RUNS_FROM = [2, 1, 326] as const
 
@@ -249,6 +262,7 @@ type Answer = {
   app_tools?: boolean
   app_sections?: boolean
   rules?: string
+  withholds?: unknown
   dir?: string
   starter?: string
   move?: string
@@ -923,11 +937,45 @@ function record($: EngineInterface, context: SessionContextUsage, limits: readon
 // the settings that turn one off, so it is asked for the text at each render: a system prompt is rendered for a
 // conversation's first request and after a compaction, not at every turn. With no text, as where a setting turns
 // the rules off or no python runs, the prompt is left as composed.
+// What python last answered to `rules`, asked once at a time: the render of a system prompt and an offer of
+// PLAN_TOOL that come together start one process, and a later render asks anew, since a setting may have changed.
+let rulesAsked: Promise<Answer | undefined> | undefined
+let withheld: readonly string[] | undefined
+
+function askRules($: EngineInterface): Promise<Answer | undefined> {
+  rulesAsked ??= ask($, ['rules'], LOOK_MS)
+    .then(answer => {
+      const named: unknown = answer?.withholds
+      withheld = Array.isArray(named) ? named.filter((tool): tool is string => typeof tool === 'string') : []
+
+      return answer
+    })
+    .finally(() => {
+      rulesAsked = undefined
+    })
+
+  return rulesAsked
+}
+
+// Whether this session's model is not offered a tool, by python's last answer, asked for where none came yet. With
+// p4-phi off, or with no answer, every tool is offered.
+async function isWithheld($: EngineInterface, tool: string): Promise<boolean> {
+  try {
+    switches ??= readSwitches($)
+    if ((await switches).isPhiOff) return false
+    if (withheld === undefined) await askRules($)
+
+    return (withheld ?? []).includes(tool)
+  } catch {
+    return false
+  }
+}
+
 async function withRules($: EngineInterface, composed: PromptComposeResult): Promise<PromptComposeResult> {
   try {
     switches ??= readSwitches($)
     if ((await switches).isPhiOff) return composed
-    const text = ((await ask($, ['rules'], LOOK_MS))?.rules ?? '').trim()
+    const text = ((await askRules($))?.rules ?? '').trim()
     if (text === '') return composed
     const others = composed.sections.filter(section => section.id !== RULES_SECTION)
 
@@ -1565,16 +1613,28 @@ export const register: Register = on => {
   // because a module that names an event its Claude Code lacks is refused whole, as 2.1.311 and 2.1.322 refuse one
   // that names `tool.run`. Tried on those builds and on 2.1.330: a second file under `modules` in hooks.json is
   // refused, "names one hooks module per plugin", and an event name that is no string literal is refused.
-  on('tool.*', { tool: OWN_TOOLS }, async ($, e, next) => {
+  //
+  // The same glob holds PLAN_TOOL, for its one event `tool.offer`, which only the glob can name on a build that
+  // lacks it: where python says this session's model is not offered the tool, the answer says so, and every other
+  // event of that tool, and its offer in any other session, goes down as it came.
+  on('tool.*', { tool: GLOB_TOOLS }, async ($, e, next) => {
+    if ((e as { tool?: string }).tool === PLAN_TOOL) {
+      // the name as a plain string: the types of a build older than 2.1.328 hold no such event
+      const isKept = (next.event as string) === 'tool.offer' && (await isWithheld($, PLAN_TOOL))
+
+      return isKept ? ({ isOffered: false } as never) : next(e)
+    }
     if (next.event === 'tool.run') return ownTool($, e)
     const out = await next(e)
 
     return next.event === 'tool.call' && isUnserved(out) ? ownTool($, e) : out
-  }).catch(($, e, next) =>
-    next.event === 'tool.run' || (next.event === 'tool.call' && next.called)
+  }).catch(($, e, next) => {
+    if ((e as { tool?: string }).tool === PLAN_TOOL) return next(e)
+
+    return next.event === 'tool.run' || (next.event === 'tool.call' && next.called)
       ? { deny: 'p4-phi could not run phi.py.' }
-      : next(e),
-  )
+      : next(e)
+  })
 
   // The command a person types to see the pane. Nothing runs beneath, since the command is nothing but this.
   on('command.run', { command: 'phi-pane' }, async $ => ({ text: await openPane($) })).catch(() => ({

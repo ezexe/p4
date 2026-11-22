@@ -1851,11 +1851,25 @@ def rules_section():
     return builtin_text(started=bool(above))
 
 
+PLAN_TOOL = "EnterPlanMode"
+
+
+def withheld_tools(text):
+    """The tools the model of a session is not offered, for the rules' text the session is handed: `EnterPlanMode`
+    where the text holds the plan rule in the words for a session another session started. That rule keeps such a
+    session out of plan mode in a sentence, and where Claude Code has the event `tool.offer`, from 2.1.328 on, the
+    hooks module answers it for this tool, so the model is not shown what it is told not to call. `ExitPlanMode`
+    stays offered, so the session still plans where ezexe enters plan mode there with `/plan`."""
+    return [PLAN_TOOL] if PLAN_STARTED in str(text or "") else []
+
+
 def rules_main():
-    """`phi.py rules`: one JSON line for the hooks module, `{"rules": <the section's text>}`. A failure prints
-    nothing, so the module adds no section, and leaves its line in the session's log."""
+    """`phi.py rules`: one JSON line for the hooks module, `{"rules": <the section's text>, "withholds": <the tools
+    the session's model is not offered>}`. A failure prints nothing, so the module adds no section and withholds
+    nothing, and leaves its line in the session's log."""
     try:
-        sys.stdout.write(json.dumps({"rules": rules_section()}) + "\n")
+        text = rules_section()
+        sys.stdout.write(json.dumps({"rules": text, "withholds": withheld_tools(text)}) + "\n")
     except Exception as e:  # noqa: BLE001
         log_failure("rules", {}, e)
     return 0

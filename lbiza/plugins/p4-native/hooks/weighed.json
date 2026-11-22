@@ -3723,17 +3723,15 @@
   },
   "tool.offer": {
    "kind": "event",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace the sentence of its plan rule that keeps a session another session started from calling `EnterPlanMode` with that tool's absence from the session's model, where Claude Code has the event, from 2.1.328 on."
-   },
    "declined": {
     "p4-temportal": "it registers its one tool and changes what no loop is offered.",
     "p4-native": "the map reads the session's tools by `$.tool.list`, and what one loop's model is offered is no fact of the host."
    },
-   "says": "One tool of a loop's pool, at the moment the engine offers it to that loop's model."
+   "says": "One tool of a loop's pool, at the moment the engine offers it to that loop's model.",
+   "nowatch": "Only a hooks module hooks it, on Claude Code 2.1.328 or later: a session has no call that does this by hand."
   },
   "ui.close": {
    "kind": "event",

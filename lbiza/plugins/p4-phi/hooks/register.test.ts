@@ -52,6 +52,8 @@ type Machine = {
   look?: (args: readonly string[]) => Answer | Promise<Answer>
   // What `phi.py rules` prints as the system prompt's section: none where a setting turns the rules off.
   rules?: string
+  // The tools python says this session's model is not offered, beside the rules' text.
+  withholds?: readonly string[]
   // What a write waits on before it lands, as a slow disk does.
   write?: (path: string) => Promise<void>
   usage?: SessionUsage
@@ -334,7 +336,7 @@ function machine(on: On, has: Machine): Seen {
       seen.calls.push({ argv: e.argv, env: e.init?.env })
       if (args[0] === 'rules') {
         seen.asked.push([...args])
-        stdout = `${JSON.stringify({ rules: has.rules ?? '' })}\n`
+        stdout = `${JSON.stringify({ rules: has.rules ?? '', withholds: has.withholds ?? [] })}\n`
       } else if (args[0] === 'goal' && args[1] !== 'ask') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ set: true })}\n`
@@ -2908,4 +2910,80 @@ test('the calls of a batch that failed are named to the PostToolBatch command ho
   await $.classic.PostToolBatch({ tool_calls: [list, { ...read, tool_use_id: 'toolu_09' }] })
   expect(batches[1]?.p4_failed).toEqual([])
   expect(batches[2]?.p4_failed).toEqual(['toolu_09'])
+})
+
+// `tool.offer`, which Claude Code has from 2.1.328 on: a test raises it where its kit can, and a kit with no such
+// event answers NO_OFFER, where the module is whole and the plan rule's sentence stands alone.
+const NO_OFFER = 'the kit has no tool.offer'
+const PLAN_TOOL = 'EnterPlanMode'
+async function offerOf($: unknown, tool: string): Promise<unknown> {
+  try {
+    const raise = $ as { tool: { offer: (e: unknown) => Promise<unknown> } }
+
+    return await raise.tool.offer({ tool, provider: { plugin: 'engine', tier: 'core' } })
+  } catch (error) {
+    if (String(error).includes('is not a function')) return NO_OFFER
+    throw error
+  }
+}
+
+// What is beneath the module for the plan tool and for an offer: the engine offers every tool, allows a call of the
+// plan tool and runs it.
+function beneathOffers(on: On): string[] {
+  const came: string[] = []
+  on('tool.*', (_, e, next) => {
+    const event = next.event as string
+    const tool = String((e as { tool?: string }).tool)
+    if (event !== 'tool.offer' && tool !== PLAN_TOOL) return next(e as never) as never
+    came.push(`${event} ${tool}`)
+
+    if (event === 'tool.offer') return { isOffered: true } as never
+
+    return (event === 'tool.check' ? ALLOW : { result: 'plan mode entered', text: 'plan mode entered' }) as never
+  })
+
+  return came
+}
+
+test("the model of a session another session started is not offered the plan tool, and the tool's other events go down", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const came = beneathOffers(on)
+  const seen = machine(on, { rules: RULES, withholds: [PLAN_TOOL] })
+
+  const first = await offerOf($, PLAN_TOOL)
+  if (first === NO_OFFER) return
+  expect(first).toEqual({ isOffered: false })
+  expect(came).toEqual([])
+  // python is asked once, and its answer serves the next offer and the render of the system prompt's section
+  expect(await offerOf($, PLAN_TOOL)).toEqual({ isOffered: false })
+  expect(seen.asked).toEqual([['rules']])
+
+  // a tool of the plugin's own, held by the same glob, is offered as the engine says
+  expect(await offerOf($, 'mcp__p4-phi__note')).toEqual({ isOffered: true })
+  // a call of the plan tool, as where ezexe's own message asks for plan mode, goes down to the engine's own check
+  await $.tool.call({ tool: PLAN_TOOL } as never)
+  expect(came[0]).toBe('tool.offer mcp__p4-phi__note')
+  expect(came).toContain(`tool.check ${PLAN_TOOL}`)
+})
+
+test('a session ezexe is at is offered the plan tool, and so is every session where python gives no answer', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const came = beneathOffers(on)
+  machine(on, { rules: RULES, withholds: [] })
+
+  const first = await offerOf($, PLAN_TOOL)
+  if (first === NO_OFFER) return
+  expect(first).toEqual({ isOffered: true })
+  expect(came).toEqual([`tool.offer ${PLAN_TOOL}`])
+})
+
+test('with no python to ask, the plan tool is offered as the engine says', async ($, on) => {
+  mock.env(on, {})
+  const came = beneathOffers(on)
+  machine(on, { files: {}, pythons: {}, rules: RULES, withholds: [PLAN_TOOL] })
+
+  const first = await offerOf($, PLAN_TOOL)
+  if (first === NO_OFFER) return
+  expect(first).toEqual({ isOffered: true })
+  expect(came).toEqual([`tool.offer ${PLAN_TOOL}`])
 })
