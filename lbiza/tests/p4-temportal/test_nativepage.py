@@ -158,7 +158,9 @@ class Page(unittest.TestCase):
                 "Seen in the desktop app on Claude Code 2.1.326, in a session in plan mode whose worktree's own",
                 "91,362 tokens to 18,383",
                 "with the plugin as its origin", "the session's last prompt", "The plugin's list was not drawn in view", "was not the first one due", "was not seen itself",
-                "keeps the end of the last turn in the session's state", "no live session has shown it")),
+                "keeps the end of the last turn in the session's state", "Seen since in the desktop app",
+                "about a second into the quiet minute", "60.3 seconds after that turn's end",
+                "had kept in the session's state", "Not seen: a reload that a plugin update makes")),
             "whether the cleanup reaches a plansDirectory": (open_still, (
                 "Seen in the desktop app on Claude Code 2.1.326, one sweep did not", "at most once per session",
                 "ten minutes and six or seven seconds", "in the session's own plans folder stayed",
@@ -170,7 +172,8 @@ class Page(unittest.TestCase):
                 "a <code>.claude/p4</code> of its own",
                 "copies its plans, its notebook and its saved code into the main checkout's store",
                 "the path resolves outside the project root", "still there after the worktree was removed",
-                "Not seen in the desktop app")),
+                "in a session whose worktree the app had made", "within a second of a call of the lifetime tool",
+                "Two notes of a second such session arrived the same way")),
         }
         for what, (where, words) in seen.items():
             for said in words:
@@ -252,6 +255,24 @@ class Page(unittest.TestCase):
                      "It rests on the words of that error", "which fails closed", "<code>engines</code>"):
             self.assertIn(said, open_still, said)
         self.assertIn("as the entry on that build below sets out", rows(text)["lifetimes"])
+
+    def test_three_checks_seen_live_in_the_desktop_app_are_on_the_page(self):
+        """The command /native, a hooks module loaded anew inside the quiet minute, and what a worktree session
+        keeps reaching the main checkout's store: each with what it showed and what it did not."""
+        text = page()
+        found = rows(text)
+        native = found["lifetimes"]
+        for said in ("<code>/native map</code>", "with the module's own map and not with the skill's page",
+                     "p4-native 0.5.17", "by <code>$.command.run</code>", "A person's own typing was not seen",
+                     "isn't available over a remote connection"):
+            self.assertIn(said, native, said)
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        for said in ("a development copy of p4-temportal 0.3.46", "left p4-temportal's module as it was: no sweep",
+                     "07:06:54.086 UTC", "07:07:54.372", "103,651 tokens",
+                     "nothing after the command's name", "one entry of the SessionStart hook's additional context"):
+            self.assertIn(said, open_still, said)
+        self.assertNotIn("no live session has shown it", text)
+        self.assertNotIn("Not seen in the desktop app.", found["plans"])
 
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
