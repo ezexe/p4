@@ -8,6 +8,11 @@ on:
   pull_request:
   push:
     branches: [main]
+  # The plugins job installs the newest Claude Code each time, so a new build can turn main red with no push to show
+  # it. One run a day, on main as it stands, shows it within the day, and GitHub writes to whoever last changed this
+  # schedule when that run fails.
+  schedule:
+    - cron: "17 5 * * *"
   # The release workflow runs these jobs before it tags a plugin's version.
   workflow_call:
 
@@ -15,9 +20,10 @@ permissions:
   contents: read
 
 # Called by the release workflow, github.workflow is that workflow's name, so its run of these jobs waits on no run
-# of this workflow and is cancelled by none.
+# of this workflow and is cancelled by none. The daily run has a group of its own, so it waits on no push's run and
+# takes the place of none that waits.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
