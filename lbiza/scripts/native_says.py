@@ -81,18 +81,25 @@ def methods_of(types):
 
 
 def events_of(types):
-    """Each event of the hooks module with what its input's comment says after `The input of`."""
-    out = {}
+    """Each event of the hooks module with what its input's comment says after `The input of`. A comment can name
+    two events and put a folder's name in brackets after the event's. The second answer holds every event a comment
+    names at all, with a line or with none, so an event is known to exist however its comment goes on."""
+    out, named = {}, set()
     for at, line in enumerate(types):
-        found = re.search(r"\* The input of `([a-z]+\.[A-Za-z.]+)`: (.*)$", line)
+        named.update(re.findall(r"`([a-z]+\.[A-Za-z.]+)`", line.split("The input of", 1)[1].split(":", 1)[0].split(";", 1)[0])
+                     if "* The input of `" in line else [])
+        found = re.search(r"\* The input of `([a-z]+\.[A-Za-z.]+)`(?: and `([a-z]+\.[A-Za-z.]+)`)?(?: \([^)]*\))?: (.*)$", line)
         if not found:
+            # a comment that goes on after a semicolon says how the input is held, and not what the event is
             continue
-        rest, on = [found.group(2)], at + 1
+        rest, on = [found.group(3)], at + 1
         while on < len(types) and types[on].strip().startswith("*") and not types[on].strip().startswith("*/"):
             rest.append(types[on])
             on += 1
-        out.setdefault(found.group(1), first_sentence(rest))
-    return out
+        for name in (found.group(1), found.group(2)):
+            if name:
+                out.setdefault(name, first_sentence(rest))
+    return out, named
 
 
 def hooks_of(page):
@@ -129,19 +136,22 @@ def main():
     rows = record["rows"]
     types = Path(args.types).read_text(encoding="utf-8").split("\n")
     methods, calls = methods_of(types)
+    events, named = events_of(types)
     read = {
         "method": methods,
-        "event": events_of(types),
+        "event": events,
         "hook": hooks_of(Path(args.hooks).read_text(encoding="utf-8")),
     }
+    # what the sources hold of a kind, by name: a line is read off every property under a noun, so only a name
+    # declared as a call counts as a method, and an event counts wherever a comment names its input
+    known = {"method": calls, "event": named, "hook": set(read["hook"])}
     for kind, got in read.items():
         have = {key for key, row in rows.items() if row["kind"] == kind}
         for key in sorted(have):
             line = got.get(key) or KIND_LINE.get(kind)
             if line:
                 rows[key]["says"] = line
-        # a line is read off every property under a noun, so only a name declared as a call counts as a new method
-        new = sorted(key for key in set(got) - have if kind != "method" or key in calls)
+        new = sorted(known[kind] - have)
         print(f"{kind}: {len(have)} rows, {sum(1 for key in have if key in got)} with a line of their own, "
               f"{len(new)} in the sources with no row: {', '.join(new) or 'none'}; "
               f"rows the sources no longer hold: {', '.join(sorted(have - set(got))) if kind == 'hook' else 'not read for this kind'}")

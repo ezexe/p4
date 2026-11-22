@@ -20,6 +20,11 @@ WALKED = ("command", "tool", "hook", "event", "method")
 # the functions of the state library a module imports from `claude-code`, each with the methods of `$` it calls
 STATE_HELPERS = {"read": ("$.state.get",), "update": ("$.state.get", "$.state.set")}
 PLUGIN_NAMES = sorted(p.name for p in PLUGINS.iterdir() if (p / ".claude-plugin" / "plugin.json").is_file())
+# the events and methods of Claude Code 2.1.330 that p4-phi has still to weigh: each row carries the other two
+# plugins' verdicts, and the session that adds p4-phi's takes the row's key out of this list
+AWAITS_P4_PHI = ("agent.report", "tool.offer", "ui.close", "vcs.detect", "vcs.diff", "vcs.isolate", "vcs.list", "vcs.release",
+                 "vcs.status", "$.session.machine", "$.vcs.detect", "$.vcs.diff", "$.vcs.isolate", "$.vcs.list", "$.vcs.release",
+                 "$.vcs.status")
 
 
 def verdict(row):
@@ -156,7 +161,7 @@ class RecordTest(unittest.TestCase):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
         self.assertEqual(ROWS["PostToolBatch"]["open"], ["p4-phi"])
         counts = {kind: sum(1 for row in ROWS.values() if row["kind"] == kind) for kind in KINDS}
-        self.assertEqual((counts["event"], counts["method"]), (51, 93))
+        self.assertEqual((counts["event"], counts["method"]), (60, 100))
         for key in ("$.mcp.call", "$.store.get", "$.model.complete", "$.ui.ask", "tool.describe", "ui.press"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
 
@@ -234,7 +239,25 @@ class RecordTest(unittest.TestCase):
     def test_a_declined_row_gives_each_of_the_three_plugins_a_reason_once_walked(self):
         for key, row in ROWS.items():
             if row["kind"] in ("hook", "event", "method") and verdict(row) == "declined":
-                self.assertEqual(sorted(row["declined"]), PLUGIN_NAMES, key)
+                want = [name for name in PLUGIN_NAMES if not (name == "p4-phi" and key in AWAITS_P4_PHI)]
+                self.assertEqual(sorted(row["declined"]), want, key)
+
+    def test_the_record_holds_every_event_and_method_of_claude_code_2_1_330(self):
+        """The types file of Claude Code 2.1.330 holds nine events and seven methods the record of 2.1.326 lacked.
+        Each has a row with p4-temportal's and p4-native's verdict. p4-phi has still to weigh them, so its name is
+        on none of them, and the row of one it weighs leaves `AWAITS_P4_PHI`."""
+        self.assertEqual(RECORD["claude"], "2.1.330")
+        self.assertEqual(len(AWAITS_P4_PHI), 16)
+        for key in AWAITS_P4_PHI:
+            row = ROWS[key]
+            self.assertEqual(row["kind"], "method" if key.startswith("$.") else "event", key)
+            self.assertEqual(sorted(row["declined"]), ["p4-native", "p4-temportal"], key)
+            for name in ("used", "open", "would"):
+                self.assertNotIn("p4-phi", row.get(name) or [], key)
+            self.assertTrue(row.get("says"), key)
+        inventory = README.split("## The inventory\n", 1)[1].split("\n## ", 1)[0]
+        for words in ("as Claude Code 2.1.330 has them", "`vcs.diff`", "`$.session.machine`", "p4-phi has still to weigh"):
+            self.assertIn(words, inventory)
 
 
 class ModuleTest(unittest.TestCase):

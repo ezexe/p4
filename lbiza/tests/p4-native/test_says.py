@@ -45,6 +45,10 @@ TYPES = """\
    * of attached clients. Every field is the engine's.
    */
   export type SessionAttachInput = {
+  /**
+   * The input of `vcs.diff`; every key is pinned, so no hook passes another down.
+   */
+  export type VcsDiffInput = {
 """.split("\n")
 HOOKS = """\
 ## Hook lifecycle
@@ -144,7 +148,11 @@ class ScriptTest(unittest.TestCase):
         self.assertEqual(calls, {"$.session.root", "$.session.machine"})
 
     def test_an_events_line_is_what_its_inputs_comment_says(self):
-        self.assertEqual(SAYS.events_of(TYPES), {"session.attach": "A surface joined the session's roster of attached clients."})
+        said, named = SAYS.events_of(TYPES)
+        self.assertEqual(said, {"session.attach": "A surface joined the session's roster of attached clients."})
+        # a comment that goes on after a semicolon gives no line, and its event is known to exist all the same,
+        # which is how `vcs.diff` once had no row and was not printed as missing
+        self.assertEqual(named, {"session.attach", "vcs.diff"})
 
     def test_a_hook_events_line_is_its_cell_of_the_lifecycle_table_with_no_link(self):
         self.assertEqual(SAYS.hooks_of(HOOKS), {"SessionStart": "When a session begins or resumes.",
@@ -159,11 +167,11 @@ class ScriptTest(unittest.TestCase):
         self.assertIn(r"/^- \[[^\]]+\]\(https:\/\/code\.claude\.com\/docs\/en\/([^)]+)\)/gm", pages, "the module reads the index the same way")
 
     def test_the_readme_says_what_the_script_read_and_what_has_no_row(self):
-        for words in ("`lbiza/scripts/native_says.py`", "33 of 33 hook events", "of 51 module events", "93 of 93 module methods",
+        for words in ("`lbiza/scripts/native_says.py`", "33 of 33 hook events", "of 60 module events", "100 of 100 module methods",
                       "`agent.report`", "`$.session.machine`", "Not tested: the fetch in the desktop app"):
             self.assertIn(words, SECTION)
         own = sum(1 for row in ROWS.values() if row["kind"] == "event" and not row["says"].startswith("An event of the hooks module"))
-        self.assertIn(f"{own} of 51 module events", SECTION)
+        self.assertIn(f"{own} of 60 module events", SECTION)
 
 
 if __name__ == "__main__":

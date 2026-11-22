@@ -1,5 +1,5 @@
 {
- "claude": "2.1.326",
+ "claude": "2.1.330",
  "rows": {
   "$.agent.call": {
    "kind": "method",
@@ -853,6 +853,62 @@
     "p4-native": "no plugin ships WebAssembly."
    },
    "says": "Compiles a WebAssembly binary and resolves with its `WebAssembly.Module`, to instantiate with the standard API or hand to emscripten's or wasm-bindgen's glue."
+  },
+  "$.session.machine": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "the runtimes it names are those of JavaScript, and the module proves the python it runs by one run and reads the platform from p4-native's map.",
+    "p4-native": "the map holds the platform by `$.session.info`, and no p4 plugin asks for the kernel, the hardware or the runtimes."
+   },
+   "says": "Returns the machine the engine runs on: the system, kernel release and hardware as `uname -s`, `-r` and `-m` print them, and which of npm, yarn, pnpm, bun, deno and node are on the PATH."
+  },
+  "$.vcs.detect": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "lifetime.py finds a worktree's main checkout by git itself, since it also runs as a command hook where no hooks module loads, and the module reads it by `$.session.repo`.",
+    "p4-native": "the module reads the main checkout by `$.session.repo`, and the call is marked experimental."
+   },
+   "says": "Returns the working copy a folder is in, the event `vcs.detect`; null when it is in none."
+  },
+  "$.vcs.diff": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "the list a compaction keeps is built from the session's own tool calls, and no diff of a working copy is read.",
+    "p4-native": "it reads no diff of a working copy."
+   },
+   "says": "Returns what changed in a working copy, the event `vcs.diff`; `unknown` where no hook can say."
+  },
+  "$.vcs.isolate": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "it makes no working copy.",
+    "p4-native": "it makes no working copy."
+   },
+   "says": "Asks the hooks to isolate a folder: the event `vcs.isolate`."
+  },
+  "$.vcs.list": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "lifetime.py finds a worktree's main checkout by git itself, since it also runs as a command hook where no hooks module loads, and the module reads it by `$.session.repo`.",
+    "p4-native": "it lists no working copy of a repository."
+   },
+   "says": "Lists the working copies of the repository holding `path`: the event `vcs.list`."
+  },
+  "$.vcs.release": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "it removes no working copy.",
+    "p4-native": "it removes no working copy."
+   },
+   "says": "Asks the hooks to take a working copy away: the event `vcs.release`."
+  },
+  "$.vcs.status": {
+   "kind": "method",
+   "declined": {
+    "p4-temportal": "it asks nothing of a working copy's state.",
+    "p4-native": "it asks nothing of a working copy's state."
+   },
+   "says": "Asks what a working copy holds: the event `vcs.status`."
   },
   "/__remote-workflow": {
    "kind": "command",
@@ -3293,7 +3349,7 @@
     "p4-temportal": "the prompt box is ezexe's interface.",
     "p4-native": "the prompt box is ezexe's interface."
    },
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+   "says": "The prompt box after a change of its text that no `prompt.edit` carried, and who made it."
   },
   "prompt.compose": {
    "kind": "event",
@@ -3319,7 +3375,7 @@
     "p4-temportal": "the prompt box is ezexe's interface.",
     "p4-native": "the prompt box is ezexe's interface."
    },
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+   "says": "One edit the person makes in the prompt box, as the draft before it and the splice the editor made of it."
   },
   "prompt.fill": {
    "kind": "event",
@@ -3328,7 +3384,7 @@
     "p4-temportal": "the prompt box is ezexe's interface.",
     "p4-native": "the prompt box is ezexe's interface."
    },
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+   "says": "A text about to be put in the prompt box as the person's draft, over it, after it, or at the cursor."
   },
   "prompt.mention": {
    "kind": "event",
@@ -3364,7 +3420,7 @@
     "p4-temportal": "the prompt box is ezexe's interface.",
     "p4-native": "the prompt box is ezexe's interface."
    },
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+   "says": "A text about to be shown dim in the empty prompt box, for Tab (or the right arrow) to take."
   },
   "session.append": {
    "kind": "event",
@@ -3495,7 +3551,7 @@
     "p4-phi",
     "p4-temportal"
    ],
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`.",
+   "says": "The tool, the call's id, the tool's arguments beside them (`e.command` for Bash), and `agentId` in a subagent.",
    "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "tool.check": {
@@ -3530,7 +3586,7 @@
     "p4-phi",
     "p4-temportal"
    ],
-   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`.",
+   "says": "The tool, the call's id, the tool's arguments beside them (`e.command` for Bash), and `agentId` in a subagent.",
    "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "turn.complete": {
@@ -3650,6 +3706,78 @@
     "p4-native": "p4-phi's pane draws no `Select`."
    },
    "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+  },
+  "agent.report": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "agents and their reports are p4-phi's.",
+    "p4-native": "it reads the host and no agent's report."
+   },
+   "says": "One report of an agent, before it reaches the loop that waits for it."
+  },
+  "tool.offer": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it registers its one tool and changes what no loop is offered.",
+    "p4-native": "the map reads the session's tools by `$.tool.list`, and what one loop's model is offered is no fact of the host."
+   },
+   "says": "One tool of a loop's pool, at the moment the engine offers it to that loop's model."
+  },
+  "ui.close": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it draws nothing.",
+    "p4-native": "it draws no pane."
+   },
+   "says": "The pane closing and why (PaneCloseOrigin)."
+  },
+  "vcs.detect": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "The folder asked about."
+  },
+  "vcs.diff": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "An event of the hooks module, which a plugin's module hooks with `on`: its types are in the skill `plugin-authoring`."
+  },
+  "vcs.isolate": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "Who needs a working copy of its own, and what to make it from."
+  },
+  "vcs.list": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "A folder of the repository asked about."
+  },
+  "vcs.release": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "The working copy to take away, and why."
+  },
+  "vcs.status": {
+   "kind": "event",
+   "declined": {
+    "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
+    "p4-native": "it answers for no version control system, which is what a hook of this event does."
+   },
+   "says": "The working copy asked about."
   },
   "docs:overview": {
    "kind": "doc",

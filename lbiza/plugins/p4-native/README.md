@@ -144,9 +144,9 @@ An answer kept under the first rule is compared with nothing.
 ## The inventory
 
 The audits of Claude Code's slash commands, tools and features against p4-phi and p4-temportal were made by hand, row by row.
-`hooks/weighed.json` keeps what they came to as one record, 635 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
+`hooks/weighed.json` keeps what they came to as one record, 651 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
 A row is a slash command, a tool, a hook event, an event of the hooks module or a method of it, and it says which plugins use it, which declined it and why, which hold it open, or that it was weighed by nobody.
-430 rows are of those five kinds, and 205 are of a sixth, `doc`, one for each page of the docs index, which carry no verdict.
+446 rows are of those five kinds, and 205 are of a sixth, `doc`, one for each page of the docs index, which carry no verdict.
 A key that ends in `__` stands for every tool of that server, and one that ends in `*` for every name that begins with it.
 
 What the record comes to, by kind, as `/native weighed` prints it.
@@ -154,8 +154,8 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
 - `tool`: 122 rows, 49 used, 6 open, 67 declined, 0 weighed by nobody
 - `hook`: 33 rows, 14 used, 1 open, 18 declined, 0 weighed by nobody
-- `event`: 51 rows, 17 used, 0 open, 34 declined, 0 weighed by nobody
-- `method`: 93 rows, 37 used, 0 open, 56 declined, 0 weighed by nobody
+- `event`: 60 rows, 17 used, 0 open, 43 declined, 0 weighed by nobody
+- `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
 - `used`: 137 rows, 53 watched by a row of misses.ts, 84 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
@@ -165,7 +165,11 @@ The counts answer who builds on a thing, and the section below gives what a sess
 A plugin's own command and another server's tool are no part of the host and are left out.
 
 A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
-So those three kinds are in the record as Claude Code 2.1.326 has them, the hook events read from `hooks.md` and the module's events and methods from that build's types file, and a newer build's are walked by hand.
+So those three kinds are in the record as Claude Code 2.1.330 has them, the hook events read from `hooks.md` and the module's events and methods from that build's types file, and a newer build's are walked by hand.
+The record was made on Claude Code 2.1.326, and the types file of 2.1.330 holds nine events and seven methods more: the events `agent.report`, `tool.offer`, `ui.close`, `vcs.detect`, `vcs.diff`, `vcs.isolate`, `vcs.list`, `vcs.release` and `vcs.status`, and the methods `$.session.machine`, `$.vcs.detect`, `$.vcs.diff`, `$.vcs.isolate`, `$.vcs.list`, `$.vcs.release` and `$.vcs.status`.
+Each has a row since 0.5.32, with the verdict of p4-temportal and of p4-native, which both declined all sixteen: neither draws a pane, answers for a version control system or makes a working copy, the calls of `$.vcs` are marked experimental, and `$.session.machine` names the kernel, the hardware and the JavaScript runtimes, which no p4 plugin asks for.
+p4-phi has still to weigh those sixteen, so its name is on none of them, and the record's test lists them until it has.
+So the record holds 60 module events and 100 module methods, where the paragraphs below count the 51 and the 93 of 2.1.326.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
 The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, one is open, and one that was open is used.
 An open row names each plugin it would serve and, under `would`, what it would replace or add there.
@@ -203,7 +207,7 @@ So each row also says what the thing does, in Claude Code's own words, and that 
 
 - A slash command's and a tool's line is its own description, which the module reads from the session when it is asked, by `$.command.list` and `$.tool.list`, so it is the build's own at every version and the record keeps no copy.
 - A hook event's line is its row of the lifecycle table of `hooks.md`, and a module event's and a module method's is the first sentence of its own comment in the types file.
-- A module cannot list those three kinds, so `lbiza/scripts/native_says.py` writes their lines into the record at each change of version: 33 of 33 hook events, 41 of 51 module events and 93 of 93 module methods have a line of their own, and the other 10 events say their kind.
+- A module cannot list those three kinds, so `lbiza/scripts/native_says.py` writes their lines into the record at each change of version: 33 of 33 hook events, 55 of 60 module events and 100 of 100 module methods have a line of their own, and the other 5 events say their kind.
 - A row of the kind `doc` stands for one page of the docs index, https://code.claude.com/docs/llms.txt, with the page's title and description as its line and its address under `page`: 205 rows.
 - A settings key, an environment variable, a command-line flag and a feature with no command or tool have no row of their own, and are found through the page that holds them.
 
@@ -223,8 +227,8 @@ Seen in a scripted run on Claude Code 2.1.328 and on 2.1.330: a hooks module's `
 Seen in a scripted run on Claude Code 2.1.328, with the plugin loaded by `--plugin-dir`: `/native compact` printed `/compact` with the build's own description, "Free up context by summarizing the conversation so far", then `$.session.compact`, `/autocompact`, the hook events `PostCompact` and `PreCompact`, the module event `session.compact` and two docs pages, each with its line, and `/native docs` fetched the index and found a row for each of its 205 pages.
 Not tested: the fetch in the desktop app.
 Not seen live: the notice of a change of version, and the line at a later session's first prompt.
-Held against the types file of Claude Code 2.1.330, the record has no row for 8 module events, `agent.report`, `tool.offer`, `ui.close`, `vcs.detect`, `vcs.isolate`, `vcs.list`, `vcs.release` and `vcs.status`, nor for 7 module methods, `$.session.machine` and the six of `$.vcs`.
-The script prints them at each run, and adds none, since a row carries each plugin's verdict, which is a walk made by hand.
+Held against the types file of Claude Code 2.1.330, the record had no row for nine module events and seven module methods, `agent.report` and `$.session.machine` among them, which the script printed and which have a row since 0.5.32.
+The script prints such names at each run and adds none, since a row carries each plugin's verdict, which is a walk made by hand.
 
 ## One line at a miss
 
