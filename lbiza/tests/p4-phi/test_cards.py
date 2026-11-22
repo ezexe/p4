@@ -160,6 +160,31 @@ class TheSet(unittest.TestCase):
     def tools(self):
         return sorted(r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__"))
 
+    def test_a_script_told_the_main_checkout_reads_its_settings_from_a_worktree(self):
+        """A session in a git worktree: its command hooks run with `CLAUDE_PROJECT_DIR` at the main checkout's root,
+        and p4-phi's hooks module now hands its scripts that same folder, by `$.process.hookEnv`, where it handed
+        the session's own. So a script the module runs reads `phi.upkeep` and `phi.cards` from the main checkout's
+        p4.json, as a command hook does, and not from a store the worktree holds."""
+        import phi
+        say_yes(self.p4)
+        p4conf.set_key(self.p4, "phi.upkeep", True)
+        worktree = os.path.join(self.proj, ".claude", "worktrees", "w1")
+        os.makedirs(os.path.join(worktree, ".claude", "p4"))           # a store of its own, which says neither
+        apps = os.path.join(self._tmp.name, "app")
+        os.makedirs(apps)
+        payload = {"session_id": "cli-w1", "cwd": worktree}
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.proj, "P4_PHI_APP_SESSIONS": apps}):
+            me = phi.Me(payload)
+            self.assertEqual(os.path.normcase(me.store), os.path.normcase(self.p4), "the main checkout's store")
+            self.assertTrue(phi.cards_on(me))
+            self.assertTrue(p4conf.upkeep_on(me.store))
+        # as the module told it before: the session's own folder, whose store holds neither setting
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": worktree, "P4_PHI_APP_SESSIONS": apps}):
+            me = phi.Me(payload)
+            self.assertEqual(os.path.normcase(me.store), os.path.normcase(os.path.join(worktree, ".claude", "p4")))
+            self.assertFalse(phi.cards_on(me))
+            self.assertFalse(p4conf.upkeep_on(me.store))
+
     def test_a_yes_given_under_the_earlier_rule_is_carried_over_once_with_no_card(self):
         """Until the keeper knew the record of a yes, `phi.cards` alone put the set in force, and ezexe's yes of
         2026-11-19 was given under that rule. An upgrade takes no yes back and asks for none again: the first whole

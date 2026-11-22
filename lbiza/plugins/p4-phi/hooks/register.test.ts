@@ -78,6 +78,11 @@ type Machine = {
   version?: () => { version: string; base?: string } | undefined
   // The build has no `$.session.info`, as Claude Code 2.1.311 and 2.1.322 have none.
   hasNoInfo?: true
+  // What `$.process.hookEnv` answers, the variables a command hook of the session gets, where a test gives them:
+  // none stands for a call that rejects, and a machine that names no such answer for a build with no such method.
+  hookEnv?: () => Record<string, string> | undefined
+  // The session's own folder, where it is not the project's: a git worktree's.
+  root?: string
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
 }
@@ -105,6 +110,8 @@ type Seen = {
   commands: { name: string; description: string }[]
   // How often the module asked `$.session.info`, which a build with no such method never reaches.
   infos: number
+  // How often the module's call of `$.process.hookEnv` came down, which a build with no such method never does.
+  envs: number
   panes: { id: string; title?: string }[]
 }
 
@@ -151,6 +158,7 @@ function machine(on: On, has: Machine): Seen {
     ran: [],
     commands: [],
     infos: 0,
+    envs: 0,
     panes: [],
   }
   on('command.register', (_, e) => {
@@ -194,7 +202,18 @@ function machine(on: On, has: Machine): Seen {
     return { value: undefined }
   })
   on('session.id', () => ({ value: 'cli-0001' }))
-  on('session.root', () => ({ value: '/work/project' }))
+  on('session.root', () => ({ value: has.root ?? '/work/project' }))
+  // `$.process.hookEnv`, which Claude Code 2.1.311 and 2.1.322 lack: a glob stands for it, since a test file that
+  // names an event its build lacks is refused whole. Every other event of `process` goes down as it came.
+  if (has.hookEnv !== undefined) {
+    on('process.*', (_, e, next) => {
+      if (next.event !== 'process.hookEnv') return next(e as never) as never
+      seen.envs += 1
+      const env = has.hookEnv?.()
+
+      return (env === undefined ? { deny: 'the data folder could not be made' } : { value: env }) as never
+    })
+  }
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.receive', (_, e) => ({ text: e.text }))
@@ -2606,4 +2625,110 @@ test("a session with no tool of the sidebar asks for one once, and its sessions 
   expect(calls.filter(tool => tool.startsWith('mcp__ccd_sidebar__'))).toEqual(['mcp__ccd_sidebar__list_sections'])
   expect(calls.filter(tool => tool.endsWith('get_session')).length).toBe(3)
   expect(kept(seen).map(write => write.text.includes('"sections"'))).toEqual([false, false, false])
+})
+
+// The variables a command hook gets in a session the desktop app started in a git worktree, as `$.process.hookEnv`
+// answers them: the project is the main checkout, and the session's own folder is the worktree.
+const MAIN = '/work/main'
+const WORKTREE = '/work/main/.claude/worktrees/w1'
+const HOOK_ENV = {
+  CLAUDECODE: '1',
+  CLAUDE_CODE_SESSION_ID: 'cli-0001',
+  CLAUDE_PROJECT_DIR: MAIN,
+  CLAUDE_PLUGIN_ROOT: '/plugins/p4-phi',
+  CLAUDE_PLUGIN_DATA: DATA,
+}
+// The data folder the process's own variable names, which a build with no such method goes by.
+const OLDER_DATA = '/older/data'
+// What the module hands its scripts on such a build: the session's id and the session's own folder, as before.
+const OLDER_ENV = { CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: WORKTREE }
+const IN_A_WORKTREE = {
+  [`${DATA}/.python`]: `${KEPT}\n`,
+  [`${OLDER_DATA}/.python`]: `${KEPT}\n`,
+  [KEPT]: '',
+  [`${MAIN}/.claude/p4/phi/models/index.json`]: '{}',
+  [`${WORKTREE}/.claude/p4/phi/models/index.json`]: '{}',
+}
+
+test('a script the module runs is handed the variables a command hook gets, so both read one store', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: OLDER_DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    files: { ...IN_A_WORKTREE },
+    hookEnv: () => HOOK_ENV,
+    root: WORKTREE,
+    runs: () => ({ stdout: 'kept\n' }),
+    comes: () => undefined,
+    check: () => undefined,
+  })
+  on('tool.check', () => ALLOW)
+
+  // The first look: python is told the project as the command hooks have it, the main checkout, where its store
+  // and the store's p4.json are, and not the worktree the session stands in.
+  await $.session.start(START)
+  await clock.settle()
+  expect(seen.looks.length).toBeGreaterThan(0)
+  // Claude Code 2.1.311 and 2.1.322 have no `$.process.hookEnv`: there the module's call of it never comes down to
+  // what stands for the engine, and its scripts are told the session's own folder, as before.
+  const hasEnv = seen.envs > 0
+  const [project, other] = hasEnv ? [MAIN, WORKTREE] : [WORKTREE, MAIN]
+  expect(seen.calls[0]?.env).toEqual(hasEnv ? HOOK_ENV : OLDER_ENV)
+  // The data folder is the engine's to name, and the process's own variable is read only where it names none.
+  const data = hasEnv ? DATA : OLDER_DATA
+  expect(seen.read.filter(path => path.endsWith('/.python'))).toEqual([`${data}/.python`])
+
+  // A tool of the plugin's own, and the check before a call: the same variables, and the worktree as the input's
+  // `cwd`, where a command hook reads the folder the session works in.
+  await $.tool.call({ tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' } as never)
+  expect(seen.calls.at(-1)?.env).toEqual(hasEnv ? HOOK_ENV : OLDER_ENV)
+  await $.tool.check(call('WebFetch', { url: 'https://example.com' }))
+  const checked = seen.checks.at(-1)
+  const older = { ...OLDER_ENV, CLAUDE_PLUGIN_ROOT: checked?.env?.CLAUDE_PLUGIN_ROOT }
+  expect(checked?.env).toEqual(hasEnv ? HOOK_ENV : older)
+  expect(checked?.payload.cwd).toBe(WORKTREE)
+
+  // Python's markers are read in the store python wrote them to, the main checkout's, and one in the worktree's
+  // store opens nothing.
+  const before = seen.checks.length
+  seen.files[`${other}/.claude/p4/phi/.nudge/cli-0001`] = ''
+  await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
+  expect(seen.checks.length).toBe(before)
+  seen.files[`${project}/.claude/p4/phi/.nudge/cli-0001`] = ''
+  await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
+  expect(seen.checks.length).toBe(before + 1)
+})
+
+test("what the module keeps for python in a worktree session lands in the main checkout's store", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: OLDER_DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    files: { ...IN_A_WORKTREE },
+    hookEnv: () => HOOK_ENV,
+    root: WORKTREE,
+    enters: async text => {
+      await $.classic.UserPromptSubmit({ prompt: text, prompt_id: PROMPT_ID, session_id: 'cli-0001' })
+    },
+  })
+  on('classic.UserPromptSubmit', () => ({}))
+
+  await $.prompt.submit({ text: 'port the flush', origin: { kind: 'peer' }, wait: false } as never)
+  await clock.settle()
+
+  // On a build with no `$.process.hookEnv`, the session's own folder as before.
+  const project = seen.envs > 0 ? MAIN : WORKTREE
+  const kept = seen.wrote.map(write => write.path).filter(path => path.endsWith('/origin.json'))
+  expect(kept).toEqual([`${project}/.claude/p4/phi/models/served/start-cli-0001/origin.json`])
+})
+
+test('where the engine gives no such variables the module names the session and its root, as before', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  // The call rejects, as where the data folder cannot be made.
+  const seen = machine(on, { hookEnv: () => undefined })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
+  expect(seen.read).toEqual([`${DATA}/.python`])
 })

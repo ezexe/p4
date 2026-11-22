@@ -247,17 +247,19 @@
   },
   "$.process.hookEnv": {
    "kind": "method",
+   "used": [
+    "p4-phi"
+   ],
    "open": [
-    "p4-phi",
     "p4-temportal"
    ],
    "would": {
-    "p4-phi": "replace the environment the module builds by hand for each python child, and its search of the plugins folders for its own data folder.",
     "p4-temportal": "replace the environment the module builds by hand for each python child, and its search of the plugins folders for its own data folder."
    },
    "declined": {
     "p4-native": "it starts no process."
-   }
+   },
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.process.run": {
    "kind": "method",

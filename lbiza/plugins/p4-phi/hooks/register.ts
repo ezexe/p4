@@ -348,6 +348,41 @@ function note($: EngineInterface, text: string): void {
   $.ui.log(text, { to: 'debug' })
 }
 
+// The variables that name the session and this plugin for a child, as a command hook of the session gets them. The
+// API types say of `$.process.hookEnv`: "Returns the variables that name the session and this plugin, as its
+// command hook gets them, to pass as a child's `env`", and list `CLAUDE_CODE_SESSION_ID`, `CLAUDE_PROJECT_DIR`,
+// `CLAUDE_PLUGIN_ROOT` and `CLAUDE_PLUGIN_DATA` among them. None on a Claude Code with no such method, as 2.1.311
+// and 2.1.322 have none, and where the call rejects.
+async function hookEnv($: EngineInterface): Promise<Record<string, string> | undefined> {
+  try {
+    const env: unknown = await $.process.hookEnv()
+    const isWhole = isRecord(env) && typeof env.CLAUDE_PROJECT_DIR === 'string' && env.CLAUDE_PROJECT_DIR !== ''
+
+    return isWhole ? (env as Record<string, string>) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// What a python child of the module is started with: the engine's own variables, so a script the module runs and a
+// command hook of the same session name one project and read one store. Until this the module built the two
+// variables by hand from the session's root. Seen in the desktop app on Claude Code 2.1.326, in a session whose
+// folder is a git worktree: its command hooks ran with `CLAUDE_PROJECT_DIR` at the main checkout's root, as
+// worktrees.md, "What worktrees share with the main checkout", has it, so the module's scripts read and wrote the
+// worktree's store while the hooks read the main checkout's. Where the engine gives none, the session's id and
+// root as before.
+async function childEnv($: EngineInterface): Promise<Record<string, string>> {
+  const env = await hookEnv($)
+
+  return env ?? { CLAUDE_CODE_SESSION_ID: await $.session.id(), CLAUDE_PROJECT_DIR: await $.session.root() }
+}
+
+// The project's folder as the session's command hooks have it, whose `.claude/p4` is the store python reads: every
+// file the module keeps for python, and every marker of python's it reads, lies under it.
+async function projectOf($: EngineInterface): Promise<string> {
+  return slashed((await hookEnv($))?.CLAUDE_PROJECT_DIR ?? (await $.session.root()))
+}
+
 // The folders that hold each plugin's data folder. The manifest reference puts `${CLAUDE_PLUGIN_DATA}` at
 // `~/.claude/plugins/data/<id>/`, and the loading reference puts an installed plugin at
 // `cache/<marketplace>/<plugin>/<version>/` under the same plugins root, which `CLAUDE_CODE_PLUGIN_CACHE_DIR` moves.
@@ -365,9 +400,13 @@ async function dataRoots($: EngineInterface): Promise<string[]> {
 }
 
 // Where find-python.sh keeps the interpreter it proved: `.python` in the plugin's data folder, and in the plugin's
-// own folder where a runner had no data folder. A data folder is named after the plugin's id, `<name>@<origin>`
-// with `@` as `-`, and the module is told only the name, so each folder that starts with the name is read.
+// own folder where a runner had no data folder. The data folder is the engine's to name: `CLAUDE_PLUGIN_DATA` of
+// `$.process.hookEnv`, "this plugin's data folder, kept across updates". Where the engine gives none, the folders
+// are searched: a data folder is named after the plugin's id, `<name>@<origin>` with `@` as `-`, and the module is
+// told only the name, so each folder that starts with the name is read.
 async function keptFiles($: EngineInterface): Promise<string[]> {
+  const own = (await hookEnv($))?.CLAUDE_PLUGIN_DATA
+  if (own) return [`${slashed(own)}/.python`, `${slashed($.plugin.root)}/.python`]
   const files: string[] = []
   const data = await $.env.get('CLAUDE_PLUGIN_DATA')
   if (data) files.push(`${slashed(data)}/.python`)
@@ -473,7 +512,7 @@ async function ask($: EngineInterface, args: readonly string[], timeoutMs: numbe
   const python = await findPython($)
   if (python === undefined) return undefined
   const script = `${slashed($.plugin.root)}/scripts/phi.py`
-  const env = { CLAUDE_CODE_SESSION_ID: await $.session.id(), CLAUDE_PROJECT_DIR: await $.session.root() }
+  const env = await childEnv($)
   let printed = ''
   try {
     const ran = await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs })
@@ -814,7 +853,7 @@ function originOf(prompt: string): PromptOrigin | undefined {
 // one that has none, where phi.py alone reads it. No prompt waits for python to say where that folder is: until a
 // look has answered it, a project with no store keeps no origin, and the hooks read the prompt's text as before.
 async function originFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
-  const models = `${slashed(await $.session.root())}/${MODELS}`
+  const models = `${await projectOf($)}/${MODELS}`
   if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${ORIGIN_FILE}`
   switches ??= readSwitches($)
   if ((await switches).isPhiOff || folder === undefined) return undefined
@@ -931,26 +970,29 @@ async function transcriptOf($: EngineInterface): Promise<string> {
 
 // One call's check: `hook.py lookup-check`, run only for a call python has a check for, with the input a
 // PreToolUse command hook is given on stdin. Retrieval's check does not obey P4_PHI=0, and phi.py's own checks
-// read the switch themselves. Whatever fails here, the call goes on unjudged.
+// read the switch themselves. Whatever fails here, the call goes on unjudged. Python's markers are read in the
+// project's store, as the command hooks have the project, and the input's `cwd` is the session's own folder, which
+// in a worktree session is the worktree: worktrees.md, "To reach the files Claude is working on, read the
+// worktree's path from the hook's `cwd` input field."
 async function check($: EngineInterface, e: ToolCheckInput): Promise<Said> {
   try {
-    const root = slashed(await $.session.root())
+    const project = await projectOf($)
     const sessionId = await $.session.id()
     const call = { tool_name: String(e.tool), tool_input: e.input }
-    if (!(await isChecked($, e, root, sessionId, JSON.stringify(call)))) return {}
+    if (!(await isChecked($, e, project, sessionId, JSON.stringify(call)))) return {}
     const python = await findPython($)
     if (python === undefined) return {}
     const plugin = slashed($.plugin.root)
     const payload = {
       session_id: sessionId,
       transcript_path: await transcriptOf($),
-      cwd: root,
+      cwd: slashed(await $.session.root()),
       hook_event_name: 'PreToolUse',
       ...call,
       tool_use_id: e.tool_use_id,
       ...(e.agentId === undefined ? {} : { agent_id: e.agentId }),
     }
-    const env = { CLAUDE_CODE_SESSION_ID: sessionId, CLAUDE_PROJECT_DIR: root, CLAUDE_PLUGIN_ROOT: plugin }
+    const env = { CLAUDE_PLUGIN_ROOT: plugin, ...(await childEnv($)) }
     const argv = [python, '-I', '-X', 'utf8', `${plugin}/scripts/hook.py`, 'lookup-check']
     const ran = await $.process.run(argv, { env, stdin: JSON.stringify(payload), timeoutMs: CHECK_MS })
 
@@ -1103,7 +1145,7 @@ async function served($: EngineInterface, args: readonly string[]): Promise<Tool
     const python = await findPython($)
     if (python === undefined) return { deny: 'p4-phi found no working python to run phi.py with.' }
     const script = `${slashed($.plugin.root)}/scripts/phi.py`
-    const env = { CLAUDE_CODE_SESSION_ID: await $.session.id(), CLAUDE_PROJECT_DIR: await $.session.root() }
+    const env = await childEnv($)
     const ran = await $.process.run([python, '-I', '-X', 'utf8', script, ...args], { env, timeoutMs: TOOL_MS })
     if (ran.exitCode !== 0) return { deny: (ran.stderr.trim() || ran.stdout.trim() || 'phi.py failed').slice(0, 4_000) }
 
@@ -1175,7 +1217,7 @@ function named(id: string): string {
 // runner that reads it.
 async function bind($: EngineInterface, toolUseId: string, agentId: string): Promise<void> {
   try {
-    const models = `${slashed(await $.session.root())}/${MODELS}`
+    const models = `${await projectOf($)}/${MODELS}`
     if (!(await $.fs.exists(models))) return
     const folder = `${models}/served/start-${named(await $.session.id())}`
     await $.fs.write(`${folder}/${BOUND}${named(agentId)}`, `${toolUseId}\n`)
@@ -1273,7 +1315,7 @@ async function appCall($: EngineInterface, tool: string, input: Record<string, u
 // served folder, rows.origin_dir in python, which phi.py finds by the session's id before it knows the tree's
 // store, and in the session's folder in the tree's store for a project that has none.
 async function appFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
-  const models = `${slashed(await $.session.root())}/${MODELS}`
+  const models = `${await projectOf($)}/${MODELS}`
   if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${APP_FILE}`
 
   return folder === undefined ? undefined : `${folder}/${APP_FILE}`

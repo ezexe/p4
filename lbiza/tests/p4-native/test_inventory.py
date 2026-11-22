@@ -154,7 +154,9 @@ class RecordTest(unittest.TestCase):
         self.assertEqual((counts["event"], counts["method"]), (51, 93))
         for key in ("$.mcp.call", "$.store.get", "$.model.complete", "$.ui.ask", "tool.describe", "ui.press"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
-        self.assertEqual(ROWS["$.process.hookEnv"]["open"], ["p4-phi", "p4-temportal"])
+        # p4-phi's module took it up, and p4-temportal's still builds its children's environment by hand
+        self.assertEqual(ROWS["$.process.hookEnv"]["used"], ["p4-phi"])
+        self.assertEqual(ROWS["$.process.hookEnv"]["open"], ["p4-temportal"])
         self.assertEqual(ROWS["$.ui.notify"]["open"], ["p4-native"])
         self.assertEqual(ROWS["session.attach"]["open"], ["p4-native"])
         self.assertEqual(ROWS["session.detach"]["open"], ["p4-native"])
