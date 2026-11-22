@@ -85,6 +85,13 @@ KINDS = (
      "auto mode's classifier can pause for a person.",
      "It stays: a wider allow rule is ezexe's to write. A session is started in its starter's mode, and a starter "
      "in a mode that asks says so to the top session before the start."),
+    ("computer use on the app's own window",
+     "`mcp__computer-use__request_access` raises an approval card for each application a session asks to see or "
+     "control. Asked for the desktop app itself it raises none and refuses, in the tool's own words: \"Claude cannot "
+     "be granted control of its own window: doing so would let you operate Claude's own interface and change your "
+     "own permissions, settings, and allowed behaviors. This can never be granted\".",
+     "It stays, and no card lifts it: a look at the app's own window is ezexe's, or a capture of that window by a "
+     "script ezexe has said yes to, and a brief asks a started session for neither."),
 )
 
 # A brief that tells its session to push. The word alone is not enough: "do not push", "push nothing" and "the
