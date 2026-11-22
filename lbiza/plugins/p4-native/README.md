@@ -154,7 +154,7 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `command`: 131 rows, 22 used, 0 open, 109 declined, 0 weighed by nobody
 - `tool`: 122 rows, 54 used, 1 open, 67 declined, 0 weighed by nobody
 - `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
-- `event`: 60 rows, 17 used, 0 open, 43 declined, 0 weighed by nobody
+- `event`: 60 rows, 17 used, 2 open, 41 declined, 0 weighed by nobody
 - `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
 - `used`: 145 rows, 54 watched by a row of misses.ts, 91 with no by-hand call to watch, 0 with neither
 
@@ -168,7 +168,8 @@ A module cannot list the hook events or the module's own events and methods of t
 So those three kinds are in the record as Claude Code 2.1.330 has them, the hook events read from `hooks.md` and the module's events and methods from that build's types file, and a newer build's are walked by hand.
 The record was made on Claude Code 2.1.326, and the types file of 2.1.330 holds nine events and seven methods more: the events `agent.report`, `tool.offer`, `ui.close`, `vcs.detect`, `vcs.diff`, `vcs.isolate`, `vcs.list`, `vcs.release` and `vcs.status`, and the methods `$.session.machine`, `$.vcs.detect`, `$.vcs.diff`, `$.vcs.isolate`, `$.vcs.list`, `$.vcs.release` and `$.vcs.status`.
 Each has a row since 0.5.32, with the verdict of p4-temportal and of p4-native, which both declined all sixteen: neither draws a pane, answers for a version control system or makes a working copy, the calls of `$.vcs` are marked experimental, and `$.session.machine` names the kernel, the hardware and the JavaScript runtimes, which no p4 plugin asks for.
-p4-phi has still to weigh those sixteen, so its name is on none of them, and the record's test lists them until it has.
+p4-phi weighed them in 0.5.38 and declined fourteen: it answers for no version control system, its upkeep reads a worktree by git itself, since that also runs as a command hook where no hooks module loads, it rewrites no agent's report, and it reads the platform from p4-native's map.
+It holds two open, each for a build that has the event: `tool.offer`, by which it would keep `EnterPlanMode` from the model of a session another session started, where its plan rule says so in a sentence today, and `ui.close`, by which it would hear its pane close, where it reads `$.ui.panes` after each look.
 So the record holds 60 module events and 100 module methods, where the paragraphs below count the 51 and the 93 of 2.1.326.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
 The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, and the two that were open are used.

@@ -857,6 +857,7 @@
   "$.session.machine": {
    "kind": "method",
    "declined": {
+    "p4-phi": "whether this is Windows is read from p4-native's map, which holds the platform by `$.session.info`, and from the shape of the plugin's own folder where the map has no entry, and the runtimes it names are JavaScript's where the module runs python.",
     "p4-temportal": "the runtimes it names are those of JavaScript, and the module proves the python it runs by one run and reads the platform from p4-native's map.",
     "p4-native": "the map holds the platform by `$.session.info`, and no p4 plugin asks for the kernel, the hardware or the runtimes."
    },
@@ -865,6 +866,7 @@
   "$.vcs.detect": {
    "kind": "method",
    "declined": {
+    "p4-phi": "upkeep.py finds a worktree's main checkout by git itself, since it also runs as a command hook where no hooks module loads, and the module reads it by `$.session.repo`.",
     "p4-temportal": "lifetime.py finds a worktree's main checkout by git itself, since it also runs as a command hook where no hooks module loads, and the module reads it by `$.session.repo`.",
     "p4-native": "the module reads the main checkout by `$.session.repo`, and the call is marked experimental."
    },
@@ -873,6 +875,7 @@
   "$.vcs.diff": {
    "kind": "method",
    "declined": {
+    "p4-phi": "upkeep.py asks git whether a worktree is clean and what it holds ahead of the default branch, since it also runs as a command hook where no hooks module loads, and reads no diff.",
     "p4-temportal": "the list a compaction keeps is built from the session's own tool calls, and no diff of a working copy is read.",
     "p4-native": "it reads no diff of a working copy."
    },
@@ -881,6 +884,7 @@
   "$.vcs.isolate": {
    "kind": "method",
    "declined": {
+    "p4-phi": "it makes no working copy: a worker's worktree is the app's to make at the session's start, or Claude Code's own by `--worktree`.",
     "p4-temportal": "it makes no working copy.",
     "p4-native": "it makes no working copy."
    },
@@ -889,6 +893,7 @@
   "$.vcs.list": {
    "kind": "method",
    "declined": {
+    "p4-phi": "upkeep.py lists a repository's worktrees by git itself, since it also runs as a command hook where no hooks module loads.",
     "p4-temportal": "lifetime.py finds a worktree's main checkout by git itself, since it also runs as a command hook where no hooks module loads, and the module reads it by `$.session.repo`.",
     "p4-native": "it lists no working copy of a repository."
    },
@@ -897,6 +902,7 @@
   "$.vcs.release": {
    "kind": "method",
    "declined": {
+    "p4-phi": "it removes no working copy itself: upkeep hands the session git's own commands for a clean and merged worktree, so each removal is a call of the session's.",
     "p4-temportal": "it removes no working copy.",
     "p4-native": "it removes no working copy."
    },
@@ -905,6 +911,7 @@
   "$.vcs.status": {
    "kind": "method",
    "declined": {
+    "p4-phi": "upkeep.py asks git what a worktree holds, since it also runs as a command hook where no hooks module loads.",
     "p4-temportal": "it asks nothing of a working copy's state.",
     "p4-native": "it asks nothing of a working copy's state."
    },
@@ -3693,6 +3700,7 @@
   "agent.report": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it closes a subagent's record at `SubagentStop`, whose input carries the agent's last message, and rewrites no report.",
     "p4-temportal": "agents and their reports are p4-phi's.",
     "p4-native": "it reads the host and no agent's report."
    },
@@ -3700,6 +3708,12 @@
   },
   "tool.offer": {
    "kind": "event",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the sentence of its plan rule that keeps a session another session started from calling `EnterPlanMode` with that tool's absence from the session's model, on a build that has the event."
+   },
    "declined": {
     "p4-temportal": "it registers its one tool and changes what no loop is offered.",
     "p4-native": "the map reads the session's tools by `$.tool.list`, and what one loop's model is offered is no fact of the host."
@@ -3708,6 +3722,12 @@
   },
   "ui.close": {
    "kind": "event",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the read of `$.ui.panes` after each look, which tells whether the person closed its pane, with the pane's own close, on a build that has the event."
+   },
    "declined": {
     "p4-temportal": "it draws nothing.",
     "p4-native": "it draws no pane."
@@ -3717,6 +3737,7 @@
   "vcs.detect": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
@@ -3725,6 +3746,7 @@
   "vcs.diff": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
@@ -3733,6 +3755,7 @@
   "vcs.isolate": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
@@ -3741,6 +3764,7 @@
   "vcs.list": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
@@ -3749,6 +3773,7 @@
   "vcs.release": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
@@ -3757,6 +3782,7 @@
   "vcs.status": {
    "kind": "event",
    "declined": {
+    "p4-phi": "it answers for no version control system, which is what a hook of this event does.",
     "p4-temportal": "it answers for no version control system, which is what a hook of this event does.",
     "p4-native": "it answers for no version control system, which is what a hook of this event does."
    },
