@@ -1832,8 +1832,10 @@ class Wiring(unittest.TestCase):
         native = {"goal", "GOAL", "goal met: ", "goal ", "goal is ", "no goal was set for this session",
                   ": `goal` is off in the store's phi.json",
                   "on and off write `goal` in the store's phi.json; set is the hooks module's word that the goal "
-                  "command set the goal; ask keeps the condition this session states as the goal it asks for; "
-                  "none prints how the session's native goal stands",
+                  "command set the goal, and failed its word that it did not; ask keeps the condition this "
+                  "session states as the goal it asks for; none prints how the session's native goal stands",
+                  "--goal-flying",
+                  "the hooks module's goal command has not answered yet, so the look answers no condition",
                   phi.GOAL_ASKED, phi.GOAL_SHORT, phi.GOAL_LONG}
         for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
                      "gaps.py"):

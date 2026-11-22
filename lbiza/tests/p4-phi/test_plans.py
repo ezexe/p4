@@ -2004,6 +2004,85 @@ class NativeGoal(unittest.TestCase):
                          "asked for and not set: the command may have failed, so the send-back stays")
         self.assertNotIn("goal", self.phi("look", "--folder", **self.ON), "the folder question answers no goal")
 
+    # plugins/mods/api.md, "Work your mod started before the interruption": the error of a command a stop found in
+    # the queue, which the hooks module passes on as why the goal was not set.
+    REMOVED = "the command was removed from the queue before it ran"
+
+    def test_a_condition_that_was_answered_and_not_set_is_answered_again_after_a_later_turn(self):
+        """Seen on 2026-11-19: a look answered a session's condition, the hooks module's goal command was still in
+        the queue when the session was stopped, the call was rejected, and the condition was answered to no look
+        again, so the goal was never set. The condition is now answered again to the look after a later turn's
+        end, phi.GOAL_TRIES looks in all. No look answers it while the module says its command has not answered,
+        and none on the timer while no turn has ended since the last answer, since after a stop Claude Code
+        refuses the command until the session's next input. The module's word of why is kept and printed."""
+        self.brief(**self.ON)
+        self.stop("I ported half the flush.", "u1", **self.ON)
+        want = self.worded(self.LINE)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), want)
+        self.assertEqual(self.t.session(KID)["goal"]["tries"], 1)
+        # the command waits in the queue behind a turn that began at once, and that turn ends
+        self.stop("Still porting.", "u2", **self.ON)
+        self.assertNotIn("goal", self.phi("look", "--goal-flying", **self.ON), "the command has not answered yet")
+        self.assertEqual(self.t.session(KID)["goal"]["tries"], 1, "a look that answers nothing counts nothing")
+        # a stop drops it, and the module says so
+        self.assertEqual(self.phi("goal", "failed", "--", self.REMOVED), {"failed": True})
+        self.assertEqual(self.t.session(KID)["goal"]["failed"], self.REMOVED)
+        said = self.t.cli(KID, "goal").stdout
+        self.assertIn("goal asked for and not set: " + want, said)
+        self.assertIn(f"the command did not set it: {self.REMOVED}. The condition was answered to 1 of 3 looks, "
+                      f"and the look after a later turn's end answers it again.", said)
+        # a turn has ended since the first answer, so the next look answers the condition again
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), want)
+        self.assertEqual(self.t.session(KID)["goal"]["tries"], 2)
+        for _ in range(2):
+            self.assertNotIn("goal", self.phi("look", **self.ON), "no turn has ended since: the timer's look answers none")
+        self.assertEqual(self.phi("goal", "failed", "--", "the session was stopped and nobody has sent input since"),
+                         {"failed": True})
+        # the session's next input begins a turn, and the look at its end is the third and last
+        self.stop("Still porting.", "u3", **self.ON)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), want)
+        self.assertEqual(self.phi("goal", "failed", "--", "Goals are unavailable: hooks are disabled."), {"failed": True})
+        self.stop("Still porting.", "u4", **self.ON)
+        self.assertNotIn("goal", self.phi("look", **self.ON), "three looks in all")
+        self.assertEqual(self.t.session(KID)["goal"]["tries"], phi.GOAL_TRIES)
+        self.assertIn("answered to 3 of 3 looks, so no look answers it again", self.t.cli(KID, "goal").stdout)
+        # a command that answers late still sets it, and a goal that is set takes no word that it failed
+        self.assertEqual(self.phi("goal", "set"), {"set": True})
+        self.assertNotIn("failed", self.t.session(KID)["goal"])
+        self.assertEqual(self.phi("goal", "failed", "--", "late"), {"failed": False})
+        self.assertEqual(self.t.cli(KID, "goal").stdout.strip(), "goal set: " + want)
+
+    def test_a_goal_the_transcript_shows_set_is_marked_set_and_an_ask_waits_for_a_command_in_flight(self):
+        """The module tells python that the command set the goal by a run of phi.py, which can fail. The transcript
+        holds Claude Code's own row for a goal that is set, so a condition that row names as set is marked set and
+        answered to no further look, where a second command would start a second turn on it. A row for another
+        condition marks nothing. And a session's new ask is answered only once the module's command for the goal
+        before it has answered."""
+        t = self.t
+        self.assertEqual(self.top("goal", "ask", "--", self.OWN).returncode, 0)
+        self.assertNotIn("goal", json.loads(self.top("look", "--goal-flying").stdout), "a command is in flight")
+        self.assertEqual(t.session(TOP)["goalAsk"]["condition"], self.OWN, "the ask is kept for the next look")
+        r = t.stop(TOP, "Build the two plugins", (), report="Row 1 is on main.", uuid="o1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(self.top("look").stdout).get("goal"), self.OWN)
+        def row(uuid, **more):
+            """Claude Code writes a goal row at the end of the transcript of the turn `uuid`."""
+            with open(os.path.join(t.tmp, TOP + uuid + ".jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "attachment", "attachment": {"type": "goal_status", **more}}) + "\n")
+        # a turn ends on a row for another condition: nothing is marked, and the look answers again
+        r = t.stop(TOP, "Build the two plugins", (), report="Row 2 is on main.", uuid="o2")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row("o2", condition="another condition, of an earlier goal", met=False, sentinel=True)
+        self.assertEqual(json.loads(self.top("look").stdout).get("goal"), self.OWN)
+        self.assertNotIn("set", t.session(TOP)["goal"])
+        # the command ran and Claude Code wrote its row, and the module's word of it never arrived
+        r = t.stop(TOP, "Build the two plugins", (), report="Row 3 is on main.", uuid="o3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row("o3", condition=self.OWN, met=False, sentinel=True)
+        self.assertNotIn("goal", json.loads(self.top("look").stdout), "set already, so not answered again")
+        self.assertTrue(t.session(TOP)["goal"].get("set"))
+        self.assertEqual(self.top("goal").stdout.strip(), "goal set: " + self.OWN)
+
     def test_a_session_nobody_started_and_a_brief_with_no_line_get_no_goal(self):
         self.t.say(TOP, "Port it.\nDone looks like: " + self.LINE, **self.ON)
         self.assertNotIn("doneLine", self.t.session(TOP), "an orchestrator's own request is no worker's brief")

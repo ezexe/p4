@@ -2957,29 +2957,73 @@ def goal_ask(home, s, condition):
     return GOAL_ASKED
 
 
-def goal_due(home, sid):
+# The most looks a condition is answered to while its goal is not set: the first, and two more. The hooks module sets
+# a goal by `$.command.run`, which the API types of Claude Code 2.1.326 give as "queued and run once the session is
+# idle", rejecting "past a Stop or a host's limit". plugins/mods/api.md, "Work your mod started before the
+# interruption": a command still in the queue when a turn is stopped is "Dropped. The call rejects with an error
+# whose message includes `the command was removed from the queue before it ran`", and after the stop "Calls stay
+# refused until the user's next input, and nothing queues or repeats them for you". So a condition answered to one
+# look alone was lost at a stop. Seen on 2026-11-19: a session's own ask stood as asked and never set after a
+# stop_session, and another worker's command waited four minutes in the queue behind a turn a queued message began
+# and then set the goal, so a turn that begins at once loses nothing.
+GOAL_TRIES = 3
+
+
+def goal_again(home, s, flying=False):
+    """The condition of a goal that was asked for and is not set, answered to one more look, or ''. Where the
+    transcript's last goal row shows the condition set, the module's word of it was lost: the goal is marked set
+    and nothing is answered. Nothing is answered either while the module says its command has not answered yet,
+    `flying`, once GOAL_TRIES looks were answered, or before a turn has ended since the last answer: after a stop
+    Claude Code refuses the command until the session's next input, so a look on the timer would spend every try
+    while none can work, and the look at the end of the turn that input begins is the one that can."""
+    g = s.get("goal")
+    if not isinstance(g, dict) or not g.get("condition") or g.get("set") or g.get("over"):
+        return ""
+    row = plans.goal_row(s.get("transcript") or "")
+    if row.get("condition") == g["condition"] and not plans.goal_over(row):
+        g["set"] = now()                           # Claude Code holds it as set
+        g.pop("failed", None)
+        save_session(home, s)
+        return ""
+    tries = g.get("tries") if isinstance(g.get("tries"), int) else 1
+    ended = str(last_turn_row(home, s["sessionId"]).get("id") or "")
+    if flying or tries >= GOAL_TRIES or not ended or ended == g.get("turn"):
+        return ""
+    g.update(tries=tries + 1, turn=ended)
+    save_session(home, s)
+    return g["condition"]
+
+
+def goal_due(home, sid, flying=False):
     """The condition the hooks module sets as the session's native goal, or ''. First the condition the session
     asked for itself, goal_ask, which any session gets whatever phi.json says, and which takes the place of a goal
     it has. Else the line `Done looks like:` of the brief of a session another session started, once its first turn
-    has ended, where phi.json turns `goal` on, answered once for a session. Either is kept on session.json as `goal`
-    with when it was asked for, and one the session asked for with `own`. Either is set as goal_condition words it,
-    so a session another session started is given a condition its starter's later message can settle."""
+    has ended, where phi.json turns `goal` on. Either is kept on session.json as `goal` with when it was asked for,
+    how many looks it was answered to and the turn that had ended last by then, and one the session asked for with
+    `own`. Either is set as goal_condition words it, so a session another session started is given a condition its
+    starter's later message can settle. A condition that was answered and is not set is answered again by
+    goal_again, to GOAL_TRIES looks in all. `flying` is the hooks module's word that a goal command of its own has
+    not answered yet."""
     s = load_session(home, sid) if sid else {}
     if not s.get("sessionId") or s.get("doneRetired") or s.get("archived"):
         return ""
+    ended = str(last_turn_row(home, s["sessionId"]).get("id") or "")
     ask = s.get("goalAsk") if isinstance(s.get("goalAsk"), dict) else {}
-    if ask.get("condition"):
+    if ask.get("condition") and not flying:
         s.pop("goalAsk", None)
         condition = goal_condition(s, ask["condition"], cut_to_fit=False)
-        s["goal"] = {"condition": condition, "asked": ask.get("asked") or now(), "own": True}
+        s["goal"] = {"condition": condition, "asked": ask.get("asked") or now(), "own": True, "tries": 1,
+                     "turn": ended}
         save_session(home, s)
         return condition
-    if not GOAL or not spawned_from(s) or s.get("goal") or not s.get("doneLine"):
-        return ""
-    if not last_turn_row(home, s["sessionId"]):
+    if ask.get("condition"):
+        return ""                                  # the command in flight answers first, then the new ask
+    if s.get("goal"):
+        return goal_again(home, s, flying)
+    if not GOAL or not spawned_from(s) or not s.get("doneLine") or not ended or flying:
         return ""
     condition = goal_condition(s, s["doneLine"])
-    s["goal"] = {"condition": condition, "asked": now()}
+    s["goal"] = {"condition": condition, "asked": now(), "tries": 1, "turn": ended}
     save_session(home, s)
     return condition
 
@@ -2992,6 +3036,20 @@ def goal_set(home, sid):
     if not isinstance(g, dict) or g.get("set"):
         return False
     g["set"] = now()
+    g.pop("failed", None)
+    save_session(home, s)
+    return True
+
+
+def goal_failed(home, sid, reason):
+    """The hooks module's word that the goal command did not set the goal, with what the command answered or why the
+    call was rejected, kept on the goal as `failed` for `phi.py goal` to print. It counts nothing: goal_due counted
+    the look it answered. True when a goal that is not set took the word."""
+    s = load_session(home, sid) if sid else {}
+    g = s.get("goal")
+    if not isinstance(g, dict) or g.get("set") or g.get("over"):
+        return False
+    g.update(failed=cut(clean(reason), 300) or "no answer", failedAt=now())
     save_session(home, s)
     return True
 
@@ -3045,7 +3103,7 @@ def goal_look(a, me):
     if not out.get("off"):
         try:
             goal_verdict(me.home, safe_id(me.id))
-            due = goal_due(me.home, safe_id(me.id))
+            due = goal_due(me.home, safe_id(me.id), flying=bool(getattr(a, "goal_flying", False)))
         except Exception as e:  # noqa: BLE001
             log_failure("goal", {}, e)
     if due:
@@ -3098,7 +3156,15 @@ def goal_text(s):
     if not g:
         return "no goal was set for this session" + ("" if GOAL else ": `goal` is off in the store's phi.json")
     state = f"over, {g['over']}" if g.get("over") else ("set" if g.get("set") else "asked for and not set")
-    return f"goal {state}: {g.get('condition')}" + (f"\n{g['reason']}" if g.get("reason") else "")
+    tries = g.get("tries") if isinstance(g.get("tries"), int) else 0
+    why = ""
+    if not g.get("set") and not g.get("over") and (g.get("failed") or tries):
+        left = max(0, GOAL_TRIES - tries)
+        why = ("\n" + (f"the command did not set it: {g['failed']}. " if g.get("failed") else "")
+               + f"The condition was answered to {tries} of {GOAL_TRIES} looks"
+               + (", and the look after a later turn's end answers it again." if left else
+                  ", so no look answers it again: ask for it anew with the tool `mcp__p4-phi__goal`."))
+    return f"goal {state}: {g.get('condition')}" + (f"\n{g['reason']}" if g.get("reason") else "") + why
 
 
 def ended_turn(home, sid):
@@ -3998,11 +4064,13 @@ def main(argv=None):
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "goal":
-            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set", "ask"),
+            p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set", "failed", "ask"),
                            help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
-                                "that the goal command set the goal; ask keeps the condition this session states "
-                                "as the goal it asks for; none prints how the session's native goal stands")
-            p.add_argument("condition", nargs="?", default="", help="with ask: what holds when the work is done")
+                                "that the goal command set the goal, and failed its word that it did not; ask "
+                                "keeps the condition this session states as the goal it asks for; none prints how "
+                                "the session's native goal stands")
+            p.add_argument("condition", nargs="?", default="", help="with ask: what holds when the work is done; "
+                                                                    "with failed: what the command answered")
         if name == "app_tools":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on and off write `app_tools` in the store's phi.json, which is on unless set off "
@@ -4058,6 +4126,10 @@ def main(argv=None):
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
     puppeteer.add_parsers(sub, common)
+    # the look's own flag for the native goal, which goal_look reads: puppeteer.py holds the look's other arguments
+    sub.choices["look"].add_argument("--goal-flying", action="store_true",
+                                     help="the hooks module's goal command has not answered yet, so the look "
+                                          "answers no condition")
     a = ap.parse_args(argv)
     me = Me(session=a.session, p4=a.p4)
     if not me.home or not os.path.isdir(me.home):
@@ -4080,6 +4152,8 @@ def main(argv=None):
                 print(goal_switch(me.home, a.act == "on"))
             elif a.act == "set":
                 sys.stdout.write(json.dumps({"set": goal_set(me.home, safe_id(me.id))}) + "\n")
+            elif a.act == "failed":
+                sys.stdout.write(json.dumps({"failed": goal_failed(me.home, safe_id(me.id), a.condition)}) + "\n")
             else:
                 print(goal_text(load_session(me.home, safe_id(me.id)) if me.id else {}))
             return 0

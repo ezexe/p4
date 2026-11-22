@@ -267,6 +267,9 @@ let isNoticeTurn = false
 // permission prompts holds each message of one that does not, and the other way round, and past the deadline it
 // "drops the message and reports it as expired to a sender it can reach".
 const DELIVERY_NOTICE = /^\s*\[Cross-session delivery notice\]/
+// The condition of the goal command that has not answered yet: `$.command.run` queues the command until the session
+// is idle, so the call can stay open through a whole turn.
+let goalFlying: string | undefined
 // The last report handed to `$.session.send` for the starter, as its whole text.
 let reported: string | undefined
 // The whole points of the usage last written to usage.json, and the writes, one after another.
@@ -523,9 +526,11 @@ async function readSwitches($: EngineInterface): Promise<Switches> {
 }
 
 // One run of `phi.py look`. What it says of the session is kept before anything that waited on the run goes on.
+// While the goal command has not answered, python is told so and answers no condition.
 async function ran($: EngineInterface, isSlow: boolean): Promise<Answer | undefined> {
   try {
-    const answer = await ask($, isSlow ? ['look', '--net'] : ['look'], isSlow ? SLOW_LOOK_MS : LOOK_MS)
+    const args = ['look', ...(isSlow ? ['--net'] : []), ...(goalFlying === undefined ? [] : ['--goal-flying'])]
+    const answer = await ask($, args, isSlow ? SLOW_LOOK_MS : LOOK_MS)
     keep(answer)
 
     return answer
@@ -676,15 +681,37 @@ function wake($: EngineInterface, text: string): void {
 // the goal is set, and from then on its Stop hook sends no turn back. Nothing waits on the call. The condition is
 // a worker's from its brief, or the one a session asked for itself with the tool `goal`, a session nobody started
 // too: the ask is made inside a turn, and the look at that turn's end answers it.
+// The call can stay open a long while and can fail. The API types of Claude Code 2.1.326 say of `$.command.run`:
+// "queued and run once the session is idle", and "Rejects an unknown name, inside a hook the turn or the session's
+// start waits on, past a Stop or a host's limit". plugins/mods/api.md, "Work your mod started before the
+// interruption": a command still in the queue when a turn is stopped is "Dropped. The call rejects with an error
+// whose message includes `the command was removed from the queue before it ran`", and "Calls stay refused until
+// the user's next input, and nothing queues or repeats them for you". Seen on 2026-11-19: a command waited four
+// minutes behind a turn a queued message had begun and then set the goal, and one in the queue at a stop_session
+// was never run. So while the call is open each look is told so and python answers no condition, there is never a
+// second command beside it, and a call that rejects or answers other than `Goal set` is told to python with what
+// it said, which answers the condition again to the look after a later turn's end, three looks in all.
 function setGoal($: EngineInterface, condition: string): void {
-  $.command.run({ command: 'goal', args: condition }).then(
-    ran => {
-      const answered = ran.text ?? ''
-      if (answered.startsWith('Goal set')) void ask($, ['goal', 'set'], LOOK_MS)
-      else note($, `the goal command did not set the goal: ${answered.slice(0, 200)}`)
-    },
-    error => note($, `the goal was not set: ${String((error as Error)?.message ?? error).slice(0, 200)}`),
-  )
+  if (goalFlying !== undefined) return
+  goalFlying = condition
+  const failed = (why: string): void => {
+    goalFlying = undefined
+    note($, `the goal command did not set the goal: ${why.slice(0, 200)}`)
+    void ask($, ['goal', 'failed', '--', why.slice(0, 300)], LOOK_MS)
+  }
+  try {
+    $.command.run({ command: 'goal', args: condition }).then(
+      ran => {
+        const answered = (ran.text ?? '').trim()
+        if (!answered.startsWith('Goal set')) return failed(answered === '' ? 'the command printed nothing' : answered)
+        goalFlying = undefined
+        void ask($, ['goal', 'set'], LOOK_MS)
+      },
+      error => failed(String((error as Error)?.message ?? error)),
+    )
+  } catch (error) {
+    failed(String((error as Error)?.message ?? error))
+  }
 }
 
 // Writes the figures to usage.json in the session's folder when one of them moved a whole point. `$.fs.write` makes

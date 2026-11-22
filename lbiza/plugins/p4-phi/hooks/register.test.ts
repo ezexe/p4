@@ -66,6 +66,12 @@ type Machine = {
   check?: (payload: Record<string, unknown>) => unknown
   // What the goal command prints for a condition, where it is not `Goal set: <condition>`.
   goalSays?: (condition: string) => string
+  // Why the engine rejects a run of the goal command, where it does, as for one a stop removed from the queue.
+  goalRejects?: () => string | undefined
+  // What a run of the goal command waits on before it answers, as a command queued behind a turn does.
+  goalWaits?: () => Promise<void>
+  // What the engine does at `tool.run` beneath every plugin, where a test stands for a build's own run of a tool.
+  toolRuns?: (tool: string) => unknown
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
 }
@@ -137,8 +143,13 @@ function machine(on: On, has: Machine): Seen {
       isPlaced: has.unplaced === undefined,
     })),
   }))
-  on('command.run', (_, e) => {
+  on('command.run', async (_, e) => {
     seen.ran.push({ command: e.command, args: e.args })
+    await has.goalWaits?.()
+    const rejected = has.goalRejects?.()
+    // A throw beneath the plugins rejects the plugin's call. The kit skips the hook that threw and rejects with
+    // its own words, `no implementation for command.run`, so a test reads that a reason was told, not which.
+    if (rejected !== undefined) throw new Error(rejected)
 
     return { text: has.goalSays?.(e.args) ?? `Goal set: ${e.args}` }
   })
@@ -1006,7 +1017,7 @@ test('with the setting off a look answers no goal, and the module runs no comman
   expect(seen.sent.length).toBe(1)
 })
 
-test('a goal the command did not set is said to the debug log, and python is not told', async ($, on) => {
+test('a goal the command did not set is said to the debug log, and python is told what the command said', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   let isDue = true
@@ -1024,8 +1035,93 @@ test('a goal the command did not set is said to the debug log, and python is not
   await clock.advance(5_000)
 
   expect(seen.ran).toEqual([{ command: 'goal', args: CONDITION }])
-  expect(seen.asked).toEqual([])
+  expect(seen.asked).toEqual([['goal', 'failed', '--', 'Goals are unavailable: hooks are disabled.']])
   expect(seen.logged.filter(line => line.includes('did not set the goal')).length).toBe(1)
+})
+
+// What plugins/mods/api.md gives as the error of a command a stop found in the queue.
+const REMOVED = 'the command was removed from the queue before it ran'
+
+test('a goal command a stop removed from the queue is told to python, and the condition answered again is set', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isDue = true
+  let isStopped = true
+  const seen = machine(on, {
+    look: () => {
+      const answer = isDue ? { ...STARTED, goal: CONDITION } : STARTED
+      isDue = false
+
+      return answer
+    },
+    goalRejects: () => (isStopped ? REMOVED : undefined),
+  })
+
+  // The look answers the condition, the command is queued, and a stop of the turn that began meanwhile drops it.
+  await $.session.start(START)
+  await clock.advance(5_000)
+  expect(seen.ran).toEqual([{ command: 'goal', args: CONDITION }])
+  expect(seen.asked.length).toBe(1)
+  expect(seen.asked[0]?.slice(0, 3)).toEqual(['goal', 'failed', '--'])
+  expect((seen.asked[0]?.[3] ?? '').length).toBeGreaterThan(0)
+  expect(seen.logged.filter(line => line.includes('did not set the goal')).length).toBe(1)
+
+  // No look answers it while no turn has ended since, so no command runs.
+  await clock.advance(600_000)
+  expect(seen.ran.length).toBe(1)
+
+  // A later turn ends, python answers the condition to that look again, and the command sets the goal.
+  isStopped = false
+  await $.turn.start({ text: 'carry on', turnId: 't2' })
+  await clock.advance(6_000)
+  isDue = true
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(5_000)
+  expect(seen.ran).toEqual([
+    { command: 'goal', args: CONDITION },
+    { command: 'goal', args: CONDITION },
+  ])
+  expect(seen.asked.at(-1)).toEqual(['goal', 'set'])
+})
+
+test('while the goal command has not answered each look says so, and there is no second command beside it', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let isIdle: () => void = () => undefined
+  const idle = new Promise<void>(resolve => {
+    isIdle = resolve
+  })
+  const seen = machine(on, {
+    // Python as it was before it read the flag: it answers the condition to every look.
+    look: () => ({ ...STARTED, goal: CONDITION }),
+    goalWaits: () => idle,
+  })
+
+  // The look answers the condition and the command waits in the queue, behind a turn that began at once.
+  await $.session.start(START)
+  await clock.advance(5_000)
+  expect(seen.looks[0]).toEqual(['look', '--net'])
+  expect(seen.ran.length).toBe(1)
+  await $.turn.start({ text: 'a queued message', turnId: 't2' })
+  await clock.advance(6_000)
+  await $.turn.complete({ ...TURN, turnId: 't2' })
+  await clock.advance(5_000)
+  expect(seen.looks.length).toBeGreaterThan(1)
+  expect(seen.looks.slice(1).every(args => args.includes('--goal-flying'))).toBe(true)
+  expect(seen.ran.length).toBe(1)
+  expect(seen.asked).toEqual([])
+
+  // The session is idle, the command runs and answers, and the next look carries no flag.
+  isIdle()
+  await clock.settle()
+  expect(seen.asked).toEqual([['goal', 'set']])
+  const before = seen.looks.length
+  await $.turn.start({ text: 'the goal as its directive', turnId: 't3' })
+  await clock.advance(6_000)
+  await $.turn.complete({ ...TURN, turnId: 't3' })
+  await clock.advance(5_000)
+  expect(seen.looks.length).toBeGreaterThan(before)
+  expect(seen.looks.at(-1)?.includes('--goal-flying')).toBe(false)
 })
 
 // The rules built into p4-phi as `phi.py rules` prints them, under the head phi.builtin_text gives them.

@@ -113,6 +113,10 @@ Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was 
 
 Where a store's `phi.json` sets `goal` true, a worker gets Claude Code's own goal in place of that send-back.
 The line `Done looks like:` of its brief is the goal's condition, and the module sets it once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`.
+`$.command.run` queues the command until the session is idle, so it waits through a turn that begins at once, and a stop of that turn drops it: `plugins/mods/api.md`, "Work your mod started before the interruption", gives the call as rejected with `the command was removed from the queue before it ran`, and as refused from then until the session's next input.
+So a condition that was answered and is not set is answered again, to the look after a later turn's end and to three looks in all, and never while the module's command has not answered.
+The module tells `phi.py` what a command that set no goal said, and `phi.py goal` prints it with how many looks the condition was answered to.
+A goal the transcript's own goal row shows as set is marked set with no word from the module, so no second command starts a second turn on it.
 The condition of a session another session started ends with two sentences p4-phi adds: the id of the session that started it, and that a part of the condition counts as met once a message from that session in the conversation says that session does that part itself or takes that part or the whole work as done.
 The evaluator "judges your condition against what Claude has surfaced in the conversation", by `goal.md`, so a brief's line cannot follow a later change of orders unless the condition says such a message counts.
 Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326, without those sentences: a worker whose line named a start and a push that its starter then made itself was sent back nine times at the end of every turn, until its starter stopped the turn.
@@ -121,7 +125,7 @@ While the goal is set the Stop hook sends no turn back for an open step, since t
 The evaluator "does not call tools, so it can only judge what Claude has already surfaced in the conversation", by `goal.md`, so the checks a script makes stay in the Stop hook: the regression test of a worker's issue, the commits on the default branch and the open issue.
 Claude Code writes a goal's verdict to the transcript after the Stop hooks have answered, so the look that follows a turn's end reads it: a goal met marks the turn done with the evaluator's reason, and a goal met, judged impossible or cleared is over, so the send-back is back.
 With `goal` unset or false no worker is given a goal, and `phi.py goal` prints how a session's goal stands.
-Any session may also ask for a goal of its own, one no session started too, with the condition it states: the tool `mcp__p4-phi__goal`, or `phi.py goal ask`, keeps the condition, the look at that turn's end answers it once, and the module sets it by the same `/goal <condition>`.
+Any session may also ask for a goal of its own, one no session started too, with the condition it states: the tool `mcp__p4-phi__goal`, or `phi.py goal ask`, keeps the condition, the look at that turn's end answers it, and the module sets it by the same `/goal <condition>`.
 That ask needs no `goal` in `phi.json`, since the key is for the goal a worker is given unasked, and it takes the place of a goal the session has, as `goal.md` says of a second `/goal`.
 A condition under 12 characters is refused, so no word that clears a goal is ever sent as one.
 The page `docs/plugin-development.html` holds what the live probes behind this showed.
