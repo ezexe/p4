@@ -292,7 +292,7 @@ The rows written from the record, each with the by-hand way it is read off and t
 - `notification-raised-from-a-shell`, after a call: a shell command raises a notification of the system or rings its bell. It stands for `PushNotification`.
 - `long-sleep-in-a-shell`, after a call: a shell command in the foreground sleeps for a minute or longer. It stands for `ScheduleWakeup`.
 - `loop-with-a-sleep-in-a-shell`, after a call: a shell loop in the foreground runs a step again and again with a sleep between. It stands for `/loop`.
-- `skill-read-as-a-file`, after a call: a `Read` call or a shell command prints a skill's `SKILL.md`. It stands for `Skill`.
+- `skill-read-as-a-file`, after a call: a `Read` call or a shell command prints the `SKILL.md` of an installed skill. It stands for `Skill`.
 - `process-killed-in-a-shell`, after a call: a shell command stops a process with `kill`, `pkill`, `taskkill` or `Stop-Process`. It stands for `TaskStop`, `mcp__terminal__stop_terminal_tab`, `mcp__ccd_session_mgmt__stop_session`.
 - `backup-copy-made-by-hand`, after a call: a shell command copies a file to a `.bak`, `.orig`, `.old` or `.backup` beside it. It stands for `/rewind`, `Checkpoints`.
 - `worktree-removed-in-a-shell`, after a call: a shell command removes a git worktree, or a folder under `.claude/worktrees`. It stands for `mcp__ccd_host__discard_kept_worktree`, `mcp__ccd_host__clean_up_worktrees`.

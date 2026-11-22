@@ -318,7 +318,7 @@ export const MISSES: readonly Miss[] = [
   },
   {
     id: 'skill-read-as-a-file',
-    hand: "A `Read` call or a shell command prints a skill's `SKILL.md`.",
+    hand: 'A `Read` call or a shell command prints the `SKILL.md` of an installed skill.',
     native: ['Skill'],
     names: ['Skill'],
     line:
@@ -531,6 +531,9 @@ const SLEEPS = /\b(?:sleep|Start-Sleep)\s+(?:-(?:s|Seconds)\s+)?(\d+)([smh]?)\b|
 const LOOPS =
   /\b(?:while|until|for)\b[^\n]*?(?:;|\n)\s*do\b(?:(?!\bdone\b)[\s\S])*?\b(?:sleep|Start-Sleep)\b|(?:\b(?:while|for|foreach)\s*\([^{}]*\)\s*\{|\bdo\s*\{)[^}]*\b(?:sleep|Start-Sleep)\b/i
 const SKILL_FILE = /[\\/]skills[\\/][^\\/\s"']+[\\/]SKILL\.md\b/i
+// The folders Claude Code loads a skill from: a `.claude/skills` folder, and the installed plugins. The folder may
+// open a relative path, a quoted one or a word of a command line.
+const INSTALLED = /(?:^|[\\/\s"'=])\.claude[\\/](?:skills|plugins[\\/](?:cache|marketplaces))[\\/]/i
 const PRINTER = /\b(?:cat|head|tail|less|more|type|Get-Content|gc)\b/i
 const BACKUP = /\b(?:cp|copy|Copy-Item|cpi)\b[^|;&\n]*\.(?:bak|orig|backup|old|save)\b/i
 const COPIES = /\b(?:cp|copy|Copy-Item|cpi)\b/i
@@ -620,7 +623,7 @@ function ofShell(command: string, isBash: boolean, own: string, isBackground: bo
   if (isOwn && COPIES.test(command)) out.push('transcript-copied-by-hand')
   else if (isOwn && MEASURES.test(command)) out.push('transcript-measured-by-hand')
 
-  const isSkill = SKILL_FILE.test(command) && PRINTER.test(command)
+  const isSkill = PRINTER.test(command) && command.split(/\s+/).some(word => SKILL_FILE.test(word) && INSTALLED.test(word))
   if (isSkill) out.push('skill-read-as-a-file')
   else if (file === undefined && heads.some(head => PRINTS.test(head) || (!isBash && TYPES.test(head)))) out.push('file-read-by-a-shell')
   if (heads.some(head => FINDS.test(head) && !ACTS.test(head))) out.push('files-found-by-a-shell')
@@ -669,7 +672,7 @@ export function atCall(tool: string, input: Record<string, unknown>, own: string
   const read = [path, text(input, 'path'), text(input, 'pattern')].join('\n')
   const file = TRANSCRIPT.exec(read)?.[0]
   if (file !== undefined && (own === '' || !file.includes(own))) out.push('transcript-read-from-disk')
-  if (tool === 'Read' && SKILL_FILE.test(path)) out.push('skill-read-as-a-file')
+  if (tool === 'Read' && SKILL_FILE.test(path) && INSTALLED.test(path)) out.push('skill-read-as-a-file')
   if (tool === 'Edit' || tool === 'Write') {
     const written = `${text(input, 'new_string')}\n${text(input, 'content')}`
     if (/\.ipynb$/i.test(path)) out.push('notebook-edited-as-a-file')
