@@ -28,7 +28,8 @@ import lifetime  # noqa: E402
 
 DAY = 86400
 
-# The source skill's section rules, word for word, with ezexe where it says the boss.
+# The source skill's section rules, word for word, with ezexe where it says the boss, and with the evidence rule's
+# last sentence holding back only a section that depends on the one implemented, since runs land side by side.
 SECTION = """## What every section of a plan holds
 
 - **Intents:** the section opens by listing what it means to change, one line each.
@@ -36,7 +37,7 @@ SECTION = """## What every section of a plan holds
   - **Documented:** the source in detail: the upstream page or file and line, read live or in the checkout, quoted where a quote fits.
   - **Derivation:** in prose, how the approach follows from that source, and why this approach rather than another.
 - **No choices for ezexe:** a section avoids, with all the effort it takes, putting a choice to ezexe. Wherever the plan's writer wants to present one, that is the sign the section's planning failed to find the documented approach: the writer goes back to the upstream sources, finds how upstream does it, and writes that approach with its Documented and Derivation, the alternatives named only in the Derivation's "rather than another". A choice reaches ezexe only when no upstream source settles it after that search; it then names the sources searched and what each said.
-- **Evidence:** once a section is implemented, its evidence is added to that same section: links to the implemented lines (`[path:N-M](../../../../path:N-M)`) with what ran and its output. Only then does the next section start.
+- **Evidence:** once a section is implemented, its evidence is added to that same section: links to the implemented lines (`[path:N-M](../../../../path:N-M)`) with what ran and its output. Only then does a section that depends on it start.
 """
 
 
@@ -123,6 +124,23 @@ class SkillText(unittest.TestCase):
         for i, line in enumerate(lines[:-1]):
             if re.match(r"\s*- ", line):
                 self.assertTrue(lines[i + 1] == "" or re.match(r"\s*(- |#)", lines[i + 1]), line)
+
+    def test_a_plan_is_looped_until_dry_and_its_sections_are_handed_to_workers_by_run(self):
+        """workflows.md, "Find issues until the list stops growing": "stop once two rounds in a row find nothing
+        new". building-effective-agents, "Agents": "stopping conditions (such as a maximum number of iterations)".
+        agent-teams.md, "Avoid file conflicts": "each teammate owns a different set of files"."""
+        body = text()
+        loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
+        for word in ("researches the section first", "one writer of the plan file",
+                     "a reader that has not seen the writing", "two dry rounds in a row, or after five rounds",
+                     "no session that writes is started and no file but the plan is edited"):
+            self.assertIn(word, loop, word)
+        hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
+        for word in ("`**Files:**`", "`**Depends on:**`", "`**Checks:**`", "share a file or depend on one another",
+                     "section `Distribution`", "landed by an integrator", "`phi.py sections <plan file>`",
+                     "A worker never edits the plan file"):
+            self.assertIn(word, hand, word)
+        self.assertLess(body.index("## The plan loop"), body.index("## What every section of a plan holds"))
 
 
 class Places(unittest.TestCase):
