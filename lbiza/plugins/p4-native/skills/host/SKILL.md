@@ -41,7 +41,11 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - `hooks/weighed.json` of the plugin is the record of what the p4 plugins weighed: for each slash command, tool, hook event and event or method of the hooks module, who uses it, who declined it and why, or that nobody weighed it.
 - Call the tool with `command` set to `weighed` for the record's counts and for each command and tool of this session that has no row.
 - A line that begins `p4-native: Claude Code` and says `no p4 plugin has weighed` names what is new in this build, and it is told once: tell ezexe the names, and add no row by yourself.
-- Before building something by hand, look the native command or tool up in the record: a row that says declined gives the reason, and one that says nobody means it was never weighed.
+- Before building something by hand, look the native thing up: call the tool with `command` set to its name or to a word, such as `compact`, `Notification` or `worktree`, and each row found says what the thing does, in Claude Code's own words, and whether it is in this session.
+- A row a plugin declined is one that plugin built nothing on. It is no advice against using the thing, so read the line that says what it does.
+- A row of the kind `doc` is a page of the docs index with its address: a setting, a variable or a flag is found through the page that holds it.
+- A line at a session's first prompt that begins `p4-native: Claude Code` and says what the build holds that the one before did not names what is new here: look a name up before you rely on what you knew of an older build, and `new` prints the lists whole.
+- `docs` holds the docs index against the record, and a line that says the index holds pages with no row is for ezexe: say so, and add no row by yourself.
 
 ## A line at a miss
 

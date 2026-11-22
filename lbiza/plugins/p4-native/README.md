@@ -142,8 +142,9 @@ An answer kept under the first rule is compared with nothing.
 ## The inventory
 
 The audits of Claude Code's slash commands, tools and features against p4-phi and p4-temportal were made by hand, row by row.
-`hooks/weighed.json` keeps what they came to as one record, 430 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
+`hooks/weighed.json` keeps what they came to as one record, 635 rows, so the plugin holds each build against it and a new native feature does not go unnoticed.
 A row is a slash command, a tool, a hook event, an event of the hooks module or a method of it, and it says which plugins use it, which declined it and why, which hold it open, or that it was weighed by nobody.
+430 rows are of those five kinds, and 205 are of a sixth, `doc`, one for each page of the docs index, which carry no verdict.
 A key that ends in `__` stands for every tool of that server, and one that ends in `*` for every name that begins with it.
 
 What the record comes to, by kind, as `/native weighed` prints it.
@@ -152,12 +153,13 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `tool`: 122 rows, 49 used, 6 open, 67 declined, 0 weighed by nobody
 - `hook`: 33 rows, 14 used, 1 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 17 used, 0 open, 34 declined, 0 weighed by nobody
-- `method`: 93 rows, 36 used, 0 open, 57 declined, 0 weighed by nobody
-- `used`: 136 rows, 53 watched by a row of misses.ts, 83 with no by-hand call to watch, 0 with neither
+- `method`: 93 rows, 37 used, 0 open, 56 declined, 0 weighed by nobody
+- `used`: 137 rows, 53 watched by a row of misses.ts, 84 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
 `/native weighed` and the tool's `weighed` print the record's counts and each command and tool of this session that has no row.
+The counts answer who builds on a thing, and the section below gives what a session reads of a row.
 A plugin's own command and another server's tool are no part of the host and are left out.
 
 A module cannot list the hook events or the module's own events and methods of the build it runs on, since the engine refuses a read of `$` itself.
@@ -166,13 +168,13 @@ Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module eve
 The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, one is open, and one that was open is used.
 An open row names each plugin it would serve and, under `would`, what it would replace or add there.
 `PostToolBatch` is open for p4-phi, which would write the lookup rows of a parallel batch in one process start.
-`Notification` was open for p4-native, whose module hooks it since 0.5.27 and pushes when a session waits at a permission prompt or sits idle.
+`Notification` was open for p4-native, whose module hooks it since 0.5.28 and pushes when a session waits at a permission prompt or sits idle.
 The 36 module events and the 50 module methods are walked too, each against its own comment in the types file.
 The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
 The walk found one use the record had missed: p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, so `$.state.get` and `$.state.set` are used, and the test reads those two helpers as the two methods.
-Of the events, 34 are declined, and `session.attach` and `session.detach`, which were open for p4-native, are used since 0.5.27: its module reads the map again when a surface joins or leaves.
+Of the events, 34 are declined, and `session.attach` and `session.detach`, which were open for p4-native, are used since 0.5.28: its module reads the map again when a surface joins or leaves.
 Of the methods, 57 are declined and none is open.
-`$.ui.notify`, which was open for p4-native, is used since 0.5.27, where a session has no `PushNotification` tool.
+`$.ui.notify`, which was open for p4-native, is used since 0.5.28, where a session has no `PushNotification` tool.
 `$.process.hookEnv` is used by p4-phi, whose module hands its python children the variables a command hook gets, and by p4-temportal since 0.3.57, for the environment of its python child and for its data folder.
 p4-temportal's module names the project itself, since for a session in a git worktree that the desktop app made the variable names the main checkout, and lifetime.py clears a worktree's own store first.
 Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
@@ -192,6 +194,36 @@ All eight are declined: three make or style artifacts, two run a workflow the ap
 No commands page lists the seven, so each verdict rests on the command's own description in the build.
 Not seen live: the notice at a change of version.
 
+## What a row says, and what is new in a build
+
+The record answers who builds on a thing, and a session that reads `declined` there can take it for advice not to use the thing, which it is not.
+So each row also says what the thing does, in Claude Code's own words, and that line is what a session reads.
+
+- A slash command's and a tool's line is its own description, which the module reads from the session when it is asked, by `$.command.list` and `$.tool.list`, so it is the build's own at every version and the record keeps no copy.
+- A hook event's line is its row of the lifecycle table of `hooks.md`, and a module event's and a module method's is the first sentence of its own comment in the types file.
+- A module cannot list those three kinds, so `lbiza/scripts/native_says.py` writes their lines into the record at each change of version: 33 of 33 hook events, 41 of 51 module events and 93 of 93 module methods have a line of their own, and the other 10 events say their kind.
+- A row of the kind `doc` stands for one page of the docs index, https://code.claude.com/docs/llms.txt, with the page's title and description as its line and its address under `page`: 205 rows.
+- A settings key, an environment variable, a command-line flag and a feature with no command or tool have no row of their own, and are found through the page that holds them.
+
+`/native <name>`, and the tool with that word as its `command`, look a word up: each row whose key or line holds it, eight at most, a key the word names outright first.
+A row prints its name, its kind, whether a command or a tool is in this session, and its line, then what the p4 plugins made of it, worded as who builds on it: a plugin that declined a row built nothing on it.
+The answer ends by saying that this is no advice against using it, and `/native weighed` says the same under its counts.
+
+At a change of the Claude Code version on a kind of host the module keeps the names of the build's slash commands and tools in `probes.json`, and holds them against the names kept for the build before.
+What the new build holds that the old one did not, and what it no longer holds, is one notice, told once, and it is kept: each later session on that build reads it as one line of context with its first prompt, unless `hints` is off.
+`/native new` prints the two lists whole.
+
+With the probes the module also fetches the docs index, by `$.http.fetch`, with the host `code.claude.com` declared under `network.hosts` in the manifest, and names once each page that has no row, so a feature that arrives as a docs page alone does not go unnoticed.
+`/native docs` fetches it on request and prints the pages with no row and the rows whose page is gone.
+A fetch that is refused, or that does not answer in eight seconds, costs the probes nothing.
+
+Seen in a scripted run on Claude Code 2.1.328 and on 2.1.330: a hooks module's `$.http.fetch` of the index answered status 200 with 49,695 characters in about 70 ms, with the host declared and with none declared.
+Seen in a scripted run on Claude Code 2.1.328, with the plugin loaded by `--plugin-dir`: `/native compact` printed `/compact` with the build's own description, "Free up context by summarizing the conversation so far", then `$.session.compact`, `/autocompact`, the hook events `PostCompact` and `PreCompact`, the module event `session.compact` and two docs pages, each with its line, and `/native docs` fetched the index and found a row for each of its 205 pages.
+Not tested: the fetch in the desktop app.
+Not seen live: the notice of a change of version, and the line at a later session's first prompt.
+Held against the types file of Claude Code 2.1.330, the record has no row for 8 module events, `agent.report`, `tool.offer`, `ui.close`, `vcs.detect`, `vcs.isolate`, `vcs.list`, `vcs.release` and `vcs.status`, nor for 7 module methods, `$.session.machine` and the six of `$.vcs`.
+The script prints them at each run, and adds none, since a row carries each plugin's verdict, which is a walk made by hand.
+
 ## One line at a miss
 
 A session sometimes does by hand what a native feature of this host does.
@@ -199,7 +231,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 136 used rows, 53 are watched by a row of the table and 83 say why none watches them: the 67 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
+Of the 137 used rows, 53 are watched by a row of the table and 84 say why none watches them: the 68 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.

@@ -41,6 +41,12 @@
 // with the next prompt for a miss a turn's end shows. Each situation is told once in a session, a line names only
 // a tool the map says answers here, and the option `hints` turns it off. Every row of the record that a p4 plugin
 // uses names the rows of misses.ts that watch it, or says why none does. A line refuses nothing. A row checked at a
+// The record also tells a session what a native thing is: a word given to the command or the tool is looked up in
+// it, and each row found says what the thing does, in Claude Code's own words, and whether it is in this session.
+// At a change of version the module keeps the names of the build's commands and tools, tells once what the new
+// build holds that the one before did not, and hands that as one line at each later session's start. It fetches
+// the docs index then too, by `$.http.fetch`, and names the pages the record has no row for.
+//
 // call also has an option of its own, `refuse_` and its id, off unless ezexe turns it on: with it on, the by-hand
 // call is refused at `tool.call`, before it runs, with the row's line as the refusal, and only where a tool the
 // line names answers here. With no such option on, the module hooks no call of another tool.
@@ -63,7 +69,7 @@ import {
   seenAtStart,
 } from './probes'
 import type { Answer, Called, Host, Probe, Said } from './probes'
-import { counted, recordOf, unweighed, watched } from './inventory'
+import { counted, findRows, pagesOf, recordOf, rowLines, strayed, unweighed, watched } from './inventory'
 import { MISSES, READ_OFF, TERMINAL, WATCHED, WRAP_UP, atCall, atEnd, isNotice, isWake, isWorker, optionOf, scriptOf } from './misses'
 import type { Record_ } from './inventory'
 
@@ -81,6 +87,12 @@ const BOOK = 'native/probes.json'
 
 // The record of what the p4 plugins weighed, in the plugin's own folder.
 const RECORD = 'hooks/weighed.json'
+
+// The docs index of Claude Code, one line for a page, which the record's rows of the kind `doc` stand for.
+const INDEX = 'https://code.claude.com/docs/llms.txt'
+// The most names one line holds, and the most characters of a description in a row's line.
+const SHOWN = 12
+const BRIEF = 300
 
 // The most sessions the file holds, the newest kept.
 const MOST = 24
@@ -103,13 +115,15 @@ const WAITING = new Set(['permission_prompt', 'idle_prompt'])
 const APP = 'mcp__ccd_'
 
 // What the commands are, for the slash command and for the tool.
-const HINT = 'map | probes | probe | weighed'
+const HINT = 'map | probes | probe | weighed | docs | new | <name>'
 const USAGE =
   `/native ${HINT}\n` +
   'map prints the capability map of this session, read anew, and where it is kept. probes lists every watched ' +
   'condition with the decision it belongs to and the answer kept for this kind of host. probe reads the probes ' +
   'anew and prints each answer. weighed holds the commands and tools of this session against the record of what ' +
-  'the p4 plugins weighed, and names each that has no row.'
+  'the p4 plugins weighed, and names each that has no row. docs holds the docs index against the record. new says ' +
+  'what this build holds that the build before did not. Any other word is looked up in the record: each command, ' +
+  'tool, hook event, module event, module method and docs page it finds, with what it does.'
 
 // The tool a session calls for the same commands. It waits behind ToolSearch as an MCP server's tool does, since
 // few turns ask what the host is.
@@ -122,10 +136,16 @@ const TOOL = {
     'other plugins. probes lists the watched conditions, one for each decision the platform blocked, with the ' +
     'answer kept for this kind of host. probe reads them anew, which changes nothing in the session, and says ' +
     'which answer changed. weighed names the slash commands and tools of this session that no p4 plugin has ' +
-    'weighed, against the record of what each plugin uses and what it declined.',
+    'weighed, against the record of what each plugin uses and what it declined. docs holds the docs index of ' +
+    'Claude Code against the record and names each page with no row. new says what this build of Claude Code ' +
+    'holds that the build before did not. Any other word is looked up: the name of a slash command, a tool, a ' +
+    'hook event, an event or a method of the hooks module or a docs page, or a word one of them holds, and each ' +
+    'row found says what the thing does, in Claude Code\'s own words, and whether it is in this session.',
   inputSchema: {
     type: 'object',
-    properties: { command: { type: 'string', enum: ['map', 'probes', 'probe', 'weighed'] } },
+    properties: {
+      command: { type: 'string', description: 'map, probes, probe, weighed, docs or new, or a name or a word to look up.' },
+    },
     required: ['command'],
   },
 } as const
@@ -148,7 +168,18 @@ export type Facts = {
 // One probe's answer as the file keeps it, the answers of one kind of host with the version they were read on, and
 // the file: the kinds of host by name, and the notices no prompt has carried yet.
 type Kept = Said & { claude: string; at: string; reads?: number }
-type Ran = { claude: string; at: string; answers: Record<string, Kept>; unweighed?: string[] }
+// What a build holds that the build kept before it did not, and what it no longer holds, by name.
+type Fresh = { claude: string; since: string; names: string[]; gone: string[] }
+type Ran = {
+  claude: string
+  at: string
+  answers: Record<string, Kept>
+  unweighed?: string[]
+  // The commands and tools of the build, what changed against the build before, and the docs pages told.
+  names?: string[]
+  fresh?: Fresh
+  pages?: string[]
+}
 type Book = { hosts: Record<string, Ran>; notices: string[] }
 
 // Whether a person is at the prompt of a terminal, and the names of the fields `session.start` carried. A reload of
@@ -409,6 +440,10 @@ async function check($: EngineInterface): Promise<void> {
     if (opened === undefined) return
     hasNotices = opened.book.notices.length > 0
     isDue = opened.book.hosts[kindOf(kept)]?.claude !== kept.claude
+    // What is new in this build, as it was kept at the change of version: one line for this session's first prompt.
+    const fresh = opened.book.hosts[kindOf(kept)]?.fresh
+    const line = !wants.hints || isDue || fresh?.claude !== kept.claude ? undefined : freshLine(kindOf(kept), fresh)
+    if (line !== undefined) waiting.push(line)
   } catch (error) {
     note($, `the probes' file was not read: ${reason(error)}`)
   }
@@ -422,10 +457,63 @@ function keptOf(ran: Ran | undefined, probe: Probe): Kept | undefined {
   return last !== undefined && (last.reads ?? 1) === (probe.reads ?? 1) ? last : undefined
 }
 
-// The record of what was weighed, and the commands and tools of this session that have no row in it: the slash
-// commands Claude Code ships, its own tools, and the desktop app's. A plugin's command and another server's tool
-// are no part of the host. Nothing where the record cannot be read.
-async function weigh($: EngineInterface, host: Host): Promise<{ record: Record_; missing: string[] } | undefined> {
+// Names in one line: the first SHOWN of them, and how many more there are.
+function some(names: readonly string[]): string {
+  return names.length > SHOWN ? `${names.slice(0, SHOWN).join(', ')} and ${names.length - SHOWN} more` : names.join(', ')
+}
+
+// What is new in a build, as one line, and nothing where the build holds the same names as the one before.
+function freshLine(kind: string, fresh: Fresh): string | undefined {
+  if (fresh.names.length === 0 && fresh.gone.length === 0) return undefined
+  const parts: string[] = []
+  if (fresh.names.length > 0) {
+    parts.push(`holds ${fresh.names.length} commands and tools that ${fresh.since} did not: ${some(fresh.names)}`)
+  }
+  if (fresh.gone.length > 0) parts.push(`no longer holds ${some(fresh.gone)}`)
+
+  return (
+    `p4-native: Claude Code ${fresh.claude} on ${kind} ${parts.join(', and ')}. /native new lists them, and /native ` +
+    'with a name says what one does and whether it is in this session.'
+  )
+}
+
+// The docs index, fetched through the host, or nothing where no answer came within CALL_MS or the fetch was
+// refused. The host is declared under `network.hosts` in the plugin's manifest.
+function fetched($: EngineInterface): Promise<string | undefined> {
+  return new Promise(resolve => {
+    const timer = $.clock.after(CALL_MS, () => resolve(undefined))
+    const done = (text: string | undefined, why?: string): void => {
+      timer.cancel()
+      if (why !== undefined) note($, `the docs index was not fetched: ${why}`)
+      resolve(text)
+    }
+    try {
+      $.http.fetch(INDEX).then(
+        got => (got.ok ? done(got.text) : done(undefined, `status ${got.status}`)),
+        error => done(undefined, reason(error)),
+      )
+    } catch (error) {
+      done(undefined, reason(error))
+    }
+  })
+}
+
+// The docs index held against the record's pages, or nothing where the index was not fetched.
+async function pages($: EngineInterface, record: Record_): Promise<{ fresh: string[]; gone: string[]; count: number } | undefined> {
+  const index = await fetched($)
+  if (index === undefined) return undefined
+  const named = pagesOf(index)
+
+  return { ...strayed(record.rows, named), count: named.length }
+}
+
+// The record of what was weighed, the commands and tools of this session, and those that have no row in it: the
+// slash commands Claude Code ships, its own tools, and the desktop app's. A plugin's command and another server's
+// tool are no part of the host. Nothing where the record cannot be read.
+async function weigh(
+  $: EngineInterface,
+  host: Host,
+): Promise<{ record: Record_; missing: string[]; names: string[] } | undefined> {
   try {
     const record = recordOf(await $.fs.read(`${slashed($.plugin.root)}/${RECORD}`))
     if (Object.keys(record.rows).length === 0) return undefined
@@ -433,7 +521,9 @@ async function weigh($: EngineInterface, host: Host): Promise<{ record: Record_;
       .filter(command => command.source === 'builtin')
       .map(command => `/${command.name}`)
 
-    return { record, missing: unweighed(record.rows, [...commands, ...host.tools.native, ...host.tools.app]) }
+    const names = [...commands, ...host.tools.native, ...host.tools.app]
+
+    return { record, missing: unweighed(record.rows, names), names }
   } catch (error) {
     note($, `the record of what was weighed was not read: ${reason(error)}`)
 
@@ -462,6 +552,7 @@ async function settle(
   answers: ReadonlyMap<Probe, Said>,
   isWhole: boolean,
   missing?: readonly string[],
+  more?: { names?: readonly string[]; pages?: { fresh: readonly string[] } },
 ): Promise<string[]> {
   const opened = await open($)
   const book = opened?.book ?? { hosts: {}, notices: [] }
@@ -483,8 +574,35 @@ async function settle(
           `${byHand.join(', ')}. /release-notes says what changed, and /native probes names the check for each.`,
       )
     }
+    if (more?.names !== undefined) {
+      // What this build holds that the build kept before it did not, told once here and kept for the first prompt
+      // of each later session on this build.
+      const before = ran.names
+      if (before !== undefined && ran.claude !== '' && ran.claude !== host.claude) {
+        const had = new Set(before)
+        const has = new Set(more.names)
+        const names = more.names.filter(name => !had.has(name))
+        ran.fresh = { claude: host.claude, since: ran.claude, names, gone: before.filter(name => !has.has(name)) }
+        const line = freshLine(kind, ran.fresh)
+        if (line !== undefined) made.push(line)
+      }
+      ran.names = [...more.names]
+    }
     ran.claude = host.claude
     ran.at = at
+  }
+  if (more?.pages !== undefined) {
+    // A page of the docs index with no row is told once for a kind of host, as a name with no row is.
+    const told = new Set(ran.pages ?? [])
+    const fresh = more.pages.fresh.filter(key => !told.has(key))
+    if (fresh.length > 0) {
+      made.push(
+        `p4-native: the docs index of Claude Code holds ${fresh.length} pages that have no row in the record: ` +
+          `${some(fresh)}. Each can be a feature the record does not know, so tell ezexe, and /native docs lists ` +
+          'them until lbiza/scripts/native_says.py has given each a row.',
+      )
+    }
+    ran.pages = [...more.pages.fresh]
   }
   if (missing !== undefined) {
     // A name with no row is told once for a kind of host, and again only after it left the build and came back.
@@ -581,8 +699,9 @@ async function run($: EngineInterface): Promise<{ answers: Map<Probe, Said>; mad
   owed = fit.filter(probe => probe.atTurnEnd === true)
   const answers = await ask($, fit.filter(probe => probe.atTurnEnd !== true), host)
   const weighed = await weigh($, host)
+  const more = { names: weighed?.names, pages: weighed === undefined ? undefined : await pages($, weighed.record) }
 
-  return { answers, made: await settle($, host, answers, true, weighed?.missing), host }
+  return { answers, made: await settle($, host, answers, true, weighed?.missing, more), host }
 }
 
 // The probes owed at the end of a turn of the main conversation.
@@ -821,19 +940,97 @@ async function inventory($: EngineInterface): Promise<string> {
     missing.length === 0
       ? `Every slash command and tool of this session, ${kindOf(host)} on Claude Code ${host.claude}, has a row.`
       : `In this session, ${kindOf(host)} on Claude Code ${host.claude}, and weighed by nobody: ${missing.join(', ')}.`,
+    'A plugin that declined a row built nothing on it, which is no advice against using it: /native with a name says what one does.',
     `The record is ${slashed($.plugin.root)}/${RECORD}.`,
   ]
 
   return lines.join('\n')
 }
 
-// One command, for the slash command and the tool: what it printed, or the usage for a word that is no command.
+// A description as one line of a row: its first line, cut at BRIEF characters.
+function brief(text: string | undefined): string | undefined {
+  const line = (text ?? '').trim().split('\n')[0]?.trim() ?? ''
+  if (line === '') return undefined
+
+  return line.length > BRIEF ? `${line.slice(0, BRIEF - 3)}...` : line
+}
+
+// A word looked up in the record, as lines: each row it finds, with what the thing does and, for a command or a
+// tool, whether it is in this session. A command's and a tool's line is its own description, read from the
+// session now, so it is the build's own at every version. What the p4 plugins made of a row comes after, marked
+// as theirs: a row a plugin declined is one it built nothing on, and a session may use it all the same.
+async function lookedUp($: EngineInterface, word: string): Promise<string> {
+  const record = recordOf(await $.fs.read(`${slashed($.plugin.root)}/${RECORD}`).catch(() => ''))
+  if (Object.keys(record.rows).length === 0) return `p4-native could not read the record of what was weighed.\n${USAGE}`
+  const { keys, count } = findRows(record.rows, word)
+  if (keys.length === 0) return `No row of the record holds "${word}".\n${USAGE}`
+  const commands = await $.command.list().catch(() => [])
+  const tools = (await asked(() => $.tool.list())) ?? []
+  const lines = keys.flatMap(key => {
+    const row = record.rows[key]
+    if (row === undefined) return []
+    if (row.kind === 'command') {
+      const live = commands.find(command => `/${command.name}` === key)
+
+      return rowLines(key, row, { description: brief(live?.description), isHere: live !== undefined })
+    }
+    if (row.kind === 'tool' && !key.endsWith('__')) {
+      const live = tools.find(tool => tool.name === key)
+
+      return rowLines(key, row, { description: brief(live?.description), isHere: live !== undefined })
+    }
+
+    return rowLines(key, row, {})
+  })
+  if (count > keys.length) lines.push(`${count - keys.length} more rows hold the word, and a longer word finds fewer.`)
+  lines.push('What the p4 plugins made of a row says who builds on it, and is no advice against using it.')
+
+  return lines.join('\n')
+}
+
+// The docs index held against the record, as lines: each page with no row, and each row whose page is gone.
+async function documented($: EngineInterface): Promise<string> {
+  const record = recordOf(await $.fs.read(`${slashed($.plugin.root)}/${RECORD}`).catch(() => ''))
+  if (Object.keys(record.rows).length === 0) return 'p4-native could not read the record of what was weighed.'
+  const held = await pages($, record)
+  if (held === undefined) return `p4-native could not fetch the docs index, ${INDEX}.`
+  const rows = Object.values(record.rows).filter(row => row.kind === 'doc').length
+
+  return [
+    `The docs index, ${INDEX}, holds ${held.count} pages, and the record holds a row for ${rows}.`,
+    held.fresh.length === 0 ? 'Every page of the index has a row.' : `With no row: ${held.fresh.join(', ')}.`,
+    held.gone.length === 0 ? 'Every row has its page.' : `Rows whose page the index dropped: ${held.gone.join(', ')}.`,
+    'lbiza/scripts/native_says.py writes the rows, and /native with a word finds a page by its title or its description.',
+  ].join('\n')
+}
+
+// What this build holds that the build before did not, as it was kept for this kind of host at the change.
+async function newHere($: EngineInterface): Promise<string> {
+  await look($)
+  const host = kept
+  if (host === undefined) return 'p4-native could not read the capability map.'
+  const fresh = (await open($))?.book.hosts[kindOf(host)]?.fresh
+  if (fresh === undefined || fresh.claude !== host.claude) {
+    return `Nothing is kept of a build before Claude Code ${host.claude} on ${kindOf(host)}, so nothing is known to be new.`
+  }
+
+  return [
+    `Claude Code ${fresh.claude} on ${kindOf(host)}, held against ${fresh.since}.`,
+    fresh.names.length === 0 ? 'No new command or tool.' : `New: ${fresh.names.join(', ')}.`,
+    fresh.gone.length === 0 ? 'None is gone.' : `Gone: ${fresh.gone.join(', ')}.`,
+    '/native with a name says what one does, and /release-notes says what else changed.',
+  ].join('\n')
+}
+
+// One command, for the slash command and the tool: what it printed. A word that is no command is looked up.
 async function answer($: EngineInterface, typed: string): Promise<string> {
   const name = typed.trim() || 'map'
   if (name === 'probes') return listed($)
   if (name === 'probe') return probed($)
   if (name === 'weighed') return inventory($)
-  if (name !== 'map') return USAGE
+  if (name === 'docs') return documented($)
+  if (name === 'new') return newHere($)
+  if (name !== 'map') return lookedUp($, name)
   await look($)
   if (kept === undefined || keptFor === undefined) return 'p4-native could not read the capability map.'
 
@@ -848,7 +1045,7 @@ async function offer($: EngineInterface): Promise<void> {
   try {
     await $.command.register({
       name: 'native',
-      description: 'Prints what this host is and can do, and the watched conditions, as p4-native read them.',
+      description: 'Prints what this host is and can do, and looks a native command, tool, event or docs page up by name.',
       argumentHint: HINT,
     })
   } catch (error) {

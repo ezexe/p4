@@ -70,6 +70,10 @@ class RecordTest(unittest.TestCase):
         self.assertRegex(RECORD["claude"], r"^\d+\.\d+\.\d+$")
         self.assertGreater(len(ROWS), 300)
         for key, row in ROWS.items():
+            # a page of the docs index is no thing a plugin builds on, so its row carries no verdict
+            if row["kind"] == "doc":
+                self.assertFalse(set(row) & {"used", "open", "would", "declined", "nobody"}, key)
+                continue
             self.assertIn(row["kind"], KINDS, key)
             self.assertTrue(row.get("used") or row.get("open") or row.get("declined") or row.get("nobody") is True, key)
             for plugin, why in (row.get("declined") or {}).items():
@@ -84,6 +88,8 @@ class RecordTest(unittest.TestCase):
                 self.assertRegex(key, r"^\$\.[a-z]+\.[A-Za-z]+$", key)
             elif row["kind"] == "event":
                 self.assertRegex(key, r"^[a-z]+\.[A-Za-z.]+$", key)
+            elif row["kind"] == "doc":
+                self.assertRegex(key, r"^docs:[a-z0-9][a-z0-9/_-]*$", key)
             else:
                 self.assertRegex(key, r"^[A-Za-z][A-Za-z_]*$", key)
 
@@ -238,14 +244,15 @@ class ModuleTest(unittest.TestCase):
         start = MODULE.split("on('session.start'", 1)[1].split("\n  })", 1)[0]
         self.assertNotIn("weigh(", start)
         run = MODULE.split("async function run(", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("settle($, host, answers, true, weighed?.missing)", run)
+        self.assertIn("settle($, host, answers, true, weighed?.missing, more)", run)
 
     def test_only_the_hosts_own_commands_and_tools_are_held_against_the_record(self):
         """A plugin's command and another server's tool are no part of the host: the slash commands Claude Code
         ships, its own tools and the desktop app's are."""
         weigh = MODULE.split("async function weigh(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn(".filter(command => command.source === 'builtin')", weigh)
-        self.assertIn("unweighed(record.rows, [...commands, ...host.tools.native, ...host.tools.app])", weigh)
+        self.assertIn("const names = [...commands, ...host.tools.native, ...host.tools.app]", weigh)
+        self.assertIn("return { record, missing: unweighed(record.rows, names), names }", weigh)
 
     def test_a_name_with_no_row_is_told_once_for_a_kind_of_host(self):
         self.assertIn("const fresh = missing.filter(name => !told.has(name))", MODULE)

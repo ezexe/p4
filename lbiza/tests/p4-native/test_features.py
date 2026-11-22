@@ -49,8 +49,8 @@ class CallsTest(unittest.TestCase):
         push = MODULE.split("async function push(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("host.run !== 'interactive'", push, "never in a scripted run")
         self.assertIn("if (isChild) return", push, "never in a session another session started")
-        for word in ("$.http.", "$.process."):
-            self.assertNotIn(word, MODULE, "no request and no process of the plugin's own making")
+        self.assertNotIn("$.process.", MODULE, "no process of the plugin's own making")
+        self.assertEqual(MODULE.count("$.http.fetch("), 1, "one request, of the docs index, which test_says.py holds")
 
     def test_a_session_with_no_push_tool_notifies_on_ezexes_own_channel_at_a_turns_end_alone(self):
         """`$.ui.notify` is Claude Code's own call for a notification on the channel `preferredNotifChannel`

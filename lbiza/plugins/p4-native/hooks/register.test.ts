@@ -65,7 +65,18 @@ type Entry = {
 
 // The probes' file as the module keeps it.
 type Book = {
-  hosts: Record<string, { claude: string; at: string; answers: Record<string, { answer: string; saw: string; claude: string }>; unweighed?: string[] }>
+  hosts: Record<
+    string,
+    {
+      claude: string
+      at: string
+      answers: Record<string, { answer: string; saw: string; claude: string }>
+      unweighed?: string[]
+      names?: string[]
+      fresh?: { claude: string; since: string; names: string[]; gone: string[] }
+      pages?: string[]
+    }
+  >
   notices: string[]
 }
 
@@ -88,7 +99,9 @@ type Machine = {
   lost?: () => boolean
   // The record of what was weighed, as the plugin's own file holds it, and the session's slash commands.
   record?: unknown
-  commands?: () => { name: string; source: string }[]
+  commands?: () => { name: string; source: string; description?: string }[]
+  // The docs index as the host fetches it, and none for a session whose fetch is refused.
+  index?: string
   // What a call of a tool answers: its text, or the text of a result that is an error.
   app?: (name: string, input: Record<string, unknown>) => string | { error: string }
 }
@@ -111,6 +124,8 @@ type Seen = {
   status: (string | undefined)[]
   // Each notification raised on ezexe's own channel, as `$.ui.notify` was called.
   notified: { text: string; title: string | undefined }[]
+  // Each address the module fetched.
+  fetched: string[]
 }
 
 function plain(path: string): string {
@@ -133,6 +148,7 @@ function machine(on: On, has: Machine): Seen {
     inputs: [],
     status: [],
     notified: [],
+    fetched: [],
   }
   on('ui.status', (_, e) => {
     seen.status.push(e.text)
@@ -218,8 +234,13 @@ function machine(on: On, has: Machine): Seen {
     return { value: files[path] !== undefined }
   })
   on('command.list', () => ({
-    value: (has.commands ?? (() => [])).call(undefined).map(command => ({ ...command, description: '' })) as never,
+    value: (has.commands ?? (() => [])).call(undefined).map(command => ({ description: '', ...command })) as never,
   }))
+  on('http.fetch', (_, e) => {
+    seen.fetched.push(e.url)
+
+    return has.index === undefined ? { deny: 'no network here' } : ({ value: { status: 200, ok: true, headers: {}, text: has.index } } as never)
+  })
   on('fs.read', (_, e) => {
     if (plain(e.path).endsWith('/hooks/weighed.json') && has.record !== undefined) return { value: JSON.stringify(has.record) }
     const text = files[plain(e.path)]
@@ -1556,4 +1577,160 @@ test('with the push off, a notification of Claude Code\'s own starts nothing', a
   await clock.settle()
   expect(seen.inputs).toEqual([])
   expect(seen.notified).toEqual([])
+})
+
+// A record with a row of each kind, as lbiza/scripts/native_says.py leaves the kinds a module cannot list.
+const SAID = {
+  claude: '2.1.326',
+  rows: {
+    '/compact': { kind: 'command', used: ['p4-temportal'], declined: { 'p4-phi': 'the module compacts.' } },
+    '/fast': { kind: 'command', declined: { 'p4-phi': 'a choice of ezexe.' } },
+    Read: { kind: 'tool', used: ['p4-phi'], miss: ['file-read-by-a-shell'] },
+    mcp__ccd_session__start_session: { kind: 'tool', used: ['p4-phi'] },
+    '$.fs.read': { kind: 'method', used: ['p4-native'], says: 'Reads a file and returns its text.' },
+    PreCompact: { kind: 'hook', used: ['p4-temportal'], says: 'Before context compaction.' },
+    'docs:hooks': { kind: 'doc', page: 'https://code.claude.com/docs/en/hooks.md', says: 'Hooks reference: Reference for Claude Code hook events.' },
+    'docs:gone-page': { kind: 'doc', page: 'https://code.claude.com/docs/en/gone-page.md', says: 'Gone: a page the index dropped.' },
+  },
+}
+// A docs index of two pages and the line of a translation, which is no page.
+const INDEX_TEXT =
+  '# Claude Code Docs\n\n- [Hooks reference](https://code.claude.com/docs/en/hooks.md): Reference for hook events.\n' +
+  '- [New thing](https://code.claude.com/docs/en/new-thing.md): A feature the record does not know.\n' +
+  '- [French (205 pages)](https://code.claude.com/docs/_llms/fr.txt): Premiers pas.\n'
+
+async function asks($: { tool: { call: (input: never) => Promise<unknown> } }, command: string): Promise<string> {
+  return String(((await $.tool.call({ tool: TOOL, command } as never)) as { result?: unknown }).result)
+}
+
+test('a word is looked up in the record: what the thing does in its own words, whether it is here, and what the plugins made of it', async ($, on) => {
+  const clock = mock.clock(on)
+  machine(on, {
+    record: SAID,
+    commands: () => [{ name: 'compact', source: 'builtin', description: 'Clear conversation history but keep a summary in context' }],
+    tools: () => [{ name: 'Read', description: 'Reads a file from the local filesystem.\n\n- more of it', mcp: false }, tool('Bash')],
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  // A command of the session says its own description, and a row a plugin declined is one it built nothing on.
+  const compact = await asks($, 'compact')
+  expect(compact).toContain('/compact, a slash command, in this session: Clear conversation history but keep a summary in context')
+  expect(compact).toContain('  p4 plugins: p4-temportal build on it; p4-phi built nothing on it')
+  expect(compact).toContain('PreCompact, a hook event: Before context compaction.')
+  expect(compact.endsWith('What the p4 plugins made of a row says who builds on it, and is no advice against using it.')).toBe(true)
+
+  // A tool says the first line of its description, with the rows that watch its by-hand copy, and a method its record line.
+  const read = await asks($, 'read')
+  expect(read).toContain('Read, a tool, in this session: Reads a file from the local filesystem.\n')
+  expect(read).toContain('  its by-hand copy is watched by: file-read-by-a-shell')
+  expect(read).toContain('$.fs.read, a method of the hooks module: Reads a file and returns its text.')
+  expect(read.indexOf('Read, a tool')).toBeLessThan(read.indexOf('$.fs.read'))
+
+  // A command and a tool this session does not hold say so.
+  expect(await asks($, 'fast')).toContain('/fast, a slash command, not in this session\n  p4 plugins: p4-phi built nothing on it')
+  expect(await asks($, 'start_session')).toContain('mcp__ccd_session__start_session, a tool, not in this session')
+
+  // A docs page is found by its path or by a word of its line, and gives its address.
+  const page = await asks($, 'hook events')
+  expect(page).toContain('docs:hooks, a page of the docs: Hooks reference: Reference for Claude Code hook events.\n  page: https://code.claude.com/docs/en/hooks.md')
+
+  const none = await asks($, 'zzz')
+  expect(none).toContain('No row of the record holds "zzz".')
+  expect(none).toContain('/native map | probes | probe | weighed | docs | new | <name>')
+})
+
+test('docs holds the docs index against the record, and a page with no row is told once at a change of version', async ($, on) => {
+  const clock = mock.clock(on)
+  let version = '2.1.326'
+  const seen = machine(on, { record: SAID, index: INDEX_TEXT, version: () => version, files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  expect(seen.fetched).toEqual([])
+
+  const docs = await asks($, 'docs')
+  expect(seen.fetched).toEqual(['https://code.claude.com/docs/llms.txt'])
+  expect(docs).toContain('holds 2 pages, and the record holds a row for 2.')
+  expect(docs).toContain('With no row: docs:new-thing.')
+  expect(docs).toContain('Rows whose page the index dropped: docs:gone-page.')
+
+  // A new build: the probes run, and the page with no row is a notice, once for this kind of host.
+  version = '2.1.330'
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await clock.settle()
+  expect(book(seen).notices.join('\n')).toContain('the docs index of Claude Code holds 1 pages that have no row in the record: docs:new-thing.')
+  expect(book(seen).hosts['terminal/scripted']?.pages).toEqual(['docs:new-thing'])
+  await $.prompt.submit({ text: 'next', origin: { kind: 'sdk' }, wait: false } as never)
+  version = '2.1.331'
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start({ ...BEGUN, turnId: 't2' })
+  await clock.settle()
+  expect(book(seen).notices.join('\n')).not.toContain('the docs index')
+})
+
+test('a session whose fetch is refused says so, and its probes run all the same', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { record: SAID })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await clock.settle()
+
+  expect(book(seen).hosts['terminal/scripted']?.claude).toBe('2.1.326')
+  expect(seen.debugged.join('\n')).toContain('the docs index was not fetched: ')
+  expect(await asks($, 'docs')).toContain('p4-native could not fetch the docs index, https://code.claude.com/docs/llms.txt.')
+})
+
+test('a new build says once what it holds that the build before did not, and each later session reads it with its first prompt', async ($, on) => {
+  const clock = mock.clock(on)
+  let version = '2.1.326'
+  let tools = [...OWN]
+  let commands = [{ name: 'compact', source: 'builtin' }]
+  const seen = machine(on, { record: SAID, version: () => version, tools: () => tools, commands: () => commands })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start(BEGUN)
+  await clock.settle()
+  // The first build read on this kind of host has none before it to be held against.
+  expect(book(seen).hosts['terminal/scripted']?.names).toEqual(['/compact', 'Agent', 'Bash', 'PushNotification', 'Read'])
+  expect(book(seen).hosts['terminal/scripted']?.fresh).toBeUndefined()
+  expect(await asks($, 'new')).toContain('Nothing is kept of a build before Claude Code 2.1.326 on terminal/scripted')
+  await $.prompt.submit({ text: 'take the notices', origin: { kind: 'sdk' }, wait: false } as never)
+
+  version = '2.1.330'
+  tools = [...OWN.filter(one => one.name !== 'Agent'), tool('Brand')]
+  commands = [...commands, { name: 'motion', source: 'builtin' }]
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.turn.start({ ...BEGUN, turnId: 't2' })
+  await clock.settle()
+  const line =
+    'p4-native: Claude Code 2.1.330 on terminal/scripted holds 2 commands and tools that 2.1.326 did not: /motion, Brand, ' +
+    'and no longer holds Agent. /native new lists them, and /native with a name says what one does and whether it is in this session.'
+  expect(book(seen).notices).toContain(line)
+  expect(await asks($, 'new')).toContain('New: /motion, Brand.\nGone: Agent.')
+  await $.prompt.submit({ text: 'take the notices', origin: { kind: 'sdk' }, wait: false } as never)
+
+  // A later session on that build: one line with its first prompt, and none with its second.
+  await $.session.start(HOSTED)
+  await clock.settle()
+  const from = seen.prompts.length
+  await $.prompt.submit({ text: 'first', origin: { kind: 'sdk' }, wait: false } as never)
+  await $.prompt.submit({ text: 'second', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[from]?.context).toEqual([line])
+  expect(seen.prompts[from + 1]?.context).toBeUndefined()
+})
+
+test('with hints off a later session reads no line of what is new', { options: { hints: false } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const fresh = { claude: '2.1.326', since: '2.1.322', names: ['/motion'], gone: [] }
+  const kept = { hosts: { 'terminal/scripted': { claude: '2.1.326', at: '', answers: {}, fresh } }, notices: [] }
+  const seen = machine(on, { record: SAID, files: { [BOOK]: JSON.stringify(kept) } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+  await $.prompt.submit({ text: 'first', origin: { kind: 'sdk' }, wait: false } as never)
+  expect(seen.prompts[0]?.context).toBeUndefined()
 })
