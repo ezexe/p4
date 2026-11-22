@@ -2,7 +2,7 @@
 session whose work is over.
 
 The functions that read the store take its home and session ids. phi.py calls them from its hooks and commands, and
-plans.py, issues.py, puppeteer.py, controls.py, starts.py, gaps.py and prompty_eval.py call them too.
+plans.py, issues.py, puppeteer.py, controls.py, starts.py and gaps.py call them too.
 
   owned paths  what a session alone may change: paths or globs, set by `phi.py shard <paths>` and kept in its
           session.json as `shard`. The address book lists them and routes a message by them, as book.py says, and a

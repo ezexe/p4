@@ -265,7 +265,6 @@ class Requests(unittest.TestCase):
         with plans.WAKE_MARK, and every reader of a prompt tells it from ezexe's words by that opening. A message
         that quotes those words further in is still ezexe's."""
         import plans
-        import prompty_eval
         import puppeteer
         import rows
         wake = plans.WAKE_MARK + " step 1, \"Await the reports\", which waits on other sessions."
@@ -273,7 +272,6 @@ class Requests(unittest.TestCase):
         self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + wake), "")
         self.assertTrue(plans.woken("\n" + wake))
         self.assertTrue(puppeteer.from_session(wake))
-        self.assertFalse(prompty_eval.own_words(wake))
         self.assertTrue(rows.WAKE_RE.match(wake), "rows.py spells the mark as plans.py does")
         asked = "why did it say this: " + wake
         self.assertEqual(phi.request_of(asked), asked)
@@ -287,7 +285,6 @@ class Requests(unittest.TestCase):
         after the notice. So every reader of a prompt tells it from ezexe's words by that opening, and a message
         that quotes the mark further in is still ezexe's."""
         import plans
-        import prompty_eval
         import puppeteer
         import rows
         held = "[Cross-session delivery notice] Your message to another session was held by that session."
@@ -299,13 +296,11 @@ class Requests(unittest.TestCase):
             self.assertTrue(plans.app_notice(said), said[:40])
             self.assertTrue(puppeteer.from_session(said), said[:40])
             self.assertTrue(rows.HARNESS_RE.match(said), said[:40])
-            self.assertFalse(prompty_eval.own_words(said), said[:40])
         asked = "what does this mean: " + held
         self.assertEqual(phi.request_of(asked), asked)
         self.assertFalse(plans.app_notice(asked))
         self.assertFalse(puppeteer.from_session(asked))
         self.assertFalse(rows.HARNESS_RE.match(asked))
-        self.assertTrue(prompty_eval.own_words(asked))
         with tempfile.TemporaryDirectory() as tmp:
             tree = Tree(tmp)
             tree.record(TOP)
@@ -2253,7 +2248,6 @@ class Origins(unittest.TestCase):
             self.assertEqual(phi.request_of(said, "user"), said, said)
 
     def test_the_origin_settles_what_the_head_of_a_text_can_only_suggest(self):
-        import prompty_eval
         import puppeteer
         import rows
         markup = "<b>bold</b> is wrong in the exporter's page, make it plain"
@@ -2263,13 +2257,11 @@ class Origins(unittest.TestCase):
         quoted = "[Cross-session idle notice] is what it said, why?"
         self.assertEqual(phi.request_of(quoted, "user"), quoted)
         self.assertFalse(puppeteer.from_session("<task-notification> pasted by hand", "user"))
-        self.assertTrue(prompty_eval.own_words(markup, "user"))
         bare = "The flush is ported and pushed as 4f1c2aa."
         self.assertEqual(phi.request_of(bare, "event"), "")
         self.assertEqual(phi.request_of(bare, "plugin"), "")
         for by in ("session", "plugin", "event"):
             self.assertTrue(puppeteer.from_session(bare, by), by)
-            self.assertFalse(prompty_eval.own_words(bare, by), by)
         self.assertTrue(phi.from_peer(bare, "session"))
         self.assertFalse(phi.from_peer('<cross-session-message from="local_x">hm</cross-session-message>', "user"))
         self.assertTrue(rows.harness(bare, "event"))

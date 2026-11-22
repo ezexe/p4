@@ -76,8 +76,7 @@ ROUTE_CHECK_S = 600.0            # how often registered routes are checked for a
 ROUTE_MIN = 4                    # content words a message shares with a route before it can match
 ROUTE_CLOSE = 0.6                # of the smaller side's content words
 OWNER_WORDS = 8                  # content words a message shares with a live session's task before that session is
-#                                  named the area's code owner; prompty_eval.py measures how often each count names
-#                                  a wrong one on a store's history
+#                                  named the area's code owner
 MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained code owner and route scorers, if any
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
@@ -998,8 +997,7 @@ def check_routes(home, net=False, force=False):
 #
 # Routing picks a route and a code owner through the ranker when a model trained for them is in the store:
 # ranker.candidate_features over the candidates' words, scored by the weights kept in phi/models/prompty.json.
-# `prompty_eval.py --train` keeps the code owner weights, and only when they beat shared content words and naming none
-# on held-out sessions; a route model is used when one is kept there. With no model, as on a store with too little
+# A code owner or a route model is used when one is kept there. With no model, as on a store with too little
 # history or a machine that never trained one, shared content words decide, at OWNER_WORDS for a code owner and at
 # ROUTE_MIN and ROUTE_CLOSE for a route.
 
