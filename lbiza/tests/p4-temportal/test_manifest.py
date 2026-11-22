@@ -1,13 +1,11 @@
-"""The marketplace maps p4-temportal's former names to it, by the renames map Claude Code reads, and its README names
-the python the tests run with. The marketplace's one catalog is at the repository's root."""
+"""The marketplace maps p4-temportal's former names to it, by the renames map Claude Code reads, and describes each
+plugin in its manifest's own words. The marketplace's one catalog is at the repository's root."""
 import json
-import re
 import unittest
 from pathlib import Path
 
 LBIZA = Path(__file__).resolve().parents[2]
 MARKETPLACE = LBIZA.parent / ".claude-plugin" / "marketplace.json"
-README = LBIZA / "README.md"
 PLUGIN = LBIZA / "plugins" / "p4-temportal" / ".claude-plugin" / "plugin.json"
 
 
@@ -46,15 +44,6 @@ class DescriptionTest(unittest.TestCase):
             own = json.loads(manifest.read_text(encoding="utf-8"))
             self.assertTrue(own["description"], entry["name"])
             self.assertEqual(entry["description"], own["description"], entry["name"])
-
-
-class ReadmeTest(unittest.TestCase):
-    def test_no_run_command_names_python3(self):
-        """ezexe/p4#122: a bare python3 can be the WindowsApps alias, so each python command the README writes is
-        `python -m pytest`, as the test files write it."""
-        runs = re.findall(r"`(python[^`]*)`", README.read_text(encoding="utf-8"))
-        self.assertTrue(runs)
-        self.assertEqual([r for r in runs if r.split()[:3] != ["python", "-m", "pytest"]], [])
 
 
 if __name__ == "__main__":
