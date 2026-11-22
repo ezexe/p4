@@ -22,6 +22,10 @@ NUMBER = re.compile(r"(\d+)\b")
 LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$"
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
+# what `phi.py sections` says after the calls it prints: each is a start that runs at once, which the app refuses in
+# a turn ezexe's own message did not begin, where the same call goes out as a card
+CARD = ("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each call there "
+        "with `initiation` `own_initiative` and without `wake_when_done`, which shows a card ezexe presses.")
 
 
 def parse(text, base=""):

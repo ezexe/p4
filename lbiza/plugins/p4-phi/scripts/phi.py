@@ -4408,9 +4408,7 @@ def main(argv=None):
                 return 2
             for call in out:
                 print("`mcp__ccd_session__start_session` with " + json.dumps(call, ensure_ascii=False))
-            print("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each "
-                  "call there with `initiation` `own_initiative` and without `wake_when_done`, which shows a card "
-                  "ezexe presses.")
+            print(sections.CARD)
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps
