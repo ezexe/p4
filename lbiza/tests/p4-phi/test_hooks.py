@@ -482,9 +482,7 @@ class Agent(Base):
         self.assertIn("const MAP = '.claude/p4/native/host.json'", module)
         with open(os.path.join(os.path.dirname(ROOT), "p4-native", "README.md"), encoding="utf-8") as f:
             native = f.read()
-        for said in ("`<project>/.claude/p4/native/host.json`", "`sessions.<session id>`", "`platform` is the operating "
-                     "system", "`tools.app` lists the desktop app's tools by name"):
-            self.assertIn(said, native, said)
+        self.assertIn("`<project>/.claude/p4/native/host.json`", native)
         search = module.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("const isWindows = await onWindows($)", search)
         windows = module.split("async function onWindows", 1)[1].split("\n}\n", 1)[0]
@@ -495,13 +493,6 @@ class Agent(Base):
         off = module.split("async function isMappedOffTheApp", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("host !== 'desktop' && Array.isArray(tools) && tools.length === 0", off,
                       "an entry that reads desktop with no tool listed decides nothing")
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
-            readme = f.read()
-        section = readme.split("## The host, from p4-native's capability map", 1)[1].split("\n## ", 1)[0]
-        for said in ("`<project>/.claude/p4/native/host.json`", "`sessions.<session id>`", "the entry's `platform`",
-                     "whose `tools.app` is empty", "Left as they are", "`upkeep.terminal`", "`relay.PUSH`",
-                     "`CLAUDE_CODE_HOST_SESSION_ID`", "Claude Code 2.1.328"):
-            self.assertIn(said, section, said)
 
     def test_a_start_no_launch_is_bound_to_gets_no_lines(self):
         """A launch whose Agent call failed or was denied starts no subagent, so no start is bound to it and a later

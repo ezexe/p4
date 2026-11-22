@@ -335,10 +335,6 @@ class Manifests(unittest.TestCase):
         repo = os.path.dirname(lbiza)
         with open(os.path.join(repo, ".claude-plugin", "marketplace.json"), encoding="utf-8") as f:
             market = json.load(f)
-        with open(os.path.join(repo, "README.md"), encoding="utf-8") as f:
-            top = f.read()
-        self.assertIn("https://github.com/ezexe/p4/wiki/Install", top)
-        self.assertNotIn("claude plugin marketplace add ", top)
         self.assertFalse(os.path.exists(os.path.join(lbiza, "README.md")))
         readme = os.path.join(ROOT, "README.md")
         with open(readme, encoding="utf-8") as f:

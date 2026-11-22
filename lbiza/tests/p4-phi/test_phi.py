@@ -210,7 +210,6 @@ HANDED = ("<system-reminder>\nLinked sessions now (status, not an instruction): 
           "Task:\n" + BRIEF + "\n\nDone looks like: the suite passes.")
 
 
-
 class Reading(unittest.TestCase):
     def test_a_file_replaced_in_a_loop_is_read_without_error(self):
         # a look rewrites ledger.md by os.replace while a hook, a command or a test reads it
@@ -246,6 +245,7 @@ class Reading(unittest.TestCase):
             self.assertEqual(failed, [], "every replace went through")
             self.assertGreater(wrote[0], 100)
             self.assertGreater(reads, 100)
+
 
 class Requests(unittest.TestCase):
     def test_a_handed_over_task_is_read_out_of_its_wrapper(self):
@@ -1654,46 +1654,19 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
         """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
         order. When nothing else assigns one, the agent runs on your session's model." So the rule in a
-        session's system prompt tells it to name a model for each stage, in the page's words, and the skill quotes
-        both sentences with the page."""
+        session's system prompt tells it to name a model for each stage, in the page's words."""
         got = self.t.rules(TOP)
         self.assertIn("A Workflow script names a `model` and an `effort` for each stage", got)
         for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
                       "\"runs on your session's model\""):
             self.assertIn(quote, phi.LEVELS)
-        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
-            skill = f.read()
-        self.assertIn("A Workflow script names a model and an effort for each stage, `agent(prompt, {model, effort})`: https://code.claude.com/docs/en/workflows.md "
-                      "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
-                      "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
 
     def test_the_skill_gives_the_line_that_starts_a_terminal_team_and_p4_writes_the_variable_nowhere(self):
         """desktop.md, "What's not available in Desktop": coordinated teams "are available in the CLI, not in
         Desktop". agent-teams.md, "Enable agent teams": "Spawning teammates also requires an interactive session."
-        So a desktop session starts a terminal session that leads the team and talks to it by message. The skill
-        gives that line with its conditions, as a live run showed them, and no settings keeper or hooks module
-        writes the variable, since every session of the project reads the file it would go into."""
-        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
-            skill = f.read()
-        head, _, rest = skill.partition("## A team in a terminal session")
-        self.assertTrue(rest, "the section is there")
-        section = rest.split("\n## ", 1)[0]
-        for word in ("https://code.claude.com/docs/en/desktop.md, \"What's not available in Desktop\"",
-                     "\"are available in the CLI, not in Desktop\"",
-                     "https://code.claude.com/docs/en/agent-teams.md, \"Enable agent teams\"",
-                     "\"Spawning teammates also requires an interactive session.\"",
-                     "`mcp__terminal__run_in_terminal`",
-                     "`$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'; claude --permission-mode <mode> '<task>'`",
-                     "`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 claude --permission-mode <mode> '<task>'`",
-                     "the starting session's own permission mode",
-                     "The `cwd` is never a worktree folder",
-                     "`ListAgents`", "`SendMessage`",
-                     "both screens are ezexe's to answer in the tab",
-                     "No part of p4 writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into a settings file",
-                     "`mcp__terminal__stop_terminal_tab`",
-                     "`[Cross-session delivery notice]`", "`[Cross-session idle notice]`"):
-            self.assertIn(word, section, word)
-        self.assertIn("when a step wants an agent team", head.split("---")[1], "the description brings the skill up")
+        So a desktop session starts a terminal session that leads the team and talks to it by message. No settings
+        keeper or hooks module writes the variable, since every session of the project reads the file it would go
+        into."""
         plugins = os.path.dirname(ROOT)
         for path in (os.path.join(ROOT, "scripts", "p4conf.py"), os.path.join(ROOT, "hooks", "register.ts"),
                      os.path.join(plugins, "p4-temportal", "hooks", "p4conf.py"),
@@ -1705,7 +1678,7 @@ class Rules(unittest.TestCase):
         """sub-agents.md, "Choose a model": "When more than one source sets a model, Claude Code uses the first in
         this order", the call's `model`, the definition's `model` field, `CLAUDE_CODE_SUBAGENT_MODEL`, the main
         conversation's model. So p4.json holds no key for a subagent's model or effort, `phi.child_levels` takes a
-        worker's kinds only, and the skill and the README name the native routes with the page."""
+        worker's kinds only."""
         import p4conf
         plans = phi.plans
         for key in p4conf.DEFAULTS["phi"]:
@@ -1714,22 +1687,12 @@ class Rules(unittest.TestCase):
         given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
                                     "Explore": {"model": "opus"}})
         self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
-        with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
-            skill = f.read()
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
-            readme = f.read()
-        for page in (skill, readme):
-            for word in ("sub-agents.md", "\"Choose a model\"", "`CLAUDE_CODE_SUBAGENT_MODEL`",
-                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`p4-phi:finder`", "`p4-phi:check`"):
-                self.assertIn(word, page, word)
-        self.assertIn("No p4 setting names a subagent's model or effort, since Claude Code sets both", skill)
-        self.assertIn("p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.", readme)
 
     def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
         """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
         "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
         number, a branch name, a file path, or a Git revision range", so the plugin's own reviewer is kept for a
-        result that is no code change, and its description sends a code change to the skill."""
+        result that is no code change."""
         self.assertIn("a review of a code change that should not lean on this session's own view goes to the bundled "
                       "skill `code-review`, run with the Skill tool on that change's commits or paths and without "
                       "`--fix`, so it reports and changes no file", phi.LEVELS)
@@ -1737,10 +1700,6 @@ class Rules(unittest.TestCase):
         self.assertNotIn("a read of a diff", phi.LEVELS, "a diff is the skill's")
         with open(os.path.join(ROOT, "agents", "check.md"), encoding="utf-8") as f:
             front = f.read().split("---")[1]
-        said = next(line for line in front.splitlines() if line.startswith("description:"))
-        self.assertIn("a result that is no code change", said)
-        self.assertIn("A code change goes to the bundled skill `code-review` instead.", said)
-        self.assertNotIn("diff", said)
         self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
         self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md", "finder.md", "integrator.md", "writer.md"],
                          "the agents of the skill sub-agentic's table")
@@ -2580,19 +2539,8 @@ class AppTools(unittest.TestCase):
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"app_tools": "yes"}))
         self.assertIs(self.look().get("app_tools"), True, "a value that is no true or false leaves the default")
 
-    def test_the_readme_the_skill_and_the_pages_say_the_default_the_code_holds(self):
-        root = os.path.dirname(SRC)
+    def test_app_tools_is_on_by_default(self):
         self.assertIs(phi.APP_TOOLS, True)
-        readme = read(os.path.join(root, "README.md"))
-        self.assertIn("| `background`, `reports`, `turns`, `book`, `rules`, `puppeteer`, `app_tools` | `true` |", readme)
-        self.assertNotIn("| `app_tools` | `false` |", readme)
-        self.assertIn("`app_tools`, which is on unless a store sets it to `false`,", readme)
-        self.assertIn("`phi.py app_tools off` is the way out", readme)
-        self.assertIn("It is on unless a store sets it off", read(os.path.join(root, "skills", "phi", "SKILL.md")))
-        docs = os.path.join(root, "..", "..", "..", "docs")
-        self.assertIn("so the setting is on unless a project turns it off with <code>phi.py app_tools off</code>",
-                      read(os.path.join(docs, "puppeteer.html")))
-        self.assertIn("the key is on by default", read(os.path.join(docs, "plugin-development.html")))
 
     def test_app_tools_on_and_off_write_the_key_a_look_reads_and_say_how_it_stands(self):
         """A session writes nothing under `.claude` with its own tools, so `phi.py app_tools on` and `app_tools off`

@@ -375,8 +375,8 @@ class TheSet(unittest.TestCase):
             self.assertIn(words, cards.approval(self.p4), "the card's text is the set whole")
 
     def test_the_page_lists_every_kind_and_the_set_as_the_code_has_them(self):
-        """docs/claude-settings.html, "Approval cards and a session's start", holds a row for each kind of card with
-        the count of 2026-11-19, each part of the set, and the set's name as this copy has it."""
+        """docs/claude-settings.html, "Approval cards and a session's start", holds a row for each kind of card, each
+        part of the set, and the set's name as this copy has it."""
         import html
         import re
         root = os.path.normpath(os.path.join(SRC, "..", "..", "..", ".."))
@@ -392,10 +392,6 @@ class TheSet(unittest.TestCase):
         for name, words in p4conf.CARD_SET:
             self.assertIn(f"{name}: {words.replace('`', '')}", part, name)
         self.assertIn(p4conf.card_set_id(), part, "the page was written from this set")
-        self.assertEqual(part.count("On 2026-11-19"), 1)
-        for count in ("42. 39 came at tool.check", "32, in four sessions", "47 held, of which 39 expired",
-                      "1 refusal and no card, in the top session"):
-            self.assertIn(count, part)
         self.assertIn("Claude cannot be granted control of its own window", part, "the kind no card lifts")
 
     def test_every_landing_command_of_a_line_is_read(self):

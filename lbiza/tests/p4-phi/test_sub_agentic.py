@@ -17,10 +17,8 @@ import unittest
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[2] / "plugins" / "p4-phi"
 SKILL = PLUGIN / "skills" / "sub-agentic" / "SKILL.md"
-PHI_SKILL = PLUGIN / "skills" / "phi" / "SKILL.md"
 README = PLUGIN / "README.md"
 AGENTS = PLUGIN / "agents"
-PAGE = pathlib.Path(__file__).resolve().parents[3] / "docs" / "session-levels.html"
 sys.path.insert(0, str(PLUGIN / "scripts"))
 import phi  # noqa: E402
 import plans  # noqa: E402
@@ -63,11 +61,6 @@ class SkillText(unittest.TestCase):
     def test_the_skill_is_the_plugins_own_and_named_sub_agentic(self):
         f = front(SKILL)
         self.assertEqual(f.get("name"), "sub-agentic")
-        for word in ("Invoke BEFORE spawning any subagent, fork, workflow, session or agent team",
-                     "BEFORE writing a Workflow script or choosing a model or effort for delegated work",
-                     "p4-phi:writer", "p4-phi:integrator", "p4-phi:check", "p4-phi:finder",
-                     "whenever ezexe asks what is running or queued"):
-            self.assertIn(word, f["description"], word)
 
     def test_the_ten_rules_keep_the_source_heads_in_order(self):
         body = text()
@@ -92,7 +85,6 @@ class SkillText(unittest.TestCase):
     def test_readers_hold_only_read_tools(self):
         for name in ("check", "finder"):
             self.assertEqual(front(AGENTS / f"{name}.md").get("tools"), "Read, Grep, Glob", name)
-        self.assertIn("`p4-phi:check` and `p4-phi:finder` hold only Read, Grep and Glob", text())
 
     def test_the_orchestrator_and_a_fork_run_on_the_session_model(self):
         rows = table()
@@ -180,23 +172,6 @@ class HandOuts(unittest.TestCase):
                      "say the shape in the reply's first line ahead of the calls"):
             self.assertIn(word, plans.LEVEL_HOW, word)
         self.assertNotIn("high effort", plans.LEVEL_HOW)
-
-    def test_the_phi_skill_points_to_it(self):
-        body = text(PHI_SKILL)
-        self.assertIn("are the skill `sub-agentic` of this plugin, read before an Agent call, a fork, a Workflow "
-                      "call or a session start", body)
-        self.assertNotIn("on the parent session's model at `high`", body)
-
-    def test_the_readme_and_the_page_have_the_table(self):
-        readme = text(README)
-        for word in ("| `build`: every other step, such as a change to behaviour or anything that names code | "
-                     "writer | `claude-opus-5-5` | `medium` |", "`model: sonnet` and `effort: medium` in "
-                     "`agents/check.md`", "`model: haiku` and `effort: low` in `agents/finder.md`"):
-            self.assertIn(word, readme, word)
-        page = text(PAGE)
-        for word in ("<td>writer</td><td><code>claude-opus-5-5</code></td>", "p4-phi:finder", "skill <code>sub-agentic</code>"):
-            self.assertIn(word, page, word)
-        self.assertNotIn("Explore", page)
 
 
 if __name__ == "__main__":

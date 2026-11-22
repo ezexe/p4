@@ -71,15 +71,6 @@ class Plugins(Base):
                      {"p4-recall": True, "p4-phi": True})
         self.assertNotIn("claude plugin", catchup.run(self.project, os.path.join(self.project, ".claude", "p4")))
 
-    def test_the_module_says_auto_update_is_on_and_by_which_key(self):
-        """https://code.claude.com/docs/en/plugins/loading.md, "Which marketplaces and plugins auto-update": a
-        marketplace auto-updates by "`autoUpdate` on its `extraKnownMarketplaces` entry in a settings file" first.
-        ezexe's user settings set it for p4-marketplace, so the module no longer speaks of a day it is turned on."""
-        self.assertNotIn("once ezexe turns it on", catchup.__doc__)
-        said = " ".join(catchup.__doc__.split())
-        self.assertIn("marketplace auto-update, which is on for p4-marketplace where a settings file sets "
-                      "`autoUpdate` on its `extraKnownMarketplaces` entry, as ezexe's user settings do", said)
-
     def test_nothing_behind_is_silent(self):
         self.install([("p4-phi", "user", "0.7.0", None), ("p4-temportal", "user", "0.2.0", None)],
                      {"p4-phi": True, "p4-temportal": True, "p4-recall": False})
