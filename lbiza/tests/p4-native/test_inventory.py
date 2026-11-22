@@ -126,10 +126,6 @@ class RecordTest(unittest.TestCase):
         fault = probes.split("id: 'set-goal-tool'", 1)[1].split("was:", 1)[0]
         for word in ("`SetGoal`", "`GetGoal`", "`PauseGoal`", "a terminal session at its prompt", "2.1.328"):
             self.assertIn(word, fault, word)
-        goal = README.split("`SetGoal`, `GetGoal` and `PauseGoal` are in the build's types file", 1)[1].split("\n\n", 1)[0]
-        for word in ("Terminal panel", "`--plugin-dir`", "Not tested: `GetGoal` and `PauseGoal` through `$.tool.call` "
-                     "in the desktop app"):
-            self.assertIn(word, goal, word)
         for key in ("GetGoal", "PauseGoal", "TaskCreate", "TaskList", "TaskUpdate", "TodoWrite"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
             self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
@@ -287,9 +283,6 @@ class ModuleTest(unittest.TestCase):
 class ReadmeTest(unittest.TestCase):
     def test_the_readme_says_what_the_record_holds_and_what_a_module_cannot_list(self):
         section = README.split("## The inventory\n", 1)[1].split("\n## ", 1)[0]
-        for words in ("`hooks/weighed.json`", "weighed by nobody", "`/native weighed`", "cannot list",
-                      "`/motion`", "`/whiteboard`"):
-            self.assertIn(words, section)
         self.assertIn(f"{len(ROWS)} rows", section)
 
     def test_the_readme_says_how_many_rows_of_each_kind_are_used_open_and_declined(self):

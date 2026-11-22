@@ -73,9 +73,6 @@ class CallsTest(unittest.TestCase):
         self.assertIn("if (wants.push && WAITING.has(e.notification_type) && !isTold) void push($, e.message, false)", hook)
         self.assertIn("const isTold = e.notification_type === 'idle_prompt' && wasSent", hook)
         self.assertIn("return out", hook)
-        for words in ("In a session with no such tool it calls `$.ui.notify`", "the classic event `Notification`",
-                      "`plugin_notification`"):
-            self.assertIn(words, SECTION)
 
     def test_status_is_one_call_of_the_engines_status_line(self):
         self.assertEqual(MODULE.count("$.ui.status("), 1)

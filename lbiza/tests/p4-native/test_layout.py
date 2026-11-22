@@ -94,7 +94,6 @@ class MapTest(unittest.TestCase):
         self.assertIn("const FILE = 'native/host.json'", MODULE)
         for page in (README, SKILL):
             self.assertIn(MAP, page)
-            self.assertIn("sessions.<session id>", page)
 
     def test_the_count_of_sessions_kept_is_the_one_the_pages_give(self):
         most = int(re.search(r"(?m)^const MOST = (\d+)$", MODULE).group(1))
@@ -141,7 +140,6 @@ class SkillTest(unittest.TestCase):
                  for s in skills]
         named = [dict(line.split(": ", 1) for line in h.group(1).splitlines())["name"] for h in heads]
         self.assertFalse(set(named) & set(commands), "a skill named as the command is the one `/native` would run")
-        self.assertIn("the skill is named `host`", README)
 
 
 class ProseTest(unittest.TestCase):

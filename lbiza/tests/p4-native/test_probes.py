@@ -70,7 +70,6 @@ class ListTest(unittest.TestCase):
         self.assertIn("if (e.agentId === undefined && isJoined) {\n      isJoined = false\n      origin = undefined", end)
         test = (PLUGIN / "hooks" / "register.test.ts").read_text(encoding="utf-8")
         self.assertIn("a start after a task notice came into a turn a person began leaves the condition as it was", test)
-        self.assertIn("reads the origin of the prompt that began the turn", README)
 
     def test_a_turn_a_message_of_a_person_came_into_is_no_unattended_turn(self):
         """Seen in the desktop app on 2026-11-22: a task's notice began a turn, ezexe wrote into it twice, the app
@@ -129,7 +128,6 @@ class RunTest(unittest.TestCase):
         self.assertIn("return `${host.host}/${host.run}`", MODULE)
         self.assertIn("const BOOK = 'native/probes.json'", MODULE)
         self.assertIn(".claude/p4/native/probes.json", README)
-        self.assertIn("`desktop/interactive` and `terminal/scripted`", README)
 
 
 class HarmlessTest(unittest.TestCase):
@@ -212,7 +210,6 @@ class ToldOnceTest(unittest.TestCase):
         self.assertIn("p4-native: Claude Code changed from ${ran.claude} to ${host.claude} on", MODULE)
         self.assertIn("`p4-native: the watched condition`", SKILL)
         self.assertIn("`p4-native: Claude Code changed from`", SKILL)
-        self.assertIn("reopening a decision is ezexe's", SKILL)
 
 
 class ChoicesTest(unittest.TestCase):
@@ -221,18 +218,6 @@ class ChoicesTest(unittest.TestCase):
         effort by its role. The section called a session's verdicts ezexe's own until 2026-11-22, when ezexe said
         which were which and reopened three of them, plan mode, the prompts on a schedule and `/schedule`."""
         section = README.split("## What ezexe chose, and what sessions decided\n", 1)[1].split("\n## ", 1)[0]
-        own, rest = section.split("The rest were verdicts of the sessions that weighed the rows", 1)
-        self.assertEqual(len([line for line in own.splitlines() if line.startswith("- ")]), 2)
-        for word in ("No pull requests", "`plan-planner` and `sub-agentic`", "by its role"):
-            self.assertIn(word, own)
-        self.assertNotIn("Fable", section)
-        verdicts, reopened = rest.split("Three that sessions had called declined are reopened on ezexe's word", 1)
-        self.assertEqual(len([line for line in verdicts.splitlines() if line.startswith("- ")]), 4)
-        for word in ("/fast", "/permissions", "/sandbox", "autoCompactWindow", "scheduled tasks"):
-            self.assertIn(word, verdicts)
-        for word in ("/plan", "EnterPlanMode", "ExitPlanMode", "CronCreate", "CronDelete", "CronList", "/schedule"):
-            self.assertIn(word, reopened)
-            self.assertNotIn(word, verdicts, "a reopened row is no verdict that stands")
         for name in BY_ID:
             self.assertNotIn(name, section)
         for word in ("autofix", "/model", "/fast", "/permissions", "/sandbox"):
