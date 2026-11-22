@@ -1415,10 +1415,8 @@
   },
   "/loop": {
    "kind": "command",
-   "used": [
-    "p4-phi"
-   ],
    "declined": {
+    "p4-phi": "its upkeep handed the sweep by it until 0.11.132: a worker's idle notice and one `CronCreate` bring an orchestrator back now, and a worker's pass over its own work is a part of its goal.",
     "p4-temportal": "the sweep runs on the module's timer and starts no turn."
    },
    "miss": [
@@ -2412,10 +2410,8 @@
   },
   "ScheduleWakeup": {
    "kind": "tool",
-   "used": [
-    "p4-phi"
-   ],
    "declined": {
+    "p4-phi": "it paces and ends a self-paced `/loop`, which its upkeep hands none of since 0.11.132.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    },
    "miss": [
