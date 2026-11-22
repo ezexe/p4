@@ -295,7 +295,7 @@ The rows written from the record, each with the by-hand way it is read off and t
 - `skill-read-as-a-file`, after a call: a `Read` call or a shell command prints the `SKILL.md` of an installed skill. It stands for `Skill`.
 - `process-killed-in-a-shell`, after a call: a shell command stops a process with `kill`, `pkill`, `taskkill` or `Stop-Process`. It stands for `TaskStop`, `mcp__terminal__stop_terminal_tab`, `mcp__ccd_session_mgmt__stop_session`.
 - `backup-copy-made-by-hand`, after a call: a shell command copies a file to a `.bak`, `.orig`, `.old` or `.backup` beside it. It stands for `/rewind`, `Checkpoints`.
-- `worktree-removed-in-a-shell`, after a call: a shell command removes a git worktree, or a folder under `.claude/worktrees`. It stands for `mcp__ccd_host__discard_kept_worktree`, `mcp__ccd_host__clean_up_worktrees`.
+- `worktree-removed-in-a-shell`, after a call: a shell command removes a git worktree by `git worktree remove`, or a folder under `.claude/worktrees`. It stands for `mcp__ccd_host__discard_kept_worktree`, `mcp__ccd_host__clean_up_worktrees`.
 - `store-measured-in-a-shell`, after a call: a shell command adds up the size of a `.claude` folder with `du` or `Measure-Object`. It stands for `mcp__ccd_host__get_storage_usage`.
 - `transcript-copied-by-hand`, after a call: a shell command copies this session's own transcript file. It stands for `/export`.
 - `transcript-measured-by-hand`, after a call: a shell command measures this session's own transcript file to tell how full the conversation is. It stands for `/context`.

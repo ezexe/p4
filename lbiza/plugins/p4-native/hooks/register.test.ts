@@ -1376,6 +1376,7 @@ const SHELL: readonly [string, string, readonly string[]][] = [
   ['Bash', 'git commit -m "kill the flaky test"', []],
   ['Bash', 'cp config.json config.json.bak', ['backup-copy-made-by-hand']],
   ['Bash', 'git worktree remove ../feature', ['worktree-removed-in-a-shell']],
+  ['Bash', 'git worktree prune', []],
   ['Bash', 'du -sh ~/.claude', ['store-measured-in-a-shell']],
   ['Bash', `cp ${MINE} /tmp/mine.jsonl`, ['transcript-copied-by-hand']],
   ['Bash', `wc -c ${MINE}`, ['transcript-measured-by-hand']],
@@ -1461,6 +1462,8 @@ test('a row written from the record hands its line beside the call, and only whe
   // A row that names a command alone needs no tool.
   const kept = await $.classic.PostToolUse(after('Bash', { command: 'cp a.json a.json.bak' }) as never)
   expect(kept.additionalContext?.[1]).toContain('`/rewind` brings one back')
+  // The app's archive does not answer here, so the worktree row hands nothing.
+  expect((await $.classic.PostToolUse(after('Bash', { command: 'git worktree remove ../feature' }) as never)).additionalContext?.length).toBe(1)
 
   // A question put by a tool in the turn is no question in prose, and the next turn starts over.
   tools = [...tools, tool('AskUserQuestion'), tool('ToolSearch')]
@@ -1475,6 +1478,16 @@ test('a row written from the record hands its line beside the call, and only whe
   await $.turn.complete({ ...TURN, turnId: 't2', answer: asked })
   expect(seen.shown.length).toBe(1)
   expect(seen.shown[0]).toContain('put to ezexe as buttons by `AskUserQuestion`.')
+
+  // Where the app's archive answers, the worktree row hands its line whole, with the archive named.
+  tools = [...OWN, tool('mcp__ccd_session_mgmt__archive_session')]
+  await $.session.start(HOSTED)
+  await clock.settle()
+  const gone = await $.classic.PostToolUse(after('Bash', { command: 'git worktree remove ../feature' }) as never)
+  const line = gone.additionalContext?.[1] ?? ''
+  expect(line).toContain('goes when that session is archived, by `mcp__ccd_session_mgmt__archive_session`')
+  expect(line).toContain("git's own to remove")
+  expect(line).not.toContain('{names}')
 })
 
 const REFUSING = {

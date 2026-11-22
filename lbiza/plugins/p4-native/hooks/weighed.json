@@ -2952,6 +2952,7 @@
   "mcp__ccd_session_mgmt__archive_session": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi",
     "p4-temportal"
    ],

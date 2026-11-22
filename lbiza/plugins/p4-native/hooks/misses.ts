@@ -35,7 +35,7 @@ const STOP_SESSION = 'mcp__ccd_session_mgmt__stop_session'
 const START = 'mcp__ccd_session__start_session'
 const STOP_TAB = 'mcp__terminal__stop_terminal_tab'
 const READ_TAB = 'mcp__terminal__read_terminal'
-const DISCARD = 'mcp__ccd_host__discard_kept_worktree'
+const ARCHIVE = 'mcp__ccd_session_mgmt__archive_session'
 const STORAGE = 'mcp__ccd_host__get_storage_usage'
 const LIFETIME = 'mcp__p4-temportal__lifetime'
 // The app's task list and its box at a turn's end, which a call of either shows is in use.
@@ -348,10 +348,16 @@ export const MISSES: readonly Miss[] = [
   },
   {
     id: 'worktree-removed-in-a-shell',
-    hand: 'A shell command removes a git worktree, or a folder under `.claude/worktrees`.',
+    hand: 'A shell command removes a git worktree by `git worktree remove`, or a folder under `.claude/worktrees`.',
     native: ['mcp__ccd_host__discard_kept_worktree', 'mcp__ccd_host__clean_up_worktrees'],
-    names: [DISCARD, 'mcp__ccd_host__clean_up_worktrees'],
-    line: "p4-native: this shell command removes a worktree. The desktop app removes its sessions' worktrees by {names}.",
+    names: [ARCHIVE],
+    line:
+      'p4-native: this shell command removes a worktree. A worktree the desktop app made for a session goes when ' +
+      "that session is archived, by `mcp__ccd_session_mgmt__archive_session` on ezexe's yes, unless it holds " +
+      'uncommitted changes, and a removal by hand while a session works in it takes the folder from under that ' +
+      'session. `mcp__ccd_host__discard_kept_worktree` removes only the worktree an archived session kept for its ' +
+      'uncommitted changes, and `mcp__ccd_host__clean_up_worktrees` only those of sessions idle 30 days or more. ' +
+      "A worktree no session of the app holds is git's own to remove.",
     at: 'call',
   },
   {
@@ -538,7 +544,7 @@ const PRINTER = /\b(?:cat|head|tail|less|more|type|Get-Content|gc)\b/i
 const BACKUP = /\b(?:cp|copy|Copy-Item|cpi)\b[^|;&\n]*\.(?:bak|orig|backup|old|save)\b/i
 const COPIES = /\b(?:cp|copy|Copy-Item|cpi)\b/i
 const MEASURES = /\b(?:wc|stat|du|Get-Item|Measure-Object)\b|\bls\s+-\w*l/i
-const WORKTREE = /\bgit\b[^|;&\n]*\bworktree\s+(?:remove|prune)\b|\b(?:rm|Remove-Item|ri|rmdir|rd)\b[^|;&\n]*[\\/]\.claude[\\/]worktrees[\\/]/i
+const WORKTREE = /\bgit\b[^|;&\n]*\bworktree\s+remove\b|\b(?:rm|Remove-Item|ri|rmdir|rd)\b[^|;&\n]*[\\/]\.claude[\\/]worktrees[\\/]/i
 const STORE_SIZE = /\bdu\b[^|;&\n]*\.claude\b|\.claude\b[^\n]*\bMeasure-Object\b/i
 const SETTINGS = /[\\/]\.claude[\\/]settings(?:\.local)?\.json$/i
 const MODEL_KEY = /"(?:model|effortLevel)"\s*:/

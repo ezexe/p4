@@ -185,7 +185,7 @@
     "refuse_worktree_removed_in_a_shell": {
       "type": "boolean",
       "title": "Refuse: worktree removed in a shell",
-      "description": "A shell command removes a git worktree, or a folder under `.claude/worktrees`. With this on, the call is refused before it runs and the refusal names `mcp__ccd_host__discard_kept_worktree`, `mcp__ccd_host__clean_up_worktrees`.",
+      "description": "A shell command removes a git worktree by `git worktree remove`, or a folder under `.claude/worktrees`. With this on, the call is refused before it runs and the refusal names `mcp__ccd_session_mgmt__archive_session`.",
       "default": false
     },
     "refuse_store_measured_in_a_shell": {
