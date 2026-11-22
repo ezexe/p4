@@ -161,10 +161,12 @@ class Loop(unittest.TestCase):
         return json.loads(r.stdout) if r.stdout.strip() else {}
 
     def settled(self, path, wait=30.0):
-        """proof.json once its run in the background has written a result, or as it is after `wait` seconds."""
+        """proof.json once its run in the background has written a result, or as it is after `wait` seconds. A read
+        that comes back empty is no result yet: on Windows a read fails while the run's own `os.replace` of the file
+        is under way."""
         end = time.time() + wait
         d = issues.relay._read_json(path)
-        while d.get("state") == "running" and time.time() < end:
+        while d.get("state") not in ("passed", "failed") and time.time() < end:
             time.sleep(0.1)
             d = issues.relay._read_json(path)
         return d
