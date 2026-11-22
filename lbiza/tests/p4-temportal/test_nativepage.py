@@ -96,8 +96,8 @@ class Page(unittest.TestCase):
         text = page()
         row = rows(text)["plans"]
         self.assertIn('<td class="n">5</td>', row)
-        for said in ('href="claude-settings.html"', "<code>.claude/p4/temportal/plans</code>", "2.1.328",
-                     "neither asked about nor refused", "a cache rule on <code>plans</code>", "sets it false"):
+        for said in ('href="claude-settings.html"', "<code>.claude/p4/temportal/plan-planner</code>", "2.1.328",
+                     "neither asked about nor refused", "a cache rule on <code>plan-planner</code>", "sets it false"):
             self.assertIn(said, row, said)
         self.assertEqual(set(re.findall(r'<li id="part-(\d+)">', text)), set(LANDED))
         self.assertNotIn('id="left"', text)

@@ -20,7 +20,7 @@ has written `plansDirectory`. Claude Code's own cleanup clears a plan in `~/.cla
 same age, by sweep_plans: the days the hooks module read from Claude Code's own merge of the settings and handed
 after `--cleanup-days`, the key as the settings files hold it where none is handed, and 30 where no file sets it.
 Where the period cannot be told, as with a settings file that cannot be read, no plan is cleared by age, as Claude
-Code pauses its own sweep there. A cache rule on `plans` in p4.json stands in place of that age, an empty one keeps
+Code pauses its own sweep there. A cache rule on `plan-planner` in p4.json stands in place of that age, an empty one keeps
 every plan, and a plan file takes a cookie as any other file does. The key holds from the session after the one
 whose start wrote it, so `tick` copies the plan files the hooks module names with `--plan` and `--plan-edited` from
 Claude Code's own folder into plans/, by keep_plans, and leaves each original.
@@ -30,6 +30,13 @@ ezexe parks it and unplanned/ once ezexe drops it, while a plan being worked sta
 clears only the files directly in the folder, where plan mode writes them, so a sorted plan stays until ezexe's
 word moves it, and no subfolder of the three takes a cookie whole. keep_plans copies no plan whose name one of
 them holds, and carry_over moves a plan of the main checkout's store into the place a worktree moved it to.
+
+The folder is temportal/plan-planner since p4-temportal 0.3.55 and was temportal/plans before, which p4conf's layout
+move takes into the new folder once, with its complete/ and todo/ and the cookies and cache rules set on it, and the
+keeper's next whole check then names the new folder in `plansDirectory`, where the keeper wrote the old one. A session
+whose Claude Code read the old value at its start writes its plan into temportal/plans until it ends. Each sweep
+starts with the layout move, which takes such a file into the new folder again, the newer of two differing copies
+staying and the older set aside in temportal/.layout-conflicts/plans/, so no plan is lost.
 
 A session in a git worktree has a store of its own, `<worktree>/.claude/p4`, since what a session writes by a
 path from its folder lands there: its plans, its notebook and its saved code, which carry_over copies into the main
@@ -604,7 +611,10 @@ def keep_plans(root, made, edited=()):
     a later process of the same session still uses. Claude Code's own cleanup removes the original with the
     session's transcript.
 
-    Nothing is copied unless the project's local settings file holds the key as the keeper writes it for this store.
+    Nothing is copied unless the project's local settings file holds the key as the keeper writes it for this store,
+    or as an earlier keeper wrote it for an earlier place of the plans folder, temportal/plans. The tick copies
+    before it runs the layout move and the keeper, so the first last sweep after p4-temportal 0.3.55 still finds the
+    old value there, and the plan goes into the new folder all the same.
     A file is copied only when it is a plain `.md` file directly in Claude Code's own plans folder. One this process
     created is copied where the store holds none of its name, and any of the two kinds is copied over the store's
     file of its name where it is the newer, so a resumed session's edit reaches the copy. A file that was only
@@ -616,7 +626,13 @@ def keep_plans(root, made, edited=()):
     want = p4conf.plans_dir(p4, target)
     have = (p4conf.read_json(target) or {}).get("plansDirectory")
     paths = dict.fromkeys(edited, False) | dict.fromkeys(made, True)
-    if not paths or not want or not isinstance(have, str) or not p4conf._same_value("plansDirectory", have, want):
+    # the key as the keeper writes it for the store's plans folder, or as an earlier keeper wrote it for an earlier
+    # place of that folder, which the next start's whole check rewrites: either names this store's plans
+    named = [want] if want else []
+    if want and want.endswith(p4conf.PLANS):
+        named += [want[:-len(p4conf.PLANS)] + old for old in p4conf.OLDER.get("plans", ())]
+    if not paths or not isinstance(have, str) or not any(p4conf._same_value("plansDirectory", have, n)
+                                                         for n in named):
         return []
     own = os.path.normcase(os.path.realpath(own_plans()))
     to = os.path.join(p4, *p4conf.PLANS.split("/"))
@@ -848,7 +864,7 @@ def listing(p4, now=None, days=None, is_told=False):
                      else f"not an object, so never applied: {json.dumps(rule)}"))
     if not own_rule(p4) and days is not None:
         lines.append(f"cache   {PLANS}/  max_age_days={_days(days)}, the {CLEANUP_KEY} at which Claude Code clears "
-                     "a plan in its own folder, since no cache rule names plans/")
+                     f"a plan in its own folder, since no cache rule names {PLANS}/")
     elif not own_rule(p4) and is_told:
         lines.append(f"cache   {PLANS}/  no plan is cleared by age: {CLEANUP_KEY} cannot be told from the settings")
     return lines

@@ -24,6 +24,7 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 - `Ctrl+G` opens the plan in ezexe's editor before approval, and approving it is ezexe's decision on the plan.
 - After a compaction Claude Code reads the plan in again from disk, so the plan file holds what the work needs and the conversation does not.
 - A plan in this folder is cleared once it is older than `cleanupPeriodDays`, as Claude Code clears its own plans, so an edit keeps a plan being worked, and a plan to keep unworked is parked.
+- The folder was `temportal/plans` before p4-temportal 0.3.55, and a session whose Claude Code read that value at its start writes its plan there until it ends, which each sweep then moves into this folder.
 - A session in a git worktree has the worktree's own store, and each retention sweep carries its plans into the main checkout's store, where a plan the worktree moved leaves its old place too.
 
 ## What a session reads

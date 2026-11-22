@@ -20,7 +20,7 @@ import p4conf  # noqa: E402
 PLUGINS = SRC.parents[1]
 # What the keeper writes as plansDirectory in a project that holds its own store: the store's folder of plan files,
 # from the project's root.
-PLANS = ".claude/p4/temportal/plans"
+PLANS = ".claude/p4/temportal/plan-planner"
 COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py"]
 
 
@@ -545,7 +545,8 @@ class P4Conf(unittest.TestCase):
         HISTORY and the pin below updated."""
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
-                11: "909dddd3e3552f7c"}   # append only: one more for each GEN. 11 came with a key of the keeper
+                11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c"}
+        # append only: one more for each GEN. 11 came with a key of the keeper, 12 with the plans folder's move
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -801,7 +802,7 @@ class ClaudeSettings(unittest.TestCase):
 
     def test_plansDirectory_names_the_stores_plans_folder_from_the_project_root(self):
         """settings-reference.md gives plansDirectory as "a path relative to the project root", so the keeper writes
-        the store's temportal/plans as one, with forward slashes, after autoMemoryDirectory, and records it as its
+        the store's temportal/plan-planner as one, with forward slashes, after autoMemoryDirectory, and records it as its
         own. A store whose claude section sets it false gets none, and one that had it loses it."""
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
@@ -834,6 +835,41 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(self.project)
         p4conf.keep_settings(self.project)
         self.assertEqual(self.read(self.local())["plansDirectory"], "docs/plans")
+        self.assertNotIn("plansDirectory", self.owned())
+
+    def test_a_plansDirectory_the_keeper_wrote_for_temportal_plans_takes_the_new_folder(self):
+        """KEEPER 12 and GEN 12 came with the plans folder's move to temportal/plan-planner: a value an earlier keeper
+        wrote and recorded at GEN 11 takes the new folder at the next whole check, a copy of GEN 11 leaves the new
+        value to the copy that wrote it, and a value a person set stays as it is."""
+        p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(p4)
+        p4conf.keep_settings(self.project)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        name = p4conf.fwd(self.local())
+        rec["files"][name]["plansDirectory"] = {"v": ".claude/p4/temportal/plans", "gen": 11}
+        rec["kept"][name]["keeper"] = 11
+        _write(self.record(), rec)
+        d = self.read(self.local())
+        d["plansDirectory"] = ".claude/p4/temportal/plans"
+        _write(self.local(), d)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["plansDirectory"], PLANS)
+        self.assertIn("plansDirectory", self.owned())
+        old = p4conf.GEN
+        try:
+            p4conf.GEN = 11
+            p4conf.PLANS = "temportal/plans"
+            p4conf.keep_settings(self.project)
+        finally:
+            p4conf.GEN = old
+            p4conf.PLANS = p4conf.LAYOUT["plans"]
+        self.assertEqual(self.read(self.local())["plansDirectory"], PLANS, "an older copy leaves the newer value")
+        d = self.read(self.local())
+        d["plansDirectory"] = ".claude/p4/temportal/plans"
+        _write(self.local(), d)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["plansDirectory"], ".claude/p4/temportal/plans",
+                         "a value a person set is left as it is")
         self.assertNotIn("plansDirectory", self.owned())
 
     def test_plansDirectory_is_not_written_for_a_store_outside_the_project(self):

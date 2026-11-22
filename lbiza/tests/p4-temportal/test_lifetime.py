@@ -299,12 +299,12 @@ class CarriedOver(unittest.TestCase):
         self.there = os.path.join(self.main, ".claude", "p4", "temportal")
 
     def test_a_plan_of_a_session_in_a_worktree_is_in_the_main_checkouts_store_once_the_worktree_is_removed(self):
-        plan = put(os.path.join(self.here, "plans", "quick-plan-brave-otter.md"), "# the plan\n")
+        plan = put(os.path.join(self.here, "plan-planner", "quick-plan-brave-otter.md"), "# the plan\n")
         said = lifetime.tick(self.tree, made=[plan])["said"]
         self.assertEqual(read(plan), "# the plan\n", "the worktree's own file stays for the session that wrote it")
         git(self.main, "worktree", "remove", "--force", self.tree)
         self.assertFalse(os.path.exists(self.tree))
-        self.assertEqual(read(os.path.join(self.there, "plans", "quick-plan-brave-otter.md")), "# the plan\n")
+        self.assertEqual(read(os.path.join(self.there, "plan-planner", "quick-plan-brave-otter.md")), "# the plan\n")
         self.assertEqual([line for line in said if "carried" in line],
                          ["carried 1 file of this worktree's plans, notebook and saved code into the main "
                           "checkout's store, where they stay when the worktree is removed."])
@@ -524,8 +524,8 @@ class KeptPlans(unittest.TestCase):
         env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.config})
         env.start()
         self.addCleanup(env.stop)
-        self.kept = os.path.join(self.p4, "temportal", "plans")
-        self.key(".claude/p4/temportal/plans")
+        self.kept = os.path.join(self.p4, "temportal", "plan-planner")
+        self.key(".claude/p4/temportal/plan-planner")
 
     def key(self, value):
         """The project's local settings file with `plansDirectory` as given, or without it for None."""
@@ -539,7 +539,7 @@ class KeptPlans(unittest.TestCase):
         self.assertEqual(read(plan), "# the plan\n", "the original is the one a resumed session writes")
         self.assertEqual(len(said), 1)
         self.assertIn("copied the plan quick-plan-brave-otter.md", said[0])
-        self.assertIn("temportal/plans/", said[0])
+        self.assertIn("temportal/plan-planner/", said[0])
         self.assertEqual(lifetime.keep_plans(self.root, [plan]), [], "a copy that is no older is left as it is")
 
     def test_nothing_is_copied_unless_the_key_names_the_stores_folder(self):
@@ -548,8 +548,20 @@ class KeptPlans(unittest.TestCase):
             self.key(value)
             self.assertEqual(lifetime.keep_plans(self.root, [plan]), [], value)
             self.assertFalse(os.path.exists(self.kept), value)
-        self.key(".claude\\p4\\temportal\\plans" if os.name == "nt" else ".claude/p4/temportal/plans/")
+        self.key(".claude\\p4\\temportal\\plan-planner" if os.name == "nt" else ".claude/p4/temportal/plan-planner/")
         self.assertEqual(len(lifetime.keep_plans(self.root, [plan])), 1, "the same folder, spelled another way")
+
+    def test_the_key_an_earlier_keeper_wrote_for_temportal_plans_still_copies_into_the_new_folder(self):
+        """The tick copies before the layout move and the keeper's check, so the first last sweep after the plans
+        folder moved still finds the old value in the local file. The plan goes into the new folder all the same."""
+        self.key(".claude/p4/temportal/plans")
+        plan = put(os.path.join(self.own, "first.md"), "# first\n")
+        self.assertEqual(len(lifetime.keep_plans(self.root, [plan])), 1)
+        self.assertEqual(read(os.path.join(self.kept, "first.md")), "# first\n")
+        self.assertFalse(os.path.exists(os.path.join(self.p4, "temportal", "plans")))
+        self.key("docs/plans")
+        other = put(os.path.join(self.own, "second.md"))
+        self.assertEqual(lifetime.keep_plans(self.root, [other]), [], "a folder a person named is not the store's")
 
     def test_only_a_plain_markdown_file_of_claude_codes_own_plans_folder_is_copied(self):
         elsewhere = put(os.path.join(self.base, "other", "plans", "b.md"))
@@ -936,31 +948,31 @@ class Lifetime(unittest.TestCase):
         self.assertIn("is not under", r.stderr)
 
     def test_plan_files_come_under_lifetimes_and_the_plans_folder_is_never_cleared_whole(self):
-        """temportal/plans/ is where plansDirectory points Claude Code. A plan file takes a cookie and is cleared when
+        """temportal/plan-planner/ is where plansDirectory points Claude Code. A plan file takes a cookie and is cleared when
         it is due, a cache rule on `plans` clears the plans past its age, and the folder itself takes no cookie, as
         the notebook and src/ take none. A sweep that is given no retention period clears no plan by age: PlansAge
         holds the age Claude Code's own cleanup gives one."""
-        old = put(os.path.join(self.t, "plans", "old-plan.md"), age_days=400)
-        due = put(os.path.join(self.t, "plans", "due-plan.md"))
-        kept = put(os.path.join(self.t, "plans", "kept-plan.md"))
-        s = run("--p4", self.p4, "set", "plans/due-plan.md", "7d", cwd=self.root)
-        self.assertEqual((s.returncode, s.stderr, sorted(lifetime.read_expires(self.p4))), (0, "", ["plans/due-plan.md"]))
-        whole = run("--p4", self.p4, "set", "plans", "7d", cwd=self.root)
+        old = put(os.path.join(self.t, "plan-planner", "old-plan.md"), age_days=400)
+        due = put(os.path.join(self.t, "plan-planner", "due-plan.md"))
+        kept = put(os.path.join(self.t, "plan-planner", "kept-plan.md"))
+        s = run("--p4", self.p4, "set", "plan-planner/due-plan.md", "7d", cwd=self.root)
+        self.assertEqual((s.returncode, s.stderr, sorted(lifetime.read_expires(self.p4))), (0, "", ["plan-planner/due-plan.md"]))
+        whole = run("--p4", self.p4, "set", "plan-planner", "7d", cwd=self.root)
         self.assertEqual((whole.returncode, whole.stdout), (2, ""))
-        self.assertIn("plans takes no cookie: notebook/, src/, plans/, plans/complete/, plans/todo/, plans/unplanned/ "
-                      "and expires.json are never cleared whole",
+        self.assertIn("plan-planner takes no cookie: notebook/, src/, plan-planner/, plan-planner/complete/, "
+                      "plan-planner/todo/, plan-planner/unplanned/ and expires.json are never cleared whole",
                       whole.stderr)
         self.assertEqual(lifetime.sweep(self.p4), "", "with no retention period given, no plan is cleared by age")
         self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, True, True])
         self.assertEqual(lifetime.sweep(self.p4, now=time.time() + 8 * DAY),
-                         "p4-temportal: cleared expired files: 1, plans/due-plan.md.")
+                         "p4-temportal: cleared expired files: 1, plan-planner/due-plan.md.")
         self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, False, True])
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
-            json.dump({"temportal": {"cache": {"plans": {"max_age_days": 90}}}}, fh)
+            json.dump({"temportal": {"cache": {"plan-planner": {"max_age_days": 90}}}}, fh)
         swept = lifetime.sweep(self.p4)
-        self.assertIn("plans", swept)
+        self.assertIn("plan-planner", swept)
         self.assertEqual([os.path.exists(p) for p in (old, kept)], [False, True])
-        self.assertTrue(os.path.isdir(os.path.join(self.t, "plans")))
+        self.assertTrue(os.path.isdir(os.path.join(self.t, "plan-planner")))
         self.assertEqual(os.path.join(self.p4, *p4conf.PLANS.split("/")), os.path.join(self.t, lifetime.PLANS))
 
     def test_no_cookie_on_tmp_or_on_the_folders_and_file_of_temportal_itself(self):
@@ -995,7 +1007,7 @@ class Lifetime(unittest.TestCase):
 class PlansAge(unittest.TestCase):
     """Claude Code's own cleanup clears a plan in `~/.claude/plans` once it is older than `cleanupPeriodDays` and
     does not reach a folder `plansDirectory` names, so the retention sweep clears the plans of the store's
-    temportal/plans/ at that same age. A cache rule on `plans` stands in its place, and where the period cannot be
+    temportal/plan-planner/ at that same age. A cache rule on `plan-planner` stands in its place, and where the period cannot be
     told no plan is cleared by age, as Claude Code pauses its own sweep there."""
     maxDiff = None
 
@@ -1014,8 +1026,8 @@ class PlansAge(unittest.TestCase):
                       mock.patch.object(p4conf, "MANAGED", {sys.platform[:3]: [self.managed]})):
             patch.start()
             self.addCleanup(patch.stop)
-        self.old = put(os.path.join(self.t, "plans", "old-plan.md"), age_days=40)
-        self.young = put(os.path.join(self.t, "plans", "young-plan.md"), age_days=20)
+        self.old = put(os.path.join(self.t, "plan-planner", "old-plan.md"), age_days=40)
+        self.young = put(os.path.join(self.t, "plan-planner", "young-plan.md"), age_days=20)
 
     def settings(self, where, value):
         """One settings file of the project holding `cleanupPeriodDays`, or text that is no JSON for None."""
@@ -1033,9 +1045,9 @@ class PlansAge(unittest.TestCase):
         """With no settings file naming the key the period is Claude Code's own default of 30 days."""
         self.assertEqual(lifetime.cleanup_days(self.root), 30.0)
         said = lifetime.sweep(self.p4, days=lifetime.cleanup_days(self.root))
-        self.assertEqual(said, "p4-temportal: cleared plans older than the 30 days of cleanupPeriodDays: 1, in plans/.")
+        self.assertEqual(said, "p4-temportal: cleared plans older than the 30 days of cleanupPeriodDays: 1, in plan-planner/.")
         self.assertEqual(self.here(), [False, True])
-        self.assertTrue(os.path.isdir(os.path.join(self.t, "plans")), "the folder is never cleared whole")
+        self.assertTrue(os.path.isdir(os.path.join(self.t, "plan-planner")), "the folder is never cleared whole")
         self.assertEqual(lifetime.sweep(self.p4, days=30.0), "", "a second sweep finds nothing past the age")
 
     def test_the_period_is_the_one_claude_code_merged_when_the_module_hands_it(self):
@@ -1045,10 +1057,10 @@ class PlansAge(unittest.TestCase):
         self.assertEqual(lifetime.cleanup_days(self.root, "7.5"), 7.5)
         r = run("--cleanup-days", "25", "now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
         self.assertEqual((r.returncode, r.stderr), (0, ""))
-        self.assertIn("plans older than the 25 days of cleanupPeriodDays: 1, in plans/", r.stdout)
+        self.assertIn("plans older than the 25 days of cleanupPeriodDays: 1, in plan-planner/", r.stdout)
         self.assertEqual(self.here(), [False, True])
         r = run("--cleanup-days", "10", "tick", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
-        self.assertIn("plans older than the 10 days of cleanupPeriodDays: 1, in plans/", json.loads(r.stdout)["said"][0])
+        self.assertIn("plans older than the 10 days of cleanupPeriodDays: 1, in plan-planner/", json.loads(r.stdout)["said"][0])
         self.assertEqual(self.here(), [False, False])
 
     def test_with_none_handed_the_period_is_read_from_the_settings_files_the_higher_one_over_the_lower(self):
@@ -1063,7 +1075,7 @@ class PlansAge(unittest.TestCase):
         self.settings("managed", 21)
         self.assertEqual(lifetime.cleanup_days(self.root), 21.0)
         r = run("now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
-        self.assertIn("plans older than the 21 days of cleanupPeriodDays: 1, in plans/", r.stdout)
+        self.assertIn("plans older than the 21 days of cleanupPeriodDays: 1, in plan-planner/", r.stdout)
         self.assertEqual(self.here(), [False, True])
 
     def test_where_the_period_cannot_be_told_no_plan_is_cleared_by_age(self):
@@ -1082,28 +1094,28 @@ class PlansAge(unittest.TestCase):
         r = run("now", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
         self.assertEqual((r.stdout.strip(), self.here()), ("nothing has expired", [True, True]))
         r = run("list", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
-        self.assertIn("cache   plans/  no plan is cleared by age: cleanupPeriodDays cannot be told from the settings",
+        self.assertIn("cache   plan-planner/  no plan is cleared by age: cleanupPeriodDays cannot be told from the settings",
                       r.stdout)
 
     def test_a_cache_rule_on_plans_stands_in_place_of_the_period_and_an_empty_one_keeps_every_plan(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
-            json.dump({"temportal": {"cache": {"plans": {}}}}, fh)
+            json.dump({"temportal": {"cache": {"plan-planner": {}}}}, fh)
         self.assertTrue(lifetime.own_rule(self.p4))
         self.assertEqual((lifetime.sweep(self.p4, days=30.0), self.here()), ("", [True, True]))
         listed = "\n".join(lifetime.listing(self.p4, days=30.0, is_told=True))
-        self.assertIn("cache   plans/  ", listed)
+        self.assertIn("cache   plan-planner/  ", listed)
         self.assertNotIn("cleanupPeriodDays", listed)
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as fh:
-            json.dump({"temportal": {"cache": {"plans/": {"max_age_days": 10}}}}, fh)
+            json.dump({"temportal": {"cache": {"plan-planner/": {"max_age_days": 10}}}}, fh)
         said = lifetime.sweep(self.p4, days=30.0)
-        self.assertEqual(said, "p4-temportal: cleared files past the cache rule: 2, in plans/.")
+        self.assertEqual(said, "p4-temportal: cleared files past the cache rule: 2, in plan-planner/.")
         self.assertEqual(self.here(), [False, False])
 
     def test_list_shows_the_age_at_which_a_plan_is_cleared(self):
         self.settings("user", 45)
         r = run("list", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CONFIG_DIR=self.config)
-        self.assertIn("cache   plans/  max_age_days=45, the cleanupPeriodDays at which Claude Code clears a plan in "
-                      "its own folder, since no cache rule names plans/", r.stdout)
+        self.assertIn("cache   plan-planner/  max_age_days=45, the cleanupPeriodDays at which Claude Code clears a plan in "
+                      "its own folder, since no cache rule names plan-planner/", r.stdout)
         self.assertEqual(self.here(), [True, True], "list clears nothing")
 
     def test_a_plan_the_stores_git_tracks_goes_with_its_removal_staged(self):
@@ -1114,13 +1126,13 @@ class PlansAge(unittest.TestCase):
         lifetime.sweep(self.p4, days=30.0)
         staged = subprocess.run(["git", "-C", self.p4, "diff", "--cached", "--name-status"], capture_output=True,
                                 text=True, check=True).stdout.split()
-        self.assertEqual(staged, ["D", "temportal/plans/old-plan.md"])
+        self.assertEqual(staged, ["D", "temportal/plan-planner/old-plan.md"])
 
     def test_a_plans_folder_that_is_a_link_is_left_alone(self):
         elsewhere = os.path.join(self.base, "elsewhere")
-        shutil.move(os.path.join(self.t, "plans"), elsewhere)
+        shutil.move(os.path.join(self.t, "plan-planner"), elsewhere)
         try:
-            os.symlink(elsewhere, os.path.join(self.t, "plans"), target_is_directory=True)
+            os.symlink(elsewhere, os.path.join(self.t, "plan-planner"), target_is_directory=True)
         except (OSError, NotImplementedError):
             self.skipTest("this account cannot make a link")
         self.assertEqual(lifetime.sweep(self.p4, days=30.0), "")

@@ -259,5 +259,54 @@ class CarriedPlaces(unittest.TestCase):
         self.assertIn(f"D\ttemportal/{lifetime.PLANS}/p.md", staged)
 
 
+class FolderMove(unittest.TestCase):
+    """The plans folder was temportal/plans until p4-temportal 0.3.55 and is temportal/plan-planner since. The layout
+    move takes the old folder into the new one once, with its complete/ and todo/, its cookies and its cache rules,
+    and a plan a session still writes into the old folder is taken in again, so none is lost."""
+
+    def setUp(self):
+        self.p4 = tempfile.mkdtemp(prefix="p4-temportal-planner-move-")
+        self.addCleanup(wipe, self.p4)
+        self.old = os.path.join(self.p4, "temportal", "plans")
+        self.new = os.path.join(self.p4, *lifetime.p4conf.PLANS.split("/"))
+
+    def test_the_folder_is_the_plugins_plan_planner_and_the_old_one_its_earlier_place(self):
+        self.assertEqual(lifetime.p4conf.PLANS, "temportal/plan-planner")
+        self.assertEqual(lifetime.PLANS, "plan-planner")
+        self.assertEqual(lifetime.p4conf.OLDER["plans"], ["temportal/plans"])
+
+    def test_the_old_folder_moves_with_its_categories_cookies_and_cache_rules(self):
+        put(os.path.join(self.old, "worked.md"), "# worked\n")
+        put(os.path.join(self.old, "complete", "done.md"), "STATUS: COMPLETED\n")
+        put(os.path.join(self.old, "todo", "parked.md"), "STATUS: TODO\n")
+        with open(os.path.join(self.p4, "temportal", "expires.json"), "w", encoding="utf-8") as f:
+            json.dump({"plans/worked.md": {"expires": 1e12}}, f)
+        with open(lifetime.p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"temportal": {"cache": {"plans": {"max_age_days": 90}}}}, f)
+        lines = lifetime.p4conf.migrate_layout(self.p4)
+        self.assertTrue(any("moved temportal/plans/ to temportal/plan-planner/" in line for line in lines), lines)
+        self.assertFalse(os.path.exists(self.old))
+        self.assertEqual(read(os.path.join(self.new, "worked.md")), "# worked\n")
+        self.assertEqual(read(os.path.join(self.new, "complete", "done.md")), "STATUS: COMPLETED\n")
+        self.assertEqual(read(os.path.join(self.new, "todo", "parked.md")), "STATUS: TODO\n")
+        self.assertEqual(list(lifetime.read_expires(self.p4)), ["plan-planner/worked.md"])
+        conf = json.loads(read(lifetime.p4conf.path(self.p4)))
+        self.assertEqual(list(conf["temportal"]["cache"]), ["plan-planner"])
+        self.assertEqual(lifetime.p4conf.migrate_layout(self.p4), [], "the move is made once")
+
+    def test_a_plan_a_session_still_writes_into_the_old_folder_is_taken_in_again(self):
+        """A session whose Claude Code read the old plansDirectory at its start writes its plan there until it ends.
+        Each sweep starts with the layout move, which keeps the newer of two differing copies in the new folder and
+        sets the older aside."""
+        put(os.path.join(self.old, "running.md"), "# first\n", age_days=1)
+        lifetime.p4conf.migrate_layout(self.p4)
+        put(os.path.join(self.old, "running.md"), "# first\n# and more\n")
+        lifetime.start_sweep(self.p4)
+        self.assertFalse(os.path.exists(self.old))
+        self.assertEqual(read(os.path.join(self.new, "running.md")), "# first\n# and more\n")
+        aside = os.path.join(self.p4, "temportal", lifetime.p4conf.LAYOUT_CONFLICTS, "plans", "running.md")
+        self.assertEqual(read(aside), "# first\n")
+
+
 if __name__ == "__main__":
     unittest.main()

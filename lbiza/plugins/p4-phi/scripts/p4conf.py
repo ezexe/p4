@@ -179,6 +179,7 @@ LAYOUT = {
     "store": "phi/store",
     "models": "phi/models",
     "archive": "phi/archive",      # what migrate.py keeps verbatim from a per-session tree, and its report
+    "plans": "temportal/plan-planner",   # the plan files, where plansDirectory points Claude Code, by plan-planner
 }
 # Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for the corpus
 # and the models. migrate_layout moves files from any of them.
@@ -186,6 +187,9 @@ OLDER = {k: [k] for k in LAYOUT}
 OLDER["store"].append("recall/store")
 OLDER["models"].append("recall/models")
 OLDER["scratchpad"].append("temportal/scratchpad")     # the notebook, before the session scratchpad left the store
+# the plan files, from p4-temportal 0.3.32 to 0.3.54, which kept complete/ and todo/ under them from 0.3.52 on. A
+# folder named plans at the top of the store was never the plans' place and is not moved.
+OLDER["plans"] = ["temportal/plans"]
 LAYOUT_LOCK = ".layout.lock"              # held while one hook moves the store; the others wait for it
 LAYOUT_CONFLICTS = ".layout-conflicts"    # inside the plugin's folder: the older of two differing copies
 
@@ -720,6 +724,8 @@ def _moves(p4, places, lines, done):
     if any(LAYOUT.get(k) == "temportal/notebook" and r == "temportal/scratchpad" for k, olds in OLDER.items()
            for r in olds if r in done):
         _carry_notebook(p4)
+    if "temportal/plans" in done:
+        _carry_keys(p4, "plans", LAYOUT["plans"].split("/", 1)[1])
     # a move keeps each file's own time, so a set-aside copy older than its cache rule would be cleared by the
     # retention sweep of the same start, unreported: every file landed in a set-aside folder takes the move's time
     for p in _LANDED:
@@ -734,7 +740,13 @@ def _carry_notebook(p4):
     """After the notebook moved from temportal/scratchpad to temportal/notebook: each cookie of
     temportal/expires.json and each cache rule of p4.json's temportal.cache set on a scratchpad/ path is set on
     the same notebook/ path."""
-    old, new = "scratchpad", "notebook"
+    _carry_keys(p4, "scratchpad", "notebook")
+
+
+def _carry_keys(p4, old, new):
+    """After a folder of temportal/ moved from `old` to `new`, both relative to temportal/: each cookie of
+    temportal/expires.json and each cache rule of p4.json's temportal.cache set on an `old` path is set on the same
+    `new` path."""
 
     def moved(k):
         return new + k[len(old):] if isinstance(k, str) and (k == old or k.startswith(old + "/")) else k
@@ -791,8 +803,10 @@ WRITTEN = "_written"
 # The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
 # store's written values follow the change. test_p4conf.py pins DEFAULTS to this number. It is raised too when the
 # settings keeper gains a key, as at 11 for plansDirectory: an installed copy of a lower GEN then leaves the key to
-# the copy that wrote it, where it would otherwise remove it at each of its starts.
-GEN = 11
+# the copy that wrote it, where it would otherwise remove it at each of its starts. 12 came with the plans folder's
+# move to temportal/plan-planner, so a copy of 11 leaves the new value of plansDirectory and never writes the old one
+# back.
+GEN = 12
 # Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
 # counts that value as written by load, so it follows today's default.
 HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
@@ -1236,7 +1250,7 @@ def _equal(a, b):
 # p4 keeps the Claude Code settings it relies on in the project's `.claude/settings.local.json`, merged with what is
 # there. What a store wants is the `claude` section of p4.json, read when set and never written by default:
 # `autoMemoryDirectory` names the store's temportal/memory unless the section sets it false, `plansDirectory` names
-# the store's temportal/plans unless the section sets it false, and `attribution.commit` is written only when the
+# the store's temportal/plan-planner unless the section sets it false, and `attribution.commit` is written only when the
 # section gives a text. settings-reference.md gives `plansDirectory` as "a path relative to the project root", so
 # it is written as one, and never where the store lies outside the project, as in a worktree whose store is the
 # main checkout's: a path that resolves outside the project root falls back to `~/.claude/plans`, by the same page.
@@ -1252,7 +1266,7 @@ RECORD = "claude-settings.json"
 SETTINGS_LOCK = ".settings.lock"
 LOCAL = "settings.local.json"
 WRITES = ("autoMemoryDirectory", "plansDirectory", "attribution.commit")
-PLANS = "temportal/plans"        # the store's folder of plan files, from the store's root
+PLANS = LAYOUT["plans"]          # the store's folder of plan files, from the store's root
 # disableAllHooks and disableSkillShellExecution are never written: they are defaults, writing them changes nothing,
 # and a local false would override a true ezexe later sets in user or project settings. A key an earlier copy wrote
 # and this one no longer owns is removed while it still holds the value written.
@@ -1260,8 +1274,10 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at,
 # 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with YES, so the rules of a set whose key
-# has no yes beside it go and a yes given before YES is carried over, by _carry_yes.
-KEEPER = 11
+# has no yes beside it go and a yes given before YES is carried over, by _carry_yes, and 12 with PLANS naming
+# temportal/plan-planner, so a plansDirectory the keeper wrote for temportal/plans takes the new folder at the next
+# start, and one a person set stays as it is.
+KEEPER = 12
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
