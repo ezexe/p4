@@ -148,10 +148,11 @@ A key that ends in `__` stands for every tool of that server, and one that ends 
 What the record comes to, by kind, as `/native weighed` prints it.
 
 - `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
-- `tool`: 122 rows, 48 used, 6 open, 68 declined, 0 weighed by nobody
+- `tool`: 122 rows, 49 used, 6 open, 67 declined, 0 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
 - `method`: 93 rows, 34 used, 2 open, 57 declined, 0 weighed by nobody
+- `used`: 131 rows, 53 watched by a row of misses.ts, 78 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -188,13 +189,18 @@ Not seen live: the notice at a change of version.
 
 ## One line at a miss
 
-A session sometimes does by hand what a tool of this host does.
-`hooks/misses.ts` is a short table of such situations, each with the tool to name, and a row is in it only with a miss seen live behind it.
-The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the tool.
+A session sometimes does by hand what a native feature of this host does.
+`hooks/misses.ts` is the table of such situations, each with the feature to name.
+Six rows have a miss seen live behind them, and each says when it was seen.
+The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
+Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
+Of the 131 used rows, 53 are watched by a row of the table and 78 say why none watches them: the 62 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
+The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - It refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
 - A situation is told once in a session.
 - A line names only a tool the capability map says answers in this session, and a row whose tools are all missing here hands nothing.
+- A row that stands for a slash command names the command alone, which is ezexe's to type.
 - It starts no process and asks no model: a row is a pattern over a call's own input or a turn's own answer.
 - The option `hints` turns it off, and it is on unless ezexe turns it off.
 
@@ -208,11 +214,53 @@ A miss a turn's end shows is a line of the transcript for ezexe at once and cont
 - `transcript-read-from-disk`, after a call: another session's transcript file is read from disk, where `mcp__ccd_session_mgmt__list_events`, `search_session_transcripts` and `export_transcript` exist.
 - `host-limit-from-memory`, at a turn's end: the answer states a limit of the host in a session that never asked the plugin, where the map and the probes hold what was measured.
 
+The rows written from the record, each with the by-hand way it is read off and the rows of the record it stands for.
+
+- `file-read-by-a-shell`, after a call: a shell command prints one file with `cat`, `head`, `tail`, `less`, `more`, `type` or `Get-Content`. It stands for `Read`.
+- `files-found-by-a-shell`, after a call: a shell command lists files by name with `find`, `ls -R`, `dir /s` or `Get-ChildItem -Recurse`. It stands for `Glob`.
+- `text-searched-by-a-shell`, after a call: a shell command searches file contents with `grep`, `rg`, `findstr` or `Select-String` at the head of a pipeline. It stands for `Grep`.
+- `file-edited-by-a-shell`, after a call: a shell command changes a file in place with `sed -i`, `perl -pi`, `awk -i inplace` or `-replace` piped to `Set-Content`. It stands for `Edit`.
+- `file-written-by-a-shell`, after a call: a shell command writes text into a file with `echo` or `printf` and a redirect, a heredoc, `Set-Content` or `Add-Content`. It stands for `Write`.
+- `notebook-edited-as-a-file`, after a call: an `Edit` or `Write` call changes a Jupyter notebook as a text file. It stands for `NotebookEdit`.
+- `powershell-run-from-bash`, after a call: a `Bash` call runs `powershell` or `pwsh` with a command of its own. It stands for `PowerShell`.
+- `bash-run-from-powershell`, after a call: a `PowerShell` call runs `bash`, `sh` or `wsl` with a command of its own. It stands for `Bash`.
+- `page-fetched-by-a-shell`, after a call: a shell command gets a public web page with `curl`, `wget`, `Invoke-WebRequest` or `Invoke-RestMethod`. It stands for `WebFetch`.
+- `search-engine-fetched`, after a call: a shell command or a `WebFetch` call gets a search engine's results page. It stands for `WebSearch`.
+- `claude-run-in-a-shell`, after a call: a `Bash` or `PowerShell` call starts a scripted Claude Code run with `claude -p`. It stands for `Agent`, `mcp__ccd_session__start_session`.
+- `claude-runs-fanned-out-in-a-shell`, after a call: a shell command starts several scripted Claude Code runs, in a loop or side by side. It stands for `Workflow`.
+- `session-messaged-in-a-shell`, after a call: a shell command sends a prompt into a session that exists, with `claude --resume` or `--continue` and `-p`. It stands for `mcp__ccd_session_mgmt__send_message`.
+- `session-resumed-in-a-shell`, after a call: a shell command resumes or forks a session with `claude --resume`, `--continue` or `--fork-session`. It stands for `/resume`, `/fork`.
+- `page-opened-from-a-shell`, after a call: a shell command opens an HTML file in a browser with `start`, `open`, `xdg-open` or `Invoke-Item`. It stands for `Artifact`.
+- `sessions-found-by-their-processes`, after a call: a shell command lists the machine's processes and picks out Claude Code's. It stands for `ListAgents`, `mcp__ccd_session_mgmt__list_sessions`, `/list-agents`.
+- `notification-raised-from-a-shell`, after a call: a shell command raises a notification of the system or rings its bell. It stands for `PushNotification`.
+- `long-sleep-in-a-shell`, after a call: a shell command sleeps for a minute or longer. It stands for `ScheduleWakeup`.
+- `loop-with-a-sleep-in-a-shell`, after a call: a shell loop runs a step again and again with a sleep between. It stands for `/loop`.
+- `skill-read-as-a-file`, after a call: a `Read` call or a shell command prints a skill's `SKILL.md`. It stands for `Skill`.
+- `process-killed-in-a-shell`, after a call: a shell command stops a process with `kill`, `pkill`, `taskkill` or `Stop-Process`. It stands for `TaskStop`, `mcp__terminal__stop_terminal_tab`, `mcp__ccd_session_mgmt__stop_session`.
+- `backup-copy-made-by-hand`, after a call: a shell command copies a file to a `.bak`, `.orig`, `.old` or `.backup` beside it. It stands for `/rewind`, `Checkpoints`.
+- `worktree-removed-in-a-shell`, after a call: a shell command removes a git worktree, or a folder under `.claude/worktrees`. It stands for `mcp__ccd_host__discard_kept_worktree`, `mcp__ccd_host__clean_up_worktrees`.
+- `store-measured-in-a-shell`, after a call: a shell command adds up the size of a `.claude` folder with `du` or `Measure-Object`. It stands for `mcp__ccd_host__get_storage_usage`.
+- `transcript-copied-by-hand`, after a call: a shell command copies this session's own transcript file. It stands for `/export`.
+- `transcript-measured-by-hand`, after a call: a shell command measures this session's own transcript file to tell how full the conversation is. It stands for `/context`.
+- `model-set-by-hand`, after a call: an edit of a settings file sets `model` or `effortLevel`, or a shell command sets `ANTHROPIC_MODEL`. It stands for `/model`.
+- `store-file-removed-by-hand`, after a call: a shell command deletes a file of the project's `.claude/p4` store, or an edit changes its `expires.json`. It stands for `/lifetime`.
+- `plugin-files-changed-by-hand`, after a call: a shell command or an edit changes the installed plugins' files under `.claude/plugins`. It stands for `/plugin`, `/reload-plugins`.
+- `release-notes-fetched-by-hand`, after a call: a shell command or a `WebFetch` call gets Claude Code's changelog or its package page. It stands for `/release-notes`.
+- `review-handed-to-an-agent`, after a call: an `Agent` call asks a subagent to review a code change. It stands for `/code-review`, `/review`.
+- `task-list-kept-by-another-tool`, after a call: a `TaskCreate` or `TodoWrite` call keeps a task list in a session of the desktop app. It stands for `mcp__ccd_turn__update_plan`.
+- `question-asked-in-prose`, at a turn's end: a turn's answer ends with a question and its choices written out as a list. It stands for `AskUserQuestion`, `mcp__ccd_turn__wrap_up`.
+- `tool-said-missing-with-no-search`, at a turn's end: a turn's answer says the session has no tool for a thing, in a session that never searched its deferred tools. It stands for `ToolSearch`.
+- `context-said-full`, at a turn's end: a turn's answer says the conversation is long or tells ezexe to start a new one. It stands for `/compact`.
+- `terminal-output-asked-of-ezexe`, at a turn's end: a turn's answer asks ezexe to paste what a terminal printed. It stands for `mcp__terminal__read_terminal`.
+- `command-handed-to-ezexe`, at a turn's end: a turn's answer tells ezexe to run a command in a terminal. It stands for `mcp__terminal__run_in_terminal`.
+
 A worker in a Terminal tab is known by `claude -p` in the line typed or in the one script file that line runs, which the module reads.
-The last row reads the answer for a sentence that says the desktop app, Claude Code, this host or a scripted run cannot do a thing, so it can fire on a sentence that is right.
+The row `host-limit-from-memory` reads the answer for a sentence that says the desktop app, Claude Code, this host or a scripted run cannot do a thing, so it can fire on a sentence that is right.
+A row written from the record is read off how the by-hand call is spelled, so it too can fire on a call that is right: a shell command is read stage by stage, a command that only takes another's output through a pipe sets off no row, and neither does a request to a local address, a download to a file or a post.
+A line is context for the model and no verdict, and each is handed once in a session.
 
 Seen in the desktop app on Claude Code 2.1.326, with a development copy: a Bash call of `gh run list --commit` with a hash of seven characters came back with its result and the line of `gh-run-list-short-commit` as `PostToolUse:Bash hook additional context`.
-Not seen live: the other five rows, and a line carried by a next prompt.
+Not seen live: the other five of the six rows, any row written from the record, and a line carried by a next prompt.
 
 ## What ezexe chose, and what sessions decided
 

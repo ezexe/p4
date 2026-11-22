@@ -9,6 +9,8 @@
 
 // One row of the record. `used` and `open` name plugins, `would` says for each plugin that holds the row open what
 // it would replace or add there, `declined` gives each plugin's reason, and `nobody` marks a name no audit weighed.
+// A row a plugin uses also says how a session's by-hand copy of it is watched: `miss` names the rows of misses.ts
+// that watch it, and `nowatch` says in one line why no by-hand call exists to watch.
 export type Row = {
   kind: 'command' | 'tool' | 'hook' | 'event' | 'method'
   used?: string[]
@@ -16,6 +18,8 @@ export type Row = {
   would?: Record<string, string>
   declined?: Record<string, string>
   nobody?: true
+  miss?: string[]
+  nowatch?: string
 }
 
 // The record: the Claude Code version whose hook events and module API it lists, and the rows by key.
@@ -69,4 +73,17 @@ export function counted(record: Record_): string[] {
 
     return `${kind}: ${rows.length} rows, ${count('used')} used, ${count('open')} open, ${count('declined')} declined, ${count('nobody')} weighed by nobody`
   })
+}
+
+// The used rows in one line: how many a row of misses.ts watches, how many say why no by-hand call exists to watch,
+// and how many say neither.
+export function watched(record: Record_): string {
+  const used = Object.values(record.rows).filter(row => verdictOf(row) === 'used')
+  const byMiss = used.filter(row => (row.miss?.length ?? 0) > 0).length
+  const byNone = used.filter(row => (row.miss?.length ?? 0) === 0 && typeof row.nowatch === 'string').length
+
+  return (
+    `used: ${used.length} rows, ${byMiss} watched by a row of misses.ts, ${byNone} with no by-hand call to watch, ` +
+    `${used.length - byMiss - byNone} with neither`
+  )
 }

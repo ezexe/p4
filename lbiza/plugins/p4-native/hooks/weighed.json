@@ -63,14 +63,16 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.clock.every": {
    "kind": "method",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.clock.now": {
    "kind": "method",
@@ -78,7 +80,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.clock.sleep": {
    "kind": "method",
@@ -92,7 +95,8 @@
    "kind": "method",
    "used": [
     "p4-native"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.command.register": {
    "kind": "method",
@@ -100,14 +104,16 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.command.run": {
    "kind": "method",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.config.list": {
    "kind": "method",
@@ -130,7 +136,8 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.env.set": {
    "kind": "method",
@@ -154,14 +161,16 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.fs.list": {
    "kind": "method",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.fs.read": {
    "kind": "method",
@@ -169,7 +178,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.fs.stat": {
    "kind": "method",
@@ -184,7 +194,8 @@
    "used": [
     "p4-native",
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.http.fetch": {
    "kind": "method",
@@ -253,7 +264,8 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.process.spawn": {
    "kind": "method",
@@ -308,7 +320,8 @@
    "used": [
     "p4",
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.prompt.suggest": {
    "kind": "method",
@@ -339,7 +352,8 @@
    "used": [
     "p4-native",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.cwd": {
    "kind": "method",
@@ -355,7 +369,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.identity": {
    "kind": "method",
@@ -370,7 +385,8 @@
    "used": [
     "p4-native",
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.messages": {
    "kind": "method",
@@ -380,7 +396,8 @@
    },
    "used": [
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.model": {
    "kind": "method",
@@ -398,7 +415,8 @@
    "used": [
     "p4-native",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.root": {
    "kind": "method",
@@ -406,13 +424,15 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.send": {
    "kind": "method",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.surface": {
    "kind": "method",
@@ -426,7 +446,8 @@
    "kind": "method",
    "used": [
     "p4-native"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.turns": {
    "kind": "method",
@@ -442,7 +463,8 @@
     "p4",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.session.version": {
    "kind": "method",
@@ -450,7 +472,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.settings.read": {
    "kind": "method",
@@ -462,21 +485,24 @@
    },
    "used": [
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.state.get": {
    "kind": "method",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.state.set": {
    "kind": "method",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.store.delete": {
    "kind": "method",
@@ -547,7 +573,8 @@
    "used": [
     "p4-native",
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.tool.check": {
    "kind": "method",
@@ -561,7 +588,8 @@
    "kind": "method",
    "used": [
     "p4-native"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.tool.register": {
    "kind": "method",
@@ -569,7 +597,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.turn.abort": {
    "kind": "method",
@@ -641,7 +670,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.notice": {
    "kind": "method",
@@ -668,13 +698,15 @@
    "kind": "method",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.panes": {
    "kind": "method",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.place": {
    "kind": "method",
@@ -688,7 +720,8 @@
    "kind": "method",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.scroll": {
    "kind": "method",
@@ -710,7 +743,8 @@
    "kind": "method",
    "used": [
     "p4-native"
-   ]
+   ],
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.ui.toast": {
    "kind": "method",
@@ -808,7 +842,8 @@
    ],
    "declined": {
     "p4-phi": "it times a compaction, and `phi.clear_at` is a clear from a state page."
-   }
+   },
+   "nowatch": "It moves the line of Claude Code's automatic compaction, for ezexe to type: a session has no call that moves it."
   },
   "/autofix-pr": {
    "kind": "command",
@@ -885,7 +920,8 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "It empties the conversation, for ezexe to type: a session has no call that empties its own."
   },
   "/code-review": {
    "kind": "command",
@@ -894,7 +930,10 @@
    ],
    "declined": {
     "p4-temportal": "code review."
-   }
+   },
+   "miss": [
+    "review-handed-to-an-agent"
+   ]
   },
   "/color": {
    "kind": "command",
@@ -908,6 +947,9 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "context-said-full"
    ]
   },
   "/config": {
@@ -917,7 +959,8 @@
    ],
    "declined": {
     "p4-temportal": "the keeper writes its keys into the local settings file itself."
-   }
+   },
+   "nowatch": "It opens the settings dialog for ezexe: a session changes a setting by an edit of the settings file, which is the documented way and no copy of the dialog."
   },
   "/context": {
    "kind": "command",
@@ -926,7 +969,10 @@
    ],
    "declined": {
     "p4-phi": "`get_usage` and the module's usage record give the figures."
-   }
+   },
+   "miss": [
+    "transcript-measured-by-hand"
+   ]
   },
   "/copy": {
    "kind": "command",
@@ -1040,7 +1086,10 @@
    ],
    "declined": {
     "p4-phi": "no line needs a transcript file."
-   }
+   },
+   "miss": [
+    "transcript-copied-by-hand"
+   ]
   },
   "/extra-usage": {
    "kind": "command",
@@ -1085,7 +1134,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions."
-   }
+   },
+   "miss": [
+    "session-resumed-in-a-shell"
+   ]
   },
   "/goal": {
    "kind": "command",
@@ -1094,7 +1146,8 @@
    ],
    "declined": {
     "p4-temportal": "turns."
-   }
+   },
+   "nowatch": "It sets the goal a session works toward, for ezexe to type or a module to run: a session has no call that sets one, since `SetGoal` is in no session's tool list."
   },
   "/heapdump": {
    "kind": "command",
@@ -1181,7 +1234,10 @@
    ],
    "declined": {
     "p4-phi": "the other plugin's."
-   }
+   },
+   "miss": [
+    "store-file-removed-by-hand"
+   ]
   },
   "/list-agents": {
    "kind": "command",
@@ -1190,7 +1246,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions."
-   }
+   },
+   "miss": [
+    "sessions-found-by-their-processes"
+   ]
   },
   "/login": {
    "kind": "command",
@@ -1213,7 +1272,10 @@
    ],
    "declined": {
     "p4-temportal": "the sweep runs on the module's timer and starts no turn."
-   }
+   },
+   "miss": [
+    "loop-with-a-sleep-in-a-shell"
+   ]
   },
   "/mcp": {
    "kind": "command",
@@ -1229,7 +1291,8 @@
    ],
    "declined": {
     "p4-phi": "the folder is set by `autoMemoryDirectory`, and the toggle is ezexe's."
-   }
+   },
+   "nowatch": "It opens the memory files for ezexe: a session writes its memory with `Write`, which is the documented way."
   },
   "/mobile": {
    "kind": "command",
@@ -1245,7 +1308,10 @@
    ],
    "declined": {
     "p4-temportal": "models."
-   }
+   },
+   "miss": [
+    "model-set-by-hand"
+   ]
   },
   "/motion": {
    "kind": "command",
@@ -1295,7 +1361,10 @@
    ],
    "declined": {
     "p4-temportal": "plugin management."
-   }
+   },
+   "miss": [
+    "plugin-files-changed-by-hand"
+   ]
   },
   "/plugin-authoring": {
    "kind": "command",
@@ -1353,7 +1422,10 @@
    ],
    "declined": {
     "p4-temportal": "in a comment of the shared keeper only."
-   }
+   },
+   "miss": [
+    "release-notes-fetched-by-hand"
+   ]
   },
   "/reload-plugins": {
    "kind": "command",
@@ -1362,7 +1434,10 @@
    ],
    "declined": {
     "p4-temportal": "plugin management."
-   }
+   },
+   "miss": [
+    "plugin-files-changed-by-hand"
+   ]
   },
   "/reload-skills": {
    "kind": "command",
@@ -1404,6 +1479,9 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "session-resumed-in-a-shell"
    ]
   },
   "/review": {
@@ -1413,7 +1491,10 @@
    ],
    "declined": {
     "p4-temportal": "code review."
-   }
+   },
+   "miss": [
+    "review-handed-to-an-agent"
+   ]
   },
   "/rewind": {
    "kind": "command",
@@ -1422,7 +1503,10 @@
    ],
    "declined": {
     "p4-phi": "one conversation's checkpoints."
-   }
+   },
+   "miss": [
+    "backup-copy-made-by-hand"
+   ]
   },
   "/run": {
    "kind": "command",
@@ -1712,7 +1796,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "claude-run-in-a-shell"
+   ]
   },
   "Artifact": {
    "kind": "tool",
@@ -1721,7 +1808,10 @@
    ],
    "declined": {
     "p4-temportal": "nothing is published."
-   }
+   },
+   "miss": [
+    "page-opened-from-a-shell"
+   ]
   },
   "ArtifactComments": {
    "kind": "tool",
@@ -1744,7 +1834,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "question-asked-in-prose"
+   ]
   },
   "Bash": {
    "kind": "tool",
@@ -1753,19 +1846,26 @@
    ],
    "declined": {
     "p4-temportal": "the tool `mcp__p4-temportal__lifetime` of 495c04e is the call of its own, and `test_skill.py` holds the skill page to no shell line."
-   }
+   },
+   "miss": [
+    "bash-run-from-powershell"
+   ]
   },
   "Checkpoints": {
    "kind": "tool",
    "used": [
     "p4"
+   ],
+   "miss": [
+    "backup-copy-made-by-hand"
    ]
   },
   "ConfigChange": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "CronCreate": {
    "kind": "tool",
@@ -1777,7 +1877,10 @@
    },
    "declined": {
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
-   }
+   },
+   "miss": [
+    "turn-ended-with-a-worker-out"
+   ]
   },
   "CronDelete": {
    "kind": "tool",
@@ -1831,6 +1934,9 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "file-edited-by-a-shell"
    ]
   },
   "Elicitation": {
@@ -1891,7 +1997,8 @@
    "kind": "hook",
    "used": [
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "GetGoal": {
    "kind": "tool",
@@ -1908,7 +2015,10 @@
    ],
    "declined": {
     "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
-   }
+   },
+   "miss": [
+    "files-found-by-a-shell"
+   ]
   },
   "Grep": {
    "kind": "tool",
@@ -1917,7 +2027,10 @@
    ],
    "declined": {
     "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
-   }
+   },
+   "miss": [
+    "text-searched-by-a-shell"
+   ]
   },
   "InstructionsLoaded": {
    "kind": "hook",
@@ -1942,7 +2055,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "sessions-found-by-their-processes"
+   ]
   },
   "ListPlugins": {
    "kind": "tool",
@@ -1986,6 +2102,9 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "notebook-edited-as-a-file"
    ]
   },
   "Notification": {
@@ -2060,13 +2179,15 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PostToolUseFailure": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PowerShell": {
    "kind": "tool",
@@ -2075,13 +2196,17 @@
    ],
    "declined": {
     "p4-temportal": "the tool `mcp__p4-temportal__lifetime` of 495c04e is the call of its own, and `test_skill.py` holds the skill page to no shell line."
-   }
+   },
+   "miss": [
+    "powershell-run-from-bash"
+   ]
   },
   "PreCompact": {
    "kind": "hook",
    "used": [
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PreModelSwitch": {
    "kind": "hook",
@@ -2095,7 +2220,8 @@
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PushNotification": {
    "kind": "tool",
@@ -2105,7 +2231,10 @@
    ],
    "declined": {
     "p4-temportal": "what a sweep cleared is a line of the transcript for ezexe."
-   }
+   },
+   "miss": [
+    "notification-raised-from-a-shell"
+   ]
   },
   "Read": {
    "kind": "tool",
@@ -2114,7 +2243,10 @@
    ],
    "declined": {
     "p4-temportal": "a session reads `expires.json` and `p4.json` with them as any file."
-   }
+   },
+   "miss": [
+    "file-read-by-a-shell"
+   ]
   },
   "RemoteTrigger": {
    "kind": "tool",
@@ -2137,7 +2269,10 @@
    ],
    "declined": {
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
-   }
+   },
+   "miss": [
+    "long-sleep-in-a-shell"
+   ]
   },
   "SearchPlugins": {
    "kind": "tool",
@@ -2157,7 +2292,10 @@
    "kind": "tool",
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "worker-with-no-exit-notice"
+   ]
   },
   "SendToProject": {
    "kind": "tool",
@@ -2184,14 +2322,16 @@
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "SessionStart": {
    "kind": "hook",
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "SetGoal": {
    "kind": "tool",
@@ -2219,31 +2359,38 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "skill-read-as-a-file"
    ]
   },
   "Stop": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "StopFailure": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "SubagentStart": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "SubagentStop": {
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "SuggestPluginInstall": {
    "kind": "tool",
@@ -2298,7 +2445,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "process-killed-in-a-shell"
+   ]
   },
   "TaskUpdate": {
    "kind": "tool",
@@ -2331,7 +2481,10 @@
    ],
    "declined": {
     "p4-temportal": "catalogs, though the skill page now names ToolSearch to load the lifetime tool."
-   }
+   },
+   "miss": [
+    "tool-said-missing-with-no-search"
+   ]
   },
   "Transcripts": {
    "kind": "tool",
@@ -2351,7 +2504,8 @@
    "kind": "hook",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "WebFetch": {
    "kind": "tool",
@@ -2360,7 +2514,10 @@
    ],
    "declined": {
     "p4-temportal": "a downloaded page is a file like any other."
-   }
+   },
+   "miss": [
+    "page-fetched-by-a-shell"
+   ]
   },
   "WebSearch": {
    "kind": "tool",
@@ -2369,7 +2526,10 @@
    ],
    "declined": {
     "p4-temportal": "a downloaded page is a file like any other."
-   }
+   },
+   "miss": [
+    "search-engine-fetched"
+   ]
   },
   "Workflow": {
    "kind": "tool",
@@ -2378,7 +2538,10 @@
    ],
    "declined": {
     "p4-temportal": "sessions and agents are p4-phi's."
-   }
+   },
+   "miss": [
+    "claude-runs-fanned-out-in-a-shell"
+   ]
   },
   "WorktreeCreate": {
    "kind": "hook",
@@ -2407,6 +2570,9 @@
    "used": [
     "p4-phi",
     "p4-temportal"
+   ],
+   "miss": [
+    "file-written-by-a-shell"
    ]
   },
   "agent.offer": {
@@ -2421,7 +2587,8 @@
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "attribution.text": {
    "kind": "event",
@@ -2445,7 +2612,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "config.describe": {
    "kind": "event",
@@ -2500,20 +2668,34 @@
   },
   "mcp__ccd_host__clean_up_worktrees": {
    "kind": "tool",
+   "used": [
+    "p4-native"
+   ],
    "declined": {
     "p4-phi": "it takes worktrees of sessions idle 30 days and keeps their branches."
-   }
+   },
+   "miss": [
+    "worktree-removed-in-a-shell"
+   ]
   },
   "mcp__ccd_host__discard_kept_worktree": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "worktree-removed-in-a-shell"
    ]
   },
   "mcp__ccd_host__get_storage_usage": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "store-measured-in-a-shell"
    ]
   },
   "mcp__ccd_host__open_in_editor": {
@@ -2551,7 +2733,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It withdraws a card the app drew, and no file or command a session reaches does that."
   },
   "mcp__ccd_session__hand_off_to_session": {
    "kind": "tool",
@@ -2563,7 +2746,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It lists the places the app can start a session in, which the app holds and no file or command a session reaches lists."
   },
   "mcp__ccd_session__mark_chapter": {
    "kind": "tool",
@@ -2588,6 +2772,9 @@
    "used": [
     "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "claude-run-in-a-shell"
    ]
   },
   "mcp__ccd_session_mgmt__": {
@@ -2601,13 +2788,15 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "It changes a session in the app's own list, and no file or command a session reaches does that."
   },
   "mcp__ccd_session_mgmt__clear_session": {
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It changes a session in the app's own list, and no file or command a session reaches does that."
   },
   "mcp__ccd_session_mgmt__delete_session": {
    "kind": "tool",
@@ -2619,7 +2808,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It changes a session in the app's own list, and no file or command a session reaches does that."
   },
   "mcp__ccd_session_mgmt__export_transcript": {
    "kind": "tool",
@@ -2628,6 +2818,9 @@
    },
    "used": [
     "p4-native"
+   ],
+   "miss": [
+    "transcript-read-from-disk"
    ]
   },
   "mcp__ccd_session_mgmt__get_session": {
@@ -2635,12 +2828,19 @@
    "used": [
     "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "transcript-read-from-disk"
    ]
   },
   "mcp__ccd_session_mgmt__get_usage": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "transcript-read-from-disk"
    ]
   },
   "mcp__ccd_session_mgmt__list_events": {
@@ -2653,13 +2853,19 @@
    ],
    "would": {
     "p4-phi": "replace the copies of a worker's reports it keeps itself in `reports.jsonl`, once the tool answers for a session at work."
-   }
+   },
+   "miss": [
+    "transcript-read-from-disk"
+   ]
   },
   "mcp__ccd_session_mgmt__list_sessions": {
    "kind": "tool",
    "used": [
     "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "sessions-found-by-their-processes"
    ]
   },
   "mcp__ccd_session_mgmt__search_session_transcripts": {
@@ -2667,12 +2873,19 @@
    "used": [
     "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "transcript-read-from-disk"
    ]
   },
   "mcp__ccd_session_mgmt__send_message": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "session-messaged-in-a-shell"
    ]
   },
   "mcp__ccd_session_mgmt__set_remote_control": {
@@ -2685,7 +2898,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It sets the model or the effort of another session that runs, and no file or command a session reaches does that."
   },
   "mcp__ccd_session_mgmt__set_session_fast_mode": {
    "kind": "tool",
@@ -2698,7 +2912,8 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "It sets the model or the effort of another session that runs, and no file or command a session reaches does that."
   },
   "mcp__ccd_session_mgmt__set_session_output_style": {
    "kind": "tool",
@@ -2721,7 +2936,11 @@
   "mcp__ccd_session_mgmt__stop_session": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "process-killed-in-a-shell"
    ]
   },
   "mcp__ccd_session_mgmt__unarchive_session": {
@@ -2771,13 +2990,15 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It reads or changes the app's sidebar, which no file or command a session reaches holds."
   },
   "mcp__ccd_sidebar__list_sections": {
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It reads or changes the app's sidebar, which no file or command a session reaches holds."
   },
   "mcp__ccd_sidebar__mark_completed": {
    "kind": "tool",
@@ -2789,7 +3010,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It reads or changes the app's sidebar, which no file or command a session reaches holds."
   },
   "mcp__ccd_sidebar__rename_group": {
    "kind": "tool",
@@ -2830,13 +3052,21 @@
   "mcp__ccd_turn__update_plan": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "task-list-kept-by-another-tool"
    ]
   },
   "mcp__ccd_turn__wrap_up": {
    "kind": "tool",
    "used": [
+    "p4-native",
     "p4-phi"
+   ],
+   "miss": [
+    "question-asked-in-prose"
    ]
   },
   "mcp__ccd_view__": {
@@ -2863,7 +3093,8 @@
    "kind": "tool",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "It lists the tabs of the app's Terminal panel, which no file or command a session reaches lists."
   },
   "mcp__terminal__open_terminal_tab": {
    "kind": "tool",
@@ -2875,18 +3106,27 @@
    "kind": "tool",
    "used": [
     "p4-phi"
+   ],
+   "miss": [
+    "terminal-output-asked-of-ezexe"
    ]
   },
   "mcp__terminal__run_in_terminal": {
    "kind": "tool",
    "used": [
     "p4-phi"
+   ],
+   "miss": [
+    "command-handed-to-ezexe"
    ]
   },
   "mcp__terminal__stop_terminal_tab": {
    "kind": "tool",
    "used": [
     "p4-phi"
+   ],
+   "miss": [
+    "process-killed-in-a-shell"
    ]
   },
   "mcp__visualize__": {
@@ -2932,7 +3172,8 @@
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "prompt.context": {
    "kind": "event",
@@ -2979,7 +3220,8 @@
    "used": [
     "p4-native",
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "prompt.suggest": {
    "kind": "event",
@@ -3015,7 +3257,8 @@
    "used": [
     "p4-native",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.detach": {
    "kind": "event",
@@ -3035,19 +3278,22 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.measure": {
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.receive": {
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.send": {
    "kind": "event",
@@ -3063,7 +3309,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "session.stop": {
    "kind": "event",
@@ -3103,13 +3350,15 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "tool.check": {
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "tool.describe": {
    "kind": "event",
@@ -3132,7 +3381,8 @@
    "used": [
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "turn.complete": {
    "kind": "event",
@@ -3140,7 +3390,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "turn.start": {
    "kind": "event",
@@ -3148,7 +3399,8 @@
     "p4-native",
     "p4-phi",
     "p4-temportal"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "turn.step": {
    "kind": "event",
@@ -3210,7 +3462,8 @@
    "kind": "event",
    "used": [
     "p4-phi"
-   ]
+   ],
+   "nowatch": "Only a hooks module hooks it: a session has no call that does this by hand."
   },
   "ui.resolve": {
    "kind": "event",

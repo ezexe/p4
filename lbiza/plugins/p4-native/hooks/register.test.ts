@@ -3,7 +3,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, ToolInfo } from 'claude-code'
 
-import { counted, recordOf, rowOf, unweighed, verdictOf } from './inventory'
+import { counted, recordOf, rowOf, unweighed, verdictOf, watched } from './inventory'
+import { MISSES, atCall, atEnd } from './misses'
 import { PROBES, START, VETO, busyOf, fromMap, ofAllEvents, ofCompact, ofEvents, ofSelf, seenAtStart } from './probes'
 
 const ROOT = '/work/project'
@@ -1099,6 +1100,12 @@ test('a row is found by its own key, by a server\'s key and by a stem, and comes
   expect(verdictOf({ kind: 'tool', nobody: true })).toBe('nobody')
   expect(recordOf('not json')).toEqual({ claude: '', rows: {} })
   expect(counted(recordOf(JSON.stringify(RECORD))).length).toBe(5)
+  // A used row is watched by a row of misses.ts, says why no by-hand call exists, or says neither.
+  const some = { '/a': { kind: 'command', used: ['p4-phi'], miss: ['x'] }, B: { kind: 'tool', used: ['p4-phi'], nowatch: 'Why.' },
+    C: { kind: 'tool', used: ['p4-phi'] }, D: { kind: 'tool', declined: { 'p4-phi': 'no' } } }
+  expect(watched(recordOf(JSON.stringify({ claude: '2.1.326', rows: some })))).toBe(
+    'used: 3 rows, 1 watched by a row of misses.ts, 1 with no by-hand call to watch, 1 with neither',
+  )
 })
 
 // A tool call of the session, as the classic event after it carries it.
@@ -1233,3 +1240,148 @@ test('an answer that states a limit of the host is told of the map, unless the s
   expect(seen.prompts[1]?.context).toBeUndefined()
 })
 
+// What each shell command shows, by the ids of the rows it sets off: one line for each row written from the record,
+// and beside it the commands that look alike and are no miss.
+const MINE = '/home/u/.claude/projects/-work-project/cli-0001.jsonl'
+const SHELL: readonly [string, string, readonly string[]][] = [
+  ['Bash', 'cat src/app.ts', ['file-read-by-a-shell']],
+  ['Bash', 'head -20 README.md && git status', ['file-read-by-a-shell']],
+  ['PowerShell', 'Get-Content -Path notes.md -TotalCount 5', ['file-read-by-a-shell']],
+  ['PowerShell', 'type notes.md', ['file-read-by-a-shell']],
+  ['Bash', 'type python', []],
+  ['Bash', 'git log --oneline | head -5', []],
+  ['Bash', 'find . -name "*.ts" -type f', ['files-found-by-a-shell']],
+  ['PowerShell', 'Get-ChildItem src -Recurse -Filter *.ts', ['files-found-by-a-shell']],
+  ['Bash', 'find build -name "*.tmp" -delete', []],
+  ['Bash', 'grep -rn "TODO" src', ['text-searched-by-a-shell']],
+  ['PowerShell', 'Select-String -Path *.md -Pattern lifetime', ['text-searched-by-a-shell']],
+  ['Bash', 'git diff | grep "^+"', []],
+  ['Bash', "sed -i 's/old/new/' config.json", ['file-edited-by-a-shell']],
+  ['PowerShell', "(Get-Content a.txt) -replace 'a', 'b' | Set-Content a.txt", ['file-edited-by-a-shell']],
+  ['Bash', "sed -n '1,20p' file.txt", []],
+  ['Bash', 'echo "hello" > out.txt', ['file-written-by-a-shell']],
+  ['Bash', "cat > notes.md <<'EOF'\nline\nEOF", ['file-written-by-a-shell']],
+  ['Bash', 'echo "failed" >&2', []],
+  ['Bash', 'npm test > test.log 2>&1', []],
+  ['Bash', 'powershell -NoProfile -Command "Get-Date"', ['powershell-run-from-bash']],
+  ['PowerShell', 'bash -c "ls -la"', ['bash-run-from-powershell']],
+  ['PowerShell', 'pwsh -Command "Get-Date"', []],
+  ['Bash', 'curl -s https://example.com/docs/page.html', ['page-fetched-by-a-shell']],
+  ['Bash', 'curl -s http://localhost:3000/health', []],
+  ['Bash', 'curl -X POST https://api.example.com/items -d "{}"', []],
+  ['Bash', 'curl -sL -o tool.zip https://example.com/tool.zip', []],
+  ['Bash', 'curl -s "https://www.google.com/search?q=claude+code+hooks"', ['search-engine-fetched']],
+  ['Bash', 'curl -s https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md', ['release-notes-fetched-by-hand']],
+  ['Bash', 'claude -p "port the flush" --output-format json', ['claude-run-in-a-shell']],
+  ['Bash', 'for f in a b c; do claude -p "port $f" & done; wait', ['claude-runs-fanned-out-in-a-shell']],
+  ['Bash', 'claude --resume 9f3a0000 -p "carry on"', ['session-messaged-in-a-shell']],
+  ['Bash', 'claude --resume 9f3a0000 --fork-session', ['session-resumed-in-a-shell']],
+  ['Bash', 'claude plugin validate plugins/p4-native --strict', []],
+  ['PowerShell', 'start report.html', ['page-opened-from-a-shell']],
+  ['Bash', 'ps aux | grep claude', ['sessions-found-by-their-processes']],
+  ['PowerShell', 'New-BurntToastNotification -Text "done"', ['notification-raised-from-a-shell']],
+  ['Bash', 'sleep 300', ['long-sleep-in-a-shell']],
+  ['PowerShell', 'Start-Sleep -Seconds 120', ['long-sleep-in-a-shell']],
+  ['Bash', 'sleep 5 && curl -s http://localhost:3000/', []],
+  ['PowerShell', 'Start-Sleep -Milliseconds 500', []],
+  ['Bash', 'while true; do npm test; sleep 30; done', ['loop-with-a-sleep-in-a-shell']],
+  ['Bash', 'cat ~/.claude/skills/review/SKILL.md', ['skill-read-as-a-file']],
+  ['Bash', 'kill -9 4242', ['process-killed-in-a-shell']],
+  ['PowerShell', 'Get-Process node | Stop-Process -Force', ['process-killed-in-a-shell']],
+  ['Bash', 'git commit -m "kill the flaky test"', []],
+  ['Bash', 'cp config.json config.json.bak', ['backup-copy-made-by-hand']],
+  ['Bash', 'git worktree remove ../feature', ['worktree-removed-in-a-shell']],
+  ['Bash', 'du -sh ~/.claude', ['store-measured-in-a-shell']],
+  ['Bash', `cp ${MINE} /tmp/mine.jsonl`, ['transcript-copied-by-hand']],
+  ['Bash', `wc -c ${MINE}`, ['transcript-measured-by-hand']],
+  ['Bash', 'export ANTHROPIC_MODEL=claude-opus-5-5', ['model-set-by-hand']],
+  ['Bash', 'rm .claude/p4/temportal/notebook/old.md', ['store-file-removed-by-hand']],
+  ['Bash', 'rm -rf ~/.claude/plugins/cache/p4-marketplace', ['plugin-files-changed-by-hand']],
+  ['Bash', 'ls ~/.claude/plugins/cache', []],
+  ['Bash', 'npm test && git push', []],
+]
+
+// The same for a call of another tool.
+const OTHER: readonly [string, Record<string, unknown>, readonly string[]][] = [
+  ['Edit', { file_path: '/work/analysis.ipynb', old_string: 'a', new_string: 'b' }, ['notebook-edited-as-a-file']],
+  ['Write', { file_path: '/work/project/.claude/settings.json', content: '{"model": "opus"}' }, ['model-set-by-hand']],
+  ['Edit', { file_path: '/work/project/.claude/settings.json', old_string: '"x"', new_string: '"hooks": {}' }, []],
+  ['Edit', { file_path: '/work/project/.claude/p4/temportal/expires.json', old_string: 'a', new_string: 'b' }, ['store-file-removed-by-hand']],
+  ['Write', { file_path: '/home/u/.claude/plugins/installed_plugins.json', content: '{}' }, ['plugin-files-changed-by-hand']],
+  ['Read', { file_path: '/home/u/.claude/skills/review/SKILL.md' }, ['skill-read-as-a-file']],
+  ['Read', { file_path: '/work/project/src/app.ts' }, []],
+  ['WebFetch', { url: 'https://duckduckgo.com/?q=claude+code', prompt: 'results' }, ['search-engine-fetched']],
+  ['WebFetch', { url: 'https://github.com/anthropics/claude-code/releases', prompt: 'new' }, ['release-notes-fetched-by-hand']],
+  ['WebFetch', { url: 'https://code.claude.com/docs/en/hooks.md', prompt: 'events' }, []],
+  ['Agent', { description: 'Review the diff', prompt: 'Review this diff for bugs.' }, ['review-handed-to-an-agent']],
+  ['Agent', { description: 'Find the callers', prompt: 'List every caller of flush().' }, []],
+  ['TaskCreate', { subject: 'port the flush' }, ['task-list-kept-by-another-tool']],
+]
+
+test('each row written from the record is set off by its by-hand call and by none that only looks alike', () => {
+  const set = new Set<string>()
+  for (const [name, command, ids] of SHELL) {
+    expect([name, command, atCall(name, { command }, 'cli-0001')]).toEqual([name, command, [...ids]])
+    for (const id of ids) set.add(id)
+  }
+  for (const [name, input, ids] of OTHER) {
+    expect([name, input, atCall(name, input, 'cli-0001')]).toEqual([name, input, [...ids]])
+    for (const id of ids) set.add(id)
+  }
+  // Every row checked at a call is set off by at least one line above, but for the three seen live, which have
+  // tests of their own.
+  const live = ['gh-run-polled-in-a-loop', 'gh-run-list-short-commit', 'transcript-read-from-disk']
+  const atACall = MISSES.filter(miss => miss.at === 'call' && !live.includes(miss.id)).map(miss => miss.id)
+  expect(atACall.filter(id => !set.has(id))).toEqual([])
+  expect(atACall.length).toBe(32)
+})
+
+test('a turn\'s answer sets off the rows read off it, and a session that used the tool sets off none', () => {
+  const quiet = { isWorkerOut: false, isNoticed: false, isWoken: false, hasAsked: true, hasSearched: false, isPut: false }
+  const asked = 'Two ways to go.\n\n- A) keep the cache\n- B) drop the cache\n\nWhich one should I take?'
+  expect(atEnd(quiet, asked)).toEqual(['question-asked-in-prose'])
+  expect(atEnd({ ...quiet, isPut: true }, asked)).toEqual([])
+  expect(atEnd(quiet, 'Done. Should I push it?')).toEqual([])
+  expect(atEnd(quiet, "I don't have a tool for reading the browser here.")).toEqual(['tool-said-missing-with-no-search'])
+  expect(atEnd({ ...quiet, hasSearched: true }, "I don't have a tool for reading the browser here.")).toEqual([])
+  expect(atEnd(quiet, 'This conversation is getting long, so start a new session for the next part.')).toEqual(['context-said-full'])
+  expect(atEnd(quiet, 'Can you paste the error output from the build?')).toEqual(['terminal-output-asked-of-ezexe'])
+  expect(atEnd(quiet, 'Run `npm install` in your terminal and tell me when it is done.')).toEqual(['command-handed-to-ezexe'])
+  expect(atEnd(quiet, 'The flush is ported and its tests pass.')).toEqual([])
+  expect(MISSES.filter(miss => miss.at === 'end').length).toBe(8)
+})
+
+test('a row written from the record hands its line beside the call, and only where the tool it names answers here', async ($, on) => {
+  const clock = mock.clock(on)
+  let tools = [...OWN, tool('Grep'), tool('WebFetch')]
+  const seen = machine(on, { tools: () => tools, files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const grep = await $.classic.PostToolUse(after('Bash', { command: 'grep -rn "TODO" src' }) as never)
+  expect(grep.additionalContext?.[1]).toContain('`Grep` is the same search with ripgrep')
+  // `Read` and `Agent` answer here, so a command that shows two misses hands two lines.
+  const two = await $.classic.PostToolUse(after('Bash', { command: 'cat a.txt; claude -p "go"' }) as never)
+  expect(two.additionalContext?.length).toBe(3)
+  expect(two.additionalContext?.[2]).toContain('is started by `Agent`.')
+  // No `Glob`, no `Workflow` and no tool of the desktop app here, so those rows hand nothing.
+  expect((await $.classic.PostToolUse(after('Bash', { command: 'find . -name "*.ts"' }) as never)).additionalContext?.length).toBe(1)
+  expect((await $.classic.PostToolUse(after('TaskCreate', { subject: 'x' }) as never)).additionalContext?.length).toBe(1)
+  // A row that names a command alone needs no tool.
+  const kept = await $.classic.PostToolUse(after('Bash', { command: 'cp a.json a.json.bak' }) as never)
+  expect(kept.additionalContext?.[1]).toContain('`/rewind` brings one back')
+
+  // A question put by a tool in the turn is no question in prose, and the next turn starts over.
+  tools = [...tools, tool('AskUserQuestion'), tool('ToolSearch')]
+  await $.session.start(HOSTED)
+  await clock.settle()
+  const asked = 'Two ways.\n\n1. keep it\n2. drop it\n\nWhich one?'
+  await $.turn.start(BEGUN)
+  await $.classic.PostToolUse(after('AskUserQuestion', { questions: [] }) as never)
+  await $.turn.complete({ ...TURN, answer: asked })
+  expect(seen.shown).toEqual([])
+  await $.turn.start({ ...BEGUN, turnId: 't2' })
+  await $.turn.complete({ ...TURN, turnId: 't2', answer: asked })
+  expect(seen.shown.length).toBe(1)
+  expect(seen.shown[0]).toContain('put to ezexe as buttons by `AskUserQuestion`.')
+})

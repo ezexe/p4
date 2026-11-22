@@ -34,9 +34,10 @@
 // The module wraps neither.
 //
 // And it hands one line at the moment of a miss, a situation of misses.ts in which a session does by hand what a
-// tool of this host does: after the tool call that shows it, as context beside that call's result, or with the
-// next prompt for a miss a turn's end shows. Each situation is told once in a session, a line names only a tool
-// the map says answers here, no call is refused, and the option `hints` turns it off.
+// native feature of this host does: after the tool call that shows it, as context beside that call's result, or
+// with the next prompt for a miss a turn's end shows. Each situation is told once in a session, a line names only
+// a tool the map says answers here, no call is refused, and the option `hints` turns it off. Every row of the
+// record that a p4 plugin uses names the rows of misses.ts that watch it, or says why none does.
 
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 
@@ -56,8 +57,8 @@ import {
   seenAtStart,
 } from './probes'
 import type { Answer, Called, Host, Probe, Said } from './probes'
-import { counted, recordOf, unweighed } from './inventory'
-import { MISSES, TERMINAL, WATCHED, atCall, atEnd, isNotice, isWake, isWorker, scriptOf } from './misses'
+import { counted, recordOf, unweighed, watched } from './inventory'
+import { MISSES, TERMINAL, WATCHED, WRAP_UP, atCall, atEnd, isNotice, isWake, isWorker, scriptOf } from './misses'
 import type { Record_ } from './inventory'
 
 // The project's store, and the map's file inside it.
@@ -177,11 +178,14 @@ let isChild = false
 let title = ''
 
 // What this session's own calls showed: a scripted worker started in a Terminal tab, a notice asked for another
-// session's exit, something set that wakes this session, and the plugin's own tool or command asked.
+// session's exit, something set that wakes this session, the plugin's own tool or command asked, the deferred
+// tools searched, and, in the turn under way, a question put to ezexe by a tool.
 let isWorkerOut = false
 let isNoticed = false
 let isWoken = false
 let hasAsked = false
+let hasSearched = false
+let isPut = false
 // The situations a line was handed for in this session, and the lines a turn's end made for the next prompt.
 const hinted = new Set<string>()
 let waiting: string[] = []
@@ -662,6 +666,8 @@ async function called($: EngineInterface, tool: string, input: unknown): Promise
   const given = typeof input === 'object' && input !== null ? (input as Record<string, unknown>) : {}
   if (isNotice(tool, given)) isNoticed = true
   if (isWake(tool, given)) isWoken = true
+  if (tool === 'ToolSearch') hasSearched = true
+  if (tool === 'AskUserQuestion' || tool === WRAP_UP) isPut = true
   if (tool === TERMINAL) {
     const command = typeof given.command === 'string' ? given.command : ''
     const script = scriptOf(command)
@@ -754,6 +760,7 @@ async function inventory($: EngineInterface): Promise<string> {
     `The record lists the hook events and the events and methods of the hooks module of Claude Code ${record.claude}, ` +
       'which a module cannot list for the build it runs on, and every slash command and tool an audit weighed.',
     ...counted(record),
+    watched(record),
     missing.length === 0
       ? `Every slash command and tool of this session, ${kindOf(host)} on Claude Code ${host.claude}, has a row.`
       : `In this session, ${kindOf(host)} on Claude Code ${host.claude}, and weighed by nobody: ${missing.join(', ')}.`,
@@ -818,6 +825,8 @@ export const register: Register = (on, options) => {
     isNoticed = false
     isWoken = false
     hasAsked = false
+    hasSearched = false
+    isPut = false
     hinted.clear()
     waiting = []
     starting = look($).then(() => check($))
@@ -847,6 +856,7 @@ export const register: Register = (on, options) => {
   // the map and for them, so a scripted run that ends with its turn keeps their answers.
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      isPut = false
       const id = await $.session.id().catch(() => undefined)
       if (id !== undefined && id !== turnOf) {
         turnOf = id
@@ -870,7 +880,7 @@ export const register: Register = (on, options) => {
     if (e.agentId === undefined && owed.length > 0) await pay($)
     if (e.agentId === undefined && wants.push && !e.isAborted) void push($, e.answer)
     if (e.agentId === undefined && wants.hints && !e.isAborted) {
-      const lines = hints(atEnd({ isWorkerOut, isNoticed, isWoken, hasAsked }, e.answer))
+      const lines = hints(atEnd({ isWorkerOut, isNoticed, isWoken, hasAsked, hasSearched, isPut }, e.answer))
       for (const line of lines) $.ui.log(line)
       waiting.push(...lines)
     }
