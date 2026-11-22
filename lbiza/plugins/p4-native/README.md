@@ -151,12 +151,12 @@ A key that ends in `__` stands for every tool of that server, and one that ends 
 
 What the record comes to, by kind, as `/native weighed` prints it.
 
-- `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
+- `command`: 131 rows, 21 used, 1 open, 109 declined, 0 weighed by nobody
 - `tool`: 122 rows, 52 used, 3 open, 67 declined, 0 weighed by nobody
 - `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
 - `event`: 60 rows, 17 used, 0 open, 43 declined, 0 weighed by nobody
 - `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
-- `used`: 141 rows, 54 watched by a row of misses.ts, 87 with no by-hand call to watch, 0 with neither
+- `used`: 142 rows, 54 watched by a row of misses.ts, 88 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -237,7 +237,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 141 used rows, 54 are watched by a row of the table and 87 say why none watches them: the 69 hook events, module events and module methods, which only a hooks module hooks or calls, and 18 commands and tools whose work no file or command a session reaches does.
+Of the 142 used rows, 54 are watched by a row of the table and 88 say why none watches them: the 69 hook events, module events and module methods, which only a hooks module hooks or calls, and 19 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
@@ -345,6 +345,7 @@ Each stays a setting of Claude Code or of the desktop app that p4-native neither
 
 Three that sessions had called declined are reopened on ezexe's word, as open rows of `weighed.json` for p4-phi to take up the way it took up `/goal` and `/loop`: plan mode, with `/plan`, `EnterPlanMode` and `ExitPlanMode`, the prompts on a schedule inside a session, with `CronCreate`, `CronDelete` and `CronList`, and the scheduled runs of `/schedule`.
 The prompts on a schedule are taken up since p4-phi 0.11.119: while a worker in the Terminal panel is live, whose end the app sends no note of, its upkeep hands `/loop` with an interval, which Claude Code runs by `CronCreate`, after a read of `CronList`, and once the last such worker is gone it hands the end, `CronList` and `CronDelete`.
+The scheduled runs are taken up since p4-phi 0.11.122: for a step a session says falls due when no session may be open, `phi.py upkeep wait "<the step>" --at "<when>"` prints `/schedule` with the time and the prompt written, for ezexe to type, since making a run that starts sessions later is ezexe's, and with `--local`, for a step that needs the project's local store, it prints a Desktop scheduled task's instructions in its place, to be made on ezexe's yes.
 
 ## Native features behind an option
 

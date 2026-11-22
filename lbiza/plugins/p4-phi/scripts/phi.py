@@ -4133,10 +4133,17 @@ def main(argv=None):
         if name == "upkeep":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "close", "wait"),
                            help="on or off sets phi.upkeep in the store's p4.json; close closes an open item or "
-                                "wait; wait keeps a step that waits on a session; none prints what is due")
+                                "wait; wait keeps a step that waits on a session, with --on, or on a time when no "
+                                "session may be open, with --at; none prints what is due")
             p.add_argument("what", nargs="?", default="", help="for close, the item's or wait's id; for wait, the "
                                                                "step that waits")
             p.add_argument("--on", dest="waits_on", default="", help="for wait: the session the step waits on")
+            p.add_argument("--at", dest="waits_at", default="",
+                           help="for wait: when the step falls due, as `tomorrow at 9am` or `every weekday at 7am`; "
+                                "it prints the scheduled run of Claude Code that fits, for ezexe to make")
+            p.add_argument("--local", action="store_true",
+                           help="for wait --at: the step needs the project's local store or other files of this "
+                                "machine, which a cloud run's clone does not hold")
             p.add_argument("--commit", default="", help="for close: a commit on the remote's default branch")
             p.add_argument("--note", default="", help="for close: why it is left")
             p.add_argument("--ezexe", default="", help="for close: ezexe's own words, in a turn ezexe began")
@@ -4252,6 +4259,10 @@ def main(argv=None):
         if a.cmd == "upkeep":
             if a.act == "close":
                 print(upkeep.close(me.home, s, a.what.strip(), a.commit.strip(), a.note, a.ezexe, os.getcwd()))
+            elif a.act == "wait" and a.waits_at:
+                if a.waits_on:
+                    raise ValueError("a step waits on a session, with --on, or on a time, with --at, and not on both")
+                print(upkeep.later(me.home, s, a.what, a.waits_at, a.local))
             elif a.act == "wait":
                 print(upkeep.wait(me.home, s, a.what, a.waits_on))
             else:

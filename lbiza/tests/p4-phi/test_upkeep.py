@@ -451,6 +451,80 @@ class Waits(Base):
         self.assertEqual(self.t.cli(TOP, "upkeep", "close", wid, "--note", "the migration ran on the store").returncode, 0)
         self.assertEqual(self.lines(self.said(), "due:"), [])
 
+    def test_a_step_that_falls_due_when_no_session_is_open_gets_the_cloud_runs_command_for_ezexe_to_type(self):
+        """A step that waits on a time may fall due with no session open, and then no hook of p4-phi runs. Claude
+        Code has runs that start with no session open, and p4-phi builds none: scheduled-tasks.md, "Compare
+        scheduling options", gives a cloud scheduled task "No (fresh clone)" for local files and no need of the
+        machine, and routines.md, "Run `/schedule` in any session to create a scheduled task conversationally. You
+        can also pass a description directly". So a step that needs only the repository gets that command with its
+        prompt written, on a line of its own, for ezexe to type: making one starts sessions later."""
+        self.turn_on()
+        step = "Run the tests of main on the newest Claude Code build and say which fail"
+        r = self.t.cli(TOP, "upkeep", "wait", step, "--at", "every weekday at 7:17am")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        said, command, closes = r.stdout.rstrip("\n").split("\n")
+        wid = re.match(r"kept as (wt-[0-9a-f]{8}): ", said).group(1)
+        for words in ("needs only the repository", "a cloud scheduled task's", "a fresh clone on Anthropic's cloud",
+                      "it is ezexe's to make and p4-phi makes none", "give ezexe the command below to type",
+                      "do not run it yourself", "asks ezexe for the repository and confirms the time"):
+            self.assertIn(words, said)
+        self.assertEqual(command, f"/schedule every weekday at 7:17am, {step}. {upkeep.RUN_ENDS}")
+        self.assertIn(f"upkeep close {wid} --note", closes)
+        kept = [w for w in upkeep.load(self.t.p4, TOP)["waits"] if w["id"] == wid]
+        self.assertEqual([(w["step"], w["at"], w["local"], w.get("on")) for w in kept],
+                         [(step, "every weekday at 7:17am", False, None)])
+        again = self.t.cli(TOP, "upkeep", "wait", step, "--at", "every weekday at 7:17am")
+        self.assertIn(f"kept as {wid}", again.stdout)
+        self.assertEqual(len(upkeep.load(self.t.p4, TOP)["waits"]), 1, "the same step at the same time is kept once")
+        # it waits on no session, so no line hands it as due, and `upkeep` lists it until it is closed
+        self.commit()
+        self.finish(report="The last row is written now.")
+        self.assertEqual(self.lines(self.said(), "due:"), [])
+        listed = self.t.cli(TOP, "upkeep").stdout
+        self.assertIn("Kept for a scheduled run, which ezexe makes:", listed)
+        self.assertIn(f"- {wid}, \"{step}\", every weekday at 7:17am: a cloud scheduled task, by `/schedule`", listed)
+        closed = self.t.cli(TOP, "upkeep", "close", wid, "--note", "ezexe made the task with /schedule")
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+        self.assertNotIn("Kept for a scheduled run", self.t.cli(TOP, "upkeep").stdout)
+
+    def test_one_that_needs_the_projects_local_store_gets_a_desktop_scheduled_task_on_ezexes_yes(self):
+        """The project's store is in no clone, so a step that needs it is no cloud run's. desktop-scheduled-tasks.md:
+        "Tasks only run while the desktop app is running and your computer is awake", with the machine's own files,
+        and "You can also ask Claude in any Desktop session to set the schedule". That tool's own text says an
+        approval prompt "may or may not appear", so the line asks for ezexe's yes before the call."""
+        self.turn_on()
+        step = "Sweep the store's lifetimes and write what was cleared into the notebook"
+        r = self.t.cli(TOP, "upkeep", "wait", step, "--at", "every day at 6:43am", "--local")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        said, prompt, closes = r.stdout.rstrip("\n").split("\n")
+        wid = re.match(r"kept as (wt-[0-9a-f]{8}): ", said).group(1)
+        for words in ("needs the project's local store, which a cloud run's fresh clone does not hold",
+                      "a Desktop scheduled task's", "while the desktop app is open and the computer is awake",
+                      "it is ezexe's to make and p4-phi makes none", "by the app's own question",
+                      "On ezexe's yes alone, make it with `mcp__scheduled-tasks__create_scheduled_task`",
+                      "\"every day at 6:43am\" as its schedule", "Scheduled, New task, with Only on this computer on"):
+            self.assertIn(words, said)
+        self.assertNotIn("/schedule", r.stdout)
+        folder = upkeep.spelled(upkeep.main_of(self.t.session(TOP).get("cwd") or "") or self.t.session(TOP).get("cwd") or "")
+        self.assertTrue(folder)
+        self.assertEqual(prompt, f"{step}. Work in the folder {folder}, whose `.claude/p4` is the project's store. "
+                                 f"{upkeep.RUN_ENDS}")
+        self.assertIn(folder, said)
+        self.assertTrue(next(w for w in upkeep.load(self.t.p4, TOP)["waits"] if w["id"] == wid)["local"])
+        self.assertIn(f"- {wid}, \"{step}\", every day at 6:43am: a Desktop scheduled task, by "
+                      "`mcp__scheduled-tasks__create_scheduled_task` on ezexe's yes", self.t.cli(TOP, "upkeep").stdout)
+
+    def test_a_wait_names_a_session_or_a_time_and_a_time_is_said(self):
+        self.turn_on()
+        both = self.t.cli(TOP, "upkeep", "wait", "Run the ports migration on the store", "--on", KID, "--at", "tomorrow at 9am")
+        self.assertNotEqual(both.returncode, 0)
+        self.assertIn("with --on, or on a time, with --at, and not on both", both.stderr + both.stdout)
+        short = self.t.cli(TOP, "upkeep", "wait", "Run it", "--at", "tomorrow at 9am")
+        self.assertNotEqual(short.returncode, 0)
+        self.assertEqual(upkeep.load(self.t.p4, TOP)["waits"], [])
+        with self.assertRaises(ValueError):
+            upkeep.later(self.t.p4, self.t.session(TOP), "Run the ports migration on the store", " ,. ")
+
     def test_a_step_of_the_task_list_that_names_the_session_it_waits_on_is_kept_with_it(self):
         self.turn_on()
         plan = {"items": [{"content": "Start the worker for the last row", "status": "completed"},

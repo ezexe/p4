@@ -1671,15 +1671,13 @@
   },
   "/schedule": {
    "kind": "command",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace a step that waits for the next session with a scheduled run, for a step that falls due when no session is open, which ezexe then makes in Claude Code's own flow."
-   },
    "declined": {
     "p4-temportal": "cloud tasks have no local files."
-   }
+   },
+   "nowatch": "It makes a cloud scheduled task in a conversation with ezexe, for ezexe to type: p4-phi hands the command with its prompt written and makes none, and no file or command a session reaches makes one."
   },
   "/scroll-speed": {
    "kind": "command",

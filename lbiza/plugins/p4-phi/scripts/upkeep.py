@@ -486,6 +486,81 @@ def wait(home, s, text, on_sid):
             f"repository's default branch")
 
 
+# --- a step that falls due when no session is open, by Claude Code's own scheduled runs ---------------------------------
+# A step that waits on a time, and not on a session, may fall due while no session is open, and then nothing of
+# p4-phi runs: its hooks and its module live in a session. Claude Code has runs that start with no session open, and
+# p4-phi builds none of its own. scheduled-tasks.md, "Compare scheduling options", sets three beside each other: a
+# cloud scheduled task runs on "Cloud, Anthropic-managed by default", needs neither the machine on nor an open
+# session, and has "No (fresh clone)" for access to local files; a Desktop scheduled task runs on "Your machine",
+# needs no open session and has local files; and `/loop` needs an open session, so it is no answer here. "Use cloud
+# tasks for work that should run reliably without your machine. Use Desktop tasks when you need access to local
+# files and tools."
+# So a step that needs only the repository is a cloud scheduled task's: routines.md, "Run `/schedule` in any session
+# to create a scheduled task conversationally. You can also pass a description directly", and "Each repository is
+# cloned at the start of a run." And a step that needs the project's local store, which no clone holds, is a Desktop
+# scheduled task's: desktop-scheduled-tasks.md, "Tasks only run while the desktop app is running and your computer
+# is awake", and "You can also ask Claude in any Desktop session to set the schedule", which is the tool
+# DESKTOP_TASK there.
+# Making either starts sessions later, so the making is ezexe's, in Claude Code's own flow, and p4-phi makes none:
+# `later` keeps the step and prints the command with the prompt written. `/schedule` asks ezexe for the repository
+# and confirms the time before it saves. The desktop tool's own text says "an approval prompt may or may not appear
+# depending on the user's permission settings, so don't rely on it as the confirmation step", so its line asks for
+# ezexe's yes first.
+SCHEDULE = "/schedule"
+DESKTOP_TASK = "mcp__scheduled-tasks__create_scheduled_task"
+RUN_ENDS = ("No session is open while this runs, and it knows nothing of the session that asked for it, so the step "
+            "is whole in these words. End with one line on what was done and one on what is left.")
+
+
+def run_prompt(step, folder=""):
+    """The prompt of a scheduled run for a step, on one line: the step as the session wrote it, the folder whose
+    store it needs where it needs one, and how the run ends."""
+    where = f" Work in the folder {folder}, whose `.claude/p4` is the project's store." if folder else ""
+    return f"{step.rstrip('.')}.{where} {RUN_ENDS}"
+
+
+def later(home, s, text, when, local=False):
+    """Keeps a step this session said falls due at a time, when no session may be open, as a wait with `at`, and
+    returns the lines to print: which scheduled run of Claude Code fits it, and the command with the prompt written,
+    for ezexe to make. With `local` the step needs the project's local store or other files of this machine."""
+    sid = s["sessionId"]
+    text, when = " ".join(str(text or "").split()), " ".join(str(when or "").split()).rstrip(",.")
+    if len(text) < 12:
+        raise ValueError("say the step that waits, in a sentence")
+    if not when:
+        raise ValueError("say when the step falls due, as `--at \"tomorrow at 9am\"` or `--at \"every weekday at 7am\"`")
+    folder = spelled(main_of(str(s.get("cwd") or "")) or str(s.get("cwd") or "")) if local else ""
+    wid = "wt-" + hashlib.sha1(f"{when} {text}".encode("utf-8")).hexdigest()[:8]
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        if not any(w.get("id") == wid for w in d["waits"]):
+            d["waits"].append({"id": wid, "step": text[:ITEM_CHARS], "at": when[:120], "local": bool(local),
+                               "time": now()})
+            save(home, sid, d)
+    prompt = run_prompt(text[:ITEM_CHARS], folder)
+    closes = (f"Close it with `{PHI.commands()} upkeep close {wid} --note \"<what ezexe made or said>\"` once ezexe "
+              f"has answered.")
+    if local:
+        return "\n".join([
+            f"kept as {wid}: a step that falls due when no session is open is a scheduled run's, and this one needs "
+            f"the project's local store, which a cloud run's fresh clone does not hold. So it is a Desktop scheduled "
+            f"task's, which runs on this machine with its files while the desktop app is open and the computer is "
+            f"awake. Making one starts sessions later, so it is ezexe's to make and p4-phi makes none: put it to "
+            f"ezexe once, by the app's own question, with the words below as the task's instructions. On ezexe's yes "
+            f"alone, make it with `{DESKTOP_TASK}`, those words as its `prompt` and \"{when}\" as its schedule, or "
+            f"leave ezexe to make it under Scheduled, New task, with Only on this computer on and the folder "
+            f"{folder}.",
+            prompt, closes])
+    return "\n".join([
+        f"kept as {wid}: a step that falls due when no session is open is a scheduled run's, and this one needs only "
+        f"the repository. So it is a cloud scheduled task's, which works in a fresh clone on Anthropic's cloud with "
+        f"this machine on or off. Making one starts sessions later, so it is ezexe's to make and p4-phi makes none: "
+        f"give ezexe the command below to type, as it stands and in a fenced block of its own, and do not run it "
+        f"yourself. Claude Code's own flow then asks ezexe for the repository and confirms the time before it saves "
+        f"the task.",
+        f"{SCHEDULE} {when}, {prompt}", closes])
+
+
 WAITS = re.compile(r"\b(?:a?wait\w*|after|once|when|until|blocked\s+(?:on|by)|depends?\s+on|needs?)\b", re.I)
 
 
@@ -1413,6 +1488,12 @@ def status(home, s, store=""):
     due = acts(home, s, s.get("turnBy") or "user", store, hand=False, d=d)
     lines += ["", "Due now:"] + ([f"- {a[3]}" for a in due] or ["- nothing"])
     lines += form(home, s, d, "\n".join(a[3] for a in due))
+    timed = [w for w in d["waits"] if w.get("at") and not w.get("closed")]
+    if timed:
+        lines += ["", "Kept for a scheduled run, which ezexe makes:"]
+        lines += [f"- {w['id']}, \"{w.get('step')}\", {w.get('at')}: "
+                  + (f"a Desktop scheduled task, by `{DESKTOP_TASK}` on ezexe's yes" if w.get("local")
+                     else f"a cloud scheduled task, by `{SCHEDULE}`") for w in timed]
     gave_up = [k for k, n in d["tried"].items() if int(n or 0) >= TRIES]
     if gave_up:
         lines += ["", f"Handed {TRIES} times and left: " + ", ".join(gave_up)]
