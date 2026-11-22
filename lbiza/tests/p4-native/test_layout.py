@@ -44,6 +44,30 @@ class StartTest(unittest.TestCase):
         self.assertIn("await offer($)", start, "the command and the tool are listed from the first prompt")
 
 
+class OlderKitsTest(unittest.TestCase):
+    """`claude plugin test` under the kits of Claude Code 2.1.311 and 2.1.322, which have no event `session.info`. A
+    kit refuses a hook on an event it lacks, and the test file named one in a stub every case made, so 57 of its 61
+    cases failed there while the module itself loaded on both builds."""
+    TESTS = (HOOKS / "register.test.ts").read_text(encoding="utf-8")
+
+    def test_the_test_file_names_no_event_the_older_kits_lack(self):
+        self.assertNotIn("on('session.info'", self.TESTS)
+        self.assertIn("on('session.*', (_, e, next) => {\n    if (next.event !== 'session.info') return next(e)", self.TESTS)
+        self.assertIn("seen.hasInfo = true", self.TESTS)
+        # each case that reads the platform expects none on a build where nothing asked the stub
+        self.assertEqual(self.TESTS.count("seen.hasInfo ? "), 2)
+        self.assertNotIn("toBe('windows')", self.TESTS)
+
+    def test_the_readme_names_the_builds_the_tests_ran_on_and_what_the_older_ones_lack(self):
+        tests = README.split("## Tests\n", 1)[1]
+        for words in ("2.1.311, 2.1.322, 2.1.328 and 2.1.330", "have no event `session.info`", "the glob `session.*`",
+                      "`claude plugin validate --strict` passes on 2.1.328 and later", "the manifest's field `network` is unknown",
+                      "requires Claude Code v2.1.328 or later"):
+            self.assertIn(words, tests)
+        cases = len(re.findall(r"(?m)^test\(", self.TESTS))
+        self.assertIn(f"{cases} cases on each", tests)
+
+
 class MapTest(unittest.TestCase):
     def test_every_fact_is_asked_of_the_engine_and_none_of_the_environment(self):
         """A `claude -p` run started from a desktop session's shell inherits that session's CLAUDE_CODE_ENTRYPOINT

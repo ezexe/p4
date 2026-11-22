@@ -14,7 +14,7 @@ claude plugin install p4-native@p4-marketplace
 The plugin is a hooks module alone, `hooks/register.ts`, whose functions run inside Claude Code.
 It runs no command hook and starts no process at a session's start, and it carries no copy of `p4conf.py`, since it writes no setting.
 A hooks module needs Claude Code v2.1.287 or later, and it does not load in a session started with `--safe-mode` or `--bare`, where `disableAllHooks` is set, or where managed settings block mods, by https://code.claude.com/docs/en/plugins/mods/create.md.
-The lowest Claude Code this module was seen to load on is 2.1.311, the oldest on the machine it was tried on, and it loads on 2.1.322 too: the debug log of a `claude -p` run on each holds `hooks module p4-native@inline loaded` with the events `session.start,prompt.submit,turn.start,turn.complete,session.compact,tool.call,classic.PostToolUse,command.run`.
+The lowest Claude Code this module was seen to load on is 2.1.311, the oldest on the machine it was tried on, and it loads on 2.1.322 too: the debug log of a `claude -p` run on each holds `hooks module p4-native@inline loaded` with the events `session.start,prompt.submit,turn.start,turn.complete,classic.Notification,session.attach,session.detach,session.compact,tool.call,classic.PostToolUse,command.run`, which are the events it names since 0.5.28.
 Both builds know every event the module names and lack one method it calls, `$.session.info`, so the map's entry is written there with no `platform`.
 A call of a method the build lacks throws where it is made, before there is a promise to catch, and until p4-native 0.5.9 that cost the whole map on those builds, with the debug line `the capability map was not read: $.session.info is not a function`.
 
@@ -399,3 +399,10 @@ Not seen live: a session whose id a `/clear` changed, a change of version betwee
 ## Tests
 
 `python -m pytest`, run in `lbiza/`, runs the tests under `tests/p4-native/`, and `claude plugin test lbiza/plugins/p4-native` runs the module's own in `hooks/register.test.ts`.
+The module's tests pass whole under the test kits of Claude Code 2.1.311, 2.1.322, 2.1.328 and 2.1.330, 61 cases on each.
+
+- The two older kits have no event `session.info`, and a kit refuses a hook on an event it lacks, which until 0.5.34 failed 57 of the 61 cases there.
+- So the file's stub for `$.session.info` stands at the glob `session.*` and names the event by `next.event`, and the two cases that read a platform expect none where nothing asked the stub.
+- The file names no other event those kits lack, and it enters each call the way a session does, through `$`.
+- `claude plugin validate --strict` passes on 2.1.328 and later.
+- On 2.1.311 and 2.1.322 it reports one warning, that the manifest's field `network` is unknown and is ignored at load, and fails for that alone: the field names the host of the docs index and, by the manifest reference, requires Claude Code v2.1.328 or later.

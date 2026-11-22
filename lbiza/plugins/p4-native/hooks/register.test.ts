@@ -126,6 +126,8 @@ type Seen = {
   notified: { text: string; title: string | undefined }[]
   // Each address the module fetched.
   fetched: string[]
+  // Whether the engine asked the stub of `$.session.info`, which a build that lacks the call never does.
+  hasInfo: boolean
 }
 
 function plain(path: string): string {
@@ -149,6 +151,7 @@ function machine(on: On, has: Machine): Seen {
     status: [],
     notified: [],
     fetched: [],
+    hasInfo: false,
   }
   on('ui.status', (_, e) => {
     seen.status.push(e.text)
@@ -191,7 +194,15 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: { version, base: version } }
   })
-  on('session.info', () => ({ value: { transcriptPath: '', platform: 'windows' as const, isHosted: false } }))
+  // What the engine answers `$.session.info`. Claude Code 2.1.311 and 2.1.322 have no such event, and a test file
+  // that names one a build lacks is refused whole on that build, so the stub stands at a glob and names it by
+  // `next.event`. On those two builds nothing asks it, the plugin's call throws, and the entry holds no platform.
+  on('session.*', (_, e, next) => {
+    if (next.event !== 'session.info') return next(e)
+    seen.hasInfo = true
+
+    return { value: { transcriptPath: '', platform: 'windows' as const, isHosted: false } } as never
+  })
   on('tool.list', async () => {
     seen.listed += 1
 
@@ -288,7 +299,8 @@ test('a session the desktop app hosts is read as desktop and interactive, with t
   expect(mine?.host).toBe('desktop')
   expect(mine?.run).toBe('interactive')
   expect(mine?.claude).toBe('2.1.326')
-  expect(mine?.platform).toBe('windows')
+  // A build with no `$.session.info` asks nothing of the stub, and its entry is written with no platform.
+  expect(mine?.platform).toBe(seen.hasInfo ? 'windows' : undefined)
   expect(mine?.tools.app).toEqual(['mcp__ccd_session__start_session', 'mcp__ccd_session_mgmt__get_session'])
   expect(mine?.tools.native).toEqual(['Agent', 'Bash', 'PushNotification', 'Read'])
   expect(mine?.tools.servers).toEqual({ terminal: 1 })
@@ -458,7 +470,8 @@ test('a project with no store gets no file, and the command still prints the map
   expect(seen.written).toEqual([])
 
   const out = await $.command.run({ command: 'native', args: '', ...TYPED })
-  expect(out.text).toContain('host: desktop, interactive, Claude Code 2.1.326 on windows')
+  // The platform is in the line where the build has `$.session.info`, and the line ends at the version where not.
+  expect(out.text).toContain(`host: desktop, interactive, Claude Code 2.1.326${seen.hasInfo ? ' on windows' : '\n'}`)
   expect(out.text).toContain('surfaces: desktop')
   expect(out.text).toContain('tools of the desktop app: 2: mcp__ccd_session__start_session, mcp__ccd_session_mgmt__get_session')
   expect(out.text).toContain('tools of other servers: terminal 1')
