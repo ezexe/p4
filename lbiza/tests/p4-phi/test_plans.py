@@ -324,7 +324,6 @@ class TreeOfPlans(unittest.TestCase):
                   "tool_input": {"prompt": "read the layout code", "description": "probe", "subagent_type": "Explore"}}
         run("agent", {**launch, "tool_use_id": "toolu_b1"})
         run("agent", {**launch, "tool_use_id": "toolu_b2"})
-        self.assertNotIn("agentsPending", plans.load(home, A), "an Agent call keeps no launch for a subagent to take")
         self.assertEqual(tasks(), [[], [], []], "and makes no task")
         stray = {"agent_id": "agentq000", "agent_type": "Explore", "tool_name": "Read",
                  "tool_input": {"file_path": "README.md"}, "tool_use_id": "toolu_q1"}
@@ -337,14 +336,10 @@ class TreeOfPlans(unittest.TestCase):
         marker = os.path.join(home, "phi", ".agents", "agentb002")
         self.assertTrue(os.path.exists(marker), "its marker opens recall-hook.sh's gate from its first call")
         self.plan(A, {"advance": True})
-        p = plans.load(home, A)                       # what an earlier copy of the plugin left behind decides nothing
-        p["agentsPending"] = {"toolu_old": {"step": "2.3", "stepText": "Commit the move", "anchorSeen": 0, "epoch": 1}}
-        relay._write_json(plans._path(home, A), p)
         start("agentb001")
         start("agentb001")
         self.assertEqual(tasks(), [["agentb002"], ["agentb001"], []],
                          "each under the step in progress at its own start, once, whichever call came first")
-        self.assertNotIn("agentsPending", plans.load(home, A))
         task = plans._agent(plans.load(home, A), "agentb001")
         self.assertEqual((task["status"], task["stepText"]), ("open", "Move recall/ into phi/"))
         self.assertEqual(task["anchorSeen"] + 1, relay.anchor_version(home, TOP),
@@ -440,7 +435,6 @@ class TreeOfPlans(unittest.TestCase):
         newer = call()
         self.assertIn("the docs build script", newer, "a newer note of that sibling is told")
         self.assertNotIn("the old docs layout", newer)
-        self.assertNotIn("marksGiven", plans._agent(plans.load(t.p4, A), "agentn004"))
         with open(own, encoding="utf-8") as f:              # the transcript alone says what it heard: without those
             first = f.readline()                            # rows the same change tells the first note again
         with open(own, "w", encoding="utf-8") as f:

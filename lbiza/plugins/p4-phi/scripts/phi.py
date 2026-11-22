@@ -1828,7 +1828,7 @@ def live_rules(s, store):
     s["rulesSeen"] = {"hash": key, "lines": new}
     if not seen or seen.get("hash") == key:
         return ""
-    old = [x for x in seen.get("lines") or [] if str(x).startswith("memory ")]   # an earlier copy kept CLAUDE.md's too
+    old = list(seen.get("lines") or [])
     added = [x for x in new if x not in set(old)]
     gone = [x for x in old if x not in set(new)]
     if not added and not gone:

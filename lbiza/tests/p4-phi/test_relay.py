@@ -726,7 +726,6 @@ class ThreeSessions(unittest.TestCase):
             self.assertIn(f"({k + 1}) warning {k:02d} of thirty: " + "a sibling changed the layout. " * 9, line[0])
         self.assertLess(ctx.index(relay.STOP_HEAD), 400, "the warnings lead")
         self.assertNotIn("did not fit", ctx)
-        self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", "sessions", TOP, "held.md")))
         self.assertNotIn("of thirty", context(t.say(TOP, "and now?")), "none of them again")
 
     def test_a_mark_is_handed_on_once(self):

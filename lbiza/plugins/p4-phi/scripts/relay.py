@@ -1173,9 +1173,6 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/.cache/",
            # the open issues a puppeteer's watcher last listed from GitHub, listed again at its next slow look
            "phi/sessions/*/open-issues.json",
-           # the page an earlier p4-phi kept of what did not fit beside a prompt, and the standing instructions an
-           # earlier p4-phi wrote: pages of this machine
-           "phi/sessions/*/held.md", "phi/sessions/*/standing.md",
            # the sessions waiting to be archived, made again from the records
            "phi/ready-to-archive.md",
            # what one hook read from the app's records, kept so the next reads one file: this machine's alone

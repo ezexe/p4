@@ -910,14 +910,12 @@ class NewTask(unittest.TestCase):
     def test_no_standing_instruction_is_handed_for_a_message_about_something_else(self):
         """The app's own `hand_off_to_session` and `start_session` with `initiation` `offer` say in their tool
         descriptions when a message about something else goes to another session, so p4-phi hands no instruction of
-        its own and keeps no standing.md."""
+        its own."""
         for host, words in ((TOP, TASK), (TOP, "also, what colour should the fence be?"), (KID, HANDED),
                             (KID, "and what about the fence?")):
             said = self.say(host, words)
             self.assertNotIn("about something else", said, words)
             self.assertNotIn("stay with the task", said, words)
-        for host in (TOP, KID):
-            self.assertFalse(os.path.exists(os.path.join(self.t.dir(host), "standing.md")))
 
     def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
         self.say(TOP, TASK)
@@ -991,7 +989,6 @@ class NewTask(unittest.TestCase):
                   "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else")
         self.assertIn(notice, told)
         self.assertLessEqual(told.index(notice) + len(notice), phi.APP_PREVIEW, "inside the app's preview")
-        self.assertFalse(os.path.exists(os.path.join(self.t.dir(KID), "held.md")))
 
     def test_the_harness_speaking_gets_no_line(self):
         self.say(TOP, TASK)
@@ -1398,7 +1395,6 @@ class Rules(unittest.TestCase):
         self.assertTrue(ctx.startswith(phi.READ_ALL + "\n\n" + relay.STOP_HEAD + "(1) warning 00 of forty"), ctx[:300])
         self.assertIn("(40) warning 39 of forty", ctx, "every warning whole")
         self.assertNotIn("did not fit", ctx)
-        self.assertFalse(os.path.exists(os.path.join(self.t.dir(TOP), "held.md")), "no page of p4-phi's own")
 
     def test_a_fresh_childs_background_comes_with_its_first_message_and_its_start_hands_no_rule(self):
         self.t.say(TOP, TASK)
@@ -1425,12 +1421,10 @@ class Rules(unittest.TestCase):
         self.assertGreater(len(first), 9500)
         self.assertIn("Each turn's report is kept either way", first, "the background's last line, whole")
         self.assertNotIn("did not fit", first)
-        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")), "no page of p4-phi's own")
         self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
                         first.index("background for this session"), "the act line leads, inside the app's preview")
         later = context(t.say(KID, "go on"))
         self.assertNotIn("did not fit", later, "a later prompt has no ceiling of p4-phi's own either")
-        self.assertFalse(os.path.exists(os.path.join(t.dir(KID), "held.md")))
         calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(12)]
         for n in range(3):                                          # its own turns, which a clear's start hands whole
             t.stop(KID, HANDED, calls, "Ported: " + "the flush writes the ports table. " * 12, uuid=f"k{n}")
@@ -2034,7 +2028,7 @@ ASKS_WRITE = re.compile(r"\b(?:writes?|written|keeps?|kept|saves?|saved|logs?|lo
 UNDER_CLAUDE = re.compile(r"(?:^|[\s`'\"(:])([^\s`'\"(]*\.claude/[^\s`'\")]*)")
 # The pages p4-phi's own scripts write in the store, which a session reads and never writes: a line may say they are
 # kept or rewritten there. A state page or a decisions file is not among them, since a session writes those.
-OWN_PAGES = ("book.md", "session.md", "sessions.md", "standing.md", "board.md", "rules.md", "ledger.md")
+OWN_PAGES = ("book.md", "session.md", "sessions.md", "board.md", "rules.md", "ledger.md")
 
 
 def writes_under_claude(text, plugin=ROOT):

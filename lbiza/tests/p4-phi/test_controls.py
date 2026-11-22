@@ -264,7 +264,6 @@ class Supervisor(unittest.TestCase):
             self.assertIn(f"`{sid}`", line)
         self.assertIn("approval card", line, "the line whole")
         self.assertLessEqual(ctx.index(head) + len(head) + len(line), 2000, "inside the app's preview")
-        self.assertFalse(os.path.exists(os.path.join(t.dir(PUP), "held.md")), "no page of p4-phi's own")
         after = ctx.split(head, 1)[1]
         self.assertTrue(any(m in after for m in ("ended turns. Each is one line", "set these sessions' effort")),
                         "the informational pieces follow it, whole and beside the prompt")

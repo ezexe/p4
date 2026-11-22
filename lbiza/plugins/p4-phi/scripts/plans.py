@@ -972,7 +972,6 @@ def agent_bind(home, s, agent_id, kind=""):
     p = load(home, sid)
     if not agent_id or _agent(p, agent_id):
         return False
-    p.pop("agentsPending", None)                  # the launches an earlier copy kept until a tool call took one
     parent = relay._parent(s)
     st = step_of(p, p.get("current") or "") if p.get("steps") else None
     task = {"id": agent_id, "tool": "Agent", "agent": True, "status": "open",
@@ -1074,7 +1073,6 @@ def agent_warn(home, s, agent_id, transcript=""):
     if heard or lines:
         if heard:
             t["anchorSeen"] = v
-        t.pop("marksGiven", None)                 # what an earlier copy kept of the notes it had told
         relay._write_json(_path(home, sid), p)
     if not lines:
         return ""
