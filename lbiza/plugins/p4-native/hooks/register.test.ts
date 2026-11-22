@@ -104,6 +104,8 @@ type Machine = {
   index?: string
   // What a call of a tool answers: its text, or the text of a result that is an error.
   app?: (name: string, input: Record<string, unknown>) => string | { error: string }
+  // The settings by source, as `$.settings.read({ source })` answers them, and none for a source left out.
+  settings?: Record<string, unknown>
 }
 
 // What the module registered, wrote, logged and called, how often it asked for the tools, the prompts as they
@@ -173,6 +175,8 @@ function machine(on: On, has: Machine): Seen {
   on('turn.complete', () => ({ text: '' }))
   // What the settings hooks beneath the module answer after a tool call.
   on('classic.PostToolUse', () => ({ additionalContext: ['a settings hook said this'] }))
+  // One source's settings, as the engine loaded them.
+  on('settings.read', (_, e) => ({ value: (has.settings ?? {})[e.source ?? ''] ?? {} }) as never)
   on('prompt.submit', (_, e) => {
     seen.prompts.push({ text: e.text, context: e.context })
 
@@ -1691,6 +1695,7 @@ test('a word is looked up in the record: what the thing does in its own words, w
     record: SAID,
     commands: () => [{ name: 'compact', source: 'builtin', description: 'Clear conversation history but keep a summary in context' }],
     tools: () => [{ name: 'Read', description: 'Reads a file from the local filesystem.\n\n- more of it', mcp: false }, tool('Bash')],
+    settings: { local: { permissions: { deny: ['mcp__ccd_session__start_session', 'Bash(rm *)'] } } },
   })
   await $.session.start(HOSTED)
   await clock.settle()
@@ -1712,6 +1717,12 @@ test('a word is looked up in the record: what the thing does in its own words, w
   // A command and a tool this session does not hold say so.
   expect(await asks($, 'fast')).toContain('/fast, a slash command, not in this session\n  p4 plugins: p4-phi built nothing on it')
   expect(await asks($, 'start_session')).toContain('mcp__ccd_session__start_session, a tool, not in this session')
+  // A tool a deny rule of the settings took out of the session says so, with the file, and a rule with a bracket takes none out.
+  expect(await asks($, 'start_session')).toContain('\n  a deny rule in .claude/settings.local.json takes it out of this session')
+  expect(await asks($, 'fast')).not.toContain('a deny rule')
+  const map = await asks($, 'map')
+  expect(map).toContain('which say nothing of what the host can do: mcp__ccd_session__start_session in .claude/settings.local.json')
+  expect(map).not.toContain('Bash(rm')
 
   // A docs page is found by its path or by a word of its line, and gives its address.
   const page = await asks($, 'hook events')

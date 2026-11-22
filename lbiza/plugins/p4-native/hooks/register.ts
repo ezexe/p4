@@ -115,6 +115,14 @@ const WAITING = new Set(['permission_prompt', 'idle_prompt'])
 // What the name of each tool of the desktop app begins with. A session the app hosts has them and no other has.
 const APP = 'mcp__ccd_'
 
+// The settings sources a deny rule can stand in, the highest first, each with where a person finds it.
+const SOURCES = [
+  ['policy', 'the managed settings'],
+  ['local', '.claude/settings.local.json'],
+  ['project', '.claude/settings.json'],
+  ['user', '~/.claude/settings.json'],
+] as const
+
 // What the commands are, for the slash command and for the tool.
 const HINT = 'map | probes | probe | weighed | docs | new | <name>'
 const USAGE =
@@ -869,6 +877,41 @@ async function take($: EngineInterface): Promise<string[]> {
   return opened.book.notices
 }
 
+// The deny rules of the settings that take a tool out of a session whole, each with where it stands: a rule with no
+// bracket, which by permissions.md "removes the tool from Claude's context entirely". A source that cannot be read
+// gives none, so a refused read costs a line and nothing else.
+async function denials($: EngineInterface): Promise<[string, string][]> {
+  const out: [string, string][] = []
+  for (const [source, where] of SOURCES) {
+    const held: unknown = await asked(() => $.settings.read({ source }))
+    const deny: unknown = (held as { permissions?: { deny?: unknown } } | undefined)?.permissions?.deny
+    for (const rule of Array.isArray(deny) ? deny : []) {
+      if (typeof rule === 'string' && !rule.includes('(')) out.push([rule, where])
+    }
+  }
+
+  return out
+}
+
+// Where the deny rule that names a tool stands, or nothing: the tool's own name, its server as `mcp__<server>`, or
+// a name with `*` in it.
+function deniedIn(rules: readonly [string, string][], name: string): string | undefined {
+  for (const [rule, where] of rules) {
+    const glob = new RegExp(`^${rule.replace(/[.+?^$(){}|[\]\\]/g, '\\$&').replaceAll('*', '.*')}$`)
+    if (rule === name || name.startsWith(`${rule}__`) || (rule.includes('*') && glob.test(name))) return where
+  }
+
+  return undefined
+}
+
+// What a session reads of a tool a deny rule took out of it: the limit is the settings' own.
+function deniedLine(where: string): string {
+  return (
+    `  a deny rule in ${where} takes it out of this session: that is a rule of the settings, which a person or a ` +
+    'plugin wrote, and says nothing of what the host can do'
+  )
+}
+
 // The map as lines, for ezexe and for the model alike.
 function shown(host: Host, id: string, file: string | undefined): string {
   const servers = Object.entries(host.tools.servers).map(([name, count]) => `${name} ${count}`)
@@ -968,6 +1011,7 @@ async function lookedUp($: EngineInterface, word: string): Promise<string> {
   if (keys.length === 0) return `No row of the record holds "${word}".\n${USAGE}`
   const commands = await $.command.list().catch(() => [])
   const tools = (await asked(() => $.tool.list())) ?? []
+  const denied = await denials($)
   const lines = keys.flatMap(key => {
     const row = record.rows[key]
     if (row === undefined) return []
@@ -978,8 +1022,10 @@ async function lookedUp($: EngineInterface, word: string): Promise<string> {
     }
     if (row.kind === 'tool' && !key.endsWith('__')) {
       const live = tools.find(tool => tool.name === key)
+      const where = live === undefined ? deniedIn(denied, key) : undefined
+      const [head = '', ...rest] = rowLines(key, row, { description: brief(live?.description), isHere: live !== undefined })
 
-      return rowLines(key, row, { description: brief(live?.description), isHere: live !== undefined })
+      return where === undefined ? [head, ...rest] : [head, deniedLine(where), ...rest]
     }
 
     return rowLines(key, row, {})
@@ -1035,8 +1081,13 @@ async function answer($: EngineInterface, typed: string): Promise<string> {
   if (name !== 'map') return lookedUp($, name)
   await look($)
   if (kept === undefined || keptFor === undefined) return 'p4-native could not read the capability map.'
+  const denied = (await denials($)).map(([rule, where]) => `${rule} in ${where}`)
+  const more =
+    denied.length === 0
+      ? []
+      : [`deny rules of the settings that take a tool out of a session, which say nothing of what the host can do: ${denied.join(', ')}`]
 
-  return shown(kept, keptFor, keptIn)
+  return [shown(kept, keptFor, keptIn), ...more].join('\n')
 }
 
 // The slash command and the tool, registered at each start of the module. A name that is taken is refused with a

@@ -229,6 +229,12 @@ So each row also says what the thing does, in Claude Code's own words, and that 
 A row prints its name, its kind, whether a command or a tool is in this session, and its line, then what the p4 plugins made of it, worded as who builds on it: a plugin that declined a row built nothing on it.
 The answer ends by saying that this is no advice against using it, and `/native weighed` says the same under its counts.
 
+A tool the session does not hold is held against the deny rules of the settings since 0.5.47, which the module reads source by source by `$.settings.read`.
+By https://code.claude.com/docs/en/permissions.md a deny rule with no bracket takes a tool out of a session whole, so the row then says which settings file denies it and that the rule says nothing of what the host can do, and the map prints those rules in one line.
+The module does not say who wrote a rule, a person or a plugin's settings keeper, since the settings do not record it.
+Seen in the desktop app on Claude Code 2.1.326, on 2026-11-22, before this was so: the lookup of `mcp__ccd_session_mgmt__set_session_model` said `not in this session` and no more, in a project whose `.claude/settings.local.json` denies that tool, and a session had told ezexe that a running session's model cannot be changed.
+Not seen live: the new line of the lookup and of the map.
+
 At a change of the Claude Code version on a kind of host the module keeps the names of the build's slash commands and tools in `probes.json`, and holds them against the names kept for the build before.
 What the new build holds that the old one did not, and what it no longer holds, is one notice, told once, and it is kept: each later session on that build reads it as one line of context with its first prompt, unless `hints` is off.
 `/native new` prints the two lists whole.

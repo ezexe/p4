@@ -141,7 +141,9 @@ export const MISSES: readonly Miss[] = [
     names: [OWN_TOOL],
     line:
       "p4-native: the turn's answer states a limit of this host. What was measured here is in the capability map " +
-      'and the probes, so call `mcp__p4-native__native` with `map` or `probes` before stating one.',
+      'and the probes, so call `mcp__p4-native__native` with `map` or `probes` before stating one. The map also ' +
+      'prints each deny rule of the settings that takes a tool out of a session, which is a limit of the settings ' +
+      'and says nothing of what the host can do.',
     at: 'end',
   },
   {

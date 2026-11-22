@@ -533,6 +533,7 @@
   "$.settings.read": {
    "kind": "method",
    "used": [
+    "p4-native",
     "p4-phi",
     "p4-temportal"
    ],
