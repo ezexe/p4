@@ -6,8 +6,9 @@ process that runs tests imports a test file, it gets:
   - a temp folder of its own, which is its working folder too, named as the file system holds it and with no
     repository above it,
   - a home folder of its own and, on Windows, app data folders of its own,
-  - git settings of its own, so git reads nothing of the caller's, from a file or from the environment, and
-  - none of the caller's variables whose names start with a prefix in STRIP, but for those in KEEP.
+  - git settings of its own, so git reads nothing of the caller's, from a file or from the environment,
+  - none of the caller's variables whose names start with a prefix in STRIP, but for those in KEEP, and
+  - on Windows, Git Bash's `sh` and the tools beside it first on PATH, where the caller's PATH finds no `sh`.
 
 So a test run from a Claude Code session sees none of that session's ids, no API key and no GitHub token, every P4_
 switch is off, a live test skips, and a run spends nothing. A setting the caller hands git by environment reaches no
@@ -17,6 +18,11 @@ GIT_CONFIG_GLOBAL and GIT_CONFIG_NOSYSTEM. The variables of KEEP only point a te
 the folder its caller chose for the fixtures a test makes, as P4_PHI_TEST_TMP does for test_phi.py. After each test,
 what it left changed in os.environ, the working folder, sys.path, tempfile.tempdir or the temp folder is put back,
 so a test file runs beside any other in one process and in any order.
+
+A command hook of these plugins is a shell command that starts `sh`, and the tests start `sh` as Claude Code does.
+PowerShell and cmd have no `sh` on PATH, so a run started from one of them finds Git Bash's as Claude Code finds it
+for a hook, by `git_bash_tools`, and a run from PowerShell runs the tests a run from Git Bash runs, with none failed
+or skipped for a missing `sh`.
 
 A file that tests the code of a plugin sits in the folder of tests/ named after that plugin and reaches that code by
 its SRC folder. A hooks module's `*.test.ts` file stays inside its plugin, where `claude plugin test` reads it.
@@ -30,6 +36,7 @@ files were imported before it.
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 
@@ -38,6 +45,7 @@ import pytest
 STRIP = ("CLAUDE", "ANTHROPIC", "P4_", "GH_TOKEN", "GITHUB_TOKEN", "GIT_CONFIG_")
 KEEP = ("P4_FIXTURES", "P4_MAC_STORE", "P4_PHI_TEST_TMP")
 WORKERS_MOST = 8        # half the logical processors of ezexe's machine, so a second run there has the other half
+SHELLS = ("bash.exe", "sh.exe", "bash", "sh")   # what CLAUDE_CODE_GIT_BASH_PATH may name, by the docs' env-vars.md
 GIT_SETTINGS = "[core]\n\tautocrlf = false\n\tlongpaths = true\n[user]\n\tname = tests\n\temail = tests@localhost\n"
 TEMP = None             # this process's own temp folder, once it is one that runs tests
 TESTS = os.path.dirname(os.path.abspath(__file__))
@@ -69,13 +77,62 @@ def is_the_callers(name):
     return name.upper().startswith(STRIP) and name.upper() not in KEEP
 
 
+def git_bash_tools(environ=None):
+    """On Windows, the folder of Git for Windows that holds `sh` and the tools a hook's script calls, `usr\\bin`
+    under Git's own folder, or None where no Git Bash is found. None on every other system, whose `sh` is its own.
+
+    https://code.claude.com/docs/en/hooks.md, "Exec form and shell form": a command hook's `command` "is passed to a
+    shell: `sh -c` on macOS and Linux, Git Bash on Windows, or PowerShell when Git Bash isn't installed". So the `sh`
+    a hook of these plugins starts is Git Bash's, whichever shell Claude Code itself was started from, and inside
+    Git Bash that folder is `/usr/bin`, on PATH.
+
+    Git Bash is looked for as https://code.claude.com/docs/en/env-vars.md has Claude Code look. First where
+    CLAUDE_CODE_GIT_BASH_PATH names it, "path to the Git Bash executable (`bash.exe`)": "If the path doesn't exist or
+    the file isn't named `bash.exe`, `sh.exe`, `bash`, or `sh`, Claude Code ignores the variable and auto-detects
+    Git Bash as if it were unset". The docs give no order for that search. Here it is the Git whose `git` PATH
+    finds, by the folder of that file and then by what `git --exec-path` prints, since a `git` on PATH can be a
+    launcher kept outside Git's folder, and then the folders Git for Windows installs to."""
+    environ = os.environ if environ is None else environ
+    if os.name != "nt":
+        return None
+
+    def starts():
+        named = environ.get("CLAUDE_CODE_GIT_BASH_PATH") or ""
+        if os.path.isfile(named) and os.path.basename(named).lower() in SHELLS:
+            yield os.path.dirname(named)
+        git = shutil.which("git", path=environ.get("PATH") or "")
+        if git:
+            yield os.path.dirname(git)
+            try:
+                said = subprocess.run([git, "--exec-path"], capture_output=True, text=True, timeout=30).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                said = ""
+            if said:
+                yield os.path.normpath(said)
+        for var, under in (("ProgramFiles", ()), ("ProgramW6432", ()), ("ProgramFiles(x86)", ()),
+                           ("LOCALAPPDATA", ("Programs",))):
+            if environ.get(var):
+                yield os.path.join(environ[var], *under, "Git", "cmd")
+
+    for folder in starts():
+        for _ in range(3):      # Git's own folder is one to three above: cmd, usr\bin, mingw64\libexec\git-core
+            folder = os.path.dirname(folder)
+            tools = os.path.join(folder, "usr", "bin")
+            if os.path.isfile(os.path.join(tools, "sh.exe")):
+                return tools
+    return None
+
+
 def isolate(base, name):
     """Give this process the folders and the environment the module's docstring names, under `base`/`name`."""
     global TEMP
     folder = os.path.join(base, name)
     tmp, home = os.path.join(folder, "t"), os.path.join(folder, "h")
+    tools = None if shutil.which("sh") else git_bash_tools()    # read before the caller's CLAUDE variables go
     for k in [k for k in os.environ if is_the_callers(k)]:
         del os.environ[k]
+    if tools:
+        os.environ["PATH"] = tools + os.pathsep + os.environ.get("PATH", "")
     os.environ.update(TEMP=tmp, TMP=tmp, TMPDIR=tmp, HOME=home, GIT_CEILING_DIRECTORIES=base,
                       GIT_CONFIG_GLOBAL=os.path.join(home, ".gitconfig"), GIT_CONFIG_NOSYSTEM="1")
     made = [tmp, home]

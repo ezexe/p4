@@ -1,7 +1,9 @@
-"""What conftest.py gives every test: a temp folder, a home and git settings of its own, and none of the caller's
-session, API or GitHub variables, nor a git setting the caller hands by environment."""
+"""What conftest.py gives every test: a temp folder, a home and git settings of its own, none of the caller's
+session, API or GitHub variables, nor a git setting the caller hands by environment, and on Windows Git Bash's `sh`
+where the caller's PATH finds none."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +26,21 @@ print(json.dumps({"held": sorted(k for k in os.environ if k.upper().startswith("
                   "settings": os.environ["GIT_CONFIG_GLOBAL"], "listed": listed.stdout, "said": listed.stderr,
                   "made": [made.returncode, made.stderr],
                   "inside": [inside.returncode, inside.stdout.strip(), inside.stderr]}))
+"""
+
+# What a child python runs whose caller's PATH finds no `sh`: it takes what conftest.py gives a process that runs
+# tests, under the folder named second, and prints the `sh` it found before and after, and what that `sh` then ran.
+SHELL_CHILD = """
+import json, os, shutil, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import conftest
+before = shutil.which("sh")
+conftest.isolate(sys.argv[2], "child")
+sh = shutil.which("sh")
+ran = subprocess.run(["sh", "-c", "mkdir -p made/here && echo ran"], capture_output=True, text=True) if sh else None
+print(json.dumps({"before": before, "sh": sh, "ran": ran and [ran.returncode, ran.stdout.strip(), ran.stderr],
+                  "made": os.path.isdir(os.path.join(conftest.TEMP, "made", "here")),
+                  "held": sorted(k for k in os.environ if k.upper().startswith("CLAUDE"))}))
 """
 
 
@@ -104,6 +121,90 @@ class Isolation(unittest.TestCase):
                                  saw["listed"] + saw["said"])
                 self.assertEqual(saw["made"][0], 0, saw["made"][1])
                 self.assertEqual(saw["inside"][:2], [0, "true"], saw["inside"][2])
+
+
+def same(a, b):
+    """Whether two paths name one file or folder, in whatever case and with whichever slashes."""
+    return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+
+class Shell(unittest.TestCase):
+    """A command hook of the plugins is a shell command that starts `sh`, and the tests start `sh` as Claude Code
+    does. PowerShell's PATH finds no `sh` on Windows, so a run started there gets Git Bash's, which is looked for as
+    https://code.claude.com/docs/en/env-vars.md has Claude Code look for it. Before conftest.py did that, a run of
+    every test from PowerShell ended with 63 failed and 98 skipped where the run from Git Bash had none failed and
+    one skipped: 62 of the 63 at a `subprocess.run(["sh", ...])` with "[WinError 2] The system cannot find the file
+    specified", and the skipped ones at a `shutil.which("sh")` that found nothing."""
+
+    def git(self, root):
+        """A folder laid out as Git for Windows lays its own out, with empty files -> its `usr\\bin`."""
+        for folder, name in (("usr/bin", "sh.exe"), ("usr/bin", "bash.exe"), ("bin", "bash.exe"), ("cmd", "git.exe")):
+            os.makedirs(os.path.join(root, *folder.split("/")), exist_ok=True)
+            open(os.path.join(root, *folder.split("/"), name), "w").close()
+        return os.path.join(root, "usr", "bin")
+
+    def test_a_test_finds_sh_whichever_shell_started_the_run(self):
+        """On every system, and on one that is not Windows the `sh` is the system's own, so none is looked for."""
+        self.assertTrue(shutil.which("sh"), "no sh on PATH: " + os.environ.get("PATH", ""))
+        if os.name != "nt":
+            self.assertIsNone(conftest.git_bash_tools({"CLAUDE_CODE_GIT_BASH_PATH": shutil.which("sh"), "PATH": ""}))
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash is looked for on Windows alone")
+    def test_git_bash_is_taken_from_the_variable_first_then_from_git_on_path_then_from_where_git_installs(self):
+        """Each case is a folder laid out as Git for Windows lays its own out, so the order holds on a machine
+        whatever Git it has. The variable counts where its file is there and is named as a shell the docs list, the
+        `git` on PATH counts next, and the folders Git for Windows installs to count last."""
+        base = os.path.realpath(tempfile.mkdtemp(prefix="shell-"))
+        self.addCleanup(conftest.remove, base)
+        named, on_path = (self.git(os.path.join(base, n, "Git")) for n in ("named", "on path"))
+        self.git(os.path.join(base, "installed", "Git"))
+        rest = {"PATH": os.path.join(base, "on path", "Git", "cmd"), "ProgramFiles": os.path.join(base, "installed")}
+        for bash in (os.path.join(named, "bash.exe"), os.path.join(named, "sh.exe"),
+                     os.path.join(base, "named", "Git", "bin", "bash.exe")):
+            with self.subTest(named=bash):
+                got = conftest.git_bash_tools({"CLAUDE_CODE_GIT_BASH_PATH": bash, **rest})
+                self.assertTrue(got and same(got, named), got)
+        other = os.path.join(named, "zsh.exe")          # a file that is there, named as no shell the docs list
+        open(other, "w").close()
+        for ignored in (other, os.path.join(base, "nowhere", "bash.exe"), ""):
+            with self.subTest(ignored=ignored):
+                got = conftest.git_bash_tools({"CLAUDE_CODE_GIT_BASH_PATH": ignored, **rest})
+                self.assertTrue(got and same(got, on_path), got)
+        nowhere = os.path.join(base, "nowhere")
+        for var, under in (("ProgramFiles", ()), ("ProgramW6432", ()), ("ProgramFiles(x86)", ()),
+                           ("LOCALAPPDATA", ("Programs",))):
+            with self.subTest(installed_under=var):
+                tools = self.git(os.path.join(base, var, *under, "Git"))
+                got = conftest.git_bash_tools({"PATH": nowhere, var: os.path.join(base, var)})
+                self.assertTrue(got and same(got, tools), got)
+        self.assertIsNone(conftest.git_bash_tools({"PATH": nowhere}), "no Git Bash anywhere")
+
+    @unittest.skipUnless(os.name == "nt", "Git Bash is looked for on Windows alone")
+    def test_a_run_whose_callers_path_finds_no_sh_gets_git_bashs_and_its_tools(self):
+        """A child python is started with a PATH that holds no folder with an `sh` in it, as PowerShell's holds none,
+        and takes what conftest.py gives a process that runs tests. It then finds Git Bash's `sh`, and a script that
+        `sh` runs finds `mkdir` beside it. Once the child is handed where Git Bash is by CLAUDE_CODE_GIT_BASH_PATH,
+        which is read before the caller's CLAUDE variables are removed, and once it is handed nothing and finds the
+        Git of this machine."""
+        tools = os.path.dirname(shutil.which("sh"))
+        path = os.pathsep.join(d for d in os.environ["PATH"].split(os.pathsep) if d and not shutil.which("sh", path=d))
+        self.assertIsNone(shutil.which("sh", path=path))
+        tests = os.path.dirname(os.path.abspath(conftest.__file__))
+        found = conftest.git_bash_tools({**os.environ, "PATH": path})
+        self.assertTrue(found, "no Git Bash found from git on PATH or where Git for Windows installs")
+        for handed, expected in (({"CLAUDE_CODE_GIT_BASH_PATH": os.path.join(tools, "bash.exe")}, tools), ({}, found)):
+            with self.subTest(handed=sorted(handed)):
+                base = os.path.realpath(tempfile.mkdtemp(prefix="shell-"))
+                self.addCleanup(conftest.remove, base)
+                r = subprocess.run([sys.executable, "-c", SHELL_CHILD, tests, base],
+                                   env={**os.environ, "PATH": path, **handed}, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                saw = json.loads(r.stdout)
+                self.assertIsNone(saw["before"])
+                self.assertTrue(saw["sh"] and same(os.path.dirname(saw["sh"]), expected), saw["sh"])
+                self.assertEqual(saw["ran"][:2], [0, "ran"], saw["ran"])
+                self.assertTrue(saw["made"])
+                self.assertEqual(saw["held"], [])
 
 
 class OwnModules(unittest.TestCase):
