@@ -532,13 +532,8 @@
   },
   "$.settings.read": {
    "kind": "method",
-   "open": [
-    "p4-phi"
-   ],
-   "would": {
-    "p4-phi": "replace the keeper's reads of the settings files of every scope from disk, where a module loads, with the merged settings the engine holds."
-   },
    "used": [
+    "p4-phi",
     "p4-temportal"
    ],
    "says": "Resolves with the settings merged over every source, with one source's settings as loaded (`{ source }`), or with the value of one top-level key (`{ key }`), undefined when the settings hold none.",

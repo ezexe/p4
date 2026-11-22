@@ -29,6 +29,7 @@ import type {
   RenderElement,
   SessionContextUsage,
   SessionRateLimit,
+  Settings,
   Timer,
   ToolCallResult,
   ToolCheckInput,
@@ -64,6 +65,18 @@ const MODELS = '.claude/p4/phi/models'
 // session's entry under `sessions.<session id>`. p4-phi reads it first where it is there, and its own reading
 // stays for a machine with no p4-native.
 const MAP = '.claude/p4/native/host.json'
+
+// The field of a SessionStart hook's input under which a p4 hooks module hands the plugins' python the settings
+// Claude Code loaded, one object a source, as p4conf.py's HANDED_KEY and HANDED_SOURCES name them. The settings
+// keeper takes the managed settings from there, every managed tier merged, where it knows one managed file a
+// platform by itself.
+const HANDED = 'p4_settings'
+const SOURCES = ['user', 'project', 'local', 'policy'] as const
+
+// The keys of a source the plugins' python reads whole. Of `env` it reads the P4_ variables, of `enabledPlugins`
+// the p4 plugins, and of `permissions` the write block and the directories added to it.
+const WHOLE = ['autoMemoryDirectory', 'plansDirectory', 'autoMemoryEnabled'] as const
+const PERMISSIONS = ['blockWritesOutsideWorkingDirectories', 'additionalDirectories'] as const
 const BOUND = 'bound-'
 // How long a subagent's SubagentStart hooks are held for the `agent.spawn` that started it to answer, where they
 // are raised first. Seen in the desktop app on Claude Code 2.1.326, the spawn answers first and nothing is held.
@@ -381,6 +394,54 @@ async function childEnv($: EngineInterface): Promise<Record<string, string>> {
 // file the module keeps for python, and every marker of python's it reads, lies under it.
 async function projectOf($: EngineInterface): Promise<string> {
   return slashed((await hookEnv($))?.CLAUDE_PROJECT_DIR ?? (await $.session.root()))
+}
+
+// The entries of an object whose name starts with `prefix`, or nothing where the value is no object.
+function prefixed(value: unknown, prefix: string): Record<string, unknown> | undefined {
+  if (!isRecord(value)) return undefined
+
+  return Object.fromEntries(Object.entries(value).filter(([name]) => name.startsWith(prefix)))
+}
+
+// What of one source's settings is handed on: the keys the plugins' python reads and no other, since a source
+// crosses with its `env` and its helper commands unfiltered. A `permissions` that is no object is handed as null,
+// which python reads as a permissions object it cannot read. It is p4-temportal's own filter, so the two modules
+// hand one shape.
+function keptOf(settings: Settings): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const key of WHOLE) if (settings[key] !== undefined) out[key] = settings[key]
+  const plugins = prefixed(settings.enabledPlugins, 'p4-')
+  if (plugins !== undefined) out.enabledPlugins = plugins
+  const env = prefixed(settings.env, 'P4_')
+  if (env !== undefined) out.env = env
+  const permissions: unknown = settings.permissions
+  if (isRecord(permissions)) {
+    const held = PERMISSIONS.filter(key => key in permissions)
+    out.permissions = Object.fromEntries(held.map(key => [key, permissions[key]]))
+  } else if (permissions !== undefined) {
+    out.permissions = null
+  }
+
+  return out
+}
+
+// A SessionStart hook's input with the settings Claude Code loaded added under HANDED, each source read by
+// `$.settings.read({ source })`, "one source's settings as loaded". The input goes down as it came where a module
+// above this one handed them already, as p4-temportal's does, and where a read fails: a source left out would read
+// as a source that holds nothing, and python then reads the settings files itself, as it does where no module
+// loads.
+async function withSettings<E>($: EngineInterface, e: E): Promise<E> {
+  if (isRecord(e) && isRecord(e[HANDED])) return e
+  try {
+    const settings: Record<string, unknown> = {}
+    for (const source of SOURCES) settings[source] = keptOf(await $.settings.read({ source }))
+
+    return { ...e, [HANDED]: settings }
+  } catch (error) {
+    note($, `the settings were not read, so python reads the settings files: ${String(error)}`)
+
+    return e
+  }
 }
 
 // The folders that hold each plugin's data folder. The manifest reference puts `${CLAUDE_PLUGIN_DATA}` at
@@ -1416,6 +1477,10 @@ export const register: Register = on => {
 
     return next(e)
   })
+
+  // Above every SessionStart command hook: the settings as Claude Code loaded them, added to the input those hooks
+  // read on stdin, where no module above handed them. With none read the input goes down as it came.
+  on('classic.SessionStart', async ($, e, next) => next(await withSettings($, e))).catch(($, e, next) => next(e))
 
   // Claude Code raises this after each turn and when a plan limit's percent used changes.
   on('session.measure', ($, e, next) => {

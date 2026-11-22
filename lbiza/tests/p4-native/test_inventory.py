@@ -136,8 +136,8 @@ class RecordTest(unittest.TestCase):
                 self.assertNotIn(key, file.read_text(encoding="utf-8"), f"{key} in {file.name}")
             self.assertEqual(verdict(ROWS[key]), "declined", key)
             self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
-        self.assertEqual(ROWS["$.settings.read"].get("open"), ["p4-phi"])
-        self.assertEqual(ROWS["$.settings.read"].get("used"), ["p4-temportal"])
+        self.assertIsNone(ROWS["$.settings.read"].get("open"))
+        self.assertEqual(ROWS["$.settings.read"].get("used"), ["p4-phi", "p4-temportal"])
         self.assertFalse([key for key, row in ROWS.items() if row.get("nobody")])
 
     def test_no_row_of_a_walked_kind_says_weighed_by_nobody(self):

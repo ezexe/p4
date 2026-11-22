@@ -86,6 +86,8 @@ type Machine = {
   // The main checkout of the repository, as `$.session.repo` answers it. With none given the session is in no
   // repository.
   main?: string
+  // The settings of each source, as `$.settings.read({ source })` answers them. With none given the read is refused.
+  settings?: Record<string, Record<string, unknown>>
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
 }
@@ -111,6 +113,10 @@ type Seen = {
   ran: { command: string; args: string }[]
   // The slash commands it declared, and the panes it opened and has not seen closed, each with its title.
   commands: { name: string; description: string }[]
+  // Each input the SessionStart command hooks beneath the module were handed, and each source of the settings the
+  // module asked for.
+  starts: Record<string, unknown>[]
+  sources: (string | undefined)[]
   // How often the module asked `$.session.info`, which a build with no such method never reaches.
   infos: number
   // How often the module's call of `$.process.hookEnv` came down, which a build with no such method never does.
@@ -160,6 +166,8 @@ function machine(on: On, has: Machine): Seen {
     checks: [],
     ran: [],
     commands: [],
+    starts: [],
+    sources: [],
     infos: 0,
     envs: 0,
     panes: [],
@@ -209,6 +217,18 @@ function machine(on: On, has: Machine): Seen {
   on('session.repo', () => ({
     value: has.main === undefined ? null : { root: has.main, remote: null, internal: false, name: null },
   }))
+  // The SessionStart command hooks, which run beneath every hooks module and read this input on stdin.
+  on('classic.SessionStart', (_, e) => {
+    seen.starts.push({ ...e })
+
+    return {}
+  })
+  on('settings.read', (_, e) => {
+    seen.sources.push(e.source)
+    if (has.settings === undefined) return { deny: 'the settings are closed to this plugin' }
+
+    return { value: has.settings[e.source ?? ''] ?? {} }
+  })
   // `$.process.hookEnv`, which Claude Code 2.1.311 and 2.1.322 lack: a glob stands for it, since a test file that
   // names an event its build lacks is refused whole. Every other event of `process` goes down as it came.
   if (has.hookEnv !== undefined) {
@@ -2794,4 +2814,66 @@ test('where the engine gives no such variables the module names the session and 
 
   expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
   expect(seen.read).toEqual([`${DATA}/.python`])
+})
+
+// The settings Claude Code loaded, handed to the SessionStart command hooks beneath the module, where p4conf.py's
+// settings keeper takes the managed settings from them.
+test('the settings of each source go down to the SessionStart command hooks, the keys python reads and no other', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {
+    settings: {
+      user: {
+        autoMemoryDirectory: '~/notes',
+        model: 'opus',
+        apiKeyHelper: '/bin/secret',
+        env: { P4_PHI_MAX_CHILDREN: '6', ANTHROPIC_AUTH_TOKEN: 'secret' },
+        enabledPlugins: { 'p4-phi@p4-marketplace': true, 'other@market': true },
+        permissions: { allow: ['Bash(ls *)'], additionalDirectories: ['~/beside'] },
+      },
+      project: { plansDirectory: 'docs/plans', autoMemoryEnabled: false },
+      policy: { permissions: { blockWritesOutsideWorkingDirectories: true }, hooks: {}, env: ['P4_X'], enabledPlugins: 7 },
+    },
+  })
+
+  await $.classic.SessionStart({ source: 'startup' })
+
+  expect(seen.sources).toEqual(['user', 'project', 'local', 'policy'])
+  expect(seen.starts.length).toBe(1)
+  expect(seen.starts[0]?.source).toBe('startup')
+  expect(seen.starts[0]?.p4_settings).toEqual({
+    user: {
+      autoMemoryDirectory: '~/notes',
+      enabledPlugins: { 'p4-phi@p4-marketplace': true },
+      env: { P4_PHI_MAX_CHILDREN: '6' },
+      permissions: { additionalDirectories: ['~/beside'] },
+    },
+    project: { plansDirectory: 'docs/plans', autoMemoryEnabled: false },
+    local: {},
+    policy: { permissions: { blockWritesOutsideWorkingDirectories: true } },
+  })
+})
+
+test('where a module above handed the settings already, they go down as they came and none is read again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, { settings: { user: { autoMemoryDirectory: '~/notes' } } })
+  const handed = { user: {}, project: {}, local: {}, policy: { plansDirectory: 'managed/plans' } }
+
+  await $.classic.SessionStart({ source: 'startup', p4_settings: handed } as never)
+
+  expect(seen.sources).toEqual([])
+  expect(seen.starts[0]?.p4_settings).toEqual(handed)
+})
+
+test('where the settings cannot be read the input goes down as it came, and the debug log says so once', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const seen = machine(on, {})
+
+  await $.classic.SessionStart({ source: 'startup' })
+  await $.classic.SessionStart({ source: 'clear' })
+
+  expect(seen.starts.map(start => start.source)).toEqual(['startup', 'clear'])
+  expect(seen.starts.some(start => 'p4_settings' in start)).toBe(false)
+  const said = seen.logged.filter(text => text.startsWith('the settings were not read'))
+  expect(said.length).toBe(1)
+  expect(said[0]).toContain('so python reads the settings files')
 })
