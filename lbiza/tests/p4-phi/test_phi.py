@@ -1571,8 +1571,39 @@ class Rules(unittest.TestCase):
 
     def test_a_fork_gets_the_built_in_rules_alone(self):
         """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
-        other session's start, so the system prompt's section is the built-in rules alone."""
-        self.assertEqual(self.t.rules(KID), phi.builtin_text())
+        other session's start, so the system prompt's section is the built-in rules alone, in the words for a
+        session another session started."""
+        self.assertEqual(self.t.rules(KID), phi.builtin_text(started=True))
+
+    def test_a_session_ezexe_is_at_is_handed_plan_mode_and_one_another_session_started_is_kept_out_of_it(self):
+        """A plan is Claude Code's own to write: tools-reference.md has `EnterPlanMode` "Switches to plan mode to
+        design an approach before coding" and `ExitPlanMode` "Presents a plan for approval and exits plan mode", and
+        commands.md has `/plan` "Enter plan mode directly from the prompt". A session ezexe is at is handed those by
+        the plan rule. In a session another session started no person answers that approval, so its rule keeps it out
+        of plan mode: it plans with the built-in `Plan` subagent, which by sub-agents.md is "A research agent" with
+        read-only tools, and its starter's message is the approval."""
+        top, kid = self.t.rules(TOP), self.t.rules(KID)
+        self.assertIn(phi.PLAN_AT, top)
+        self.assertNotIn(phi.PLAN_STARTED, top)
+        self.assertIn(phi.PLAN_STARTED, kid)
+        self.assertNotIn(phi.PLAN_AT, kid)
+        for rule in (phi.PLAN_AT, phi.PLAN_STARTED):
+            self.assertTrue(rule.startswith("built-in, plan-mode: "))
+            self.assertIn(phi.PLAN_OPEN, rule, "one wording of which change is one whose approach is open")
+        self.assertEqual(top.count("built-in, plan-mode: "), 1)
+        self.assertEqual(kid.count("built-in, plan-mode: "), 1)
+        self.assertIn("plan-mode", phi.plans.BUILT_INS)
+
+    def test_the_plan_rule_reads_the_plans_folder_from_the_keeper_and_spells_none_itself(self):
+        """The folder plan mode writes into is the one p4conf.PLANS names, where the settings keeper points
+        `plansDirectory`. The rule takes it from there, so a folder that moves is named right with no edit here."""
+        import p4conf
+        self.assertEqual(phi.PLANS_DIR, p4conf.PLANS)
+        self.assertIn(f"points at `{p4conf.PLANS}` in the project's store", phi.PLAN_AT)
+        with open(os.path.join(SRC, "phi.py"), encoding="utf-8") as f:
+            source = f.read()
+        self.assertNotIn(p4conf.PLANS, source, "phi.py spells the folder nowhere")
+        self.assertNotIn(p4conf.PLANS, phi.PLAN_STARTED, "a started session's plan goes by message and names no file")
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
@@ -1581,6 +1612,8 @@ class Rules(unittest.TestCase):
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
         got = self.t.rules(TOP)
         self.assertNotIn("act-don't-wait", got)
+        self.assertNotIn("plan-mode", got, "the plan rule goes with it: both say what goes to ezexe and how")
+        self.assertNotIn("plan-mode", self.t.rules(KID))
         self.assertIn("built-in, levels", got, "the other built-in rule still comes")
         try:
             phi.project_conf(self.t.p4)

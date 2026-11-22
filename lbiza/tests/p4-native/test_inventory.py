@@ -220,7 +220,7 @@ class RecordTest(unittest.TestCase):
         other, which begins with what the plugin would do: replace a copy it builds by hand or add what it cannot
         do today."""
         opened = {key: row for key, row in ROWS.items() if row.get("open")}
-        self.assertGreater(len(opened), 2)
+        self.assertGreater(len(opened), 0, "the rows that wait on the host, each behind a probe")
         for key, row in opened.items():
             self.assertEqual(row["open"], sorted(row["open"]), key)
             for plugin in row["open"]:

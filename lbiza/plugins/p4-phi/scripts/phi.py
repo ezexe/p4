@@ -1392,7 +1392,53 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "role, as the advice that hands out each start call names them; an effort above this session's own is "
           "not accepted. " + WORKFLOW + " After a run, the report says the agents launched and finished and what "
           "they spent.")
-plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
+# The plan rule. A plan is Claude Code's own to write and ezexe's to approve, and p4-phi builds no plan of its own:
+# - tools-reference.md: `EnterPlanMode` "Switches to plan mode to design an approach before coding", with no
+#   permission required, and `ExitPlanMode` "Presents a plan for approval and exits plan mode", with one required.
+# - commands.md: "`/plan` switches into plan mode before a large change", and `/plan [description]` is "Enter plan
+#   mode directly from the prompt."
+# - common-workflows.md, "Plan before editing": "For changes you want to review before they touch disk, switch to
+#   plan mode. Claude reads files and proposes a plan but makes no edits until you approve."
+# - permission-modes.md, "Analyze before you edit with plan mode": "Approving a plan exits plan mode and switches the
+#   session to the permission mode each approve option describes".
+# - The tool's own text names when: a task that "can be solved in several different ways", one that "requires
+#   choosing between patterns or technologies", one that "will likely touch more than 2-3 files", and "If you would
+#   use AskUserQuestion to clarify the approach, use EnterPlanMode instead". PLAN_OPEN says those three in the
+#   rule's words. The same text skips it for "Tasks where the user has given very specific, detailed instructions".
+# - The plan file is plan mode's: `ExitPlanMode` "will read the plan from the file you wrote", and p4's settings
+#   keeper points `plansDirectory` at the store's folder p4conf.PLANS, which the rule names from there and never
+#   spells by itself. How a plan is shaped and where it moves once it is done is p4-temportal's skill `plan-planner`.
+# What that text lacks is the session another session started. It says "Use this tool proactively", and there no
+# person answers the approval: docs/plugin-development.html, "Plan mode for a worker", has the card seen in the
+# desktop app, answered by ezexe alone. So such a session is told to enter no plan mode. sub-agents.md, "Built-in
+# subagents", Plan: "A research agent used during plan mode to gather context before presenting a plan", with
+# read-only tools, so it raises no card, and the session's starter approves by a message, which the two sentences of
+# GOAL_STARTER already count toward a condition. An allow at `classic.PermissionRequest` settles `ExitPlanMode` with
+# no person, seen in the desktop app on Claude Code 2.1.326, and p4-phi builds nothing on it: that would be a part
+# of the set of what it settles with no approval card, which is ezexe's to say yes to.
+# The rule rides with the act-don't-wait rule's switch, `phi.act_dont_wait`: both say what goes to ezexe and how.
+PLANS_DIR = p4conf.PLANS            # from the store's root, as the keeper has it: no line names a place under the app's own folder
+PLAN_OPEN = ("a change that could be made in more than one way, that decides a structure, or that reaches past two "
+             "or three files")
+PLAN_AT = ("built-in, plan-mode: a change whose approach is open is planned before it is edited, and the plan is "
+           "Claude Code's own to write and ezexe's to approve. Where a message asks for " + PLAN_OPEN + ", and this "
+           "session has the tool `EnterPlanMode`, call it before any edit: it is the mode ezexe enters with `/plan`. "
+           "The plan goes into the file plan mode names, whose folder p4's settings keeper points at `"
+           + PLANS_DIR + "` in the project's store, shaped as the skill `plan-planner` of the plugin p4-temportal "
+           "says where that plugin is installed. Put the finished plan to ezexe with `ExitPlanMode`, whose approval "
+           "card ezexe answers by a button: that approval is ezexe's go for the plan's edits, and no other question "
+           "asks for it. A change the message spells "
+           "out, or one a sentence "
+           "describes, is made with no plan, and no plan is written into a file elsewhere.")
+PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned before it is edited. Another "
+                "session started this one, and no person answers a plan's approval here, so this session calls "
+                "neither `EnterPlanMode` nor `ExitPlanMode`, unless a message of ezexe's own in this conversation "
+                "asks for plan mode. Where its task asks for " + PLAN_OPEN + ", and its brief does not settle how, "
+                "it has the built-in `Plan` subagent design the change, which only reads and raises no approval "
+                "card, sends that plan to the session that started it in one SendMessage, and takes that session's "
+                "message as the approval. A change the brief spells out, or one a sentence describes, is made with "
+                "no plan.")
+plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, PLAN_AT, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
@@ -1757,19 +1803,21 @@ def fair_cut(texts, room):
     return [out[k] for k in range(len(texts))]
 
 
-def builtin_text():
+def builtin_text(started=False):
     """The rules p4-phi carries itself, so they hold in every project, with memories or none, a store or none; ''
-    where the project's p4.json turns both off."""
-    own = built_in()
+    where the project's p4.json turns both off. `started` says the session was started by another session, which
+    the plan rule reads."""
+    own = built_in(started)
     if not own:
         return ""
     head = "a rule built into p4-phi" if len(own) == 1 else "the rules built into p4-phi"
     return f"phi (p4-phi): {head}, for every session:\n" + "\n".join("- " + x for x in own)
 
 
-def built_in():
-    """The built-in rules that are on, each as its line."""
-    return ([BUILT_IN] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
+def built_in(started=False):
+    """The built-in rules that are on, each as its line. The plan rule comes with the act-don't-wait rule, in the
+    words for a session ezexe is at or, with `started`, in the words for a session another session started."""
+    return ([BUILT_IN, PLAN_STARTED if started else PLAN_AT] if ACT_DONT_WAIT else []) + ([LEVELS] if LEVELS_ON else [])
 
 
 def rules_section():
@@ -1791,7 +1839,12 @@ def rules_section():
         configure(me.home)                         # phi.json's `rules`, and P4_PHI_RULES ahead of it
     elif os.environ.get("P4_PHI_RULES") in ("0", "1"):
         globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
-    return builtin_text() if RULES else ""
+    if not RULES:
+        return ""
+    above = spawned_from(me.rec)                   # the app's record says so with a store or none
+    if not above and me.home and me.id:
+        above = spawned_from(load_session(me.home, me.id))
+    return builtin_text(started=bool(above))
 
 
 def rules_main():

@@ -1484,15 +1484,13 @@
   },
   "/plan": {
    "kind": "command",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace the plan a line of p4-phi asks a session to write itself with Claude Code's own plan mode, where a message of ezexe's asks for a change whose approach is open, so the plan is written by Claude Code and approved by ezexe."
-   },
    "declined": {
     "p4-temportal": "permission modes."
-   }
+   },
+   "nowatch": "It enters plan mode from the prompt, for ezexe to type: a session has no call that types it, and enters by `EnterPlanMode`."
   },
   "/plugin": {
    "kind": "command",
@@ -2093,15 +2091,13 @@
   },
   "EnterPlanMode": {
    "kind": "tool",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace the plan a line of p4-phi asks a session to write itself with Claude Code's own plan mode, where a message of ezexe's asks for a change whose approach is open, so the plan is written by Claude Code and approved by ezexe."
-   },
    "declined": {
     "p4-temportal": "permission modes."
-   }
+   },
+   "nowatch": "It switches the session into plan mode, and no file or command a session reaches does that."
   },
   "EnterWorktree": {
    "kind": "tool",
@@ -2112,15 +2108,13 @@
   },
   "ExitPlanMode": {
    "kind": "tool",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "add what settles a plan's approval with no person in a session another session started, where today it is an approval card that ezexe answers and the session comes out in `auto`, and leave the approval to Claude Code's own call in a session ezexe is at."
-   },
    "declined": {
     "p4-temportal": "permission modes."
-   }
+   },
+   "nowatch": "It puts a plan to ezexe for approval and leaves plan mode, and no file or command a session reaches does that."
   },
   "ExitWorktree": {
    "kind": "tool",
