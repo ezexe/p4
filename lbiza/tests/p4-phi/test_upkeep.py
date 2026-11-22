@@ -273,70 +273,115 @@ class Archive(Base):
         self.assertIn(f"archive:{KID}", self.t.cli(TOP, "upkeep").stdout)
 
 
-class Loop(Base):
-    """The orchestrator's sweep of its sessions runs by Claude Code's own `/loop` with no interval, which p4-phi
-    asks for once and ends once, in words it keeps in one place."""
+class Sweep(Base):
+    """An orchestrator is brought back to the sessions it started by events, and by one prompt on a long fixed
+    schedule for what no event tells. p4-phi hands that schedule once, as one `CronCreate` call, and its end once."""
 
-    def test_the_line_that_starts_the_sweeps_loop_is_handed_once_while_a_worker_is_live(self):
-        """An orchestrator kept its sessions by a `CronCreate` job it wrote by hand, prompt and all. scheduled-tasks.md,
-        "Run a prompt repeatedly with /loop": a prompt with no interval "runs at an interval Claude chooses each
-        iteration". With a live worker and no loop of its own, the session is handed the line once: the Skill tool
-        with the skill `loop` and the sweep's words, upkeep.SWEEP."""
+    MADE = ("Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm. Session-only (not written "
+            "to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.")
+
+    def made(self):
+        return (upkeep.CRON_CREATE, {"cron": upkeep.CRON, "prompt": upkeep.SWEEP, "recurring": True}, self.MADE)
+
+    def test_the_schedule_is_handed_once_while_a_worker_is_out_as_one_cron_create_call(self):
+        """scheduled-tasks.md, "Manage session-scoped scheduled tasks": "`CronCreate` | Schedule a new task. Accepts a
+        5-field cron expression, the prompt to run, and whether it recurs or fires once." With a started session
+        that is not finished and no schedule kept, the session is handed that call once, with the expression
+        upkeep.CRON and the words upkeep.SWEEP, after a read of `CronList`."""
         self.turn_on()
         got = self.said()
-        line = self.lines(got, "loop:")
+        line = self.lines(got, "schedule:")
         self.assertEqual(len(line), 1, got)
-        self.assertIn("1 live worker and no loop of its own running", line[0])
-        self.assertIn("the Skill tool with `skill` `loop`", line[0])
-        self.assertIn("with no interval", line[0])
-        self.assertIn(upkeep.SWEEP, line[0], "the sweep's words come from one place")
-        for words in ("`mcp__ccd_session_mgmt__list_sessions`", "`mcp__terminal__list_terminal_tabs`",
-                      "Send on one that stopped with work left", "Verify one that reports done",
-                      "1200 seconds or more", "`ScheduleWakeup` and `stop` true"):
-            self.assertIn(words, upkeep.SWEEP)
-        self.assertEqual(self.lines(self.said(), "loop:"), [], "handed once")
-        self.assertEqual(self.lines(self.said(), "end the loop:"), [], "and no loop runs to end")
+        for part in (f"`{upkeep.CRON_CREATE}`", f"`{upkeep.CRON}`", f"`{upkeep.CRON_LIST}`", upkeep.SWEEP):
+            self.assertIn(part, line[0])
+        self.assertEqual(self.lines(self.said(), "schedule:"), [], "handed once")
+        self.assertEqual(self.lines(self.said(), "end the schedule:"), [], "and none runs to end")
 
-    def test_it_is_not_handed_while_a_loop_runs_and_is_handed_anew_once_that_loop_is_over(self):
-        """Whether a loop runs is read off the session's own calls at each turn's end: the skill `loop` and a
-        `ScheduleWakeup` with a delay start or renew it, until the delay and Claude Code's fallback wakeup of about
-        twenty minutes have passed."""
-        self.turn_on()
-        calls = [("Skill", {"skill": "loop", "args": upkeep.SWEEP}, "ok"),
-                 ("ScheduleWakeup", {"delaySeconds": 1200, "prompt": upkeep.SWEEP, "reason": "the fallback"}, "ok")]
-        self.t.stop(TOP, TASK, calls, report="The sweep's loop is started.", uuid="l1")
-        kept = self.t.session(TOP).get("loop") or {}
-        self.assertAlmostEqual(kept.get("until", 0) - time.time(), 1200 + upkeep.FALLBACK_S, delta=60)
-        self.assertTrue(upkeep.loop_runs(self.t.session(TOP)))
-        self.assertEqual(self.lines(self.said(), "loop:"), [], "a loop of its own runs")
-        self.assertFalse(upkeep.loop_runs(self.t.session(TOP), at=time.time() + 1200 + upkeep.FALLBACK_S + 5))
-        s = self.t.session(TOP)
-        s["loop"] = {"until": time.time() - 5}             # the wakeup and the fallback both passed unanswered
-        write(os.path.join(self.t.dir(TOP), "session.json"), json.dumps(s))
-        self.assertEqual(len(self.lines(self.said(), "loop:")), 1, "its loop is over and a worker is live: once more")
-        self.assertEqual(self.lines(self.said(), "loop:"), [])
+    def test_the_schedule_comes_seldom_and_its_late_run_stays_inside_the_prompt_cache(self):
+        """scheduled-tasks.md, "How late a recurring task runs": "Unless it runs every five minutes, a recurring task
+        starts each run late by up to half the gap to the next run, and by at most 30 minutes." best-practices.md,
+        "Know what subagents cost": "The prompt cache lasts about an hour on a subscription". And the tool
+        `ScheduleWakeup` gives 1200 to 1800 seconds for a wait with no signal to watch. The tool `CronCreate`, in its
+        own description: "Avoid the :00 and :30 minute marks when the task allows it", "pick a minute that is NOT 0
+        or 30". `CronList` shows a task's first eighty characters, which hold the words the end is told by."""
+        minute, *rest = upkeep.CRON.split()
+        self.assertEqual(rest, ["*"] * 4, upkeep.CRON)
+        marks = sorted(int(m) for m in minute.split(","))
+        self.assertFalse({0, 30} & set(marks), "off the marks every other schedule lands on")
+        gaps = {(b - a) % 60 or 60 for a, b in zip(marks, marks[1:] + marks[:1])}
+        self.assertEqual(len(gaps), 1, "its runs come evenly through the hour")
+        gap = gaps.pop()
+        self.assertGreaterEqual(gap * 60, 1200)
+        self.assertLessEqual(gap + min(gap / 2, 30), 60, "its latest run is inside the hour the cache lasts")
+        self.assertTrue(upkeep.SWEEP.startswith(upkeep.OPENS))
+        self.assertLessEqual(len(upkeep.OPENS), 80)
 
-    def test_the_stop_is_handed_once_when_nothing_of_the_tree_is_live(self):
-        """scheduled-tasks.md, "Stop a loop": "Claude calls the `ScheduleWakeup` tool with `stop: true`, which cancels
-        the pending wakeup immediately." With a loop running and no started session live, the session is handed that
-        call once, and a turn that made it leaves no loop kept."""
+    def test_it_is_not_handed_while_a_schedule_runs_and_is_handed_anew_once_claude_code_has_ended_it(self):
+        """Whether a schedule runs is read off the session's own calls at each turn's end: a `CronCreate` whose prompt
+        holds the sweep's opening words begins it, with the task's id from its answer, until Claude Code's own
+        expiry of a recurring task. scheduled-tasks.md: "Recurring tasks automatically expire 7 days after
+        creation." """
         self.turn_on()
-        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"delaySeconds": 1800, "prompt": upkeep.SWEEP}, "ok")],
-                    report="Waiting on the worker.", uuid="l1")
+        self.t.stop(TOP, TASK, [self.made()], report="The sweep's schedule is started.", uuid="c1")
+        kept = self.t.session(TOP)
+        self.assertEqual((kept.get("schedule") or {}).get("id"), "72f3dc05")
+        self.assertAlmostEqual(kept["schedule"]["until"] - time.time(), upkeep.EXPIRY_S, delta=60)
+        self.assertTrue(upkeep.schedule_runs(kept))
+        self.assertFalse(upkeep.schedule_runs(kept, at=time.time() + upkeep.EXPIRY_S + 5), "Claude Code ends it then")
+        self.assertEqual(self.lines(self.said(), "schedule:"), [], "its schedule runs")
+        kept = self.t.session(TOP)
+        kept["schedule"]["until"] = time.time() - 5         # the seven days passed
+        write(os.path.join(self.t.dir(TOP), "session.json"), json.dumps(kept))
+        self.assertEqual(len(self.lines(self.said(), "schedule:")), 1, "it expired with a worker out: once more")
+        self.assertEqual(self.lines(self.said(), "schedule:"), [])
+
+    def test_the_end_is_handed_once_when_nothing_is_live_by_the_id_the_sessions_own_call_gave(self):
+        """With the schedule running and no started session live, the session is handed its end once: `CronList`,
+        then `CronDelete` with the task's id. A delete of another task leaves the schedule kept, and a delete of its
+        own ends it."""
+        self.turn_on()
+        self.t.stop(TOP, TASK, [self.made()], report="The sweep's schedule is started.", uuid="c1")
         self.commit()
         self.finish(report="The last row is written now.")
         got = self.said()                                   # a finished worker is no live one, archived or not
-        end = self.lines(got, "end the loop:")
+        end = self.lines(got, "end the schedule:")
         self.assertEqual(len(end), 1, got)
-        self.assertIn("Call `ScheduleWakeup` with `stop` true", end[0])
-        self.assertEqual(self.lines(got, "loop:"), [])
-        self.assertEqual(self.lines(self.said(), "end the loop:"), [], "handed once")
-        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"stop": True}, "ok")], report="The loop is ended.", uuid="l2")
-        self.assertNotIn("loop", self.t.session(TOP))
-        self.assertFalse(upkeep.loop_runs(self.t.session(TOP)))
+        for part in (f"`{upkeep.CRON_LIST}`", f"`{upkeep.CRON_DELETE}`", upkeep.OPENS, "`72f3dc05`"):
+            self.assertIn(part, end[0])
+        self.assertEqual(self.lines(got, "schedule:"), [])
+        self.assertEqual(self.lines(self.said(), "end the schedule:"), [], "handed once")
+        self.t.stop(TOP, TASK, [(upkeep.CRON_DELETE, {"id": "0a1b2c3d"}, "Cancelled job 0a1b2c3d.")],
+                    report="Another task is cancelled.", uuid="c2")
+        self.assertTrue(upkeep.schedule_runs(self.t.session(TOP)), "another task's delete ends nothing of the sweep")
+        self.t.stop(TOP, TASK, [(upkeep.CRON_DELETE, {"id": "72f3dc05"}, "Cancelled job 72f3dc05.")],
+                    report="The schedule is ended.", uuid="c3")
+        self.assertNotIn("schedule", self.t.session(TOP))
+        self.assertEqual(self.lines(self.said(), "end the schedule:"), [])
 
-    def test_with_upkeep_off_no_line_of_the_loop_is_handed(self):
-        self.assertEqual(self.lines(self.said(), "loop:"), [])
+    def test_a_started_session_is_asked_for_no_idle_notice(self):
+        """A session the desktop app started is told of by the app's own note of its turn end. Seen in the desktop
+        app on Claude Code 2.1.326: `SendMessage` with `notify_when_idle` to another session of the app answered
+        "no idle subscription was made: notify_when_idle is only supported for Claude sessions on this machine in
+        this release". A call so answered keeps no subscription, and a name `ListAgents` gave with its short
+        identifier is kept as the name alone."""
+        self.turn_on()
+        self.assertEqual(self.lines(self.said(), "notice:"), [])
+        s = {"sessionId": TOP}
+        refused = ("no idle subscription was made: notify_when_idle is only supported for Claude sessions on this "
+                   "machine in this release")
+        self.assertFalse(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "input": {"to": KID, upkeep.NOTIFY: True},
+                                                "result": refused}]))
+        self.assertEqual(upkeep.asked(s), set())
+        self.assertTrue(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "result": "Subscribed",
+                                               "input": {"to": "upkeep-0a1b2c3d [1adbdd]", upkeep.NOTIFY: True}}]))
+        self.assertEqual(upkeep.asked(s), {"upkeep-0a1b2c3d"})
+        self.assertEqual(upkeep.asked(s, at=time.time() + upkeep.NOTICE_S + 5), set(), "Claude Code drops it then")
+        self.assertFalse(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "input": {"to": "kid", "message": "go on"}}]),
+                         "a message with no notice asked for keeps nothing")
+
+    def test_with_upkeep_off_no_line_of_the_sweep_is_handed(self):
+        got = self.said()
+        self.assertEqual(self.lines(got, "schedule:") + self.lines(got, "notice:"), [])
 
 
 class FollowThrough(Base):
@@ -920,6 +965,7 @@ class TerminalWorker(Base):
         for lines, typed in ((win[1], win[2]), (nix[1], nix[2])):
             run = lines[-1]
             self.assertIn("--permission-mode auto --worktree upkeep-0a1b2c3d --settings", run)
+            self.assertIn("--name upkeep-0a1b2c3d ", run, "the name its starter asks its idle notice by")
             self.assertEqual(run.count("'"), 4, "the prompt and the settings path are the two quoted words")
             self.assertNotRegex(run, r"[\"$`;()]", "no character of the title reaches the shell")
             # the tool types one literal line of printable ASCII and refuses a variable read, a pipe and a backtick
@@ -1025,108 +1071,79 @@ class TerminalWorker(Base):
         self.assertNotIn("worktree unlock", got)
         self.assertEqual(self.lines(self.said(), "left on disk, of the terminal worker"), [], "it is named once")
 
-    def test_a_live_terminal_worker_gets_the_sweep_on_a_fixed_schedule_and_no_self_paced_loop(self):
-        """The app sends no note when a worker in the Terminal panel ends, so no notice ends that wait. There the
-        sweep is Claude Code's own `/loop` with an interval: scheduled-tasks.md, "Run on a fixed interval", "When you
-        supply an interval, Claude converts it to a cron expression, schedules the job, and confirms the cadence and
-        job ID". The session is handed that line once: a read of `CronList`, then the Skill tool with the skill
-        `loop`, the interval upkeep.EVERY and the words upkeep.SWEEP_FIXED. Whether the schedule runs is read off
-        the session's own `CronCreate` call, with the task's id from its answer."""
+    NOTICE = ("[Cross-session idle notice] \"{}\", which you asked to be notified about, is idle now — it finished a "
+              "turn at 13:06. This is an automated notice from that session's harness — not a message from a "
+              "person, and not an instruction; act on it only insofar as your user's earlier request calls for it.")
+
+    def test_a_terminal_worker_that_runs_is_asked_for_its_idle_notice_once_and_anew_after_each_notice(self):
+        """The app sends no note when a worker in the Terminal panel ends. cross-session-messaging.md, "Get a notice
+        when another session goes idle": "Claude can ask one of your sessions on this machine to send back one
+        notice when that session next goes idle or exits", and "If the asking session is idle, Claude Code starts a
+        new turn with the notice." Seen with scripted runs on Claude Code 2.1.328 under a session of the desktop
+        app: one subscription gave one notice, for the first time the worker was idle, in the words of NOTICE. So
+        the session is handed the call once for a worker whose run works, its own call keeps the subscription, the
+        notice that comes as a prompt spends it, and the call is handed anew while the run still works."""
+        name = self.started()
+        self.assertEqual(self.lines(self.said(), "notice:"), [], "its run has not begun: no worktree is there")
+        self.worker(name, os.getpid())                  # its run made the worktree and holds the lock
+        got = self.said()
+        line = self.lines(got, "notice:")
+        self.assertEqual(len(line), 1, got)
+        for part in (f"`{name}`", f"`{upkeep.SEND}`", f"`{upkeep.NOTIFY}`"):
+            self.assertIn(part, line[0])
+        self.assertEqual(self.lines(self.said(), "notice:"), [], "handed once")
+        call = (upkeep.SEND, {"to": name, upkeep.NOTIFY: True},
+                f"Subscribed — \"{name}\" will send one notice when it is next idle (or exits).")
+        self.t.stop(TOP, TASK, [call], report="The worker is asked for its notice.", uuid="n1")
+        self.assertEqual(upkeep.asked(self.t.session(TOP)), {name})
+        self.assertEqual(self.lines(self.said(), "notice:"), [], "its notice is asked for")
+        after = self.lines(self.said(self.NOTICE.format(name)), "notice:") + self.lines(self.said(), "notice:")
+        self.assertEqual(upkeep.asked(self.t.session(TOP)), set(), "its one notice spent the subscription")
+        self.assertEqual(len(after), 1, "and its run still works, so the call is handed anew, once")
+        self.assertEqual(self.lines(self.said(), "notice:"), [])
+
+    def test_a_worker_whose_run_has_ended_is_asked_for_no_notice(self):
+        """A scripted run is gone when its turn ends, and a subscription to a session that is gone answers nothing.
+        A worker whose lock names a process that has ended gets no such line: its leftovers are what is handed."""
+        name = self.started()
+        self.worker(name, self.ended(), change="rows = [1, 2]\n")
+        git(self.repo, "fetch", "-q", "origin")
+        got = self.said()
+        self.assertEqual(self.lines(got, "notice:"), [])
+        self.assertEqual(len(self.lines(got, "leftovers of the terminal worker")), 1, got)
+
+    def test_a_notice_that_names_no_worker_of_this_session_changes_nothing(self):
+        s = {"sessionId": TOP, "notices": {"upkeep-0a1b2c3d": time.time() + 60}}
+        self.assertEqual(upkeep.notice_came(s, "Go on with the exporter."), "")
+        self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("another-session")), "another-session")
+        self.assertEqual(upkeep.asked(s), {"upkeep-0a1b2c3d"})
+        self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("upkeep-0a1b2c3d")), "upkeep-0a1b2c3d")
+        self.assertEqual(upkeep.asked(s), set())
+
+    def test_a_terminal_worker_counts_as_out_for_the_schedule_and_its_end_waits_until_none_is_live(self):
+        """The schedule covers what no event tells of a terminal worker: one that was stopped from outside sent no
+        notice in the runs of 2026-11-22. So a worker in the Terminal panel is out for the schedule as a started
+        session is, and the end is handed once the last of them is removed."""
         self.seat()
         self.left_item()
         got = self.said()
         line = self.lines(got, "schedule:")
         self.assertEqual(len(line), 1, got)
-        self.assertIn("2 live workers in the Terminal panel, whose end the app sends no note of", line[0])
-        self.assertIn("Read the tasks with `CronList` first, and where one holds the words below, start none", line[0])
-        self.assertIn("the Skill tool with `skill` `loop` and, as `args`, `10m` and then these words", line[0])
-        self.assertIn("on a fixed schedule by `CronCreate`", line[0])
-        self.assertIn(upkeep.SWEEP_FIXED, line[0], "the schedule's words come from one place")
-        self.assertNotIn("end the self-paced loop", line[0], "none runs")
-        self.assertEqual(self.lines(got, "loop:"), [], "one sweep, and it is the schedule")
-        self.assertEqual(self.lines(self.said(), "schedule:"), [], "handed once")
-        calls = [("CronList", {}, "No scheduled jobs."),
-                 ("Skill", {"skill": "loop", "args": f"{upkeep.EVERY} {upkeep.SWEEP_FIXED}"}, "Launching skill: loop"),
-                 ("CronCreate", {"cron": "*/10 * * * *", "prompt": upkeep.SWEEP_FIXED, "recurring": True},
-                  "Scheduled recurring job f5726d66 (Every 10 minutes). Next run: Nov 22 11:05am. Session-only (not "
-                  "written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.")]
-        self.t.stop(TOP, TASK, calls, report="The sweep's schedule is started.", uuid="c1")
-        kept = self.t.session(TOP)
-        self.assertEqual((kept.get("schedule") or {}).get("id"), "f5726d66")
-        self.assertAlmostEqual(kept["schedule"]["until"] - time.time(), upkeep.EXPIRY_S, delta=60)
-        self.assertNotIn("loop", kept, "a `/loop` an interval leads is a schedule and no self-paced loop")
-        self.assertTrue(upkeep.schedule_runs(kept))
-        self.assertFalse(upkeep.schedule_runs(kept, at=time.time() + upkeep.EXPIRY_S + 5), "Claude Code ends it then")
-        again = self.said()
-        self.assertEqual(self.lines(again, "schedule:"), [], "its schedule runs")
-        self.assertEqual(self.lines(again, "end the schedule:"), [], "and its workers are live")
-
-    def test_the_schedule_is_ended_once_no_terminal_worker_is_live_by_the_id_its_own_call_gave(self):
-        """scheduled-tasks.md, "Stop a loop": "to stop a loop such as `/loop 5m`, ask Claude to cancel it", which is
-        `CronDelete` with the task's id. With the schedule running and no terminal worker live, the session is
-        handed that end once. A delete of another task leaves the schedule kept, and a delete of its own ends it."""
-        self.seat()
-        self.left_item()
-        self.said()
-        made = ("CronCreate", {"cron": "*/10 * * * *", "prompt": upkeep.SWEEP_FIXED},
-                "Scheduled recurring job f5726d66 (Every 10 minutes). Next run: Nov 22 11:05am.")
+        self.assertIn(upkeep.SWEEP, line[0])
+        made = (upkeep.CRON_CREATE, {"cron": upkeep.CRON, "prompt": upkeep.SWEEP},
+                "Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm.")
         self.t.stop(TOP, TASK, [made], report="The sweep's schedule is started.", uuid="c1")
+        again = self.said()
+        self.assertEqual(self.lines(again, "schedule:") + self.lines(again, "end the schedule:"), [],
+                         "its schedule runs and its workers are out")
         d = upkeep.load(self.t.p4, TOP)
         self.assertEqual(len(d["terminals"]), 2)
         for t in d["terminals"]:
             t["removed"] = upkeep.now()                 # as terminal_acts marks one whose worktree is gone
         upkeep.save(self.t.p4, TOP, d)
         got = self.said()
-        end = self.lines(got, "end the schedule:")
-        self.assertEqual(len(end), 1, got)
-        self.assertIn("Read the tasks with `CronList` and call `CronDelete` with the id of the task whose prompt "
-                      f"opens \"{upkeep.OPENS}\"", end[0])
-        self.assertIn("gave as `f5726d66`", end[0])
+        self.assertEqual(len(self.lines(got, "end the schedule:")), 1, got)
         self.assertEqual(self.lines(got, "schedule:"), [])
-        self.assertEqual(self.lines(self.said(), "end the schedule:"), [], "handed once")
-        self.t.stop(TOP, TASK, [("CronDelete", {"id": "0a1b2c3d"}, "Cancelled job 0a1b2c3d.")],
-                    report="Another task is cancelled.", uuid="c2")
-        self.assertTrue(upkeep.schedule_runs(self.t.session(TOP)), "another task's delete ends nothing of the sweep")
-        self.t.stop(TOP, TASK, [("CronList", {}, "f5726d66"), ("CronDelete", {"id": "f5726d66"}, "Cancelled job f5726d66.")],
-                    report="The schedule is ended.", uuid="c3")
-        self.assertNotIn("schedule", self.t.session(TOP))
-        self.assertEqual(self.lines(self.said(), "end the schedule:"), [])
-
-    def test_a_self_paced_loop_that_runs_is_ended_where_the_schedule_takes_the_sweep(self):
-        """A session has one sweep and never both: the schedule sweeps the started sessions too, so its line ends a
-        self-paced loop that runs, and no line starts one while a terminal worker is live."""
-        self.seat()
-        self.left_item()
-        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"delaySeconds": 1800, "prompt": "/loop " + upkeep.SWEEP}, "ok")],
-                    report="Waiting on the worker.", uuid="s1")
-        self.assertTrue(upkeep.loop_runs(self.t.session(TOP)))
-        got = self.said()
-        line = self.lines(got, "schedule:")
-        self.assertEqual(len(line), 1, got)
-        self.assertIn("so end the self-paced loop: call `ScheduleWakeup` with `stop` true.", line[0])
-        self.assertEqual(self.lines(got, "loop:"), [])
-        self.assertEqual(self.lines(got, "end the loop:"), [], "the schedule's line ends it")
-
-    def test_the_schedules_interval_and_words_put_no_question_to_ezexe(self):
-        """Read in the `/loop` skill of Claude Code 2.1.326: before it schedules, it asks the person whether to
-        make a cloud schedule in its place where the interval is sixty minutes or more or the words read like a
-        daily cadence. The interval is under the hour and the words name no day. `CronList` shows a task's first
-        eighty characters, which hold the words the end is told by."""
-        minutes = re.fullmatch(r"(\d+)m", upkeep.EVERY)
-        self.assertTrue(minutes and 0 < int(minutes.group(1)) < 60, upkeep.EVERY)
-        self.assertEqual(60 % int(minutes.group(1)), 0, "an interval that divides the hour is not rounded")
-        for phrase in ("every morning", "daily", "every day", "each night", "every weekday"):
-            self.assertNotIn(phrase, upkeep.SWEEP_FIXED.lower())
-        self.assertNotRegex(upkeep.SWEEP_FIXED, r"every \d+ ?\w+$", "no trailing clause reads as a second interval")
-        for words in (upkeep.SWEEP, upkeep.SWEEP_FIXED):
-            self.assertTrue(words.startswith(upkeep.OPENS))
-        self.assertLessEqual(len(upkeep.OPENS), 80)
-        self.assertTrue(upkeep.LEADS.match(f"{upkeep.EVERY} {upkeep.SWEEP_FIXED}"))
-        self.assertIsNone(upkeep.LEADS.match(upkeep.SWEEP))
-        for words in ("`mcp__terminal__list_terminal_tabs`", "Do each act p4-phi hands beside this prompt",
-                      "this prompt comes on a fixed schedule", "`CronList`", "`CronDelete`"):
-            self.assertIn(words, upkeep.SWEEP_FIXED)
-        self.assertNotIn("ScheduleWakeup", upkeep.SWEEP_FIXED, "the self-paced loop's end is no end of a schedule")
 
     def test_an_item_handed_to_a_terminal_worker_is_listed_after_with_no_card(self):
         name = self.started()

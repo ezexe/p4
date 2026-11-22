@@ -2520,6 +2520,8 @@ def h_user_prompt_submit(payload):
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
     plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
+    if upkeep.notice_came(s, payload.get("prompt")):  # an idle notice spends the subscription it answers
+        RAN["notice"] = True
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
             and not load_turns(me.home, s["sessionId"]):
@@ -2752,8 +2754,8 @@ def h_stop(payload):
     done = s.get("done") if isinstance(s.get("done"), dict) else None
     if done and clean(done.get("text")):
         row["done"] = clean(done["text"])[:400]
-    if upkeep.keep_loop(s, turn.get("calls")):     # a loop of its own, begun, renewed or ended in this turn
-        RAN["loop"] = upkeep.loop_runs(s)
+    if upkeep.keep_sweep(s, turn.get("calls")):    # the sweep's schedule, or a worker asked for its idle notice
+        RAN["schedule"] = upkeep.schedule_runs(s)
     if s.get("toldBy"):
         row["by"] = s["toldBy"]                    # whose words began the turn, where the prompt's origin said
         if s.get("toldFrom"):

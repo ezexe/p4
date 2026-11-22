@@ -976,8 +976,8 @@ def script_of(s, name, main, windows=None):
               f"that brief is on {default_ref(main)} with its proof shown in this conversation, or is written into "
               f"the note <folder>{sep}report-{name}.md as left with the reason, and one message with the outcome "
               f"has been sent with SendMessage to the session named {who}.")
-    run = (f"claude -p '{prompt}' --permission-mode {mode_of(sid)} --worktree {name} --settings "
-           f"'<folder>{sep}{SETTINGS_FILE}'")
+    run = (f"claude -p '{prompt}' --name {name} --permission-mode {mode_of(sid)} --worktree {name} "
+           f"--settings '<folder>{sep}{SETTINGS_FILE}'")
     if windows:
         names = ", ".join(f"'{n}'" for n in CARRIED)
         return (f"start-{name}.ps1",
@@ -1227,80 +1227,88 @@ def leftover_acts(home, s, d, hand):
     return out
 
 
-# --- the sweep of a session tree, by Claude Code's own /loop ----------------------------------------------------------
-# An orchestrator keeps the sessions it started by a sweep that runs again and again while any of them is live. The
-# sweep is Claude Code's own `/loop`, and p4-phi builds no schedule of its own. scheduled-tasks.md, "Run a prompt
-# repeatedly with /loop": with a prompt and no interval "Your prompt runs at an interval Claude chooses each
-# iteration", and "Let Claude choose the interval": "After each iteration it picks a delay between one minute and one
-# hour based on what it observed". "Stop a loop": "Claude calls the `ScheduleWakeup` tool with `stop: true`, which
-# cancels the pending wakeup immediately. If an iteration ends without either rescheduling or stopping, Claude Code
-# schedules one fallback wakeup about 20 minutes later and ends the loop when that iteration doesn't reschedule
-# either." The tool's own text asks for "a long fallback (1200s+)" where something else is the main wake-up, and here
-# that is the app's note of a started session's turn end. So the loop is the fallback: for a session that stalls
-# without ending a turn, and for a worker in the Terminal panel, of which the app sends no note.
-# The sweep's words are SWEEP, kept here and nowhere else, so no orchestrator writes them by hand. p4-phi hands one
-# line, once, to start the loop where a session has a live worker and no loop of its own, and one line, once, to end
-# it where a loop runs and nothing of the tree is live. Whether a loop runs is read off the session's own calls at
-# each turn's end, keep_loop: a call of the skill `loop` or of `ScheduleWakeup` with a delay starts or renews it,
-# until that delay and the fallback wakeup have passed, and `ScheduleWakeup` with `stop` ends it.
-#
-# A worker in the Terminal panel is a scripted run outside the app's sessions, and the app sends no note when it
-# ends, so no notice ends that wait and a self-paced loop told to wait long is all that would come back to it. There
-# a prompt on a fixed schedule fits, and it is Claude Code's own too: scheduled-tasks.md, "Run on a fixed interval",
-# "When you supply an interval, Claude converts it to a cron expression, schedules the job, and confirms the cadence
-# and job ID", by the tool `CronCreate`, and "Stop a loop", "to stop a loop such as `/loop 5m`, ask Claude to cancel
-# it", by `CronDelete` with the id `CronList` gives. So while a terminal worker is live p4-phi hands `/loop` with the
-# interval EVERY and the words SWEEP_FIXED, once, and once the last is gone it hands the end, `CronList` and
-# `CronDelete`. The schedule sweeps the started sessions too, so a session has one of the two and never both: the
-# self-paced loop where every worker is a started session, whose turn end the app notes.
-# Whether a schedule runs is read off the session's own calls as the loop is: a `CronCreate` whose prompt holds the
-# sweep's opening words begins it, until Claude Code's expiry of a recurring task, and a `CronDelete` of its id ends
-# it. Seen in the desktop app, with `/loop` run with EVERY and the words below: the skill has the session call
-# `CronCreate` with `*/10 * * * *`, "the parsed prompt verbatim" and `recurring` true, which answered "Scheduled
-# recurring job f5726d66 (Every 10 minutes). Next run: ...", where a one-shot answers "Scheduled one-shot task
-# efd4cd1b"; `CronList` listed it as its id, its cadence, its next run and the first eighty characters of its
-# prompt, which hold OPENS whole; and `CronDelete` answered "Cancelled job f5726d66."
-# The same skill puts a question to the person before it schedules, whether to make a cloud schedule in its place,
-# where the interval is sixty minutes or more or the words read like a daily cadence. EVERY is under the hour and
-# the words name no day, so a session p4-phi hands the line is asked nothing.
-LOOP_SKILL = "loop"
-WAKEUP = "ScheduleWakeup"
+# --- the sweep of a session tree: an idle notice from each terminal worker, and one long schedule -------------------
+# An orchestrator keeps the sessions it started by a sweep, and what brings it back to one is an event wherever
+# Claude Code has one. scheduled-tasks.md opens with "Reacting to events as they happen instead of polling: see
+# Channels", and best-practices.md, "Start runs on a schedule or an event", says of a scheduled prompt "Each run is
+# another turn in the same session, so don't leave one going in a long conversation". So p4-phi hands no `/loop`.
+# Three things bring an orchestrator back, and the first two are events:
+# - A session the desktop app started: the app's own note of that session's turn end, which p4-phi adds nothing to.
+# - A worker in the Terminal panel, a scripted run on this machine of which the app sends no note: an idle notice.
+#   cross-session-messaging.md, "Get a notice when another session goes idle": "Claude can ask one of your sessions
+#   on this machine to send back one notice when that session next goes idle or exits", with `SendMessage` and
+#   `notify_when_idle`, and "If the asking session is idle, Claude Code starts a new turn with the notice." A
+#   session is handed that call once for each worker that runs, and again after each notice while it still runs.
+# - What neither tells, a session that stalls with no turn's end and a worker whose notice does not come: one prompt
+#   on a long fixed schedule, by `CronCreate` itself and not through the skill `loop`. scheduled-tasks.md, "Manage
+#   session-scoped scheduled tasks": "`CronCreate` | Schedule a new task. Accepts a 5-field cron expression, the
+#   prompt to run, and whether it recurs or fires once." It is handed once while any worker is out and no schedule
+#   is kept, and its end, `CronList` and `CronDelete`, once nothing is live.
+# Seen on 2026-11-22, a session of the desktop app on Claude Code 2.1.326 asking scripted `claude -p` runs on 2.1.328:
+# - The call answered "Subscribed" for a scripted run, which `ListAgents` listed five seconds after its start, where
+#   the same call to another session of the desktop app answers "no idle subscription was made".
+# - The notice came for a worker in the asker's own permission mode: queued the instant the worker ended, it began a
+#   turn a second after the asker went idle, and it waited while a turn ran there. For a worker in the default mode
+#   under an asker that bypasses permission prompts nothing came: by "Control inbound messages" a session that
+#   bypasses holds what a session that prompts sends. script_of starts a worker in its starter's own mode.
+# - One subscription gave one notice, for the first time the worker was idle, and none at its later turn ends or at
+#   its exit. A worker stopped from outside sent none. So the call is handed anew after each notice, and the
+#   schedule covers a worker that was stopped.
+# The schedule's interval is CRON, the half hour. "How late a recurring task runs": "Unless it runs every five
+# minutes, a recurring task starts each run late by up to half the gap to the next run, and by at most 30 minutes",
+# so its prompt comes thirty to forty-five minutes apart, inside the hour best-practices.md gives the prompt cache
+# on a subscription. It is written off the marks 0 and 30 of the hour, as the tool `CronCreate` asks in its own
+# description, "Avoid the :00 and :30 minute marks when the task allows it": "requests from across the planet land
+# on the API at the same instant", so "pick a minute that is NOT 0 or 30".
+# The sweep's words are SWEEP, kept here and nowhere else, so no orchestrator writes them by hand.
+# What a session's own calls did is read at each turn's end, keep_sweep: a `CronCreate` whose prompt holds the
+# sweep's opening words begins the schedule, until Claude Code's expiry of a recurring task, and a `CronDelete` of
+# its id ends it; a `SendMessage` with `notify_when_idle` asks a worker, until its notice comes as a prompt,
+# notice_came, or Claude Code drops the subscription, "If no notice arrives within 12 hours".
+# Seen in the desktop app on Claude Code 2.1.326: `CronCreate` with CRON, a prompt and `recurring` true answered
+# "Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm.", seven minutes after the mark, where
+# a one-shot answers "Scheduled one-shot task efd4cd1b"; `CronList` listed it as its id, its expression, its next
+# run and the first eighty characters of its prompt, which hold OPENS whole; and `CronDelete` answered "Cancelled
+# job 72f3dc05."
+# Nothing is built for a session that still runs a `/loop` an older p4-phi handed it: that loop's own words end it.
 CRON_CREATE, CRON_LIST, CRON_DELETE = "CronCreate", "CronList", "CronDelete"
-FALLBACK_S = 1500                # the fallback wakeup Claude Code schedules, "about 20 minutes later", with room
-EVERY = "10m"                    # how often the schedule's prompt comes while a terminal worker is live
+SEND, NOTIFY = "SendMessage", "notify_when_idle"
+CRON = "7,37 * * * *"            # when the schedule's prompt comes while a worker is out: each half hour, off 0 and 30
 EXPIRY_S = 7 * 86400             # scheduled-tasks.md: "Recurring tasks automatically expire 7 days after creation."
+NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arrives within 12 hours"
+NOT_MADE = "no idle subscription"                 # in the call's answer where the app made none
 OPENS = "Sweep the sessions this one started, as p4-phi's upkeep has it."
-_SWEPT = (OPENS + " Read each live session with "
-          "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
-          + "mcp__terminal__list_terminal_tabs" + "`. Send on one that stopped with work left, by SendMessage to its "
-          "id. Verify one that reports done, on its repository's default branch and on the run of its workflow, "
-          "before it counts as done. Do each act p4-phi hands beside this prompt. ")
-SWEEP = (_SWEPT + "The app's note of a started "
-         "session's turn end is the main wake-up, so wait long between sweeps, 1200 seconds or more. End the loop "
-         "with `ScheduleWakeup` and `stop` true once no session and no terminal worker is live.")
-SWEEP_FIXED = (_SWEPT + "The app sends no note when a worker in the Terminal panel ends, so this prompt comes on a "
-               "fixed schedule. End the schedule once no terminal worker is live: read the tasks with `" + CRON_LIST
-               + "` and call `" + CRON_DELETE + "` with the id of the task that holds these words.")
-LEADS = re.compile(r"\s*\d+\s*[smhd]\b", re.I)          # an interval that leads the words given to `/loop`
+SWEEP = (OPENS + " Read each live session with "
+         "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
+         + "mcp__terminal__list_terminal_tabs" + "`. Send on one that stopped with work left, by SendMessage to its "
+         "id. Verify one that reports done, on its repository's default branch and on the run of its workflow, "
+         "before it counts as done. Do each act p4-phi hands beside this prompt. The app's note of a started "
+         "session's turn end and a terminal worker's idle notice are the main wake-ups, so this prompt comes on a "
+         "long fixed schedule for what neither tells: a session that stalls with no turn's end, and a worker that "
+         "was stopped or whose notice did not come. End the schedule once no session and no terminal worker is "
+         "live: read the tasks with `" + CRON_LIST + "` and call `" + CRON_DELETE + "` with the id of the task that "
+         "holds these words.")
 JOB = re.compile(r"\b(?:job|task)\s+([0-9A-Za-z]{8})\b")  # the id in `CronCreate`'s answer
+REF = re.compile(r"\s*\[[0-9a-f]+\]\s*\Z")                # the short identifier `ListAgents` adds to a shared name
+# the worker an idle notice names, as the app words the prompt: `[Cross-session idle notice] "<name>", which ...`,
+# and the first name in quotes on that line where a notice words it another way, as one of an expired subscription
+NOTICE = re.compile(r"\A\s*(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?\[Cross-session idle notice\][^\n\"]*"
+                    r"\"([^\"\n]+)\"")
+NOTICED_MOST = 40                # the workers whose notices are counted, the latest kept
 
 
-def keep_loop(s, calls, at=None):
-    """Keeps on a session whether a loop of its own runs, from the calls of the turn that just ended: `loop` with
-    `until`, the time by which its next wakeup and Claude Code's fallback have passed. The last call that says so
-    decides, and a turn with none leaves what is kept. And whether the sweep's fixed schedule runs: `schedule` with
-    `until`, the time Claude Code ends a recurring task by itself, and `id`, the task's own where the answer of
-    `CronCreate` gave one. A `/loop` whose words an interval leads is a schedule, which its `CronCreate` call tells,
-    and no self-paced loop. A `CronDelete` ends the schedule kept where it names that id, or where none was read.
-    Returns True when either changed."""
+def keep_sweep(s, calls, at=None):
+    """Keeps on a session what its own calls of the turn that just ended did for the sweep. `schedule`: the sweep's
+    fixed schedule, with `until`, the time Claude Code ends a recurring task by itself, and `id`, the task's own
+    where the answer of `CronCreate` gave one; a `CronDelete` ends the schedule kept where it names that id, or
+    where none was read. `notices`: each session asked for an idle notice, by the name the call gave, with the time
+    Claude Code drops the subscription; a call the app answered with no subscription made keeps none. A turn with
+    no such call leaves what is kept. Returns True when either changed."""
     at = time.time() if at is None else at
-    before = repr((s.get("loop"), s.get("schedule")))
+    before = repr((s.get("schedule"), s.get("notices")))
     for c in calls or []:
         name, inp = c.get("name"), c.get("input") if isinstance(c.get("input"), dict) else {}
-        if name == "Skill" and str(inp.get("skill") or "").lstrip("/") == LOOP_SKILL:
-            if not LEADS.match(str(inp.get("args") or "")):
-                s["loop"] = {"until": at + 3600 + FALLBACK_S}
-        elif name == CRON_CREATE:
+        if name == CRON_CREATE:
             if OPENS in str(inp.get("prompt") or "") and inp.get("recurring") is not False:
                 made = JOB.search(str(c.get("result") or ""))
                 s["schedule"] = {"until": at + EXPIRY_S, "id": made.group(1) if made else ""}
@@ -1308,88 +1316,109 @@ def keep_loop(s, calls, at=None):
             kept = s.get("schedule") if isinstance(s.get("schedule"), dict) else None
             if kept is not None and (not kept.get("id") or str(inp.get("id") or "") == kept.get("id")):
                 s.pop("schedule", None)
-        elif name == WAKEUP and inp.get("stop") is True:
-            s.pop("loop", None)
-        elif name == WAKEUP:
-            try:
-                wait = min(3600.0, max(60.0, float(inp.get("delaySeconds") or 0)))
-            except (TypeError, ValueError):
-                wait = 3600.0
-            s["loop"] = {"until": at + wait + FALLBACK_S}
-    return repr((s.get("loop"), s.get("schedule"))) != before
-
-
-def loop_runs(s, at=None):
-    """True while a loop of the session's own is kept as running, by keep_loop."""
-    kept = s.get("loop") if isinstance(s, dict) else None
-    until = kept.get("until") if isinstance(kept, dict) else None
-    return isinstance(until, (int, float)) and until > (time.time() if at is None else at)
+        elif name == SEND and inp.get(NOTIFY) is True:
+            to = REF.sub("", str(inp.get("to") or "")).strip()
+            if to and NOT_MADE not in str(c.get("result") or ""):
+                s["notices"] = {**(s.get("notices") if isinstance(s.get("notices"), dict) else {}), to: at + NOTICE_S}
+    return repr((s.get("schedule"), s.get("notices"))) != before
 
 
 def schedule_runs(s, at=None):
-    """True while the sweep's fixed schedule is kept as running, by keep_loop."""
+    """True while the sweep's fixed schedule is kept as running, by keep_sweep."""
     kept = s.get("schedule") if isinstance(s, dict) else None
     until = kept.get("until") if isinstance(kept, dict) else None
     return isinstance(until, (int, float)) and until > (time.time() if at is None else at)
 
 
-def loop_acts(home, s, d, hand):
-    """The line that starts the sweep, handed once where the session has a live worker and no sweep of its own, and
-    the line that ends it, handed once where one runs and nothing it is for is live. A worker is live while it is a
-    started session that is not finished, or a worker in the Terminal panel not yet removed.
-    With a worker in the Terminal panel live the sweep is `/loop` with an interval, a fixed schedule, since the app
-    sends no note of that worker's end, and its end is `CronDelete`. With started sessions alone it is `/loop` with
-    no interval, the self-paced loop, as before, and its end is `ScheduleWakeup` with `stop`."""
+def asked(s, at=None):
+    """The names this session asked for an idle notice that has not come, while Claude Code keeps each subscription."""
+    at = time.time() if at is None else at
+    kept = s.get("notices") if isinstance(s, dict) and isinstance(s.get("notices"), dict) else {}
+    return {k for k, until in kept.items() if isinstance(until, (int, float)) and until > at}
+
+
+def notice_came(s, prompt):
+    """An idle notice that came as a prompt spends the subscription it answers: the session it names is asked no
+    more, and the count of notices that came from it rises, which sweep_acts reads to hand the call anew. Returns
+    that name, '' for any other prompt."""
+    m = NOTICE.match(str(prompt or ""))
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    kept = {k: v for k, v in (s.get("notices") if isinstance(s.get("notices"), dict) else {}).items() if k != name}
+    if kept:
+        s["notices"] = kept
+    else:
+        s.pop("notices", None)
+    came = dict(s.get("noticed") if isinstance(s.get("noticed"), dict) else {})
+    came[name] = int(came.pop(name, 0) or 0) + 1       # the latest last
+    s["noticed"] = dict(list(came.items())[-NOTICED_MOST:])
+    return name
+
+
+def running(t):
+    """True while the run of a terminal worker still works: its worktree is there and git's lock on it names a
+    process that lives, as Claude Code writes that lock for the run."""
+    name, main = str(t.get("name") or ""), str(t.get("main") or "")
+    tree = f"{main}/.claude/worktrees/{name}"
+    if not name or not os.path.isdir(tree):
+        return False
+    pid = lock_pid(main, tree)
+    return bool(pid and PHI.issues._alive(pid))
+
+
+def sweep_acts(home, s, d, hand):
+    """What brings this session back to the workers it has out, each line handed once. For each worker in the
+    Terminal panel whose run still works and that it has asked for no idle notice: the call that asks, and again
+    after each notice while that run still works. While any worker is out and no schedule of the sweep is kept: the
+    one `CronCreate` that makes it. And once a schedule runs and nothing is live: its end. A worker is out while it
+    is a started session that is not finished, or a worker in the Terminal panel not yet removed. A started session
+    is asked for no notice: the app's own note of its turn end tells of it."""
     sid = s["sessionId"]
     live = [k for k, ks in started(home, sid).items() if not finished(home, k, ks)]
     tabs = [t for t in d["terminals"] if not t.get("removed")]
-    runs, fixed = loop_runs(s), schedule_runs(s)
+    fixed = schedule_runs(s)
     out = []
-    if runs:
-        d.pop("loopTold", None)                    # a loop that ends while a worker is live is asked for anew
-    else:
-        d.pop("loopEndTold", None)
     if fixed:
-        d.pop("scheduleTold", None)                # and so is a schedule
+        d.pop("scheduleTold", None)                # a schedule that ends while a worker is out is asked for anew
     else:
         d.pop("scheduleEndTold", None)
-    if tabs and not fixed and not d.get("scheduleTold"):
+    waiting = asked(s)
+    came = s.get("noticed") if isinstance(s.get("noticed"), dict) else {}
+    told = d.get("noticeTold") if isinstance(d.get("noticeTold"), dict) else {}
+    told = {k: v for k, v in told.items() if any(t.get("name") == k for t in tabs)}
+    for t in tabs:
+        name, n = str(t.get("name") or ""), int(came.get(str(t.get("name") or "")) or 0)
+        if not name or name in waiting or told.get(name) == n or not running(t):
+            continue
+        told[name] = n
+        out.append((f"notice:{name}", "sweep", True,
+                    f"notice: the terminal worker `{name}` runs, and this session has asked it for no idle notice"
+                    + (f" since the last one came" if n else "") + f". Ask it: call `{SEND}` with `to` `{name}`, "
+                    f"`{NOTIFY}` true and no `message`, which costs that worker nothing. One `[Cross-session idle "
+                    f"notice]` then begins a turn here once it goes idle or exits. It runs in this session's own "
+                    f"permission mode, which is what lets its notice through, and one subscription gives one "
+                    f"notice. A worker that was stopped from outside sends none, which the sweep's schedule covers."))
+    if hand:
+        d["noticeTold"] = told
+    if (live or tabs) and not fixed and not d.get("scheduleTold"):
         if hand:
             d["scheduleTold"] = now()
-        n = len(tabs)
-        out.append((f"schedule:{sid}", "loop", any(t.get("started") for t in tabs),
-                    f"schedule: this session has {n} live worker{'s' * (n != 1)} in the Terminal panel, whose end "
-                    f"the app sends no note of, and no schedule of the sweep running. Read the tasks with "
-                    f"`{CRON_LIST}` first, and where one holds the words below, start none. Otherwise start Claude "
-                    f"Code's own `/loop` once with an interval, which runs its prompt on a fixed schedule by "
-                    f"`{CRON_CREATE}`: call the Skill tool with `skill` `{LOOP_SKILL}` and, as `args`, `{EVERY}` and "
-                    f"then these words as they stand: \"{SWEEP_FIXED}\""
-                    + (f" The schedule sweeps the started sessions too, so end the self-paced loop: call `{WAKEUP}` "
-                       f"with `stop` true." if runs else "")))
-    if not tabs and fixed and not d.get("scheduleEndTold"):
+        n = len(live) + len(tabs)
+        out.append((f"schedule:{sid}", "sweep", any(t.get("started") for t in tabs),
+                    f"schedule: this session has {n} worker{'s' * (n != 1)} out and no schedule of the sweep "
+                    f"running. Read the tasks with `{CRON_LIST}` first, and where one holds the words below, start "
+                    f"none. Otherwise call `{CRON_CREATE}` once, with `cron` `{CRON}`, `recurring` true and, as "
+                    f"`prompt`, these words as they stand: \"{SWEEP}\""))
+    if not live and not tabs and fixed and not d.get("scheduleEndTold"):
         if hand:
             d["scheduleEndTold"] = now()
         kept = str((s.get("schedule") or {}).get("id") or "")
-        out.append((f"schedule-end:{sid}", "loop", False,
-                    f"end the schedule: no worker in the Terminal panel is live, and the sweep's fixed schedule "
-                    f"still runs. Read the tasks with `{CRON_LIST}` and call `{CRON_DELETE}` with the id of the task "
-                    f"whose prompt opens \"{OPENS}\""
+        out.append((f"schedule-end:{sid}", "sweep", False,
+                    f"end the schedule: no session this one started and no worker in the Terminal panel is live, "
+                    f"and the sweep's fixed schedule still runs. Read the tasks with `{CRON_LIST}` and call "
+                    f"`{CRON_DELETE}` with the id of the task whose prompt opens \"{OPENS}\""
                     + (f", which this session's own `{CRON_CREATE}` call gave as `{kept}`." if kept else ".")))
-    if live and not tabs and not runs and not fixed and not d.get("loopTold"):
-        if hand:
-            d["loopTold"] = now()
-        n = len(live)
-        out.append((f"loop:{sid}", "loop", False,
-                    f"loop: this session has {n} live worker{'s' * (n != 1)} and no loop of its own running. Start "
-                    f"Claude Code's own `/loop` once, with no interval, so that each sweep picks its own wait: call "
-                    f"the Skill tool with `skill` `{LOOP_SKILL}` and, as `args`, these words as they stand: "
-                    f"\"{SWEEP}\""))
-    if not live and not tabs and runs and not d.get("loopEndTold"):
-        if hand:
-            d["loopEndTold"] = now()
-        out.append((f"loop-end:{sid}", "loop", False,
-                    f"end the loop: no session this one started and no terminal worker is live, and its `/loop` "
-                    f"still runs. Call `{WAKEUP}` with `stop` true."))
     return out
 
 
@@ -1403,7 +1432,7 @@ def acts(home, s, by="user", store="", hand=False, d=None):
     out = []
     for part in (lambda: archive_acts(home, s, d, hand), lambda: item_acts(home, s, d, by, store, hand),
                  lambda: wait_acts(home, s, d, by, store, hand), lambda: leftover_acts(home, s, d, hand),
-                 lambda: terminal_acts(home, s, d, hand), lambda: loop_acts(home, s, d, hand)):
+                 lambda: terminal_acts(home, s, d, hand), lambda: sweep_acts(home, s, d, hand)):
         try:
             out += part()
         except Exception:  # noqa: BLE001  one act that cannot be read never costs a message the others
