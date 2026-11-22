@@ -25,6 +25,12 @@ every plan, and a plan file takes a cookie as any other file does. The key holds
 whose start wrote it, so `tick` copies the plan files the hooks module names with `--plan` and `--plan-edited` from
 Claude Code's own folder into plans/, by keep_plans, and leaves each original.
 
+The skill plan-planner gives a plan three places in the store: plans/ while it is worked, plans/complete/ once it
+is finished and plans/todo/ once ezexe parks it. The age clears only the files directly in plans/, where plan mode
+writes them, so a finished or parked plan stays until ezexe's word moves it, and neither folder takes a cookie
+whole. keep_plans copies no plan whose name either folder holds, and carry_over moves a plan of the main
+checkout's store into the place a worktree moved it to.
+
 A session in a git worktree has a store of its own, `<worktree>/.claude/p4`, since what a session writes by a
 path from its folder lands there: its plans, its notebook and its saved code, which carry_over copies into the main
 checkout's store at each sweep. Three more things are settled for such a session. p4.json is read from the main
@@ -102,7 +108,11 @@ EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
 NOTEBOOK = p4conf.rel("scratchpad").split("/", 1)[-1]    # the notebook's folder under temportal/
 PLANS = "plans"                         # the plan files, where plansDirectory points Claude Code
-WHOLE = (NOTEBOOK, "src", PLANS, EXPIRES)   # the notebook, saved code, plans and cookies, which no cookie clears whole
+# the places of plan-planner under plans/: a finished plan and a parked one, which no age clears
+COMPLETE, TODO = "complete", "todo"
+SHELVES = (COMPLETE, TODO)
+# the notebook, saved code, plans, the finished and parked plans and the cookies, which no cookie clears whole
+WHOLE = (NOTEBOOK, "src", PLANS, *(f"{PLANS}/{shelf}" for shelf in SHELVES), EXPIRES)
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
@@ -219,7 +229,8 @@ def refusal(p4, path):
     if rel.split("/")[0].lower() == "tmp":
         return rel, f"{rel} takes no cookie: tmp/ holds the folders an earlier version kept for each session's scratchpad"
     if rel.lower() in WHOLE:
-        return rel, f"{rel} takes no cookie: {NOTEBOOK}/, src/, {PLANS}/ and {EXPIRES} are never cleared whole"
+        return rel, (f"{rel} takes no cookie: {NOTEBOOK}/, src/, {PLANS}/, {PLANS}/{COMPLETE}/, {PLANS}/{TODO}/ "
+                     f"and {EXPIRES} are never cleared whole")
     return rel, None
 
 
@@ -286,12 +297,13 @@ def remove(path):
         return 0
 
 
-def _files(d, by_folder=False):
-    """[(time, size, path)] of every file under `d`, links not followed. The time is the file's modification time, or
-    with `by_folder` the later of it and the time of the folder holding the file."""
+def _files(d, by_folder=False, top=False):
+    """[(time, size, path)] of every file under `d`, links not followed, and with `top` only the files directly in
+    `d`. The time is the file's modification time, or with `by_folder` the later of it and the time of the folder
+    holding the file."""
     out = []
     for base, dirs, names in os.walk(d):
-        dirs[:] = [x for x in dirs if not p4conf.is_link(os.path.join(base, x))]
+        dirs[:] = [] if top else [x for x in dirs if not p4conf.is_link(os.path.join(base, x))]
         try:
             since = os.lstat(base).st_mtime if by_folder else float("-inf")
         except OSError:
@@ -359,14 +371,14 @@ def _conflicts_dir(p4, plugin):
     return d if same else None
 
 
-def _clear(d, rule, now, by_folder=False):
-    """Clear the folder `d` by one cache rule -> the paths of the files it removed. With `by_folder` a file's age
-    starts at the later of its own time and its folder's, since a layout move keeps the time of the copy it sets
-    aside and gives the folder it lands in a new one, and neither `max_age_days` nor `max_mb` clears a copy younger
-    than FRESH_S, which the same start's move set aside."""
+def _clear(d, rule, now, by_folder=False, top=False):
+    """Clear the folder `d` by one cache rule -> the paths of the files it removed, and with `top` only of the files
+    directly in `d`. With `by_folder` a file's age starts at the later of its own time and its folder's, since a
+    layout move keeps the time of the copy it sets aside and gives the folder it lands in a new one, and neither
+    `max_age_days` nor `max_mb` clears a copy younger than FRESH_S, which the same start's move set aside."""
     if not os.path.isdir(d):
         return []
-    files = sorted(_files(d, by_folder))                # oldest first
+    files = sorted(_files(d, by_folder, top))           # oldest first
     gone = []
     age = rule.get("max_age_days")
     if age is not None:
@@ -437,10 +449,16 @@ def sweep_plans(p4, days, now=None, removed=None):
     """Clear the plan files older than `days`, the age at which Claude Code clears a plan in its own folder -> the
     count cleared. None for `days` clears nothing, and so does an entry for plans/ in temportal.cache, which
     sweep_cache then applies in its place. A plans/ that is a link or resolves to another place is left alone, as
-    a cache rule's folder is. Each file removed is added to `removed` when it is a list."""
+    a cache rule's folder is. Each file removed is added to `removed` when it is a list.
+
+    Only the files directly in plans/ are cleared by age, which is where plan mode writes them: Claude Code's own
+    cleanup clears "Plan files written during plan mode", by claude-directory.md, "Cleaned up automatically". A plan
+    plan-planner closed into plans/complete/ or parked into plans/todo/ is kept until ezexe's word moves it, so no
+    age reaches those two folders, nor anything else below plans/."""
     if days is None or own_rule(p4) or rel_in(p4, PLANS) != PLANS:
         return 0
-    gone = _clear(os.path.join(home(p4), PLANS), {"max_age_days": days}, time.time() if now is None else now)
+    gone = _clear(os.path.join(home(p4), PLANS), {"max_age_days": days}, time.time() if now is None else now,
+                  top=True)
     if removed is not None:
         removed.extend(gone)
     return len(gone)
@@ -589,7 +607,9 @@ def keep_plans(root, made, edited=()):
     A file is copied only when it is a plain `.md` file directly in Claude Code's own plans folder. One this process
     created is copied where the store holds none of its name, and any of the two kinds is copied over the store's
     file of its name where it is the newer, so a resumed session's edit reaches the copy. A file that was only
-    edited and that the store holds no copy of is left alone: another project's session may have made it."""
+    edited and that the store holds no copy of is left alone: another project's session may have made it. A plan
+    whose name plans/complete/ or plans/todo/ holds is never copied, since plan-planner closed or parked it and
+    only ezexe's word revives it."""
     p4 = store_of(root)
     target = p4conf.settings_file(root)
     want = p4conf.plans_dir(p4, target)
@@ -606,6 +626,8 @@ def keep_plans(root, made, edited=()):
         if not plain or os.path.normcase(os.path.dirname(os.path.realpath(path))) != own:
             continue
         kept = os.path.join(to, name)
+        if any(os.path.lexists(os.path.join(to, shelf, name)) for shelf in SHELVES):
+            continue                                    # closed or parked: only ezexe's word brings it back
         if os.path.lexists(kept):
             if p4conf.is_link(kept) or not os.path.isfile(kept) or os.path.getmtime(path) <= os.path.getmtime(kept):
                 continue                                # the store's file is no older: it stays as it is
@@ -640,14 +662,21 @@ def carry_over(root):
     lost at most what it wrote since the sweep before. A file is copied where the main checkout's store holds none
     of its name or an older one, and nothing is ever removed on either side. Links, the notebook's `.out` and a
     folder's own git are left where they are. Nothing is carried where the main checkout has no store. The cookie
-    of a carried file goes with it, by carry_cookies."""
+    of a carried file goes with it, by carry_cookies.
+
+    A plan has three places by plan-planner: plans/ while it is worked, plans/complete/ once finished and
+    plans/todo/ once parked. A plan the worktree closed, parked or revived is carried into its new place only where
+    it is newer than every copy of its name the main checkout's store holds in the other two, and those older
+    copies are then removed there, their removal staged where that store is a git repository of its own. So a
+    close in a worktree does not leave the plan worked in the main checkout too, and a plan the main checkout
+    closed is not brought back by an older copy a worktree still holds."""
     main, in_git = p4conf.main_root(root)
     if not in_git or os.path.normcase(os.path.realpath(main)) == os.path.normcase(os.path.realpath(root)):
         return []
     here, there = os.path.join(store_of(root), "temportal"), os.path.join(store_of(main), "temportal")
     if not os.path.isdir(store_of(main)) or p4conf.is_link(here) or not os.path.isdir(here):
         return []
-    carried = 0
+    carried, moved = 0, []
     for name in CARRIED:
         top = os.path.join(here, name)
         if p4conf.is_link(top) or not os.path.isdir(top):
@@ -657,26 +686,56 @@ def carry_over(root):
             for file in files:
                 path = os.path.join(folder, file)
                 kept = os.path.join(there, os.path.relpath(path, here))
+                others = _other_places(there, os.path.relpath(path, here))
                 try:
                     if p4conf.is_link(path) or not os.path.isfile(path) or p4conf.is_link(kept):
                         continue
                     if os.path.lexists(kept) and (not os.path.isfile(kept)
                                                   or os.path.getmtime(path) <= os.path.getmtime(kept)):
                         continue                        # the main checkout's file is no older: it stays as it is
+                    if any(not os.path.isfile(o) or os.path.getmtime(path) <= os.path.getmtime(o) for o in others):
+                        continue                        # the plan's newest copy is in another of its places there
                     os.makedirs(os.path.dirname(kept), exist_ok=True)
                     shutil.copy2(path, kept)
                 except OSError:
                     continue                            # this file stays in the worktree, and the sweep goes on
                 carried += 1
+                for other in others:                    # the plan moved: its older copy goes from its old place
+                    if remove(other):
+                        moved.append(other)
     said = []
     if carried:
         said.append(f"carried {carried} file{'s' if carried > 1 else ''} of this worktree's plans, notebook and "
                     "saved code into the main checkout's store, where they stay when the worktree is removed.")
+    if moved:
+        if _own_repo(store_of(main)):
+            _stage_removals(store_of(main), moved)
+        said.append(f"moved {len(moved)} plan{'s' if len(moved) > 1 else ''} of the main checkout's store to the "
+                    "place this worktree closed, parked or revived it in, from "
+                    + ", ".join(os.path.relpath(p, there).replace("\\", "/") for p in moved) + ".")
     cookies = carry_cookies(store_of(root), store_of(main), root)
     if cookies:
         said.append(f"carried the lifetime of {cookies} of this worktree's files into the main checkout's store, "
                     "so the copy there is cleared when the worktree's is.")
     return said
+
+
+def _other_places(there, rel):
+    """For `rel`, a path under temportal/ with the platform's separator, that is a plan in one of plan-planner's
+    three places, plans/, plans/complete/ or plans/todo/ -> the files of the same name the store under `there`
+    holds in the other two places. [] for any other path. A plan is in one place at a time, so the place of its
+    newest copy is where it is."""
+    parts = rel.replace("\\", "/").split("/")
+    if parts[0] != PLANS or not parts[-1].lower().endswith(".md"):
+        return []
+    if len(parts) == 2:
+        place = ""
+    elif len(parts) == 3 and parts[1] in SHELVES:
+        place = parts[1]
+    else:
+        return []
+    return [p for p in (os.path.join(there, PLANS, *([shelf] if shelf else []), parts[-1])
+                        for shelf in ("", *SHELVES) if shelf != place) if os.path.lexists(p)]
 
 
 FROM = "from"                           # in a cookie of the main checkout's store: the worktree it was carried from
