@@ -95,7 +95,8 @@ class RecordTest(unittest.TestCase):
             elif row["kind"] == "doc":
                 self.assertRegex(key, r"^docs:[a-z0-9][a-z0-9/_-]*$", key)
             else:
-                self.assertRegex(key, r"^[A-Za-z][A-Za-z_]*$", key)
+                # a tool's name, where an MCP server's own name may hold a hyphen, as `scheduled-tasks` does
+                self.assertRegex(key, r"^[A-Za-z][A-Za-z_-]*$", key)
 
     def test_the_record_holds_what_each_plugins_own_files_use(self):
         """A plugin that begins to hook an event, call a method or name a tool of the desktop app gains its row

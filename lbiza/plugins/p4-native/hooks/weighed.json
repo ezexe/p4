@@ -3252,6 +3252,13 @@
     "p4-temportal": "windows."
    }
   },
+  "mcp__scheduled-tasks__create_scheduled_task": {
+   "kind": "tool",
+   "used": [
+    "p4-phi"
+   ],
+   "nowatch": "It makes a scheduled task of the desktop app with its schedule, which no file a session reaches holds: the task's folder under `scheduled-tasks` holds its prompt alone."
+  },
   "mcp__terminal__": {
    "kind": "tool",
    "declined": {
