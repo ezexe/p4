@@ -63,6 +63,7 @@ import {
   VETO,
   busyOf,
   fromMap,
+  isUnattended,
   ofAllEvents,
   ofCompact,
   ofSelf,
@@ -202,7 +203,8 @@ let hasNotices = false
 // The probes that wait for the end of the turn, and whether their run stamps the version.
 let owed: Probe[] = []
 // The origin of the prompt that began the turn under way, and nothing where that is not told: a prompt that came
-// into a running turn may be read inside it or begin the turn after it, and `turn.start` names no origin.
+// into a running turn may be read inside it or begin the turn after it, and `turn.start` names no origin. Nothing
+// too once a prompt that a person may have written came into the turn, which then holds a person's words.
 let origin: string | undefined
 // A prompt came into the turn under way.
 let isJoined = false
@@ -1094,10 +1096,16 @@ export const register: Register = (on, options) => {
   // submitted while the session was idle is kept for the turn it begins. One that carries a `turnId` was typed
   // over a running turn or delivered into it, as a background task's notice is, and began no turn: its origin is
   // not the turn's. Seen in the desktop app on Claude Code 2.1.326: a task's notice arrived in the middle of a turn
-  // ezexe's own message began, and a start later in that turn was read as one on an unattended turn.
+  // ezexe's own message began, and a start later in that turn was read as one on an unattended turn. The other
+  // way round was seen there too, on 2026-11-22: a task's notice began a turn, ezexe wrote into it twice, and the
+  // app then started a session on it, which was read as a start on a turn no person began. So a prompt that came
+  // into a turn and is not known to be unattended leaves the turn with no origin, and a start on it says nothing.
   on('prompt.submit', async ($, e, next) => {
     if (e.turnId === undefined) origin = e.origin?.kind
-    else isJoined = true
+    else {
+      isJoined = true
+      if (!isUnattended(e.origin?.kind)) origin = undefined
+    }
     const notices = hasNotices ? await take($).catch(() => []) : []
     const lines = [...notices, ...waiting]
     waiting = []

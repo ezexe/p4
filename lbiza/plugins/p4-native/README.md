@@ -126,6 +126,8 @@ The probe of a plugin's own compaction asks for a compaction that this module's 
 The probe `start-on-an-unattended-turn` reads the origin of the prompt that began the turn, which is the last one submitted while the session was idle.
 A prompt that carries a `turnId` came into a running turn, as a background task's notice does, and began none, so a start after it says nothing of the condition.
 Neither does a start in the turn after it, since `turn.start` names no origin and that prompt may have begun the turn or been read inside the one before.
+A turn that a notice began and that a message of a person then came into is attended: the app starts a session on it, so from that prompt on the turn has no origin, and a start on it says nothing of the condition.
+Seen in the desktop app on 2026-11-22, before this was so: a task's notice began a turn, ezexe wrote into it twice, the session then started another, and the probe told it as a start on a turn no person began.
 Until p4-native 0.5.11 the module read the origin of the latest prompt: seen in the desktop app on Claude Code 2.1.326, a start in a turn that ezexe's own message began was told as open, with the words "a start went through on a turn a prompt of the origin task-notification began", after a task's notice had arrived in the middle of that turn.
 
 The tool `mcp__p4-native__native` and `/native` take `probes`, which lists every condition that fits this host with its decision, its fault, its check and the answer kept, and `probe`, which reads the asked probes anew and prints each answer.

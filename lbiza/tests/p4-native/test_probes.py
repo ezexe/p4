@@ -64,13 +64,27 @@ class ListTest(unittest.TestCase):
         that turn was told as one on an unattended turn. The turn after such a prompt has no origin told."""
         hook = MODULE.split("on('prompt.submit'", 1)[1].split("\n  })", 1)[0]
         self.assertIn("if (e.turnId === undefined) origin = e.origin?.kind", hook)
-        self.assertIn("else isJoined = true", hook)
+        self.assertIn("else {\n      isJoined = true\n      if (!isUnattended(e.origin?.kind)) origin = undefined\n    }", hook)
         self.assertNotIn("\n    origin = e.origin?.kind", hook)
         end = MODULE.split("on('turn.complete'", 1)[1].split("\n  })", 1)[0]
         self.assertIn("if (e.agentId === undefined && isJoined) {\n      isJoined = false\n      origin = undefined", end)
         test = (PLUGIN / "hooks" / "register.test.ts").read_text(encoding="utf-8")
         self.assertIn("a start after a task notice came into a turn a person began leaves the condition as it was", test)
         self.assertIn("reads the origin of the prompt that began the turn", README)
+
+    def test_a_turn_a_message_of_a_person_came_into_is_no_unattended_turn(self):
+        """Seen in the desktop app on 2026-11-22: a task's notice began a turn, ezexe wrote into it twice, the app
+        then started a session on it, and the probe told that as a start on a turn no person began. A prompt
+        that came into a turn and is not known to be unattended leaves the turn with no origin, so a start on it
+        says nothing, and a notice that came into a turn a notice began changes nothing."""
+        probes = (PLUGIN / "hooks" / "probes.ts").read_text(encoding="utf-8")
+        self.assertIn("export function isUnattended(kind: string | undefined): boolean {\n"
+                      "  return kind !== undefined && UNATTENDED.has(kind)\n}", probes)
+        self.assertIn("if (isStarted && isAsked && isUnattended(kind)) {", probes)
+        test = (PLUGIN / "hooks" / "register.test.ts").read_text(encoding="utf-8")
+        self.assertIn("a start on a turn a task notice began, after a message of a person came into it, leaves the "
+                      "condition blocked", test)
+        self.assertIn("A turn that a notice began and that a message of a person then came into is attended", README)
 
     def test_a_probe_the_module_does_not_ask_names_its_check(self):
         for name, entry in BY_ID.items():

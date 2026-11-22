@@ -840,6 +840,37 @@ test('a start after a task notice came into a turn a person began leaves the con
   expect(book(seen).notices.join('\n')).toContain('a prompt of the origin task-notification began')
 })
 
+test('a start on a turn a task notice began, after a message of a person came into it, leaves the condition blocked', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, ...OF_THE_APP],
+    files: { [BOOK]: ranOn('desktop/interactive', '2.1.326', { 'start-on-an-unattended-turn': 'blocked' }) },
+    app: () => '{"sessionId":"local_9","name":"worker"}',
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  // A task's notice begins the turn, and ezexe writes into it before the session starts another.
+  await $.prompt.submit({ text: 'a task ended', origin: { kind: 'task-notification' }, wait: false } as never)
+  await $.turn.start({ text: 'a task ended', turnId: 'turn-1' })
+  await $.prompt.submit({ text: 'start a session for the plans', ...TYPED, turnId: 'turn-1', wait: false } as never)
+  const started = await $.tool.call({ tool: START, initiation: 'user_asked', title: 'worker', prompt: 'do it' } as never)
+  await clock.settle()
+
+  expect((started as { text?: unknown }).text).toBe('{"sessionId":"local_9","name":"worker"}')
+  expect(book(seen).notices).toEqual([])
+  expect(book(seen).hosts['desktop/interactive']?.answers['start-on-an-unattended-turn']?.answer).toBe('blocked')
+
+  // A second notice that comes into a turn a notice began leaves it a turn no person began, and its start is told.
+  await $.turn.complete({ ...TURN, turnId: 'turn-1' })
+  await $.prompt.submit({ text: 'a task ended', origin: { kind: 'task-notification' }, wait: false } as never)
+  await $.turn.start({ text: 'a task ended', turnId: 'turn-2' })
+  await $.prompt.submit({ text: 'another ended', origin: { kind: 'task-notification' }, turnId: 'turn-2', wait: false } as never)
+  await $.tool.call({ tool: START, initiation: 'user_asked', title: 'worker', prompt: 'do it' } as never)
+  await clock.settle()
+  expect(book(seen).notices.join(' ')).toContain('a prompt of the origin task-notification began')
+})
+
 test('probe reads the probes on request and prints each answer, and probes lists each decision', async ($, on) => {
   const clock = mock.clock(on)
   const seen = machine(on, { files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
