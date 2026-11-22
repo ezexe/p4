@@ -939,7 +939,9 @@ class TerminalWorker(Base):
         self.assertIn("its branch `worktree-<name>`", tail)
         for name in set(names):
             self.assertEqual(tail.count(f"`{name}`"), 1, "each worker is named once in the form")
-        self.assertLess(len(tail.split("phi (p4-phi):")[0]), 3200, "the form stays short beside a message")
+        self.assertIn(upkeep.plans.REVIEW_PART, tail, "the worker's goal carries the review of its change")
+        self.assertLess(len(tail.split("phi (p4-phi):")[0]) - len(upkeep.plans.REVIEW_PART), 3200,
+                        "the form stays short beside a message, the review's words apart")
         self.assertIn("SendMessage to the session named Orchestrate the narwhal exporter.", tail)
         self.assertIn("CLAUDE_CODE_HOST_SESSION_ID", tail)
         for lack in ("no row in the sidebar", "no Changes card", "no archive"):
@@ -954,6 +956,9 @@ class TerminalWorker(Base):
                 mock.patch.object(upkeep, "title", lambda sid, s=None: s["title"]):
             win = upkeep.script_of(s, "upkeep-0a1b2c3d", "E:/code/narwhal", windows=True)
             nix = upkeep.script_of(s, "upkeep-0a1b2c3d", "/code/narwhal", windows=False)
+            with mock.patch.object(phi, "GOAL_REVIEW", False):
+                off = upkeep.script_of(s, "upkeep-0a1b2c3d", "/code/narwhal", windows=False)
+        self.assertNotIn(upkeep.plans.REVIEW_PART, off[1][-1], "with `phi.goal_review` off its goal asks for none")
         self.assertEqual(win[0], "start-upkeep-0a1b2c3d.ps1")
         self.assertEqual(win[2], "& '<folder>\\start-upkeep-0a1b2c3d.ps1'")
         self.assertTrue(win[1][0].startswith("foreach ($n in 'CLAUDE_CODE_HOST_SESSION_ID', "))
@@ -966,6 +971,7 @@ class TerminalWorker(Base):
             run = lines[-1]
             self.assertIn("--permission-mode auto --worktree upkeep-0a1b2c3d --settings", run)
             self.assertIn("--name upkeep-0a1b2c3d ", run, "the name its starter asks its idle notice by")
+            self.assertIn(upkeep.plans.REVIEW_PART, run, "its goal carries the review, in words a shell line takes")
             self.assertEqual(run.count("'"), 4, "the prompt and the settings path are the two quoted words")
             self.assertNotRegex(run, r"[\"$`;()]", "no character of the title reaches the shell")
             # the tool types one literal line of printable ASCII and refuses a variable read, a pipe and a backtick

@@ -967,7 +967,9 @@ def terminal(home, s, text, d=None, hand=False):
 
 def script_of(s, name, main, windows=None):
     """The start script of a terminal worker, as (its file's name, its lines, the line typed into the tab). `<folder>`
-    stands for the folder the session writes the files in, which only the session knows."""
+    stands for the folder the session writes the files in, which only the session knows. Its goal carries the
+    review of the change, plans.REVIEW_PART, as a started session's goal does, where `phi.goal_review` is
+    on: a terminal worker's work is a change that lands on the default branch."""
     windows = WINDOWS if windows is None else windows
     sid, sep = s["sessionId"], "\\" if windows else "/"
     here = main.replace("/", sep)
@@ -975,7 +977,8 @@ def script_of(s, name, main, windows=None):
     prompt = (f"/goal Carry out the brief in the file <folder>{sep}brief-{name}.md. This is met when every part of "
               f"that brief is on {default_ref(main)} with its proof shown in this conversation, or is written into "
               f"the note <folder>{sep}report-{name}.md as left with the reason, and one message with the outcome "
-              f"has been sent with SendMessage to the session named {who}.")
+              f"has been sent with SendMessage to the session named {who}."
+              + (" " + plans.REVIEW_PART if PHI.GOAL_REVIEW else ""))   # its work lands on the default branch
     run = (f"claude -p '{prompt}' --name {name} --permission-mode {mode_of(sid)} --worktree {name} "
            f"--settings '<folder>{sep}{SETTINGS_FILE}'")
     if windows:

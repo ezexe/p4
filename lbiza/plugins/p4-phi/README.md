@@ -151,6 +151,10 @@ Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was 
 
 Where a store's `phi.json` sets `goal` true, a worker gets Claude Code's own goal in place of that send-back.
 The line `Done looks like:` of its brief is the goal's condition, and the module sets it once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`.
+Where the brief asks for changes and `phi.goal_review` is on, as it is by default, the condition also asks for a review of the change by a reader that has not seen the conversation: the skill `code-review` at the level `low` and without `--fix` for a change to code, and the agent `p4-phi:check` for anything else.
+Each finding is mended or answered with the reason it is no fault, one second review reads a mended change, and there is no third, since by `best-practices.md` "A reviewer that's asked to find problems will always find something".
+The goal of a worker in the Terminal panel carries the same words, kept in one place, `plans.REVIEW_PART`.
+Seen in scripted runs of Claude Code 2.1.328 whose whole prompt was `/goal`: with those words the goal's check judged the goal met at its first pass after two reviews, and with words that asked for no unmended "confirmed" finding and capped the rounds at two, the check held out for a review that came back clean and the run ended with the goal unmet.
 `$.command.run` queues the command until the session is idle, so it waits through a turn that begins at once, and a stop of that turn drops it: `plugins/mods/api.md`, "Work your mod started before the interruption", gives the call as rejected with `the command was removed from the queue before it ran`, and as refused from then until the session's next input.
 So a condition that was answered and is not set is answered again, to the look after a later turn's end and to three looks in all, and never while the module's command has not answered.
 The module tells `phi.py` what a command that set no goal said, and `phi.py goal` prints it with how many looks the condition was answered to.
@@ -418,6 +422,7 @@ Every key is optional.
 | `child_levels` | the table under Delegation | an object: a kind, `static`, `build`, `design`, `review` or `top`, with its `model`, an id or `inherit`, and its `effort`, a level or `inherit` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `plan_mode` | `true` | `false`: the built-in plan rule, which hands plan mode, is left out |
+| `goal_review` | `true` | `false`: the goal p4-phi sets for a worker whose work changes files asks for no review of that change by a reader that has not seen the conversation |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |

@@ -1442,6 +1442,7 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, PLAN_AT, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 PLAN_MODE = True              # p4.json phi.plan_mode: false leaves the plan rule out of a project
+GOAL_REVIEW = True            # p4.json phi.goal_review: false leaves the review of the change out of a worker's goal
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
 
@@ -1449,7 +1450,7 @@ UPKEEP = False                # p4.json phi.upkeep: true has a session that star
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, UPKEEP
+    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, GOAL_REVIEW, UPKEEP
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
@@ -1460,6 +1461,7 @@ def project_conf(store):
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     LEVELS_ON = d.get("levels") is not False
     PLAN_MODE = d.get("plan_mode") is not False
+    GOAL_REVIEW = d.get("goal_review") is not False
     UPKEEP = d.get("upkeep") is True
     relay.UPKEEP = controls.UPKEEP = UPKEEP     # the words that leave an archive to ezexe go with it on
     plans.LEVELS = LEVELS_ON
@@ -2548,6 +2550,7 @@ def h_user_prompt_submit(payload):
         s["taskAt"] = now()
         if GOAL and spawned_from(s) and plans.done_line(req):   # the whole line, which the cut task may not hold
             s["doneLine"] = plans.done_line(req)
+            keep_review(s, req)
     issue_line = ""
     if spawned_from(s) and not load_turns(me.home, s["sessionId"]) and not s.get("issue"):
         issue_line = issues.ensure(me.home, s, req or str(payload.get("prompt") or ""),
@@ -2785,6 +2788,7 @@ def h_stop(payload):
         # the worker got no goal. The line is taken where the task is, from the turn's whole request.
         if GOAL and spawned_from(s) and plans.done_line(turn.get("prompt")):
             s["doneLine"] = plans.done_line(turn.get("prompt"))
+            keep_review(s, turn.get("prompt"))
     if (GOAL or s.get("goal") or s.get("goalAsk")) and payload.get("transcript_path"):
         s["transcript"] = str(payload["transcript_path"])   # where goal_verdict reads the goal's last row
     save_session(me.home, s)
@@ -3001,9 +3005,20 @@ GOAL_STARTER = ("The session that started this one is `{sid}`. A part of this co
                 "or the whole work as done.")
 
 
-def goal_condition(s, line, cut_to_fit=True):
+def keep_review(s, brief):
+    """Keeps on a session, beside its done line, whether its goal carries the review of the change: `doneReview`,
+    where p4.json's `phi.goal_review` is on and the brief asks for changes, as issues.writing tells a brief that
+    changes files from a check, an audit or a question."""
+    if GOAL_REVIEW and issues.writing(brief):
+        s["doneReview"] = True
+    else:
+        s.pop("doneReview", None)
+
+
+def goal_condition(s, line, cut_to_fit=True, review=False):
     """A condition as it is set for the session `s`: `line`, and for a session another session started the two
-    sentences of GOAL_STARTER after it, which name the starter by the id its messages carry. goal.md, "Write an
+    sentences of GOAL_STARTER after it, which name the starter by the id its messages carry. With `review`, the
+    review of the change, plans.REVIEW_PART, stands between the two, for a brief that changes files. goal.md, "Write an
     effective condition": "The evaluator judges your condition against what Claude has surfaced in the conversation."
     So a brief's line that its starter later changes by a message cannot be met as worded unless the condition says
     that such a message counts. Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326: a worker's line named
@@ -3016,7 +3031,7 @@ def goal_condition(s, line, cut_to_fit=True):
     above = spawned_from(s)
     if not above or not line:
         return line
-    tail = GOAL_STARTER.format(sid=above)
+    tail = (plans.REVIEW_PART + " " if review else "") + GOAL_STARTER.format(sid=above)
     room = plans.GOAL_CHARS - len(tail) - 1
     if len(line) > room:
         if not cut_to_fit or room < plans.GOAL_LEAST:
@@ -3116,7 +3131,7 @@ def goal_due(home, sid, flying=False):
         return goal_again(home, s, flying)
     if not GOAL or not spawned_from(s) or not s.get("doneLine") or not ended or flying:
         return ""
-    condition = goal_condition(s, s["doneLine"])
+    condition = goal_condition(s, s["doneLine"], review=bool(s.get("doneReview")))
     s["goal"] = {"condition": condition, "asked": now(), "tries": 1, "turn": ended}
     save_session(home, s)
     return condition

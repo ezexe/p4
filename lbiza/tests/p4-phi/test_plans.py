@@ -1853,9 +1853,11 @@ class NativeGoal(unittest.TestCase):
     BRIEF = "Port the flush to the new hook.\nFiles: hooks/flush.py\nDone looks like: " + LINE + "\n\nReport then."
     ON = {"P4_PHI_GOAL": "1"}
 
-    def worded(self, line):
-        """A worker's condition as it is set: the line, then the sentences that name the session that started it."""
-        return line + " " + phi.GOAL_STARTER.format(sid=TOP)
+    def worded(self, line, review=True):
+        """A worker's condition as it is set: the line, the review of its change where its brief asks for changes,
+        as BRIEF does, then the sentences that name the session that started it. A condition a session asked for
+        itself carries no review."""
+        return " ".join([line] + [plans.REVIEW_PART] * review + [phi.GOAL_STARTER.format(sid=TOP)])
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1980,6 +1982,35 @@ class NativeGoal(unittest.TestCase):
         s = self.t.session(KID)
         self.assertTrue(s.get("task"))
         self.assertNotIn("doneLine", s)
+
+    def test_a_brief_that_changes_files_has_its_change_reviewed_in_its_goal_and_one_that_only_reads_does_not(self):
+        """Where p4.json's `phi.goal_review` is on, as it is by default, the goal of a worker whose brief asks for
+        changes carries the review of the change, plans.REVIEW_PART, between the brief's line and the starter's
+        sentences. A brief that only reads, as issues.writing tells it, keeps no review, and a line too long for
+        the 4,000 characters a condition holds is cut so that both parts after it stay whole."""
+        import p4conf
+        self.assertIs(p4conf.DEFAULTS["phi"]["goal_review"], True)
+        self.assertEqual(p4conf.env_name("phi.goal_review"), "P4_PHI_GOAL_REVIEW")
+        self.brief(**self.ON)
+        self.assertIs(self.t.session(KID).get("doneReview"), True)
+        self.stop("I ported half the flush.", "u1", **self.ON)
+        tail = phi.GOAL_STARTER.format(sid=TOP)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), " ".join((self.LINE, plans.REVIEW_PART, tail)))
+        reads = {"sessionId": KID2}
+        phi.keep_review(reads, "Check what hooks/flush.py does and report.\nDone looks like: the report names "
+                               "each caller of the flush.")
+        self.assertNotIn("doneReview", reads)
+        kid = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
+        cut = phi.goal_condition(kid, "x" * plans.GOAL_CHARS, review=True)
+        self.assertEqual(len(cut), plans.GOAL_CHARS)
+        self.assertTrue(cut.startswith("x" * 100) and cut.endswith(" ".join(("", plans.REVIEW_PART, tail))), cut[-90:])
+
+    def test_with_the_key_off_a_workers_goal_asks_for_no_review(self):
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"goal_review": False}}))
+        self.brief(**self.ON)
+        self.assertNotIn("doneReview", self.t.session(KID))
+        self.stop("I ported half the flush.", "u1", **self.ON)
+        self.assertEqual(self.phi("look", **self.ON).get("goal"), self.worded(self.LINE, review=False))
 
     def test_the_done_line_is_the_goal_the_look_answers_once_the_first_turn_has_ended(self):
         self.brief(**self.ON)
@@ -2138,7 +2169,7 @@ class NativeGoal(unittest.TestCase):
         self.assertNotIn("goalAsk", self.t.session(KID))
         self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN).returncode, 0)
         self.assertEqual(self.t.cli(KID, "goal", "ask", "--", self.OWN + " Or stop after 20 turns.").returncode, 0)
-        self.assertEqual(self.phi("look").get("goal"), self.worded(self.OWN + " Or stop after 20 turns."),
+        self.assertEqual(self.phi("look").get("goal"), self.worded(self.OWN + " Or stop after 20 turns.", review=False),
                          "the later ask, which names the worker's starter as its brief's line did")
         goal = self.t.session(KID)["goal"]
         self.assertEqual((goal["own"], "set" in goal), (True, False), "the one before it is replaced, and not yet set")

@@ -1491,6 +1491,38 @@ DONE_LINE = re.compile(r"^[ \t>*_-]*Done looks like[*_]*[ \t]*:[*_]*[ \t]*(\S.*)
 GOAL_CHARS = 4000             # goal.md, "Write an effective condition": "The condition can be up to 4,000 characters."
 GOAL_LEAST = 12               # a shorter line is no condition, so `/goal clear` or one of its aliases is never sent
 GOAL_TAIL = 1 << 20           # the bytes from a transcript's end read for the goal's last row
+# The part of a goal that has a worker's change read by a reader that has not seen the conversation, where the work
+# changes files and p4.json's `phi.goal_review` is on. It is kept here alone and both goals p4-phi sets carry it: the
+# one from a brief's line `Done looks like:`, by phi.goal_condition, and a terminal worker's, by upkeep.script_of.
+# That worker's line is typed into a shell, so these words hold no backtick, quote or bracket.
+# best-practices.md, "Give Claude a check to run": "A fresh reviewer does help, because it hasn't seen your
+# reasoning", and "A reviewer that's asked to find problems will always find something. If you fix every finding,
+# you end up with extra abstraction layers and tests for cases that can't happen." goal.md, "Write an effective
+# condition": the evaluator "doesn't run commands or read files independently, so write the condition as something
+# Claude's own output can demonstrate."
+# Seen on 2026-11-22 in scripted runs of Claude Code 2.1.328 whose whole prompt was `/goal`, on a change of twenty
+# lines with two faults its own tests missed:
+# - Worded "leaves no finding it confirmed unmended, with two rounds of review at most", the run stalled. Two
+#   reviews raised four findings and the session mended all four, and the goal's check then judged it not met ten
+#   times: at `low` the skill gives a severity and no verdict, so "confirmed" named nothing the transcript held, no
+#   review had come back clean, and the cap forbade the round that could. Claude Code ended the loop after eight
+#   passes with no tool call, the goal unmet.
+# - Worded as below, the check judged it met at its first pass: two reviews of three findings each, of which two
+#   were mended and one answered as no fault each time, and no third. Its reason quoted each finding as mended or
+#   answered and the line that no third review was run.
+# - With no level named the skill raised nine and then eight findings on those twenty lines, and at `low` three and
+#   three, so the level is named.
+# So the words say what the transcript can show, name no verdict of the skill, let a finding be answered, and say
+# outright that no review has to come back clean and that there is no third. A worker in the Terminal panel runs
+# with p4-phi off, so they name a plain subagent where the session has no `p4-phi:check`.
+REVIEW_PART = ("It is met only when this conversation also shows a review of the change by a reader that has not seen "
+               "this conversation: the skill code-review at the level low and without --fix for a change to code, and "
+               "for anything else the agent p4-phi:check, or a subagent handed the change and none of this "
+               "conversation where this session has no such agent. Each finding of the review is mended, or answered "
+               "here with the reason it is no fault, and this conversation says which for each. Where a finding led "
+               "to a mend, one second review reads the mended change, and its findings are mended or answered the "
+               "same way. Then this part is met: no review has to come back without a finding, and there is no third "
+               "review.")
 
 
 def done_line(text):
