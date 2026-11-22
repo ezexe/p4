@@ -1237,8 +1237,9 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with YES, so the rules of a set whose key
 # has no yes beside it go and a yes given before YES is carried over, by _carry_yes, and 12 with PLANS naming
 # temportal/plan-planner, so a plansDirectory the keeper wrote for temportal/plans takes the new folder at the next
-# start, and one a person set stays as it is.
-KEEPER = 12
+# start, and one a person set stays as it is, and 13 with DENY_RULES emptied, so the deny rule on the model tool an
+# earlier keeper wrote goes at the next start.
+KEEPER = 13
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1781,12 +1782,15 @@ def version_folders(here):
 # an approval card before Claude archives a session, except in Auto mode and Bypass permissions mode".
 ASK_KEY = "permissions.ask"
 ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
-# The deny rule ezexe approved, kept the same way under RECORD's `denyRules`: a session's model is chosen on its start
-# call and never changed after, since a change mid-run re-prices its turns, so set_session_model is denied, which
-# replaced p4-phi's own refusal of the call. https://code.claude.com/docs/en/permissions: "Deny rules prevent Claude
-# Code from using the specified tool", and "Rules are evaluated in order: deny, then ask, then allow."
+# The deny rules p4 keeps, the same way under RECORD's `denyRules`: none. Until KEEPER 13 the keeper wrote one on
+# mcp__ccd_session_mgmt__set_session_model, so that no session changed a running session's model. The app has that
+# tool and its own gate, in the words of its sibling set_session_effort: "Same gate as set_session_model: usually no
+# prompt for a session this session started at this session's own effort or lower, the app asks the user for a
+# higher effort or any other session", and "refused for this session". So the rule was p4's own and is retired: with
+# the tuple empty _keep_rules takes the entry a copy wrote out of each local file at the store's next whole check,
+# with the list p4 made for it, and leaves every deny rule a person wrote.
 DENY_KEY = "permissions.deny"
-DENY_RULES = ("mcp__ccd_session_mgmt__set_session_model",)
+DENY_RULES = ()
 # Both rules serve p4-phi's session tree alone, so the keeper writes them only where p4-phi is installed and enabled,
 # and takes its own entries out where it is not, as it takes out any key it no longer writes. p4-phi's own copy sits
 # beside phi.py and runs only where p4-phi is loaded. The copy in p4-temportal reads Claude Code's own files:

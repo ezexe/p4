@@ -698,12 +698,12 @@ class Supervisor(unittest.TestCase):
         self.assertRegex(lines, rf"`{TOP4}`[^\n]*low\b")
         self.assertIn("note", lines, "logged on the board")
         import p4conf
-        self.assertIn("mcp__ccd_session_mgmt__set_session_model", p4conf.DENY_RULES, "the app's deny rule refuses it")
+        self.assertEqual(p4conf.DENY_RULES, (), "p4 writes no deny rule on the model tool: the app's own gate holds")
         said, out = self.pre(PUP, "mcp__ccd_session_mgmt__set_session_model",
                              {"session_id": TOP, "model": "claude-haiku-5-5"})
         self.assertNotIn("permissionDecision", out, "p4-phi keeps no refusal of its own")
         self.assertIn("set_session_effort", controls.RULE)
-        self.assertIn("only on the start call", controls.RULE)
+        self.assertIn("`mcp__ccd_session_mgmt__set_session_model`, only where effort alone does not fit", controls.RULE)
 
     def test_a_worker_under_a_puppeteer_hands_up_a_pages_path_and_counts_and_never_publishes(self):   # 226
         t = self.t

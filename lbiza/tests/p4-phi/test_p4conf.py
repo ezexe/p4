@@ -864,7 +864,7 @@ class ClaudeSettings(unittest.TestCase):
         got = self.read(self.local())
         self.assertEqual(got["permissions"]["ask"], mine, "p4's own entry is gone, the user's rules are untouched")
         self.assertNotIn("askRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
-        self.assertEqual(got["permissions"]["deny"], list(p4conf.DENY_RULES), "the deny rule on the model tool stays")
+        self.assertNotIn("deny", got["permissions"], "p4 writes no deny rule")
         self.assertEqual(got["env"].get("P4_PHI_UPKEEP"), "1", "the changed setting shows in the local file")
         p4conf.set_key(p4, "phi.upkeep", False)
         p4conf.keep_settings(self.project, platform="win32")
@@ -895,6 +895,7 @@ class ClaudeSettings(unittest.TestCase):
             project = os.path.join(self.tmp, f"made{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
+            _write(self.local(project), {"permissions": {"deny": ["Read(./.env)"]}})
             copy.keep_settings(project, platform="linux")
             self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK])
             self.assertIs(self.lists(project)["permissions.ask"], True, "the key was not there: p4 made the list")
@@ -903,7 +904,7 @@ class ClaudeSettings(unittest.TestCase):
                 copy.keep_settings(project, platform="linux")
             got = self.read(self.local(project))["permissions"]
             self.assertNotIn("ask", got, "the list p4 made and emptied is gone with its key")
-            self.assertEqual(got["deny"], [self.MODEL_DENY], "the section keeps its other key")
+            self.assertEqual(got["deny"], ["Read(./.env)"], "the section keeps its other key")
             self.assertNotIn("permissions.ask", self.lists(project))
             copy.set_key(p4, "phi.upkeep", False)
             copy.keep_settings(project, platform="linux")
@@ -968,7 +969,7 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(self.project, platform="linux")
         got = self.read(self.local())["permissions"]
         self.assertNotIn("ask", got)
-        self.assertEqual(got["deny"], ["Read(./.env)", self.MODEL_DENY])
+        self.assertEqual(got["deny"], ["Read(./.env)"])
 
     def test_set_key_keeps_every_other_setting_and_a_later_load_never_moves_it(self):
         p4 = os.path.join(self.project, ".claude", "p4")
@@ -1017,36 +1018,38 @@ class ClaudeSettings(unittest.TestCase):
 
     MODEL_DENY = "mcp__ccd_session_mgmt__set_session_model"
 
-    def test_the_deny_rule_on_set_session_model_is_p4s_own_entry_once_beside_the_users(self):
-        """ezexe approved a deny rule on the model tool, which replaced p4-phi's own refusal: after two checks it is in
-        permissions.deny once, after the user's own deny rules, which stay as they were and in order, beside the
-        archive ask rule, and the record owns it."""
-        self.assertEqual(p4conf.DENY_RULES, (self.MODEL_DENY,))
+    def test_the_keeper_writes_no_deny_rule_and_takes_out_the_one_an_earlier_copy_wrote(self):
+        """Until KEEPER 13 the keeper wrote a deny rule on the model tool. The app has that tool and a gate of its
+        own, so the rule is retired: a fresh project gets no deny rule, and the entry an earlier copy wrote and
+        recorded goes at the next whole check, with the list p4 made for it, while a person's own deny rules stay
+        as they were and in order."""
+        from unittest import mock
+        self.assertEqual(p4conf.DENY_RULES, ())
+        self.assertGreaterEqual(p4conf.KEEPER, 13)
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
-        mine = ["Bash(rm *)", "mcp__ccd_session_mgmt__delete_session", "Read(./.env)"]
-        _write(self.local(), {"permissions": {"deny": list(mine)}})
-        for _ in range(2):
-            p4conf.keep_settings(self.project, platform="win32")
-        got = self.read(self.local())["permissions"]
-        self.assertEqual(got["deny"], mine + [self.MODEL_DENY], "the user's own first and untouched, p4's once")
-        self.assertEqual(got["ask"], [self.ARCHIVE_ASK], "beside the archive ask rule")
+        p4conf.keep_settings(self.project, platform="linux")
+        self.assertNotIn("deny", self.read(self.local())["permissions"], "a fresh project gets none")
+        with mock.patch.object(p4conf, "DENY_RULES", (self.MODEL_DENY,)):      # as a copy before KEEPER 13 left it
+            p4conf.keep_settings(self.project, platform="linux")
+        self.assertEqual(self.read(self.local())["permissions"]["deny"], [self.MODEL_DENY])
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(list(rec["denyRules"].values())[0]["entries"], [self.MODEL_DENY])
-        p4conf.keep_settings(self.project, platform="linux")
-        self.assertEqual(self.read(self.local())["permissions"]["deny"].count(self.MODEL_DENY), 1, "on every platform")
-
-    def test_a_fresh_project_gets_the_deny_rule_and_one_deleted_by_hand_stays_gone(self):
-        os.makedirs(os.path.join(self.project, ".claude", "p4"))
-        p4conf.keep_settings(self.project, platform="linux")
-        d = self.read(self.local())
-        self.assertEqual(d["permissions"]["deny"], [self.MODEL_DENY])
-        d["permissions"]["deny"].remove(self.MODEL_DENY)
-        _write(self.local(), d)
         for _ in range(2):
             p4conf.keep_settings(self.project, platform="linux")
-        self.assertNotIn(self.MODEL_DENY, self.read(self.local())["permissions"].get("deny", []),
-                         "deleted by hand: ezexe's choice, not written back")
-        self.assertEqual(self.read(self.local())["permissions"]["ask"], [self.ARCHIVE_ASK], "the ask rule stays")
+        got = self.read(self.local())["permissions"]
+        self.assertNotIn("deny", got, "p4's own entry is gone, and so is the list p4 made for it")
+        self.assertEqual(got["ask"], [self.ARCHIVE_ASK], "the ask rule stays")
+        self.assertNotIn("denyRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
+        other = os.path.join(self.tmp, "beside")
+        os.makedirs(os.path.join(other, ".claude", "p4"))
+        mine = ["Bash(rm *)", "Read(./.env)"]
+        local = os.path.join(other, ".claude", "settings.local.json")
+        _write(local, {"permissions": {"deny": list(mine)}})
+        with mock.patch.object(p4conf, "DENY_RULES", (self.MODEL_DENY,)):
+            p4conf.keep_settings(other, platform="linux")
+        self.assertEqual(self.read(local)["permissions"]["deny"], mine + [self.MODEL_DENY])
+        p4conf.keep_settings(other, platform="linux")
+        self.assertEqual(self.read(local)["permissions"]["deny"], mine, "a person's own stay, first and in order")
 
     def test_the_keeper_never_removes_a_deny_rule_it_did_not_write(self):
         """A user who wrote the same rule first owns it: the keeper takes it over neither while it wants the rule nor
@@ -1055,7 +1058,8 @@ class ClaudeSettings(unittest.TestCase):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         mine = ["Bash(rm *)", self.MODEL_DENY]
         _write(self.local(), {"permissions": {"deny": list(mine)}})
-        p4conf.keep_settings(self.project, platform="linux")
+        with mock.patch.object(p4conf, "DENY_RULES", (self.MODEL_DENY,)):
+            p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["deny"], mine, "the user's own, left as it is")
         self.assertNotIn("denyRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
         with mock.patch.object(p4conf, "DENY_RULES", ()):
@@ -1064,7 +1068,8 @@ class ClaudeSettings(unittest.TestCase):
         other = os.path.join(self.tmp, "other")
         os.makedirs(os.path.join(other, ".claude", "p4"))
         _write(os.path.join(other, ".claude", "settings.local.json"), {"permissions": {"deny": ["Bash(rm *)"]}})
-        p4conf.keep_settings(other, platform="linux")
+        with mock.patch.object(p4conf, "DENY_RULES", (self.MODEL_DENY,)):
+            p4conf.keep_settings(other, platform="linux")
         with mock.patch.object(p4conf, "DENY_RULES", ()):
             p4conf.keep_settings(other, platform="linux")
         got = json.loads(Path(other, ".claude", "settings.local.json").read_text(encoding="utf-8"))
@@ -1101,7 +1106,7 @@ class ClaudeSettings(unittest.TestCase):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         self.install_phi(enabled=True)
         other.keep_settings(self.project, platform="linux")
-        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
         self.assertNotIn("allow", self.read(self.local())["permissions"], "the allow rules are p4-phi's copy's alone")
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(list(rec["phi"].values()), [True])
@@ -1145,7 +1150,7 @@ class ClaudeSettings(unittest.TestCase):
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
         _write(self.local(), {"permissions": {"ask": ["Bash(git push *)"], "deny": ["Read(./.env)"]}})
-        both = (["Bash(git push *)", self.ARCHIVE_ASK], ["Read(./.env)", self.MODEL_DENY])
+        both = (["Bash(git push *)", self.ARCHIVE_ASK], ["Read(./.env)"])
         mine = (["Bash(git push *)"], ["Read(./.env)"])
         self.install_phi(enabled=True)
         other.migrate_layout(p4)
@@ -1176,7 +1181,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(self.two_rules(), (None, None))
         with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)):
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
-        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
 
     def test_the_temportal_copy_leaves_both_rules_to_a_checkout_of_p4_phi_that_kept_the_store(self):
         """A checkout of p4-phi loaded by `--plugin-dir` is in no file of Claude Code's, so p4-temportal's copy
@@ -1191,7 +1196,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertIsNone(other.phi_on(self.project, self.local(), "linux", rec))
         other.migrate_layout(p4)
         other.keep_settings(self.project, platform="linux")
-        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], [self.MODEL_DENY]))
+        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         rec["phiCopy"] = Path(self.tmp, "gone", "scripts").as_posix()
         _write(self.record(), rec)
@@ -1874,8 +1879,7 @@ REFERENCE = {
         'Bash(python -I -X utf8 "<scripts>/p4.py" sync *)',
         'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)',
         'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)'],
-        "ask": ["mcp__ccd_session_mgmt__archive_session"],
-        "deny": ["mcp__ccd_session_mgmt__set_session_model"]},
+        "ask": ["mcp__ccd_session_mgmt__archive_session"]},
     "disableAllHooks": False,
     "disableSkillShellExecution": False,
 }

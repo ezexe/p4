@@ -340,7 +340,9 @@ RULE = (
     "orchestrators, since the app nests a session under its starter for good. It checks the orchestrators and its "
     "own worker for stalls and context, and tunes "
     "their effort from their reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging "
-    "each change on its board; a model is passed only on the start call and never changed after. A `Finding:` line "
+    "each change on its board. It changes a running session's model, by "
+    "`mcp__ccd_session_mgmt__set_session_model`, only where effort alone does not fit that session's work and its "
+    "context is worth keeping, and starts a new session otherwise. A `Finding:` line "
     "stays on its board until such a note holds its text. It shows ezexe a result in its reply as a short "
     "table or list, with the full page kept in the store's notes, and publishes no Artifact and sends no file "
     "unless ezexe asks.{asks}")
@@ -904,7 +906,8 @@ def effort_text(rows):
         return ""
     return (f"phi (p4-phi): set these sessions' effort with `mcp__ccd_session_mgmt__set_session_effort` before each "
             f"one's next turn, and log each change on the board with `{PHI.commands()} note \"<the change>\" --source "
-            f"\"<its report>\" --kind effort`. Their models stay as they were started:\n" + "\n".join(told))
+            f"\"<its report>\" --kind effort`. Change a model only where effort alone does not fit, with "
+            f"`mcp__ccd_session_mgmt__set_session_model`:\n" + "\n".join(told))
 
 
 # --- the board ------------------------------------------------------------------------------------------------------------
