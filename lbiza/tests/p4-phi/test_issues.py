@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 # the folder of the code these tests run
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
@@ -591,6 +592,22 @@ class NoConsoleWindow(unittest.TestCase):
         for name in ("p4.py", "phi.py", "console.py"):
             write(os.path.join(self.fake, name), CONSOLE)
         self.addCleanup(self._tmp.cleanup)
+        if os.name == "nt":
+            # A PATH that holds no `sh`, as PowerShell's does: its `bash` is System32's, the launcher of WSL.
+            keep = [d for d in os.environ.get("PATH", "").split(os.pathsep)
+                    if d and not any(os.path.isfile(os.path.join(d, n)) for n in ("sh.exe", "bash.exe"))]
+            patch = unittest.mock.patch.dict(os.environ, {"PATH": os.pathsep.join(keep)})
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def test_a_proofs_shell_is_git_bashs_sh_where_path_holds_none(self):
+        if os.name != "nt" or not shutil.which("git"):
+            self.skipTest("no Git Bash on Windows")
+        self.assertIsNone(shutil.which("sh"))
+        argv, shell = issues._argv("true")
+        self.assertFalse(shell)
+        self.assertEqual(os.path.basename(argv[0]).lower(), "sh.exe")
+        self.assertNotIn("system32", argv[0].lower())
 
     def windows(self, out):
         """Each reporter's console window, once both have written."""

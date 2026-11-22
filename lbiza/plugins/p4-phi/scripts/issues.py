@@ -656,8 +656,32 @@ def proof_of(home, s):
     return None
 
 
+def git_bash_sh():
+    """On Windows, Git Bash's sh.exe where PATH holds no `sh`, or None. A `bash` that PATH finds there can be the
+    bash.exe in System32, the launcher of WSL, which would run a proof's command in a Linux guest and not in the
+    Git Bash that Claude Code runs a command hook with. Git's own folder is one to three above the `git` PATH
+    finds, for cmd, usr/bin or mingw64/libexec/git-core."""
+    if os.name != "nt":
+        return None
+    starts = []
+    git = shutil.which("git")
+    if git:
+        starts.append(os.path.dirname(git))
+    for var, under in (("ProgramFiles", ()), ("ProgramW6432", ()), ("ProgramFiles(x86)", ()),
+                       ("LOCALAPPDATA", ("Programs",))):
+        if os.environ.get(var):
+            starts.append(os.path.join(os.environ[var], *under, "Git", "cmd"))
+    for folder in starts:
+        for _ in range(3):
+            folder = os.path.dirname(folder)
+            sh = os.path.join(folder, "usr", "bin", "sh.exe")
+            if os.path.isfile(sh):
+                return sh
+    return None
+
+
 def _argv(cmd):
-    sh = shutil.which("sh") or shutil.which("bash")
+    sh = shutil.which("sh") or (git_bash_sh() if os.name == "nt" else shutil.which("bash"))
     return ([sh, "-c", cmd], False) if sh else (cmd, True)
 
 
