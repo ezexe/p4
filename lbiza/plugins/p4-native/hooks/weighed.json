@@ -2313,17 +2313,15 @@
   },
   "PostToolBatch": {
    "kind": "hook",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace the one process its async PostToolUse entry starts for each call of a parallel batch with one start that writes every lookup row of the batch."
-   },
    "declined": {
     "p4-temportal": "it keeps nothing after a tool call.",
     "p4-native": "a miss is read off one call, at `classic.PostToolUse`."
    },
-   "says": "After a full batch of parallel tool calls resolves, before the next model call."
+   "says": "After a full batch of parallel tool calls resolves, before the next model call.",
+   "nowatch": "Claude Code raises it for a plugin's hook: a session has no call that does this by hand."
   },
   "PostToolUse": {
    "kind": "hook",

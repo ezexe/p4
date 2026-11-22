@@ -159,7 +159,8 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(sum(1 for row in ROWS.values() if row["kind"] == "hook"), 33)
         for key in ("Setup", "WorktreeCreate", "PermissionRequest", "PostCompact", "TeammateIdle"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
-        self.assertEqual(ROWS["PostToolBatch"]["open"], ["p4-phi"])
+        self.assertEqual(ROWS["PostToolBatch"]["used"], ["p4-phi"])
+        self.assertIsNone(ROWS["PostToolBatch"].get("open"))
         counts = {kind: sum(1 for row in ROWS.values() if row["kind"] == kind) for kind in KINDS}
         self.assertEqual((counts["event"], counts["method"]), (60, 100))
         for key in ("$.mcp.call", "$.store.get", "$.model.complete", "$.ui.ask", "tool.describe", "ui.press"):

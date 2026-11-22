@@ -42,7 +42,8 @@ event and matcher hooks/hooks.json runs it on, and what it does.
   lookup-record  PostToolUseFailure, matcher `.*`, and PostToolUse for the tools of WAITED alone. phi.py's records
                  that PHI_RECORD names for the tool, whose answer is returned for `update_plan`, Write and Edit;
                  otherwise lookups.py writes the call's row and tells a failure what other sessions did about it.
-  lookup-row     PostToolUse for every tool WAITED does not name, async. The call's row, and nothing printed.
+  lookup-batch   PostToolBatch, async. The lookup row of every call of the batch that worked, written by one start,
+                 and nothing printed.
   close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
                  repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
                  the session up to date, and then the repository's and the dependencies' documents and the index.
@@ -726,9 +727,9 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
 
 # The tools whose PostToolUse entry a call waits on, as the first matcher of hooks.json lists them: a record of
 # phi.py can answer for a tool of PHI_RECORD, and lookups.py reads an error only out of a shell tool's output when
-# the call worked, so it has words for no other. Every other tool has the async entry `lookup-row` alone, which
-# writes the same row h_lookup_record would, and a call that failed has the PostToolUseFailure entry whatever its
-# tool.
+# the call worked, so it has words for no other. The lookup row of a call that worked, of any tool, is written by
+# the one async entry of PostToolBatch, `lookup-batch`, which writes the same row h_lookup_record would, and a call
+# that failed has the PostToolUseFailure entry whatever its tool.
 WAITED = ("Bash", "PowerShell", "Write", "Edit", "TaskStop", "mcp__ccd_turn__update_plan",
           "mcp__ccd_turn__wrap_up")
 
@@ -757,7 +758,7 @@ def phi_route(payload, table):
     """phi.py's handlers that `table` names for this tool, run in this process in their order until one answers:
     that answer, or None. A failure in phi.py is swallowed and never touches the lookup hooks. A session registers a
     plugin's hooks when it loads the plugin, at its start or at `/reload-plugins`, and a record added to phi.py
-    needs no hook of its own in hooks.json, only its tool in WAITED and in the two PostToolUse matchers there. A check added to phi.py
+    needs no hook of its own in hooks.json, only its tool in WAITED and in the PostToolUse matcher there. A check added to phi.py
     needs none either, and its tool must be one hooks/register.ts lists, where the plugin's hooks module tells
     which calls python has a check for."""
     names = table.get(str(payload.get("tool_name") or ""))
@@ -804,16 +805,45 @@ def h_lookup_phi(payload):
     return None
 
 
-def h_lookup_row(payload):
-    """A call's lookup row, written in the background by an async entry; nothing printed. It is a clean call's row
-    for a tool of WAITED, and the row of every call that worked for any other tool."""
-    if plugins_own(payload):
+# The field of a PostToolBatch hook's input under which the plugin's hooks module names the calls of the batch that
+# failed, by their ids: it hears each at `classic.PostToolUseFailure`. hooks.md, "PostToolBatch input", gives a call
+# of `tool_calls` four fields, the tool's name, its input, its id and its response, and seen on Claude Code 2.1.328
+# and 2.1.330 a call that failed stands there with its error's text as the response and nothing that marks it.
+FAILED_KEY = "p4_failed"
+
+
+def h_lookup_batch(payload):
+    """PostToolBatch, async: the lookup row of every call of a batch that worked, written in the background by one
+    start, and nothing printed. Until p4-phi 0.11.116 each call had an async PostToolUse entry of its own, so a
+    batch of parallel calls started one process a call. Seen on Claude Code 2.1.328 and 2.1.330 in a scripted run:
+    the event comes once a batch, for a batch of one call too and for a subagent's batch with its `agent_id`, after
+    every PostToolUse and PostToolUseFailure entry a call waits on has answered.
+    A call's `tool_response` here is what the model reads, a string or a list of content blocks, where PostToolUse
+    hands the tool's own object, so a row's text is the model's text.
+    A call that failed is left to its PostToolUseFailure entry, which writes its row with the error and answers it:
+    the module names such a call under FAILED_KEY, and a row that entry wrote stays as it is, since a row is
+    written once by its id. Where no module loads and that entry wrote no row, the call is written as one that
+    worked, and a shell call's error is still read off its text.
+    A call a plugin's hooks module made itself gets none of it."""
+    calls = payload.get("tool_calls")
+    if not isinstance(calls, list):
         return None
-    phi_route(payload, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it
-    import lookups
-    p4 = ready(payload)
-    if p4:
-        lookups.record(p4, payload, now())
+    marked = payload.get(FAILED_KEY)
+    failed = {str(x) for x in marked} if isinstance(marked, list) else set()
+    common = {k: v for k, v in payload.items() if k not in ("tool_calls", FAILED_KEY)}
+    p4, when = None, now()
+    for call in calls:
+        if not isinstance(call, dict):
+            continue
+        one = {**common, **call, "hook_event_name": "PostToolUse"}
+        if plugins_own(one) or str(one.get("tool_use_id") or "") in failed:
+            continue
+        phi_route(one, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it, once
+        if p4 is None:
+            import lookups
+            p4 = ready(one) or ""
+        if p4:
+            lookups.record(p4, one, when)
     return None
 
 
@@ -825,7 +855,7 @@ def h_lookup_record(payload):
     module made itself gets none of it."""
     if plugins_own(payload):
         return None
-    phi_route(payload, PHI_TIE)                    # as h_lookup_row does behind a clean call: one of the two runs
+    phi_route(payload, PHI_TIE)                    # as h_lookup_batch does behind a clean call, and a tie is made once
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit"):
         return out
@@ -869,7 +899,7 @@ def h_catch_up(payload):
 
 HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
             "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
-            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-row": h_lookup_row}
+            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-batch": h_lookup_batch}
 
 
 def parse_payload(raw: str):

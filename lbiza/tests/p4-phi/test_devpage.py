@@ -288,7 +288,7 @@ class Page(unittest.TestCase):
         # what the section says of the code, held against the code
         hook = read(os.path.join(SRC, "hook.py"))
         self.assertIn('PLUGIN_CALL = "toolu_plugin_"', hook)
-        self.assertEqual(hook.count("if plugins_own(payload):"), 3, "the three record handlers")
+        self.assertEqual(hook.count("if plugins_own("), 3, "the three record handlers")
         self.assertIn("toolu_plugin_", read(os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")))
         phi = read(os.path.join(SRC, "phi.py"))
         self.assertIn("def app_tools_switch(home, on=None):", phi)

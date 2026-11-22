@@ -9,23 +9,29 @@
 # The record hooks run after a tool call, so every process this script starts is paid at each call. The platform
 # is read from the environment, so no `uname` runs, and a clean call's record is written by a python left running
 # behind, so the call waits only for this script. hooks.json has a call that worked wait for this script only for a
-# tool whose record can answer, a shell tool or a tool of hook.py's PHI_RECORD, and gives every other tool the one
-# async entry `lookup-row`, so no shell stands between such a call and its result. The check before a call starts no shell: the plugin's hooks module
+# tool whose record can answer, a shell tool or a tool of hook.py's PHI_RECORD, so no shell stands between any other
+# call and its result. The lookup row of every call that worked is written by the one async entry of PostToolBatch,
+# `lookup-batch`, which Claude Code runs once for a batch of calls, so a batch of parallel calls starts one process
+# for its rows. The check before a call starts no shell: the plugin's hooks module
 # tells which calls python has a check for and runs `hook.py lookup-check` for those itself.
 set -u
 
 name="${1:-}"
 payload=""
 piped=0
-# A call that worked and printed nothing like an error has nothing to be told, so only its lookup row is written by
-# the `lookup-record-async` entry, which hooks.json marks `async`: the app runs it in the background and the call
-# does not wait for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
+# A call that worked and printed nothing like an error has nothing to be told, so only its lookup row is written,
+# by the `lookup-batch` entry, which hooks.json marks `async`: the app runs it in the background and no call waits
+# for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
 # waits on: the tools PHI_RECORD of hook.py names, whose plan records and memory checks a later check reads. A
 # subagent's clean call waits on nothing, since its id is bound at its SubagentStart. That entry answers every other
 # call whole.
-# P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it and the async entry nothing.
+# P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it, the row too.
 clean=0
-if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name" = lookup-row ]; then
+if [ "$name" = lookup-batch ]; then
+  # Every call of a batch in one input: python reads it whole, and leaves out a call a plugin's module made itself.
+  payload=$(cat)
+  piped=1
+elif [ "$name" = lookup-record ]; then
   payload=$(cat)
   piped=1
   # A call a plugin's hooks module made itself, by its id: no lookup of the session's, so no python starts for it,
@@ -33,10 +39,7 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name"
   case "$payload" in
     *'"tool_use_id":"toolu_plugin_'*|*'"tool_use_id": "toolu_plugin_'*) exit 0 ;;
   esac
-  # `lookup-row` is the entry of a tool nothing waits on: its row is written whatever the result printed.
-  if [ "$name" = lookup-row ]; then
-    :
-  elif [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
+  if [ "${P4_RECALL_SYNC:-0}" != 1 ]; then
     case "$payload" in
       *mcp__ccd_turn__update_plan*) ;;            # phi.py's plan check answers beside the result
       *mcp__ccd_turn__wrap_up*) ;;                # phi.py's clear line answers beside the result
@@ -51,18 +54,14 @@ if [ "$name" = lookup-record ] || [ "$name" = lookup-record-async ] || [ "$name"
       *) clean=1 ;;
     esac
   fi
-  if [ "$name" = lookup-record ] && [ "$clean" = 1 ]; then
+  if [ "$clean" = 1 ]; then
     case "$payload" in
       *'"tool_name":"Write"'*|*'"tool_name": "Write"'*) ;;
       *'"tool_name":"TaskStop"'*|*'"tool_name": "TaskStop"'*) ;;
       *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*) ;;
       *) exit 0 ;;
     esac
-    name=lookup-phi                               # phi.py's records, and no lookup row
-  fi
-  if [ "$name" = lookup-record-async ]; then
-    [ "$clean" = 1 ] || exit 0
-    name=lookup-row                               # the lookup row alone, in the background the app gives it
+    name=lookup-phi                               # phi.py's records, and no lookup row: the batch's entry writes it
   fi
 fi
 

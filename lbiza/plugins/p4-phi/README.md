@@ -111,9 +111,16 @@ The engine's verdict stands for a call it already refused, for a plugin's `$.too
 The module hooks no `tool.call`: a subagent may call any tool, and a hook there that may match a tool turns off that tool's move to the background and its live output.
 It hooks no function at `classic.PreToolUse` either, whose input holds no agent id, which phi.py's checks of a subagent's call read.
 The check does not obey `P4_PHI=0`: retrieval's check runs, and phi.py's own checks read the switch themselves.
-The `Agent` entry of `PreToolUse` stays a command hook, and so do the entries of `PostToolUse` and `PostToolUseFailure` that record a call.
-After a call that worked, the call waits on a shell only for a tool whose record can answer, which the first matcher of `PostToolUse` names: `Bash`, `PowerShell`, `Write`, `Edit`, `TaskStop`, `mcp__ccd_turn__update_plan` and `mcp__ccd_turn__wrap_up`, with the entries `lookup-record` and `lookup-record-async`.
-Every other tool has one async entry, `lookup-row`, under a second matcher that takes every name the first does not, so its lookup row is written behind the call and nothing stands between the call and its result.
+The `Agent` entry of `PreToolUse` stays a command hook, and so do the entries of `PostToolUse`, `PostToolUseFailure` and `PostToolBatch` that record a call.
+After a call that worked, the call waits on a shell only for a tool whose record can answer, which the one matcher of `PostToolUse` names: `Bash`, `PowerShell`, `Write`, `Edit`, `TaskStop`, `mcp__ccd_turn__update_plan` and `mcp__ccd_turn__wrap_up`, with the entry `lookup-record`.
+A call of any other tool starts no process of its own once it ran, so nothing stands between the call and its result.
+The lookup row of every call that worked is written by one async entry of `PostToolBatch`, `lookup-batch`, which by `hooks.md`, "PostToolBatch", "fires exactly once with the full batch", so a batch of parallel calls starts one process for its rows.
+Until p4-phi 0.11.116 each call had an async `PostToolUse` entry of its own for its row, one process a call.
+Seen on Claude Code 2.1.328 and 2.1.330 in a scripted run: the event came once a batch, for a batch of one call too and for a subagent's batch with its `agent_id`, and after the `PostToolUse` and `PostToolUseFailure` entries of its calls had answered.
+A call of `tool_calls` carries its tool, its input, its id and its response, and a call that failed stood there with its error's text as the response and nothing that marks it.
+So the hooks module, which hears each failed call at `classic.PostToolUseFailure`, names the failed calls of a batch by their ids under `p4_failed` in the input of the `PostToolBatch` command hooks, and the batch's entry leaves those to their own entry.
+Where no module loads, a row is still written once by its id, so the row the `PostToolUseFailure` entry wrote stays as it is.
+A call's response in a batch is what the model reads, a string or a list of content blocks, where `PostToolUse` hands the tool's own object, so a row's text is the model's text.
 A call that failed has the `lookup-record` entry of `PostToolUseFailure` whatever its tool.
 These stay command hooks where the hooks module loads too: a function hook at `classic.PostToolUse` runs above the command hooks and cannot keep its own plugin's entry out, since Claude Code has a module's `plugin.register` judged by the modules admitted before it and never by itself, so a function that made the record would run beside the shell that makes it.
 A call a plugin's hooks module makes itself, with `$.tool.call` or `$.session.send`, runs those entries too, under an id that begins `toolu_plugin_`: the shell ends at once for such an id, and no lookup row and no record of `phi.py` is kept of it, since no model reads its result.

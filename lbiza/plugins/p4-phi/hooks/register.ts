@@ -325,6 +325,15 @@ const submitted: Submitted[] = []
 
 // What a check said beside a call that runs, by the call's id, until a PostToolUse hook hands it to the model.
 const told = new Map<string, string>()
+
+// The ids of the calls that failed and whose batch has not ended yet, heard at `classic.PostToolUseFailure`. The
+// PostToolBatch command hook beneath writes the lookup row of every call of a batch that worked, and by hooks.md,
+// "PostToolBatch input", a call of `tool_calls` carries its tool, its input, its id and its response and nothing
+// that says whether it failed, so the module names the failed ones under FAILED in that hook's input. A failed
+// call whose batch never ends, as one a stop cut short, would stay here, so the set is emptied past FAILED_MAX.
+const failed = new Set<string>()
+const FAILED = 'p4_failed'
+const FAILED_MAX = 500
 // Whether the store's failure model weighs shell calls, as its first line said when it was last read.
 let shellModel: { at: number; isWeighted: boolean } | undefined
 
@@ -1615,10 +1624,22 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   on('classic.PostToolUseFailure', async ($, e, next) => {
+    if (failed.size >= FAILED_MAX) failed.clear()
+    failed.add(e.tool_use_id)
     const out = await next(e)
     const words = toldOf(e.tool_use_id)
 
     return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
+  }).catch(($, e, next) => next(e))
+
+  // Above the PostToolBatch command hooks, which write a batch's lookup rows: the calls of the batch that failed,
+  // by their ids, added to the input those hooks read on stdin. The list is added where it is empty too, so python
+  // can tell a batch the module read from one no module read.
+  on('classic.PostToolBatch', ($, e, next) => {
+    const ids = e.tool_calls.map(call => call.tool_use_id).filter(id => failed.has(id))
+    for (const id of ids) failed.delete(id)
+
+    return next({ ...e, [FAILED]: ids } as typeof e)
   }).catch(($, e, next) => next(e))
 
   // The UserPromptSubmit command hooks run beneath this hook, so they run once the prompt's origin is written.

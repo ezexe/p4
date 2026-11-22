@@ -153,10 +153,10 @@ What the record comes to, by kind, as `/native weighed` prints it.
 
 - `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
 - `tool`: 122 rows, 49 used, 6 open, 67 declined, 0 weighed by nobody
-- `hook`: 33 rows, 14 used, 1 open, 18 declined, 0 weighed by nobody
+- `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
 - `event`: 60 rows, 17 used, 0 open, 43 declined, 0 weighed by nobody
 - `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
-- `used`: 137 rows, 53 watched by a row of misses.ts, 84 with no by-hand call to watch, 0 with neither
+- `used`: 138 rows, 53 watched by a row of misses.ts, 85 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -171,9 +171,9 @@ Each has a row since 0.5.32, with the verdict of p4-temportal and of p4-native, 
 p4-phi has still to weigh those sixteen, so its name is on none of them, and the record's test lists them until it has.
 So the record holds 60 module events and 100 module methods, where the paragraphs below count the 51 and the 93 of 2.1.326.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.
-The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, one is open, and one that was open is used.
+The 20 hook events are walked now, each against its section of `hooks.md`: 18 are declined, each with its reason, and the two that were open are used.
 An open row names each plugin it would serve and, under `would`, what it would replace or add there.
-`PostToolBatch` is open for p4-phi, which would write the lookup rows of a parallel batch in one process start.
+`PostToolBatch` was open for p4-phi, which since 0.11.116 writes the lookup rows of a batch of calls in one process start.
 `Notification` was open for p4-native, whose module hooks it since 0.5.28 and pushes when a session waits at a permission prompt or sits idle.
 The 36 module events and the 50 module methods are walked too, each against its own comment in the types file.
 The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
@@ -237,7 +237,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 137 used rows, 53 are watched by a row of the table and 84 say why none watches them: the 68 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
+Of the 138 used rows, 53 are watched by a row of the table and 85 say why none watches them: the 69 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.

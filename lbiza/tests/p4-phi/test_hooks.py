@@ -118,8 +118,8 @@ class Base(unittest.TestCase):
 class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
-        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop",
-                                  "SubagentStop", "ConfigChange", "SubagentStart"})
+        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+                                  "PostToolBatch", "Stop", "SubagentStop", "ConfigChange", "SubagentStart"})
         # ezexe/p4#246: the settings watcher runs in the layout hook at every start, and here at a change of a
         # settings file, which it never blocks
         self.assertEqual(h["ConfigChange"][0]["matcher"], "local_settings|project_settings|user_settings")

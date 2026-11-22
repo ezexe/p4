@@ -43,7 +43,7 @@ EVENTS = {"SessionStart": ("startup", "resume", "clear", "compact", "fork"),
                           "billing_error", "invalid_request", "model_not_found", "server_error", "max_output_tokens",
                           "cloud_credential_error", "unknown"),
           "SessionEnd": ("clear", "resume", "logout", "prompt_input_exit", "other"),
-          "PreToolUse": "tools", "PostToolUse": "tools",
+          "PreToolUse": "tools", "PostToolUse": "tools", "PostToolBatch": None,
           "PostToolUseFailure": "tools", "SubagentStop": "agents", "SubagentStart": "agents",
           "ConfigChange": ("user_settings", "project_settings", "local_settings", "policy_settings", "skills")}
 
@@ -61,8 +61,7 @@ def handlers():
     try:
         import hook
         import phi
-        # recall-hook.sh runs lookup-record-async as lookup-record, in the background the async entry gives it
-        return {"run-hook.sh": set(phi.HOOKS), "recall-hook.sh": set(hook.HANDLERS) | {"lookup-record-async"}}
+        return {"run-hook.sh": set(phi.HOOKS), "recall-hook.sh": set(hook.HANDLERS)}
     finally:
         sys.path.remove(SCRIPTS)
 
@@ -95,6 +94,9 @@ def payload(event, matcher, proj, tmp):
             body["tool_response"] = {"stdout": "a.txt", "stderr": "", "interrupted": False}
         if event == "PostToolUseFailure":
             body.update(error="Exit code 2: ls: cannot access 'nowhere'", is_interrupt=False)
+    elif event == "PostToolBatch":
+        body["tool_calls"] = [{"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_use_id": "toolu_wiring1",
+                               "tool_response": "a.txt"}]
     elif event == "SubagentStart":
         body.update(agent_id="a0000wiring", agent_type="general-purpose")
     elif event == "SubagentStop":
@@ -153,7 +155,7 @@ class Wiring(unittest.TestCase):
             elif isinstance(EVENTS[event], tuple) and matcher:
                 self.assertTrue(set(matcher.split("|")) <= set(EVENTS[event]), matcher)
             if hook.get("async"):
-                self.assertIn(event, ("Stop", "PostToolUse", "PostToolUseFailure", "SubagentStop"))
+                self.assertIn(event, ("Stop", "PostToolUse", "PostToolUseFailure", "PostToolBatch", "SubagentStop"))
 
     def check(self, label, event, hook, r):
         where = f"{label}, {event}: {hook['command']}"

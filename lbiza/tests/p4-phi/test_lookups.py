@@ -53,6 +53,14 @@ def post(tool, inp, resp, session=S1, proj=None, tid="t1", event="PostToolUse", 
     return d
 
 
+def batch(calls, session=S1, proj=None, **more):
+    """A PostToolBatch input of the calls, each given as the PostToolUse input of its own: by hooks.md,
+    "PostToolBatch input", a call there carries its tool, its input, its id and its response."""
+    return {"hook_event_name": "PostToolBatch", "session_id": session, "cwd": proj, **more,
+            "tool_calls": [{k: c.get(k, c.get("error")) for k in ("tool_name", "tool_input", "tool_use_id",
+                                                                   "tool_response")} for c in calls]}
+
+
 class Keys(unittest.TestCase):
     def test_kind_and_key(self):
         self.assertEqual(lk.kind("WebFetch"), "web")
@@ -539,31 +547,32 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(h[ev][0]["hooks"][0]["timeout"], 10)
         # a call that failed is answered whole, whatever its tool
         self.assertEqual([m["matcher"] for m in h["PostToolUseFailure"]], [".*"])
-        # ezexe/p4#150: a clean call's row is written by an entry the app runs in the background
+        # ezexe/p4#150: a call waits on one entry, and its row is written by an entry the app runs in the background,
+        # the one entry of PostToolBatch, which comes once for a batch of calls and takes no matcher
         self.assertEqual([(x["command"].split()[-1], x.get("async")) for x in h["PostToolUse"][0]["hooks"]],
-                         [("lookup-record", None), ("lookup-record-async", True)])
+                         [("lookup-record", None)])
+        self.assertEqual([(m.get("matcher"), [(x["command"].split()[-1], x.get("async"), x.get("timeout"))
+                                              for x in m["hooks"]]) for m in h["PostToolBatch"]],
+                         [(None, [("lookup-batch", True, None)])])
 
     def test_a_call_that_worked_waits_on_a_shell_only_for_a_tool_whose_record_can_answer(self):
-        """The first matcher of PostToolUse names hook.WAITED, which holds every tool phi.py keeps a record of and
-        the shell tools, and the second takes every other name and no name of the first, so each call has the
-        entries of one matcher and its row is written once. The second has the async `lookup-row` alone."""
+        """The one matcher of PostToolUse names hook.WAITED, which holds every tool phi.py keeps a record of and
+        the shell tools, so a call of any other tool starts no process of its own once it ran: its row is the
+        batch's entry's to write."""
         import test_hooks
-        waited, others = test_hooks.own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")["PostToolUse"]
+        (waited,) = test_hooks.own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")["PostToolUse"]
         self.assertEqual(waited["matcher"].split("|"), list(hook.WAITED))
         self.assertLessEqual(set(hook.PHI_RECORD) | set(hook.PHI_TIE) | set(lk.SHELL_TOOLS), set(hook.WAITED))
-        self.assertEqual(others["matcher"], "^(?!(?:%s)$).*" % "|".join(hook.WAITED))
-        self.assertEqual([(x["command"].split()[-1], x.get("async"), x.get("timeout")) for x in others["hooks"]],
-                         [("lookup-row", True, None)])
-        named = re.compile(others["matcher"])
+        named = re.compile("(?:%s)" % waited["matcher"])
         for tool in hook.WAITED:
-            self.assertIsNone(named.search(tool), tool)
+            self.assertIsNotNone(named.fullmatch(tool), tool)
         for tool in ("Read", "Grep", "Glob", "Agent", "WebFetch", "WebSearch", "NotebookEdit", "BashOutput", "Editor",
                      "mcp__ccd_turn__update_plans", "mcp__ccd_session_mgmt__list_sessions", "mcp__p4-phi__note"):
-            self.assertIsNotNone(named.search(tool), tool)
+            self.assertIsNone(named.fullmatch(tool), tool)
             self.assertNotIn(tool, hook.WAITED)
 
-    def test_a_tool_nothing_waits_on_has_the_row_its_waited_entry_wrote(self):
-        """A call that worked, of a tool lookups.py reads no error out of, has the same row from `lookup-row` as
+    def test_a_batch_writes_the_row_the_waited_entry_wrote(self):
+        """A call that worked, of a tool lookups.py reads no error out of, has the same row from `lookup-batch` as
         from `lookup-record`, clean or with words that read like an error, and neither prints a word."""
         import tempfile
         said = "Error: 3 matches\nTraceback (most recent call last):\n  File x\nValueError: boom"
@@ -571,7 +580,8 @@ class HooksJson(unittest.TestCase):
         def row_of(name, text):
             with tempfile.TemporaryDirectory() as tmp:
                 proj = make_project(tmp)
-                r = run_hook(name, post("Grep", {"pattern": "boom", "path": "src"}, text, S1, proj, "toolu_01G"), proj)
+                one = post("Grep", {"pattern": "boom", "path": "src"}, text, S1, proj, "toolu_01G")
+                r = run_hook(name, batch([one], S1, proj) if name == "lookup-batch" else one, proj)
                 self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
                 con = sqlite3.connect(lk.db_path(os.path.join(proj, ".claude", "p4")))
                 try:
@@ -581,11 +591,56 @@ class HooksJson(unittest.TestCase):
                 self.assertEqual(len(rows), 1)
                 return rows[0]
         for text in ("src/a.py:3: boom", said):
-            self.assertEqual(row_of("lookup-row", text), row_of("lookup-record", text))
+            self.assertEqual(row_of("lookup-batch", text), row_of("lookup-record", text))
+
+    def test_a_batch_writes_one_row_a_call_and_leaves_a_failed_call_to_its_own_entry(self):
+        """The one start of a batch writes the row of each call that worked, a subagent's with its id. A call that
+        failed is its PostToolUseFailure entry's: the row that entry wrote stays as it is, since a row is written
+        once by its id, and a call the hooks module names as failed gets no row from the batch. A call a plugin's
+        hooks module made itself gets none either."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = make_project(tmp)
+
+            def rows():
+                con = sqlite3.connect(lk.db_path(os.path.join(proj, ".claude", "p4")))
+                try:
+                    return con.execute("SELECT id, tool, agent, ok FROM calls ORDER BY id").fetchall()
+                finally:
+                    con.close()
+            read = post("Read", {"file_path": "a.py"}, "1\tprint(1)", S1, proj, "toolu_b1")
+            grep = post("Grep", {"pattern": "boom"}, "a.py:3: boom", S1, proj, "toolu_b2")
+            fetch = post("WebFetch", {"url": URL, "prompt": ASK}, "Request failed with status code 503", S1, proj,
+                         "toolu_b3", "PostToolUseFailure")
+            ls = post("Bash", {"command": "ls nowhere"}, "Exit code 2\nls: cannot access 'nowhere'", S1, proj,
+                      "toolu_b4", "PostToolUseFailure")
+            own = post("mcp__ccd_session_mgmt__list_sessions", {}, "[]", S1, proj, "toolu_plugin_377de02ec20c43d1")
+            # the failed fetch's own entry ran and wrote its row; the failed listing's did not
+            self.assertEqual(run_hook("lookup-record", fetch, proj).returncode, 0)
+            self.assertEqual(rows(), [("toolu_b3", "WebFetch", "", 0)])
+            r = run_hook("lookup-batch", batch([read, grep, fetch, ls, own], S1, proj, p4_failed=["toolu_b3", "toolu_b4"]),
+                         proj)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+            self.assertEqual(rows(), [("toolu_b1", "Read", "", 1), ("toolu_b2", "Grep", "", 1),
+                                      ("toolu_b3", "WebFetch", "", 0)])
+            # the same batch again writes nothing twice, and with no module to name them the failed fetch keeps the
+            # row its own entry wrote
+            r = run_hook("lookup-batch", batch([read, grep, fetch], S1, proj), proj)
+            self.assertEqual(r.returncode, 0)
+            self.assertEqual(len(rows()), 3)
+            self.assertEqual([row for row in rows() if row[0] == "toolu_b3"], [("toolu_b3", "WebFetch", "", 0)])
+            # a subagent's batch carries its id beside the calls
+            sub = post("Read", {"file_path": "b.py"}, "1\tprint(2)", S1, proj, "toolu_b5")
+            self.assertEqual(run_hook("lookup-batch", batch([sub], S1, proj, agent_id="a1385126"), proj).returncode, 0)
+            self.assertIn(("toolu_b5", "Read", "a1385126", 1), rows())
+            # an input that holds no list of calls writes nothing and fails nothing
+            r = run_hook("lookup-batch", {"hook_event_name": "PostToolBatch", "session_id": S1, "cwd": proj}, proj)
+            self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+            self.assertEqual(len(rows()), 4)
 
     def test_only_the_lookup_row_goes_to_the_background(self):
-        """The entry the call waits on keeps phi.py's records of a clean call that a later check reads, and the async
-        entry writes only the lookup row: a stand-in hook.py names the handler each entry reaches."""
+        """The entry the call waits on keeps phi.py's records of a clean call that a later check reads, and the
+        batch's entry writes only the lookup rows: a stand-in hook.py names the handler each entry reaches."""
         import shutil
         import subprocess
         import tempfile
@@ -617,7 +672,6 @@ class HooksJson(unittest.TestCase):
                 asks = dict(clean, tool_input={"command": line})
                 self.assertEqual(ran("lookup-record", "Bash", asks), ["lookup-record"], line)
                 self.assertEqual(ran("lookup-record", "PowerShell", asks), ["lookup-record"], line)
-                self.assertEqual(ran("lookup-record-async", "Bash", asks), [], "left to the entry the call waits on")
             for line in ('python "C:/x/scripts/phi.py" cards', 'python "C:/x/scripts/phi.py" cards off',
                          'python "C:/x/scripts/phi.py" upkeep on'):
                 self.assertEqual(ran("lookup-record", "Bash", dict(clean, tool_input={"command": line})), [], line)
@@ -625,31 +679,26 @@ class HooksJson(unittest.TestCase):
             self.assertEqual(ran("lookup-record", "TaskStop", clean), ["lookup-phi"], "a stop ends a saved entry")
             self.assertEqual(ran("lookup-record", "Read", dict(clean, agent_id="a1")), [],
                              "a subagent's clean read: nothing waits, since its id is bound at its SubagentStart")
-            self.assertEqual(ran("lookup-record-async", "Bash", clean), ["lookup-row"], "the row alone, behind")
-            self.assertEqual(ran("lookup-row", "Read", clean), ["lookup-row"], "a tool nothing waits on: its row")
-            self.assertEqual(ran("lookup-row", "Read", {"hook_event_name": "PostToolUse", "tool_response": "Error: x"}),
-                             ["lookup-row"], "and its row whatever the result printed")
+            behind = {"hook_event_name": "PostToolBatch", "tool_calls": [{"tool_name": "Read", "tool_response": "Error: x"}]}
+            self.assertEqual(ran("lookup-batch", "", behind), ["lookup-batch"], "a batch's rows, whatever a result printed")
             failed = {"hook_event_name": "PostToolUseFailure", "error": "Exit code 1"}
             self.assertEqual(ran("lookup-record", "Bash", failed), ["lookup-record"], "a failure is answered whole")
-            self.assertEqual(ran("lookup-record-async", "Bash", failed), [])
             # a call a plugin's hooks module made itself, by its id: no python starts for it, clean or failed
             own = {"tool_use_id": "toolu_plugin_377de02ec20c43d186269255387f91dd"}
             app = "mcp__ccd_session_mgmt__list_sessions"
             self.assertEqual(ran("lookup-record", app, dict(clean, **own)), [])
-            self.assertEqual(ran("lookup-record-async", app, dict(clean, **own)), [], "no row for a plugin's call")
-            self.assertEqual(ran("lookup-row", app, dict(clean, **own)), [], "nor from the entry of its own tool")
             self.assertEqual(ran("lookup-record", app, dict(failed, **own)), [])
             self.assertEqual(ran("lookup-record", "Write", dict(clean, **own)), [], "phi.py keeps nothing of it")
-            compact = json.dumps({"tool_name": app, **clean, **own}, separators=(",", ":"))
+            compact = json.dumps({"tool_name": app, **failed, **own}, separators=(",", ":"))
             if os.path.exists(log):
                 os.remove(log)
-            subprocess.run(["sh", runner, "lookup-record-async"], input=compact, text=True, capture_output=True, env=env)
+            subprocess.run(["sh", runner, "lookup-record"], input=compact, text=True, capture_output=True, env=env)
             self.assertFalse(os.path.exists(log), "the id is read with no space after its colon too, as the app writes it")
-            self.assertEqual(ran("lookup-record-async", app, dict(clean, tool_use_id="toolu_01A")), ["lookup-row"])
+            self.assertEqual(ran("lookup-record", app, dict(failed, tool_use_id="toolu_01A")), ["lookup-record"])
 
     def test_a_clean_call_waits_on_nothing_and_its_row_is_written_in_the_background(self):
-        """ezexe/p4#150: the entry the call waits on ends at once for a clean call and writes no row; the async entry
-        writes it, and a failure is still answered by the entry the call waits on."""
+        """ezexe/p4#150: the entry the call waits on ends at once for a clean call and writes no row; the batch's
+        entry writes it in the background, and a failure is still answered by the entry the call waits on."""
         import subprocess
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -657,7 +706,8 @@ class HooksJson(unittest.TestCase):
             env = {k: v for k, v in os.environ.items() if not k.startswith(("P4_", "CLAUDE_"))}
             env.update({"CLAUDE_PLUGIN_ROOT": os.path.dirname(os.path.dirname(os.path.abspath(HOOKS_JSON))), "CLAUDE_PROJECT_DIR": proj})
             runner = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(HOOKS_JSON))), "hooks", "recall-hook.sh")
-            clean = json.dumps(post("Read", {"file_path": "README.md"}, "a clean read", S1, proj, "t9"))
+            one = post("Read", {"file_path": "README.md"}, "a clean read", S1, proj, "t9")
+            clean = json.dumps(one)
 
             def rows():
                 db = lk.db_path(os.path.join(proj, ".claude", "p4"))
@@ -671,15 +721,15 @@ class HooksJson(unittest.TestCase):
             r = subprocess.run(["sh", runner, "lookup-record"], input=clean, capture_output=True, text=True, env=env)
             self.assertEqual((r.returncode, r.stdout), (0, ""))
             self.assertEqual(rows(), 0, "the entry the call waits on writes no row for a clean call")
-            r = subprocess.run(["sh", runner, "lookup-record-async"], input=clean, capture_output=True, text=True,
-                               env=env)
-            self.assertEqual(r.returncode, 0)
-            self.assertEqual(rows(), 1, "the async entry writes it")
-            failed = json.dumps(post("Bash", {"command": "python x.py"}, "Exit code 1\nTraceback: boom", S1, proj,
-                                     "t10", "PostToolUseFailure"))
-            subprocess.run(["sh", runner, "lookup-record-async"], input=failed, capture_output=True, text=True,
-                           env=env)
-            self.assertEqual(rows(), 1, "the async entry leaves a failure to the entry the call waits on")
+            r = subprocess.run(["sh", runner, "lookup-batch"], input=json.dumps(batch([one], S1, proj)),
+                               capture_output=True, text=True, env=env)
+            self.assertEqual((r.returncode, r.stdout), (0, ""))
+            self.assertEqual(rows(), 1, "the batch's entry writes it")
+            failed = post("Bash", {"command": "python x.py"}, "Exit code 1\nTraceback: boom", S1, proj, "t10",
+                          "PostToolUseFailure")
+            subprocess.run(["sh", runner, "lookup-batch"], input=json.dumps(batch([failed], S1, proj, p4_failed=["t10"])),
+                           capture_output=True, text=True, env=env)
+            self.assertEqual(rows(), 1, "the batch's entry leaves a failure to the entry the call waits on")
 
 
 if __name__ == "__main__":

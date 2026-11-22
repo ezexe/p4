@@ -2877,3 +2877,35 @@ test('where the settings cannot be read the input goes down as it came, and the 
   expect(said.length).toBe(1)
   expect(said[0]).toContain('so python reads the settings files')
 })
+
+// The PostToolBatch command hook beneath the module writes the lookup row of every call of a batch that worked, and
+// a call of the batch carries nothing that says it failed, so the module names the failed ones by their ids.
+test('the calls of a batch that failed are named to the PostToolBatch command hooks, each once', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const batches: Record<string, unknown>[] = []
+  on('classic.PostToolUseFailure', () => ({}))
+  on('classic.PostToolBatch', (_, e) => {
+    batches.push({ ...e })
+
+    return {}
+  })
+  machine(on, {})
+  const read = { tool_name: 'Read', tool_input: { file_path: 'a.py' }, tool_use_id: 'toolu_01', tool_response: 'a' }
+  const list = { tool_name: 'Bash', tool_input: { command: 'ls nowhere' }, tool_use_id: 'toolu_02', tool_response: 'Exit code 2' }
+  const fetch = { tool_name: 'WebFetch', tool_input: { url: 'https://example.com' }, tool_use_id: 'toolu_03', tool_response: 'timeout' }
+
+  // Two calls of a batch of three fail, and one call of a batch that has not ended yet.
+  await $.classic.PostToolUseFailure({ tool_name: 'Bash', tool_input: list.tool_input, tool_use_id: 'toolu_02', error: 'Exit code 2' })
+  await $.classic.PostToolUseFailure({ tool_name: 'WebFetch', tool_input: fetch.tool_input, tool_use_id: 'toolu_03', error: 'timeout' })
+  await $.classic.PostToolUseFailure({ tool_name: 'Read', tool_input: {}, tool_use_id: 'toolu_09', error: 'no such file' })
+  await $.classic.PostToolBatch({ tool_calls: [read, list, fetch] })
+
+  expect(batches[0]?.p4_failed).toEqual(['toolu_02', 'toolu_03'])
+  expect(batches[0]?.tool_calls).toEqual([read, list, fetch])
+
+  // A batch with no failed call is handed an empty list, and an id named once is not named again.
+  await $.classic.PostToolBatch({ tool_calls: [read] })
+  await $.classic.PostToolBatch({ tool_calls: [list, { ...read, tool_use_id: 'toolu_09' }] })
+  expect(batches[1]?.p4_failed).toEqual([])
+  expect(batches[2]?.p4_failed).toEqual(['toolu_09'])
+})

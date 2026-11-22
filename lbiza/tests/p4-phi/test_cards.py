@@ -787,7 +787,7 @@ class Guards(unittest.TestCase):
         that worked and printed no word that reads like an error before python starts, and the command's own
         output holds no such word, so without an arm for it no yes was ever kept in a session: p4-phi 0.11.100 to
         0.11.103. The runner passes a payload that holds the command on to python, in the entry the call waits
-        on, and the entry that runs in the background leaves that call to it."""
+        on, and the batch's entry, which runs in the background and writes the call's lookup row, keeps no yes."""
         sid = p4conf.card_set_id()
         for n, (tool, cmd) in enumerate((("Bash", f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'),
                                          ("PowerShell", f"python 'C:/plugins/p4-phi/scripts/phi.py'   cards   on {sid}"))):
@@ -798,7 +798,8 @@ class Guards(unittest.TestCase):
             self.assertEqual(ran.returncode, 0, ran.stderr)
             self.assertFalse(p4conf.cards_on(self.t.p4))
             done = {"hook_event_name": "PostToolUse", **call, "tool_response": {"stdout": ran.stdout, "stderr": ""}}
-            self.assertEqual(self.runner("lookup-record-async", TOP, done), {}, "left to the entry the call waits on")
+            behind = {"hook_event_name": "PostToolBatch", "tool_calls": [dict(call, tool_response=ran.stdout)]}
+            self.assertEqual(self.runner("lookup-batch", TOP, behind), {}, "left to the entry the call waits on")
             self.assertFalse(p4conf.cards_on(self.t.p4))
             said = self.runner("lookup-record", TOP, done).get("additionalContext") or ""
             self.assertIn(f"phi (p4-phi): ezexe's yes to the set {sid} is kept for the store", said, tool)
