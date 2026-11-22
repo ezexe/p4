@@ -132,7 +132,6 @@ class StartRequests(unittest.TestCase):
                          ("", ""))
         import p4conf
         self.assertNotIn("file_sets", p4conf.DEFAULTS["phi"])
-        self.assertIn("phi.file_sets", p4conf.RETIRED)
         with open(os.path.join(t.p4, "p4.json"), "w", encoding="utf-8") as f:
             json.dump({"phi": {"file_sets": True}}, f)
         self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""),

@@ -312,25 +312,11 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(self.read()["recall"]["query"]["max_lines"], 9)
         self.assertEqual(old.load(self.p4)["recall"]["query"]["max_lines"], 9, "the older copy reads the newer value")
 
-    def test_a_store_from_before_the_record_follows_today_s_default(self):
-        """A store with no record, as this project's own, counts a value equal to a past default in HISTORY as
-        written, so it moves to today's; a value no default ever had stays."""
-        d = json.loads(json.dumps(p4conf.DEFAULTS))
-        d["recall"]["teacher"]["model"] = "claude-fable-5-1"
-        d["recall"]["query"]["per_file"] = 7
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump(d, f)
-        s = p4conf.load(self.p4)
-        self.assertEqual(s["recall"]["teacher"]["model"], p4conf.DEFAULTS["recall"]["teacher"]["model"])
-        self.assertEqual(s["recall"]["query"]["per_file"], 7)
-        self.assertNotIn("recall.query.per_file", self.read(record=True)[p4conf.WRITTEN])
-
     def test_a_store_holding_the_old_web_default_moves_to_note(self):
-        """ezexe/p4#243, row D1: a store load wrote at GEN 1 and a store from before the record both move from
-        "answer" to "note"; a value set by hand stays."""
+        """ezexe/p4#243, row D1: a store load wrote at GEN 1 moves from "answer" to "note"; a value set by hand
+        stays."""
         stores = {}
-        for name, value, record in (("written", "answer", True), ("no record", "answer", False),
-                                    ("by hand", "shadow", True)):
+        for name, value, record in (("written", "answer", True), ("by hand", "shadow", True)):
             p4 = tempfile.mkdtemp()
             self.addCleanup(shutil.rmtree, p4, True)
             d = json.loads(json.dumps(p4conf.DEFAULTS))
@@ -340,7 +326,7 @@ class P4Conf(unittest.TestCase):
             with open(p4conf.path(p4), "w", encoding="utf-8") as f:
                 json.dump(d, f)
             stores[name] = p4conf.load(p4)["recall"]["lookups"]["web"]
-        self.assertEqual(stores, {"written": "note", "no record": "note", "by hand": "shadow"})
+        self.assertEqual(stores, {"written": "note", "by hand": "shadow"})
 
     def test_the_notebook_moves_out_of_temportal_scratchpad(self):
         """B8 of ezexe/p4#131: the notebook's place is temportal/notebook, so a store's temportal/scratchpad moves there
@@ -350,8 +336,9 @@ class P4Conf(unittest.TestCase):
         Path(old).write_text("the plan\n", encoding="utf-8")
         Path(self.p4, ".gitignore").write_text("temportal/scratchpad/.out/\n", encoding="utf-8")
         d = json.loads(json.dumps(p4conf.DEFAULTS))
-        d["temportal"]["cache"] = p4conf.HISTORY["temportal.cache"][0]
-        d[p4conf.WRITTEN] = {"temportal.cache": {"v": p4conf.HISTORY["temportal.cache"][0], "gen": 2}}
+        old_cache = {"scratchpad/.out": {"max_age_days": 14, "max_mb": 500}, ".layout-conflicts": {"max_age_days": 30}}
+        d["temportal"]["cache"] = old_cache
+        d[p4conf.WRITTEN] = {"temportal.cache": {"v": old_cache, "gen": 2}}
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             json.dump(d, f)
         p4conf.migrate_layout(self.p4, commit=False)
@@ -393,108 +380,11 @@ class P4Conf(unittest.TestCase):
                          {"notebook/plan.md": "2030-01-01"})
         self.assertIn("notebook/big", p4conf.load(self.p4)["temportal"]["cache"])
 
-    def test_the_keys_p4_temportal_stopped_reading_are_dropped_and_never_called_unknown(self):
-        import contextlib
-        import io
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"memory": {"retries": 5}, "scratchpad": {"tmp_skip_dirs": [], "asks": True}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("memory", s)
-        self.assertNotIn("tmp_skip_dirs", s["scratchpad"])
-        self.assertIs(s["scratchpad"]["asks"], True)
-
-    def test_the_retired_archive_switch_is_dropped_and_never_called_unknown(self):
-        """phi.session_archives went with the archive guard, for the ask rule on archive_session."""
-        import contextlib
-        import io
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"session_archives": True}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("session_archives", s.get("phi", {}))
-
-    def test_the_retired_compact_keys_are_dropped_and_have_no_variable(self):
-        """Claude Code compacts a session by itself, by context-window.md, "When your context fills up", so a
-        puppeteer's boundary notice carries no compact question. phi.puppeteer_chars and phi.compactions, which would
-        count characters and compactions toward one, are neither read, written, called unknown nor mirrored as a P4_*
-        variable."""
-        import contextlib
-        import io
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"puppeteer_chars": 9, "compactions": 5}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        for key in ("puppeteer_chars", "compactions"):
-            self.assertNotIn(key, s.get("phi", {}), key)
-            self.assertNotIn(key, self.read().get("phi", {}), key)
-            self.assertNotIn(key, p4conf.DEFAULTS["phi"], key)
-            self.assertIn("phi." + key, p4conf.RETIRED)
-            self.assertNotIn("phi." + key, p4conf.env_keys())
-
-    def test_the_retired_context_window_is_dropped_and_has_no_variable(self):
-        """The app counts a session's context and gives it through `mcp__ccd_session_mgmt__get_usage`, so p4 holds no
-        window size: phi.context_window is neither read, written, called unknown nor mirrored as
-        P4_PHI_CONTEXT_WINDOW, and a value of the variable changes nothing. phi.clear_at, the share past which a
-        session clears itself, stays a key read when a store sets it."""
-        import contextlib
-        import io
-        from unittest import mock
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"context_window": 1000000, "clear_at": 45}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("context_window", s["phi"])
-        self.assertNotIn("context_window", self.read()["phi"])
-        self.assertIn("phi.context_window", p4conf.RETIRED)
-        self.assertNotIn("phi.context_window", p4conf.env_keys())
-        self.assertNotIn("P4_PHI_CONTEXT_WINDOW", [p4conf.env_name(k) for k in p4conf.env_keys()])
-        self.assertEqual(s["phi"]["clear_at"], 45)
-        self.assertIn("phi.clear_at", p4conf.env_keys())
-        with mock.patch.dict(os.environ, {"P4_PHI_CONTEXT_WINDOW": "500000"}), contextlib.redirect_stderr(err):
-            again = p4conf.load(self.p4, write=False)
-        self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
-        self.assertEqual(err.getvalue(), "")
-
-    def test_the_retired_file_sets_key_is_dropped_and_has_no_variable(self):
-        """A session that writes works in a git worktree of its own, worktrees.md, "Running each Claude Code session
-        in its own worktree gives it a separate copy of the files to edit", so no start is refused or held for the
-        files its brief names. phi.file_sets, which switched that refusal, is neither read, written, called unknown
-        nor mirrored as P4_PHI_FILE_SETS, and a value of the variable changes nothing."""
-        import contextlib
-        import io
-        from unittest import mock
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"file_sets": False}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("file_sets", s["phi"])
-        self.assertNotIn("file_sets", self.read().get("phi", {}))
-        self.assertNotIn("file_sets", p4conf.DEFAULTS["phi"])
-        self.assertIn("phi.file_sets", p4conf.RETIRED)
-        self.assertNotIn("phi.file_sets", p4conf.env_keys())
-        self.assertNotIn("P4_PHI_FILE_SETS", [p4conf.env_name(k) for k in p4conf.env_keys()])
-        with mock.patch.dict(os.environ, {"P4_PHI_FILE_SETS": "0"}), contextlib.redirect_stderr(err):
-            again = p4conf.load(self.p4, write=False)
-        self.assertEqual(json.dumps(again, sort_keys=True), json.dumps(s, sort_keys=True))
-        self.assertEqual(err.getvalue(), "")
-
     def test_the_keeper_writes_and_keeps_scratchpad_tmp_false(self):
         """p4-temportal 0.3.9 links a session's scratchpad into temportal/tmp unless p4.json's scratchpad.tmp is false,
-        so every store holds it false: a store that lacks it, one load wrote true into, and one from before the record
-        that holds the old default."""
+        so every store holds it false: a store that lacks it and one load wrote true into."""
         cases = {}
-        for name, value, record in (("missing", None, True), ("written", True, True), ("no record", True, False)):
+        for name, value, record in (("missing", None, True), ("written", True, True)):
             p4 = tempfile.mkdtemp()
             self.addCleanup(shutil.rmtree, p4, True)
             d = json.loads(json.dumps(p4conf.DEFAULTS))
@@ -509,8 +399,7 @@ class P4Conf(unittest.TestCase):
             p4conf.load(p4)
             with open(p4conf.path(p4), encoding="utf-8") as f:
                 cases[name] = json.load(f)["scratchpad"]["tmp"]
-        self.assertEqual(cases, {"missing": False, "written": False, "no record": False})
-        self.assertNotIn("scratchpad.tmp", p4conf.RETIRED)
+        self.assertEqual(cases, {"missing": False, "written": False})
 
     def test_a_store_gains_the_tree_caps_a_project_sets(self):
         """ezexe/p4#125: the ten caps of the session tree are phi keys of p4.json, written into a store that lacks
@@ -529,8 +418,8 @@ class P4Conf(unittest.TestCase):
         self.assertNotIn("max_depth", json.dumps(p4conf.read_record(self.p4)), "nothing of the settings record")
 
     def test_gen_is_raised_with_every_change_of_defaults(self):
-        """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised, the old value added to
-        HISTORY and the pin below updated."""
+        """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised and the pin below
+        updated."""
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
                 11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c"}
@@ -538,7 +427,7 @@ class P4Conf(unittest.TestCase):
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
-        self.assertEqual(pins[p4conf.GEN], got, "DEFAULTS changed: raise GEN, add the old value to HISTORY, pin it")
+        self.assertEqual(pins[p4conf.GEN], got, "DEFAULTS changed: raise GEN and pin it")
 
     def test_a_missing_file_is_written_with_every_default(self):
         s = p4conf.load(self.p4)
@@ -565,45 +454,6 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
         self.assertEqual(s["recall"]["repo_deadline_s"], 3.0)
 
-    def test_the_pinned_rules_key_is_retired_and_no_variable_carries_it(self):
-        """The pinned rules block of a start went to Claude Code's own rules files, memory.md, "Organize rules with
-        `.claude/rules/`": no default writes recall.pinned_chars, a store that holds it loses it at the next rewrite
-        with no unknown-key line, and no P4_* variable is derived from it."""
-        import contextlib
-        import io
-        self.assertNotIn("pinned_chars", p4conf.DEFAULTS["recall"])
-        self.assertIn("recall.pinned_chars", p4conf.RETIRED)
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"recall": {"pinned_chars": 900}, "phi": {"max_depth": 4}}, f)
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "")
-        self.assertNotIn("pinned_chars", s["recall"])
-        self.assertNotIn("pinned_chars", self.read()["recall"])
-        self.assertNotIn("recall.pinned_chars", p4conf.env_keys())
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"recall": {"pinned_chars": 900}}, f)
-        self.assertNotIn("P4_RECALL_PINNED_CHARS", p4conf.env_wants(self.p4))
-
-    def test_a_retired_section_is_dropped_from_the_file(self):
-        """A key of RETIRED, such as `plans` or `version`, leaves a p4.json that holds it at the next rewrite, with no
-        unknown-key line, and nothing writes it again."""
-        old = {k: v for k, v in p4conf.DEFAULTS.items() if k != "memory"}
-        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({**old, "plans": {"plans_dir": ".claude/plans", "owner_title": "ezexe"}, "version": 1}, f)
-        import contextlib
-        import io
-        err = io.StringIO()
-        with contextlib.redirect_stderr(err):
-            s = p4conf.load(self.p4)
-        self.assertEqual(err.getvalue(), "", "a retired key is dropped without an unknown-key line")
-        for key in ("plans", "version"):
-            self.assertNotIn(key, s)
-            self.assertNotIn(key, self.read())
-            self.assertNotIn(key, p4conf.DEFAULTS)
-        self.assertEqual(self.read(), p4conf.DEFAULTS)
-
     def test_a_writer_holding_a_temp_file_does_not_block_another(self):
         """Two hooks of one event load at once: a temp file another writer still holds does not stop this write."""
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
@@ -621,7 +471,6 @@ class P4Conf(unittest.TestCase):
         older = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(older)
         older.DEFAULTS = {**older.DEFAULTS, "version": 1}
-        older.RETIRED = ("plans",)
         writes = []
         for copy in (p4conf, older):
             real = copy._write

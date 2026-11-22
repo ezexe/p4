@@ -4,9 +4,8 @@ p4conf.py: the settings of every p4 plugin, kept in one file of the store, `<pro
 Each plugin carries its own copy of this file, since an installed plugin cannot import another plugin's code, and
 test_p4conf.py holds the copies the same byte for byte. `load(p4)` returns DEFAULTS with the file merged over them. It
 writes the file when it is missing, when it lacks a key of DEFAULTS and when a default an older generation of this
-file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. Two limits: a value set by
-hand that equals the value load recorded as written moves at the next GEN, and in a store from before the record a
-value set by hand that equals a past default in HISTORY moves. A file that is not valid JSON is never overwritten: the
+file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. One limit: a value set by
+hand that equals the value load recorded as written moves at the next GEN. A file that is not valid JSON is never overwritten: the
 defaults are used and a line goes to stderr. Each setting has a variable `P4_<SECTION>_<KEY>`, named by env_name,
 and `load` reads one a person set ahead of p4.json for the session's own store; one p4 wrote, or one that does not
 fit, is passed over for p4.json's value. The settings keeper below mirrors each setting a store changed from its
@@ -152,21 +151,6 @@ OPEN = ("temportal.cache",)
 # every store: kept as set, never called unknown.
 READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude",
                  "phi.cards")
-
-# Keys no plugin reads, top-level or dotted: never returned or called unknown, and dropped from p4.json when it is
-# rewritten for another reason. The memory section and the scratchpad tmp keys went with p4-temportal's move to the
-# app's own auto memory and scratchpad, and phi.session_archives with the archive guard, which the app's approval card
-# on the archive tool replaced. phi.puppeteer_chars and phi.compactions steer nothing: Claude Code compacts a session
-# by itself, so a puppeteer's boundary notice carries no compact question to count characters or compactions for.
-# phi.context_window steers nothing either: the app counts a session's context, and a session reads its share with
-# the app's get_usage tool, so p4 holds no window size to count against. phi.file_sets went with the refusal of a
-# start whose brief declares no files: a session that writes works in a git worktree of its own, so no start is
-# held or refused for the files its brief names. recall.pinned_chars went with the pinned rules block of a start:
-# Claude Code loads the rules files under `.claude/rules/` itself, at launch and after a compaction.
-RETIRED = ("plans", "version", "memory", "scratchpad.tmp_idle_days", "scratchpad.tmp_max_file_mb",
-           "scratchpad.tmp_max_files", "scratchpad.tmp_empty_idle_hours", "scratchpad.scratch_sweep_minutes",
-           "scratchpad.tmp_skip_dirs", "phi.session_archives", "phi.puppeteer_chars", "phi.compactions",
-           "phi.context_window", "phi.file_sets", "recall.pinned_chars")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -753,8 +737,6 @@ def _carry_keys(p4, old, new):
 def _merge(base, over, unknown, prefix=""):
     out = copy.deepcopy(base)
     for k, v in over.items():
-        if prefix + k in RETIRED:
-            continue
         if k not in base:
             if prefix + k not in READ_WHEN_SET:
                 unknown.append(prefix + k)
@@ -785,18 +767,13 @@ def _write(p4, data):
 # higher GEN moves it to that copy's default, so two installed copies that differ on a default settle on the newer
 # one's and never rewrite the file in turn. A value that differs from its entry was set by hand and is never moved.
 WRITTEN = "_written"
-# The generation of DEFAULTS: raised by one whenever a default changes, with the value it had added to HISTORY, so a
-# store's written values follow the change. test_p4conf.py pins DEFAULTS to this number. It is raised too when the
+# The generation of DEFAULTS: raised by one whenever a default changes, so a store's written values follow the
+# change. test_p4conf.py pins DEFAULTS to this number. It is raised too when the
 # settings keeper gains a key, as at 11 for plansDirectory: an installed copy of a lower GEN then leaves the key to
 # the copy that wrote it, where it would otherwise remove it at each of its starts. 12 came with the plans folder's
 # move to temportal/plan-planner, so a copy of 11 leaves the new value of plansDirectory and never writes the old one
 # back.
 GEN = 12
-# Past defaults by dotted path: a store from before the record whose value equals one of these, or today's default,
-# counts that value as written by load, so it follows today's default.
-HISTORY = {"recall.teacher.model": ["claude-fable-5-1"], "recall.lookups.web": ["answer"], "scratchpad.tmp": [True],
-           "temportal.cache": [{"scratchpad/.out": {"max_age_days": 14, "max_mb": 500},
-                                ".layout-conflicts": {"max_age_days": 30}}]}
 
 
 def _leaves(d, prefix=""):
@@ -839,13 +816,13 @@ def _entry(e):
 
 def written_record(kept, record):
     """The record load works from: the store's own, or, for a store from before it, every value equal to today's
-    default or to a past one in HISTORY, as written at generation 0."""
+    default, as written at generation 0."""
     if isinstance(record, dict):
         return record
     out = {}
     for p, v in _leaves(DEFAULTS):
         have = _get(kept, p)
-        if have is not _NONE and (have == v or have in HISTORY.get(p, ())):
+        if have is not _NONE and have == v:
             out[p] = {"v": have, "gen": 0}
     return out
 
@@ -876,7 +853,7 @@ def _load_file(p4, write=True, warn=True):
             if warn:
                 print(f"p4: {path(p4)} unreadable: {e}; defaults used, the file left as it is", file=sys.stderr)
             return copy.deepcopy(DEFAULTS)
-    kept = {k: v for k, v in over.items() if k not in RETIRED}
+    kept = dict(over)
     record = written_record(kept, kept.pop(WRITTEN, None))
     known = dict(_leaves(DEFAULTS))
     now = {p: e for p, e in record.items() if p not in known and _entry(e)}   # another copy's, kept as it wrote it
@@ -897,20 +874,12 @@ def _load_file(p4, write=True, warn=True):
         print(f"p4: {path(p4)} holds keys this plugin does not read, kept as they are: {', '.join(unknown)}",
               file=sys.stderr)
     out = {**merged, WRITTEN: now}
-    # a retired key alone never rewrites the file, since an older copy that still writes it would put it back at its
-    # own next load: it leaves the file at the next rewrite for another reason
-    if write and os.path.isdir(p4) and (not existed or out != _without_retired(over)):
+    if write and os.path.isdir(p4) and (not existed or out != over):
         try:
             _write(p4, out)
         except OSError:
             pass
     return merged
-
-
-def _without_retired(d, prefix=""):
-    """`d` with every key of RETIRED left out, at any depth."""
-    return {k: _without_retired(v, f"{prefix}{k}.") if isinstance(v, dict) else v for k, v in d.items()
-            if prefix + k not in RETIRED}
 
 
 def section(p4, name, write=True):
