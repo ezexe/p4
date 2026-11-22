@@ -1473,6 +1473,37 @@ class TopOrchestrates(unittest.TestCase):
         self.plan(TOP, {"advance": True})
         self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "syncing a store is its own")
 
+    def test_seeing_landed_work_through_stays_and_a_watch_of_anything_else_is_work(self):
+        """Seen in an orchestrator on p4-phi 0.11.133 and 0.11.134: for its steps "Watch GitHub's run on piece D"
+        and "Update the installed plugins" the advice named a new session in a worktree for each, and the nudge
+        called the first a build that changes behaviour, while "Land piece D" stayed as landing. The orchestrator
+        pushed the work, so the run on it and the installed plugins' update to its release are its own to see
+        through. The object decides: a watch of something else, and a change to a plugin's own files, is work."""
+        for stays in ("Watch GitHub's run on piece D", "Update the installed plugins",
+                      "Watch the workflow run on what was just pushed", "Follow the release run to its end",
+                      "Wait for the CI run on main to pass", "Check that CI passed on the pushed commit",
+                      "Run claude plugin update for the three plugins"):
+            self.assertEqual(plans.top_stays(stays), "checks or lands the work", stays)
+        for work in ("Watch the lock file while two hooks write and record each failed read",
+                     "Watch how the hook runs on Windows and fix what fails",
+                     "Update the plugin's README with the new command",
+                     "Check the workflow file for a missing matcher"):
+            self.assertEqual(plans.top_stays(work), "", work)
+        # the advice gives a child only the watch that is work, and the split advice keeps an update that names a path
+        steps = [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
+            "Watch GitHub's run on piece D", "Update the installed plugins from lbiza/plugins/p4-phi",
+            "Watch the lock file in src/lock.py while two hooks write"))]
+        groups, kept = plans.top_groups({"steps": steps}, "")
+        self.assertEqual([[st["addr"] for st in g] for g in groups], [["3"]])
+        self.assertEqual([a for a, _ in kept], ["1", "2"])
+        self.assertEqual(dict(plans.judge({"steps": steps}, "")[1])["2"], "checks or lands the other steps' work")
+        # and the nudge is silent on the watch, and speaks on the work step after it
+        self.plan(TOP, items("Watch GitHub's run on piece D", "Port the CLI in src/cli.py"))
+        self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "the watch is its own")
+        self.plan(TOP, {"advance": True})
+        self.assertEqual((phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)) or {}).get("content"),
+                         "Port the CLI in src/cli.py")
+
     def test_queueing_sending_passing_or_handing_to_a_session_is_orchestration(self):
         groups, kept = plans.top_groups({"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((

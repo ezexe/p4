@@ -396,11 +396,13 @@ var REVIEWS=/^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check
 var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
 var STATIC=/\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b|\.(?:md|html|css|txt|svg)\b/i;
 function kindOfWork(t){if(REVIEWS.test(t))return "review";if(DESIGNS.test(t))return "design";if(STATIC.test(t)&&!CODE.test(t))return "static";return "build"}
-/* three of the reasons plans.top_stays keeps a step with the orchestrator; it has more, such as waiting on other sessions */
+/* three of the reasons plans.top_stays keeps a step with the orchestrator; it has more, such as waiting on other sessions. Watching the run on what was pushed, and updating the installed plugins, count as landing. */
 var LANDS=/^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)|\b(?:commit|merge|push|ship|release|land|fast-forward)\b/i;
 var SYNCS=/^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b/i;
+var WATCHES_RUN=/\b(?:watch|follow|monitor|poll|a?wait|check|verify|confirm)\w*\b[^.;]*?\b(?:(?:workflow|ci|release|actions?|pipeline|github(?:'s|’s)?)\s+runs?\b|(?:the|its|that|this|each|every)\s+runs?\s+on\b|(?:workflows?|ci|pipelines?)(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|green|red)\b|\W*$))/i;
+var INSTALLS=/\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?\b(?!['’])|\bplugin\s+update\b/i;
 var ORCHESTRATES=/^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b/i;
-function staysWhy(t){if(LANDS.test(t)||SYNCS.test(t))return "it checks or lands the work";if(ORCHESTRATES.test(t))return "it starts a check, test or session, which is orchestration";return ""}
+function staysWhy(t){if(LANDS.test(t)||SYNCS.test(t)||WATCHES_RUN.test(t)||INSTALLS.test(t))return "it checks or lands the work";if(ORCHESTRATES.test(t))return "it starts a check, test or session, which is orchestration";return ""}
 var KIND_WORDS={static:"static or mechanical work, an integrator's, so it starts on <code>claude-sonnet-5-5</code> at <code>medium</code> effort",
   build:"a build that changes behaviour, a writer's, so it starts on <code>claude-opus-5-5</code> at <code>medium</code> effort",
   design:"a design or a decision with its sources, a writer's, so it starts on <code>claude-opus-5-5</code> at <code>medium</code> effort",

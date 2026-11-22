@@ -479,7 +479,7 @@ def judge(plan, cwd):
             kept.append((a, f"leans on another step, \"{dep.group(0)}\""))
         elif wait:
             kept.append((a, f"waits on or passes on other work, \"{wait.group(0)}\""))
-        elif LANDS.search(text):
+        elif LANDS.search(text) or WATCHES_RUN.search(text) or INSTALLS.search(text):
             kept.append((a, "checks or lands the other steps' work"))
         elif ORCHESTRATES.search(text):
             kept.append((a, "starts a check, test or session, which is orchestration"))
@@ -548,9 +548,9 @@ def split_advice(home, s, plan, owner_turn, cap):
 # with ezexe, and landing work. Each work step of its task list goes to a fresh child, not only the independent ones,
 # and a serial run, work steps that lean on the step before them or share a path with it, goes to one child that does
 # them in order. With delegation on, a step that only reads or only runs a command goes to a background subagent
-# instead. A step that checks or lands work, such as a test-and-commit, merge, push, release or sync, waits on or
-# passes on work, starts a check or session, manages a worker, compiles results or tracks what another does
-# stays; top_stays gives the reason for each.
+# instead. A step that checks or lands work, such as a test-and-commit, merge, push, release or sync, or the watch
+# of the run on what was pushed, waits on or passes on work, starts a check or session, manages a worker, compiles
+# results or tracks what another does stays; top_stays gives the reason for each.
 
 # a step that begins with one of these is read-only work of its own, a child's, such as "Verify phi's session tree
 # matches the app", though WAITS matches `verif` and `confirm` anywhere. It stays only when it names a child or a
@@ -562,6 +562,20 @@ CHILD_WORD = re.compile(r"\b(?:child(?:ren)?(?:'s|’s)?|sub-?sessions?)\b"   # 
 # syncing a store is landing work: the orchestrator is the one that pushes and syncs each store
 SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
+# Seeing landed work through is landing too. The orchestrator pushed the work, so the workflow run, the CI run or
+# the release run on it is its own to watch, and so is bringing the installed plugins up to the release that run
+# made: a child in a worktree of its own would wait on what its starter has to read anyway. Seen in an orchestrator
+# on p4-phi 0.11.133 and 0.11.134: for its steps "Watch GitHub's run on piece D" and "Update the installed plugins"
+# the advice named a new session in a worktree for each, and the nudge called the first "a build that changes
+# behaviour, a writer's", while "Land piece D" stayed as landing. The object decides: a watch of anything else, as
+# of a lock file or of how a hook runs on one system, is work, and so is a change to a plugin's own files.
+RUN_OF = (r"(?:(?:workflow|ci|release|actions?|pipeline|github(?:'s|’s)?)\s+runs?\b"
+          r"|(?:the|its|that|this|each|every)\s+runs?\s+on\b"
+          r"|(?:workflows?|ci|pipelines?)(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|"
+          r"green|red)\b|\W*$))")
+WATCHES_RUN = re.compile(r"\b(?:watch|follow|monitor|poll|a?wait|check|verify|confirm)\w*\b[^.;]*?\b" + RUN_OF, re.I)
+INSTALLS = re.compile(r"\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?\b"
+                      r"(?!['’])|\bplugin\s+update\b", re.I)
 
 
 # a step whose doer is another session, or that waits on, awaits, collects or checks other sessions' or trees'
@@ -592,7 +606,7 @@ def top_stays(text):
     text = str(text or "")
     if awaits_sessions(text):                      # waiting on other sessions' results wins over the check rule
         return AWAITS_WHY
-    if LANDS.search(text) or SYNCS.search(text):
+    if LANDS.search(text) or SYNCS.search(text) or WATCHES_RUN.search(text) or INSTALLS.search(text):
         return "checks or lands the work"
     if ORCHESTRATES.search(text):
         return "starts a check, test or session, which is orchestration"
