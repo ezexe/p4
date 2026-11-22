@@ -174,10 +174,16 @@ class RecordTest(unittest.TestCase):
         found = uses()
         self.assertIn(("event", "tool.run", "p4-temportal"), found)
         self.assertIn(("event", "tool.call", "p4-temportal"), found)
-        self.assertEqual(ROWS["tool.call"]["used"], ["p4-native", "p4-temportal"])
+        self.assertEqual(ROWS["tool.call"]["used"], ["p4-native", "p4-phi", "p4-temportal"])
         self.assertIn(("method", "$.session.version", "p4-temportal"), found)
+        # p4-phi's module serves its four tools the same way, so it loads on those builds too: it answers at
+        # `tool.run` where the glob is handed it and at `tool.call` where Claude Code 2.1.330 hands a glob none
+        for use in (("event", "tool.run", "p4-phi"), ("event", "tool.call", "p4-phi"),
+                    ("method", "$.session.version", "p4-phi")):
+            self.assertIn(use, found)
+        self.assertIn("p4-phi", ROWS["tool.call"]["used"])
         self.assertEqual(ROWS["tool.run"]["used"], ["p4-phi", "p4-temportal"])
-        self.assertEqual(ROWS["$.session.version"]["used"], ["p4-native", "p4-temportal"])
+        self.assertEqual(ROWS["$.session.version"]["used"], ["p4-native", "p4-phi", "p4-temportal"])
 
     def test_the_state_p4_temportal_keeps_for_a_reload_is_in_the_record(self):
         """p4-temportal's module keeps the end of the last turn in the session's state, so a module loaded anew

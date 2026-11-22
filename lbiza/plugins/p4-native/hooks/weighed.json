@@ -448,6 +448,7 @@
    "kind": "method",
    "used": [
     "p4-native",
+    "p4-phi",
     "p4-temportal"
    ]
   },
@@ -3100,6 +3101,7 @@
    "kind": "event",
    "used": [
     "p4-native",
+    "p4-phi",
     "p4-temportal"
    ]
   },

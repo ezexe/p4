@@ -70,8 +70,14 @@ type Machine = {
   goalRejects?: () => string | undefined
   // What a run of the goal command waits on before it answers, as a command queued behind a turn does.
   goalWaits?: () => Promise<void>
-  // What the engine does at `tool.run` beneath every plugin, where a test stands for a build's own run of a tool.
-  toolRuns?: (tool: string) => unknown
+  // What is beneath the module at `tool.call` for a call of one of its own tools, the permission check and the run,
+  // where a test enters such a call: a refusal where it gives one, else the engine's answer that the allowed call
+  // found no hook at its run.
+  comes?: (tool: string) => unknown
+  // The Claude Code the session runs on, where a test names one: none answers that the version is closed.
+  version?: () => { version: string; base?: string } | undefined
+  // The build has no `$.session.info`, as Claude Code 2.1.311 and 2.1.322 have none.
+  hasNoInfo?: true
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
 }
@@ -97,7 +103,29 @@ type Seen = {
   ran: { command: string; args: string }[]
   // The slash commands it declared, and the panes it opened and has not seen closed, each with its title.
   commands: { name: string; description: string }[]
+  // How often the module asked `$.session.info`, which a build with no such method never reaches.
+  infos: number
   panes: { id: string; title?: string }[]
+}
+
+// What Claude Code answers a call of one of the plugin's tools that came to its run and found no hook there, in
+// the words a scripted session on 2.1.330 printed for p4-temportal's tool, with this plugin's names.
+function unserved(name: string): string {
+  return (
+    `p4-phi registered the tool ${name} but no hook answered this call: add on("tool.run", { tool: ` +
+    `"mcp__p4-phi__${name}" }, ($, e) => ({ result: ... })) to the plugin.`
+  )
+}
+
+// The words a call of a tool was refused with. A call enters at `tool.call`, and its error comes back in one of two
+// shapes: `{ deny }` where the module answered at `tool.call`, as on Claude Code 2.1.330, and the error Claude Code
+// makes of a `{ deny }` given at `tool.run`, with the words as its `text`, as on 2.1.326 to 2.1.328. Nothing for a
+// call that was served.
+function refusal(out: unknown): string | undefined {
+  const answer = out as { deny?: unknown; text?: unknown; isError?: unknown }
+  if (typeof answer.deny === 'string') return answer.deny
+
+  return answer.isError === true && typeof answer.text === 'string' ? answer.text : undefined
 }
 
 // A path as the test wrote it: the engine hands a hook the path resolved on the machine the test runs on.
@@ -122,6 +150,7 @@ function machine(on: On, has: Machine): Seen {
     checks: [],
     ran: [],
     commands: [],
+    infos: 0,
     panes: [],
   }
   on('command.register', (_, e) => {
@@ -213,7 +242,32 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: Object.keys(files).some(file => file === path || file.startsWith(`${path}/`)) }
   })
-  on('session.info', () => ({ value: { transcriptPath: TRANSCRIPT } }))
+  // `$.session.info`, which Claude Code 2.1.311 and 2.1.322 lack: a glob stands for it, since a test file that
+  // names an event its build lacks is refused whole, as a module is.
+  on('session.*', (_, e, next) => {
+    if (next.event !== 'session.info') return next(e as never) as never
+    seen.infos += 1
+    const told = { value: { transcriptPath: TRANSCRIPT } }
+
+    return (has.hasNoInfo === true ? { deny: '$.session.info is not a function' } : told) as never
+  })
+  // The build the session runs on. A test that names none stands for a current one, 2.1.330.
+  on('session.version', () => {
+    const version = has.version === undefined ? { version: '2.1.330', base: '2.1.330' } : has.version()
+
+    return version === undefined ? { deny: 'the version is closed to this plugin' } : { value: version }
+  })
+  // What is beneath the module at `tool.call` for one of its own tools: the permission check and the run. It
+  // stands for Claude Code 2.1.330, where no glob selects `tool.run`, so an allowed call finds no hook at its run
+  // and the engine's answer comes back up. A test that calls a tool of the app answers `tool.call` itself.
+  if (has.comes !== undefined) {
+    on('tool.call', (_, e) => {
+      const name = String(e.tool).replace('mcp__p4-phi__', '')
+      const text = unserved(name)
+
+      return (has.comes?.(String(e.tool)) ?? { result: `Error: ${text}`, text, isError: true }) as never
+    })
+  }
   on('tool.register', (_, e) => {
     seen.tools.push({ name: e.name, description: e.description, inputSchema: e.inputSchema, isDeferred: e.isDeferred as never })
 
@@ -1517,9 +1571,13 @@ test('a call python has no check for starts no process, and a listed one runs ho
   ])
   const first = seen.checks[0]
   expect(first?.args).toEqual(['lookup-check'])
+  // The transcript's path is `$.session.info`'s to give, and Claude Code 2.1.311 and 2.1.322 have no such method:
+  // there the module's call of it never comes down to what stands for the engine, the input holds no path, and the
+  // call is checked all the same.
+  const hasInfo = seen.infos > 0
   expect(first?.payload).toEqual({
     session_id: 'cli-0001',
-    transcript_path: TRANSCRIPT,
+    transcript_path: hasInfo ? TRANSCRIPT : '',
     cwd: '/work/project',
     hook_event_name: 'PreToolUse',
     tool_name: 'WebFetch',
@@ -1881,19 +1939,124 @@ test('P4_PHI=0 declares no tool', async ($, on) => {
 test('a call of the note tool runs phi.py note for this session, its words after the options', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   mock.clock(on)
-  const seen = machine(on, { runs: () => ({ stdout: 'kept\n' }) })
+  const seen = machine(on, { runs: () => ({ stdout: 'kept\n' }), comes: () => undefined })
 
   // A finding that opens with a dash is still the finding, not an option of the command.
   const claim = '-x is no flag of flush.py'
-  const kept = await $.tool.run({ tool: 'mcp__p4-phi__note', claim, source: ' flush.py:12 ', kind: 'decision' } as never)
+  const kept = await $.tool.call({ tool: 'mcp__p4-phi__note', claim, source: ' flush.py:12 ', kind: 'decision' } as never)
   expect(kept).toEqual({ result: 'kept' })
   expect(seen.asked).toEqual([['note', '--source', 'flush.py:12', '--kind', 'decision', '--', claim]])
   expect(seen.calls[0]?.argv.slice(0, 4)).toEqual([KEPT, '-I', '-X', 'utf8'])
   expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
 
   // With no kind the command gets none, and phi.py itself refuses a finding with no source.
-  await $.tool.run({ tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' } as never)
+  await $.tool.call({ tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' } as never)
   expect(seen.asked[1]).toEqual(['note', '--source', 'git log -1', '--', 'the flush is ported'])
+})
+
+// What the permission check answers a call it refuses, which comes back up to `tool.call` as it is.
+const NOT_ALLOWED = 'Permission to use mcp__p4-phi__note was denied.'
+
+test('a call the permission check refused goes up as it came, and phi.py runs for none but an allowed one', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  // Another error of a call, which names no tool of the plugin left unserved.
+  const aborted = { result: 'Error: the turn was aborted', text: 'the turn was aborted', isError: true }
+  let beneath: 'refused' | 'aborted' | 'allowed' = 'refused'
+  const seen = machine(on, {
+    runs: () => ({ stdout: 'kept\n' }),
+    comes: () => (beneath === 'refused' ? { deny: NOT_ALLOWED } : beneath === 'aborted' ? aborted : undefined),
+  })
+  const noted = { tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' }
+
+  // Refused beneath, where the engine's check is: the module ran nothing and changed nothing of the answer. On a
+  // build whose glob is handed `tool.run` the kit asks nothing beneath, so there each call is served as allowed.
+  const first = await $.tool.call(noted as never)
+  const isServedAbove = seen.asked.length > 0
+  if (!isServedAbove) expect(first).toEqual({ deny: NOT_ALLOWED })
+  beneath = 'aborted'
+  const second = await $.tool.call(noted as never)
+  if (!isServedAbove) {
+    expect(refusal(second)).toBe('the turn was aborted')
+    expect(seen.asked).toEqual([])
+  }
+  const before = seen.asked.length
+
+  // Allowed, and no hook at its run: the module runs the command once, in place of the engine's error.
+  beneath = 'allowed'
+  expect(await $.tool.call(noted as never)).toEqual({ result: 'kept' })
+  expect(seen.asked.length).toBe(before + 1)
+  expect(seen.asked.at(-1)).toEqual(['note', '--source', 'git log -1', '--', 'the flush is ported'])
+})
+
+test('where a glob reaches tool.run, as on Claude Code 2.1.326 to 2.1.328, the allowed call is served there', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, { runs: () => ({ stdout: 'local_top00001  working  port the flush\n' }) })
+  let out: unknown
+  try {
+    out = await ($.tool as unknown as { run: (e: unknown) => Promise<unknown> }).run({ tool: 'mcp__p4-phi__tree' })
+  } catch (error) {
+    out = String(error)
+  }
+
+  // On a Claude Code whose glob does not select tool.run, 2.1.330, and on one with no such event, nothing answers
+  // a run, and the call is served at `tool.call` as the cases beside this one show.
+  if (seen.asked.length === 0) expect(String(out)).toMatch(/no implementation for tool\.run|not a function/)
+  else expect(out).toEqual({ result: 'local_top00001  working  port the flush' })
+  expect(seen.asked.length).toBeLessThanOrEqual(1)
+})
+
+for (const version of ['2.1.311', '2.1.322', '2.1.325', '2.0.400']) {
+  test(`on Claude Code ${version}, which has no tool.run, no tool is declared and the pane's command is`, async ($, on) => {
+    mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+    const clock = mock.clock(on)
+    const seen = machine(on, { version: () => ({ version, base: version }) })
+
+    await $.session.start(START)
+    await clock.settle()
+
+    expect(seen.commands.map(command => command.name)).toEqual(['phi-pane'])
+    expect(seen.tools).toEqual([])
+    expect(seen.logged).toEqual(["p4-phi's tools are not declared: this Claude Code has no `tool.run` event to serve them at"])
+    // The watcher runs all the same: the session's first look was made.
+    expect(seen.looks.length).toBeGreaterThan(0)
+  })
+}
+
+for (const [name, version] of [
+  ['2.1.326', { version: '2.1.326', base: '2.1.326' }],
+  ['2.1.330', { version: '2.1.330', base: '2.1.330' }],
+  ['a development build of 2.1.328', { version: '2.1.328-dev.20261119', base: '2.1.328-dev' }],
+  ['a version that names no release', { version: 'dev' }],
+  ['a version that is closed to the plugin', undefined],
+] as const) {
+  test(`on ${name} the four tools are declared`, async ($, on) => {
+    mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+    const clock = mock.clock(on)
+    const seen = machine(on, { version: () => version as never })
+
+    await $.session.start(START)
+    await clock.settle()
+
+    expect(seen.tools.map(tool => tool.name)).toEqual(['note', 'done', 'tree', 'goal'])
+    expect(seen.logged).toEqual([])
+  })
+}
+
+test("on a build with no $.session.info a call is still checked, with no transcript's path", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {
+    hasNoInfo: true,
+    check: () => ({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'no' } }),
+  })
+  on('tool.check', () => ALLOW)
+
+  expect(await $.tool.check(call('WebSearch', { query: 'flush' }))).toEqual({ decision: 'deny', reason: 'no' })
+  expect(seen.checks.length).toBe(1)
+  expect(seen.checks[0]?.payload.transcript_path).toBe('')
+  expect(seen.logged.filter(line => line.includes('was not checked'))).toEqual([])
 })
 
 test('done and tree run their commands, and what phi.py says on a failure is the call\'s error', async ($, on) => {
@@ -1907,15 +2070,16 @@ test('done and tree run their commands, and what phi.py says on a failure is the
 
       return { stdout: 'this turn will be kept as done\n' }
     },
+    comes: () => undefined,
   })
 
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__done', text: 'pytest -q passed, 12 of 12' } as never)).toEqual({
+  expect(await $.tool.call({ tool: 'mcp__p4-phi__done', text: 'pytest -q passed, 12 of 12' } as never)).toEqual({
     result: 'this turn will be kept as done',
   })
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__tree' } as never)).toEqual({
+  expect(await $.tool.call({ tool: 'mcp__p4-phi__tree' } as never)).toEqual({
     result: 'local_top00001  working  port the flush',
   })
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__done', text: 'ok' } as never)).toEqual({ deny: short })
+  expect(refusal(await $.tool.call({ tool: 'mcp__p4-phi__done', text: 'ok' } as never))).toBe(short)
   expect(seen.asked).toEqual([['done', '--', 'pytest -q passed, 12 of 12'], ['tree'], ['done', '--', 'ok']])
 })
 
@@ -1941,6 +2105,7 @@ test("a session's own ask is kept by phi.py, and the look at its turn's end has 
 
       return { stdout: `${ASKED}\n` }
     },
+    comes: () => undefined,
   })
 
   await $.session.start(START)
@@ -1949,7 +2114,7 @@ test("a session's own ask is kept by phi.py, and the look at its turn's end has 
   await clock.advance(6_000)
 
   // The call sets nothing by itself: the command is run for what a look answers, as it is for a worker.
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__goal', condition: ` ${CONDITION} ` } as never)).toEqual({ result: ASKED })
+  expect(await $.tool.call({ tool: 'mcp__p4-phi__goal', condition: ` ${CONDITION} ` } as never)).toEqual({ result: ASKED })
   expect(seen.asked).toEqual([['goal', 'ask', '--', CONDITION]])
   expect(seen.calls.at(-1)?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
   expect(seen.ran).toEqual([])
@@ -1961,7 +2126,7 @@ test("a session's own ask is kept by phi.py, and the look at its turn's end has 
   expect(seen.sent).toEqual([])
 
   // A condition phi.py refuses is the call's error, and no command runs for it.
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__goal', condition: 'clear' } as never)).toEqual({ deny: TOO_SHORT })
+  expect(refusal(await $.tool.call({ tool: 'mcp__p4-phi__goal', condition: 'clear' } as never))).toBe(TOO_SHORT)
   await clock.advance(600_000)
   expect(seen.ran.length).toBe(1)
 })
@@ -1969,11 +2134,11 @@ test("a session's own ask is kept by phi.py, and the look at its turn's end has 
 test('with no python found a tool says so, and starts nothing', async ($, on) => {
   mock.env(on, {})
   mock.clock(on)
-  const seen = machine(on, { files: {} })
+  const seen = machine(on, { files: {}, comes: () => undefined })
 
-  expect(await $.tool.run({ tool: 'mcp__p4-phi__tree' } as never)).toEqual({
-    deny: 'p4-phi found no working python to run phi.py with.',
-  })
+  expect(refusal(await $.tool.call({ tool: 'mcp__p4-phi__tree' } as never))).toBe(
+    'p4-phi found no working python to run phi.py with.',
+  )
   expect(seen.asked).toEqual([])
 })
 

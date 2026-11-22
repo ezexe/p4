@@ -182,6 +182,11 @@ const TOOLS = [
 ] as const
 // How long one of those commands may run.
 const TOOL_MS = 30_000
+// The four as a call names them, which the one hook that serves them is matched on: an array matches any of its
+// names, by the API types of a matcher.
+const OWN_TOOLS = ['mcp__p4-phi__note', 'mcp__p4-phi__done', 'mcp__p4-phi__tree', 'mcp__p4-phi__goal']
+// The first Claude Code whose API types declare `tool.run`: the types of 2.1.325 have none.
+const RUNS_FROM = [2, 1, 326] as const
 
 // The pane's id, which is its `ui.render` request id too, and its tab's label beside another plugin's pane.
 const PANE = 'p4-phi'
@@ -913,6 +918,17 @@ function saidBy($: EngineInterface, printed: string): Said {
   }
 }
 
+// The main conversation's transcript file, which a PreToolUse command hook's input holds as `transcript_path`, or
+// '' where the build has no `$.session.info`, as 2.1.311 and 2.1.322 have none: a call of a method a build lacks
+// throws where it is made, and a check that throws would judge no call there. Python then reads no transcript.
+async function transcriptOf($: EngineInterface): Promise<string> {
+  try {
+    return (await $.session.info()).transcriptPath ?? ''
+  } catch {
+    return ''
+  }
+}
+
 // One call's check: `hook.py lookup-check`, run only for a call python has a check for, with the input a
 // PreToolUse command hook is given on stdin. Retrieval's check does not obey P4_PHI=0, and phi.py's own checks
 // read the switch themselves. Whatever fails here, the call goes on unjudged.
@@ -927,7 +943,7 @@ async function check($: EngineInterface, e: ToolCheckInput): Promise<Said> {
     const plugin = slashed($.plugin.root)
     const payload = {
       session_id: sessionId,
-      transcript_path: (await $.session.info()).transcriptPath,
+      transcript_path: await transcriptOf($),
       cwd: root,
       hook_event_name: 'PreToolUse',
       ...call,
@@ -990,17 +1006,51 @@ async function queued($: EngineInterface, tool: unknown, response: unknown): Pro
   }
 }
 
-// Declares the four tools, at a session's start and at each reload of the module. A session with P4_PHI=0 gets
-// none, since phi.py keeps nothing for it.
+// Whether this Claude Code raises `tool.run`, by the release its version is built from. A version that cannot be
+// read or is spelled as no release counts as one that does, which every build since 2.1.326 is.
+async function hasRun($: EngineInterface): Promise<boolean> {
+  try {
+    const { base, version } = await $.session.version()
+    const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(base ?? version)
+    if (parts === null) return true
+    for (const [at, least] of RUNS_FROM.entries()) {
+      const part = Number(parts[at + 1])
+      if (part !== least) return part > least
+    }
+
+    return true
+  } catch {
+    return true
+  }
+}
+
+// Declares the pane's command and the four tools, at a session's start and at each reload of the module. A session
+// with P4_PHI=0 gets none, since phi.py keeps nothing for it. Each is declared whatever became of the other. The
+// tools are left out on a Claude Code with no `tool.run`, 2.1.311 and 2.1.322 among them, where nothing was seen to
+// serve one once its call is allowed: a session there keeps a finding by the shell line `phi.py note`, as before
+// the tools.
 async function offer($: EngineInterface): Promise<void> {
   try {
     switches ??= readSwitches($)
     if ((await switches).isPhiOff) return
-    for (const tool of TOOLS) await $.tool.register(tool)
+  } catch {
+    return
+  }
+  try {
     await $.command.register({
       name: 'phi-pane',
       description: "p4-phi: this session's board, its ledger of requests and its ledger of sessions, in a pane",
     })
+  } catch (error) {
+    note($, `/phi-pane was not declared: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  }
+  if (!(await hasRun($))) {
+    note($, "p4-phi's tools are not declared: this Claude Code has no `tool.run` event to serve them at")
+
+    return
+  }
+  try {
+    for (const tool of TOOLS) await $.tool.register(tool)
   } catch (error) {
     note($, `p4-phi's tools were not declared: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   }
@@ -1011,6 +1061,38 @@ function field(e: unknown, name: string): string {
   const value = (e as Record<string, unknown>)[name]
 
   return typeof value === 'string' ? value.trim() : ''
+}
+
+// What Claude Code answers a call of a registered tool that came to its run and found no hook to serve it, as
+// 2.1.326 to 2.1.330 word it: "p4-phi registered the tool note but no hook answered this call: add on("tool.run",
+// ...) to the plugin." It is an error of the call that names one of the plugin's own tools.
+const UNSERVED = /registered the tool (?:note|done|tree|goal) but no hook answered this call/
+
+// Whether what came back up to `tool.call` is that answer: an error of the call, or a refusal, with those words.
+function isUnserved(out: unknown): boolean {
+  if (!isRecord(out) || !(out.isError === true || typeof out.deny === 'string')) return false
+
+  return [out.deny, out.text, out.result].some(said => typeof said === 'string' && UNSERVED.test(said))
+}
+
+// One call of a tool of the plugin's own, as the command of phi.py it stands for. `goal` is the session's own ask
+// for a goal: python keeps the condition and the look at this turn's end answers it, so the goal is set by the
+// same call as a worker's, once the session is idle.
+function ownTool($: EngineInterface, e: unknown): Promise<ToolCallResult> {
+  const tool = isRecord(e) ? String(e.tool) : ''
+  if (tool === 'mcp__p4-phi__note') {
+    const options = [
+      ...(field(e, 'source') ? ['--source', field(e, 'source')] : []),
+      ...(field(e, 'kind') ? ['--kind', field(e, 'kind')] : []),
+    ]
+
+    return served($, ['note', ...options, '--', field(e, 'claim')])
+  }
+  if (tool === 'mcp__p4-phi__done') return served($, ['done', '--', field(e, 'text')])
+  if (tool === 'mcp__p4-phi__tree') return served($, ['tree'])
+  if (tool === 'mcp__p4-phi__goal') return served($, ['goal', 'ask', '--', field(e, 'condition')])
+
+  return Promise.resolve({ deny: `p4-phi has no tool named ${tool}.` })
 }
 
 // Runs one command of phi.py for a tool call, for this session, in the session's working folder as a shell line
@@ -1325,30 +1407,26 @@ export const register: Register = on => {
     }
   }).catch(($, e, next) => next(e))
 
-  // A call of one of the plugin's own tools, once it is allowed: the command of phi.py it stands for is run, and
-  // nothing runs beneath, since the tool is nothing but that command.
-  on('tool.run', { tool: 'mcp__p4-phi__note' }, ($, e) => {
-    const options = [
-      ...(field(e, 'source') ? ['--source', field(e, 'source')] : []),
-      ...(field(e, 'kind') ? ['--kind', field(e, 'kind')] : []),
-    ]
+  // A call of one of the plugin's own tools: the command of phi.py it stands for is run, and only once Claude Code
+  // allowed the call, so its permission check stands. One hook holds the four, since a module names a glob once.
+  // `tool.run` fires once a call is allowed, and there the command runs: on Claude Code 2.1.326 to 2.1.328 the glob
+  // selects that event. On 2.1.330 no glob selects it, `tool.*` and `*` alike, seen there under `claude plugin
+  // test`: the allowed call comes to its run, finds no hook, and Claude Code answers with the words of UNSERVED.
+  // That answer comes back up to `tool.call`, where the module runs the command in its place, and a call the
+  // permission check refused comes back with its refusal and goes up as it came. The glob stands for `tool.run`
+  // because a module that names an event its Claude Code lacks is refused whole, as 2.1.311 and 2.1.322 refuse one
+  // that names `tool.run`. Tried on those builds and on 2.1.330: a second file under `modules` in hooks.json is
+  // refused, "names one hooks module per plugin", and an event name that is no string literal is refused.
+  on('tool.*', { tool: OWN_TOOLS }, async ($, e, next) => {
+    if (next.event === 'tool.run') return ownTool($, e)
+    const out = await next(e)
 
-    return served($, ['note', ...options, '--', field(e, 'claim')])
-  }).catch(() => ({ deny: 'p4-phi could not run `phi.py note`.' }))
-
-  on('tool.run', { tool: 'mcp__p4-phi__done' }, ($, e) => served($, ['done', '--', field(e, 'text')])).catch(() => ({
-    deny: 'p4-phi could not run `phi.py done`.',
-  }))
-
-  on('tool.run', { tool: 'mcp__p4-phi__tree' }, $ => served($, ['tree'])).catch(() => ({
-    deny: 'p4-phi could not run `phi.py tree`.',
-  }))
-
-  // The session's own ask for a goal. Python keeps the condition and the look at this turn's end answers it, so
-  // the goal is set by the same call as a worker's, once the session is idle.
-  on('tool.run', { tool: 'mcp__p4-phi__goal' }, ($, e) =>
-    served($, ['goal', 'ask', '--', field(e, 'condition')]),
-  ).catch(() => ({ deny: 'p4-phi could not run `phi.py goal ask`.' }))
+    return next.event === 'tool.call' && isUnserved(out) ? ownTool($, e) : out
+  }).catch(($, e, next) =>
+    next.event === 'tool.run' || (next.event === 'tool.call' && next.called)
+      ? { deny: 'p4-phi could not run phi.py.' }
+      : next(e),
+  )
 
   // The command a person types to see the pane. Nothing runs beneath, since the command is nothing but this.
   on('command.run', { command: 'phi-pane' }, async $ => ({ text: await openPane($) })).catch(() => ({
@@ -1383,8 +1461,8 @@ export const register: Register = on => {
 
   // The engine decides whether a tool call may run, after the PreToolUse hooks. The event carries the tool, its
   // input, the call's id and a subagent's id, which `classic.PreToolUse` does not hand a function, and no hook
-  // here stands on `tool.call`, where one turns off a tool's move to the background and its live output. A check
-  // that fails judges nothing, and the engine's verdict stands.
+  // here stands on `tool.call` for any tool but the plugin's own four, where one turns off a tool's move to the
+  // background and its live output. A check that fails judges nothing, and the engine's verdict stands.
   on('tool.check', async ($, e, next) => judged($, e, await next(e))).catch(($, e, next) => next(e))
 
   // What a check said beside a call that ran, handed to the model with the call's result as a PreToolUse command
