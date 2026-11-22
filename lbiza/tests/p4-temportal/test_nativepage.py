@@ -274,6 +274,33 @@ class Page(unittest.TestCase):
         self.assertNotIn("no live session has shown it", text)
         self.assertNotIn("Not seen in the desktop app.", found["plans"])
 
+    def test_when_claude_codes_own_sweep_runs_and_what_leans_on_it(self):
+        """The page gives when the sweep runs and what pauses it by three docs pages, what two terminal sessions and
+        a scripted one did at their tenth minute, what is not found out, and the one place p4-temportal leans on
+        the sweep, which the skill page words as it is."""
+        text = page()
+        open_still = text.split('id="not-confirmed"', 1)[1].split("</section>", 1)[0]
+        by_the_docs = open_still.split('<li id="sweep">', 1)[1].split("</li>", 1)[0]
+        for said in ("at most once per session", "by at least 10 minutes", "it pauses the sweep",
+                     "<code>skip_reason</code> names four such cases", "shows a warning until you fix the cause",
+                     "at any age", "<code>desktopSessionCleanupPeriodDays</code>"):
+            self.assertIn(said, by_the_docs, said)
+        seen = open_still.split('<li id="sweep-seen">', 1)[1].split("</li>", 1)[0]
+        for said in ("Two terminal sessions sat at their prompt", "showed no warning",
+                     "ten minutes and two or three seconds", "Neither sent a <code>retention_sweep</code> event",
+                     "The scripted session, kept open the same way, swept", "<code>complete</code>",
+                     "So <code>--settings</code> pauses nothing", "is not found out"):
+            self.assertIn(said, seen, said)
+        leans = open_still.split('<li id="sweep-leans">', 1)[1].split("</li>", 1)[0]
+        for said in ("One thing", "when it deletes the transcript", "<code>desktopSessionCleanupPeriodDays</code>",
+                     "waits on no sweep of Claude Code", "plan files among them since 0.3.45"):
+            self.assertIn(said, leans, said)
+        skill = (REPO / "lbiza" / "plugins" / "p4-temportal" / "skills" / "temportal" / "SKILL.md").read_text(
+            encoding="utf-8")
+        for said in ("That is Claude Code's retention sweep", "`desktopSessionCleanupPeriodDays`",
+                     "Nothing the store keeps waits on that sweep"):
+            self.assertIn(said, skill, said)
+
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the
         original stays, and what the live checks showed of a move and of the copy."""

@@ -48,8 +48,8 @@
 // a command hook of the same event.
 //
 // Each run of lifetime.py is handed the setting `cleanupPeriodDays` as Claude Code merged it, read by
-// `$.settings.read({ key })`. lifetime.py clears the plan files of the store's `temportal/plans` at that age, as
-// Claude Code's own cleanup clears a plan in `~/.claude/plans` and does not reach a folder `plansDirectory` names.
+// `$.settings.read({ key })`. lifetime.py clears the plan files of the store's `temportal/plan-planner` at that age,
+// as Claude Code's own cleanup clears a plan in `~/.claude/plans` and does not reach a folder `plansDirectory` names.
 
 import type {
   EngineInterface,
