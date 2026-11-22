@@ -1357,26 +1357,32 @@ class NativeCalls(unittest.TestCase):
                 mock.patch.object(controls, "full_title", lambda sid, s=None: f"The {sid} tree"):
             return controls.idle_watch("", s)
 
-    def test_a_puppeteer_is_handed_the_idle_subscription_once_for_each_controlled_session_that_works(self):
-        """SendMessage's text: "pass `notify_when_idle: true` (from the main conversation only) — one-shot and
-        opt-in: exactly one `[Cross-session idle notice]` arrives when it next goes idle (or exits)", and "Omit
-        `message` for a pure subscription that costs that session nothing"."""
+    def test_a_puppeteer_is_told_what_tells_it_of_a_controlled_sessions_turn_end_and_is_handed_no_call(self):
+        """Seen on 2026-11-22 in the desktop app on Claude Code 2.1.326, from two sessions: `SendMessage` with
+        `notify_when_idle` to another session of the app answered success false, "Nothing was subscribed:
+        notify_when_idle is only supported for Claude sessions on this machine in this release", and with a message
+        attached "no idle subscription was made". A controlled session is one the app runs, so the line hands no
+        such call. It says once, for each controlled session that works, what tells the puppeteer of its turn's
+        end: the app's own note for one it started, and nothing for one it did not start, with whether the sweep's
+        schedule covers it. A session is named again once it works after a later report."""
+        from unittest import mock
         s = {"sessionId": TOP, "controls": [{"sessionId": KID, "store": "x"}, {"sessionId": KID2, "store": "x"}]}
         got = self.watch(s, {KID: ("working", "09:00"), KID2: ("shown done", "08:00")})
-        self.assertIn(f"\"The {KID} tree\" with `to` `{KID}`", got)
-        self.assertNotIn(KID2, got, "a session that does not work is not subscribed to")
-        for words in ("`SendMessage` with `notify_when_idle: true` and no `message`", "from the main conversation",
-                      "on this machine", "`[Cross-session idle notice]`", "tells what closed beside it"):
-            self.assertIn(words, got)
+        self.assertIn(f"\"The {KID} tree\", {controls.TOLD_BY_NOTHING} {controls.NOT_COVERED}", got,
+                      "nobody started it from here, and `phi.upkeep` is off")
+        self.assertNotIn(KID2, got, "a session that does not work is not named")
+        self.assertEqual(re.findall(r"`to` `[^`]*`", got), [], "no call is handed")
         self.assertEqual(s["idleWatch"], {KID: "09:00"})
         self.assertEqual(self.watch(s, {KID: ("working", "09:00"), KID2: ("shown done", "08:00")}), "", "once")
         self.assertEqual(self.watch(s, {KID: ("shown done", "09:30"), KID2: ("shown done", "08:00")}), "")
-        again = self.watch(s, {KID: ("working", "09:30"), KID2: ("working", "08:00")})
-        self.assertIn(f"`to` `{KID}`", again, "the one notice spent it, and the session works again")
-        self.assertIn(f"`to` `{KID2}`", again)
+        with mock.patch.object(controls, "UPKEEP", True), \
+                mock.patch.object(controls, "started_here", lambda home, s, e: e["sessionId"] == KID2):
+            again = self.watch(s, {KID: ("working", "09:30"), KID2: ("working", "08:00")})
+        self.assertIn(f"\"The {KID} tree\", {controls.TOLD_BY_NOTHING} {controls.COVERED}", again,
+                      "it works again after a later report, and with upkeep on the schedule covers it")
+        self.assertIn(f"\"The {KID2} tree\", {controls.TOLD_BY_APP}", again,
+                      "the app tells the session that started it")
         self.assertEqual(self.watch({"sessionId": TOP}, {}), "", "a session that controls none is handed nothing")
-        self.assertNotIn("uses neither", controls.__doc__)
-        self.assertIn("`idle_watch` hands that call", controls.__doc__)
 
     def test_the_prompt_hook_hands_the_subscription_beside_the_boundary(self):
         src = read(os.path.join(SRC, "phi.py"))

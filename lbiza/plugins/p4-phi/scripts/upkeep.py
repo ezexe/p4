@@ -1279,7 +1279,10 @@ SEND, NOTIFY = "SendMessage", "notify_when_idle"
 CRON = "7,37 * * * *"            # when the schedule's prompt comes while a worker is out: each half hour, off 0 and 30
 EXPIRY_S = 7 * 86400             # scheduled-tasks.md: "Recurring tasks automatically expire 7 days after creation."
 NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arrives within 12 hours"
-NOT_MADE = "no idle subscription"                 # in the call's answer where the app made none
+# in the call's answer where the app made none: with no message "Nothing was subscribed: notify_when_idle is only
+# supported for Claude sessions on this machine in this release", with success false, and with a message attached
+# "no idle subscription was made", both seen for a session of the desktop app on Claude Code 2.1.326
+NOT_MADE = ("nothing was subscribed", "no idle subscription", '"success":false', '"success": false')
 OPENS = "Sweep the sessions this one started, as p4-phi's upkeep has it."
 SWEEP = (OPENS + " Read each live session with "
          "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
@@ -1321,7 +1324,7 @@ def keep_sweep(s, calls, at=None):
                 s.pop("schedule", None)
         elif name == SEND and inp.get(NOTIFY) is True:
             to = REF.sub("", str(inp.get("to") or "")).strip()
-            if to and NOT_MADE not in str(c.get("result") or ""):
+            if to and not any(x in str(c.get("result") or "").lower() for x in NOT_MADE):
                 s["notices"] = {**(s.get("notices") if isinstance(s.get("notices"), dict) else {}), to: at + NOTICE_S}
     return repr((s.get("schedule"), s.get("notices"))) != before
 
@@ -1370,16 +1373,30 @@ def running(t):
     return bool(pid and PHI.issues._alive(pid))
 
 
+def controlled_out(home, s):
+    """The sessions `s` controls as a puppeteer that are inside a turn and that it did not start. The app's note of
+    a turn's end goes to the session that started one, and so does the report its hooks module sends, so nothing
+    tells a puppeteer of these, and no idle notice can be asked of a session the app runs: controls.idle_watch."""
+    out = []
+    for e in PHI.controls.controlled(s):
+        k, store = str(e.get("sessionId") or ""), str(e.get("store") or "") or home
+        if k and relay._parent(relay._session(store, k)) != s["sessionId"] and working(store, k):
+            out.append(k)
+    return out
+
+
 def sweep_acts(home, s, d, hand):
     """What brings this session back to the workers it has out, each line handed once. For each worker in the
     Terminal panel whose run still works and that it has asked for no idle notice: the call that asks, and again
     after each notice while that run still works. While any worker is out and no schedule of the sweep is kept: the
     one `CronCreate` that makes it. And once a schedule runs and nothing is live: its end. A worker is out while it
-    is a started session that is not finished, or a worker in the Terminal panel not yet removed. A started session
-    is asked for no notice: the app's own note of its turn end tells of it."""
+    is a started session that is not finished, a worker in the Terminal panel not yet removed, or a session this
+    one controls and did not start that is inside a turn, controlled_out. A started session is asked for no
+    notice: the app's own note of its turn end tells of it."""
     sid = s["sessionId"]
     live = [k for k, ks in started(home, sid).items() if not finished(home, k, ks)]
     tabs = [t for t in d["terminals"] if not t.get("removed")]
+    held = controlled_out(home, s)
     fixed = schedule_runs(s)
     out = []
     if fixed:
@@ -1404,23 +1421,24 @@ def sweep_acts(home, s, d, hand):
                     f"notice. A worker that was stopped from outside sends none, which the sweep's schedule covers."))
     if hand:
         d["noticeTold"] = told
-    if (live or tabs) and not fixed and not d.get("scheduleTold"):
+    if (live or held or tabs) and not fixed and not d.get("scheduleTold"):
         if hand:
             d["scheduleTold"] = now()
-        n = len(live) + len(tabs)
+        n = len(live) + len(held) + len(tabs)
         out.append((f"schedule:{sid}", "sweep", any(t.get("started") for t in tabs),
-                    f"schedule: this session has {n} worker{'s' * (n != 1)} out and no schedule of the sweep "
-                    f"running. Read the tasks with `{CRON_LIST}` first, and where one holds the words below, start "
+                    f"schedule: {n} of the sessions and terminal workers this session keeps "
+                    f"{'is' if n == 1 else 'are'} out, and no schedule of the sweep runs. Read the tasks with "
+                    f"`{CRON_LIST}` first, and where one holds the words below, start "
                     f"none. Otherwise call `{CRON_CREATE}` once, with `cron` `{CRON}`, `recurring` true and, as "
                     f"`prompt`, these words as they stand: \"{SWEEP}\""))
-    if not live and not tabs and fixed and not d.get("scheduleEndTold"):
+    if not live and not held and not tabs and fixed and not d.get("scheduleEndTold"):
         if hand:
             d["scheduleEndTold"] = now()
         kept = str((s.get("schedule") or {}).get("id") or "")
         out.append((f"schedule-end:{sid}", "sweep", False,
-                    f"end the schedule: no session this one started and no worker in the Terminal panel is live, "
-                    f"and the sweep's fixed schedule still runs. Read the tasks with `{CRON_LIST}` and call "
-                    f"`{CRON_DELETE}` with the id of the task whose prompt opens \"{OPENS}\""
+                    f"end the schedule: no session this one started or controls and no worker in the Terminal "
+                    f"panel is live, and the sweep's fixed schedule still runs. Read the tasks with `{CRON_LIST}` "
+                    f"and call `{CRON_DELETE}` with the id of the task whose prompt opens \"{OPENS}\""
                     + (f", which this session's own `{CRON_CREATE}` call gave as `{kept}`." if kept else ".")))
     return out
 
@@ -1450,8 +1468,11 @@ TAIL_LINE = ("A force, a deletion of unmerged work, a credential and a permissio
 
 
 def has_tree(home, sid):
+    """True for a session upkeep has something to keep: one that started a session or a subagent, or a puppeteer
+    with a session it controls, which the sweep's schedule covers."""
     return any(relay._parent(v) == sid for v in relay._sessions(home).values()) \
-        or any(t.get("agent") for _, t in plans._tasks(plans.load(home, sid)))
+        or any(t.get("agent") for _, t in plans._tasks(plans.load(home, sid))) \
+        or bool(PHI.controls.controlled(relay._session(home, sid)))
 
 
 def text(home, s, by="user", store=""):

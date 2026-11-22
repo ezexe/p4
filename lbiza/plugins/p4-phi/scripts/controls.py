@@ -36,10 +36,11 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
                session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
                when one of its hooks fires, so a boundary reached while the puppeteer is idle is told
-               beside its next message. `SendMessage` with `notify_when_idle` tells it when a controlled session
-               goes idle, so `idle_watch` hands that call once for each controlled session that works, and the
-               app's idle notice then opens the turn the boundary is told in. A command hook with `asyncRewake`
-               could wake it at once, and p4-phi uses none.
+               beside its next message. No idle notice can be asked of a controlled session, since the
+               desktop app runs each and `SendMessage` with `notify_when_idle` serves a session outside
+               the app alone, so `idle_watch` says once, for each controlled session that works, what
+               does tell the puppeteer of its turn's end. A command hook with `asyncRewake` could wake
+               it at once, and p4-phi uses none.
   open issues  an open issue of a repository a controlled session works in is the puppeteer's to resolve. When a
                controlled tree has closed or a controlled session has reported done, the puppeteer is handed the
                ones no live session holds, each once, beside the running orchestrator whose topic covers it or as
@@ -1103,27 +1104,50 @@ def boundary(home, s):
             f"context fills, and the board's path is the first thing it is handed after that.")
 
 
+# What tells a puppeteer, while it is idle, that a session it controls ended a turn.
 # The SendMessage tool's own text: "To hear when a session ON THIS MACHINE finishes what it is doing, pass
-# `notify_when_idle: true` (from the main conversation only) — one-shot and opt-in: exactly one `[Cross-session idle
-# notice]` arrives when it next goes idle (or exits)", "if it never signals within the subscription's lifetime ... the
-# notice says the subscription expired instead", and "Omit `message` for a pure subscription that costs that session
-# nothing". The notice reaches the puppeteer as a prompt, plans.app_notice, and the boundary is told beside it.
-IDLE_WATCH = ("phi (p4-phi): to hear while this session is idle that a controlled session went idle, subscribe once "
-              "to each one that works: {calls}. Each call is `SendMessage` with `notify_when_idle: true` and no "
-              "`message`, a subscription that costs that session nothing, made from the main conversation for a "
-              "session on this machine. One `[Cross-session idle notice]` then opens a turn here when that session "
-              "goes idle or exits, or says that the subscription expired, and p4-phi tells what closed beside it. "
-              "A subscription is spent by its one notice, so p4-phi names the call again once that session works "
-              "after a later report.")
+# `notify_when_idle: true`", and cross-session-messaging.md, "Get a notice when another session goes idle": "Only
+# the Claude in your main conversation can subscribe, and only to your sessions on this machine." Until p4-phi
+# 0.11.136 this line handed that call for each controlled session that works. It was never served: a controlled
+# session is one the desktop app runs, since _standing reads a session with no record of the app as unread, and the
+# call serves a Claude session on this machine outside the app alone. Seen on 2026-11-22 in the desktop app on Claude
+# Code 2.1.326, from two sessions: the call to another session of the app by its id answered success false with
+# "Nothing was subscribed: notify_when_idle is only supported for Claude sessions on this machine in this release
+# (not teammates, subagents, Remote Control or cloud sessions)", and with a message attached "no idle subscription
+# was made". The same call to a scripted `claude -p` run answered "Subscribed", which upkeep.py builds on for a
+# worker in the Terminal panel.
+# So the line hands no call and says what does tell:
+# - A controlled session this puppeteer started: the app's own note of that session's turn end begins a turn here.
+# - One it did not start: nothing begins a turn here. A session's hooks module sends each turn's report to the
+#   session that started it, phi.starter_cli, and to nobody where nobody started it, and p4-phi speaks only when a
+#   hook of the puppeteer's own fires, so the report is handed beside its next message. With `phi.upkeep` on, the
+#   sweep's schedule, which upkeep.sweep_acts hands while such a session is inside a turn, brings the puppeteer back
+#   within the hour, and with it off nothing does.
+TURN_END_WATCH = ("phi (p4-phi): what tells this session, while it is idle, that a session it controls ended a turn. "
+                  "No idle notice can be asked of one: each is a session the desktop app runs, and `SendMessage` "
+                  "with `notify_when_idle` answers for such a session that nothing was subscribed, since it serves "
+                  "a Claude session on this machine outside the app alone. {parts}")
+TOLD_BY_APP = "which this session started: the app's own note of its turn end begins a turn here."
+TOLD_BY_NOTHING = ("which this session did not start: nothing begins a turn here when its turn ends, and its report "
+                   "is handed beside this session's next message.")
+COVERED = ("The sweep's schedule, which upkeep hands while one of them is inside a turn, brings this session back "
+           "within the hour.")
+NOT_COVERED = "With `phi.upkeep` off no schedule covers it either."
+
+
+def started_here(home, s, e):
+    """True where the puppeteer `s` itself started the controlled session of the row `e`, by that session's record."""
+    kept = relay._session(e.get("store") or home, e["sessionId"])
+    return relay._parent(kept) == s["sessionId"]
 
 
 def idle_watch(home, s):
-    """The line that has a puppeteer subscribe to each controlled session that works, with `SendMessage` and
-    `notify_when_idle`, and an empty string where none is new: one is handed once for a session's stretch of work,
-    and again once it works after a later report. The caller saves what was told."""
+    """The line that tells a puppeteer what brings it back when a controlled session that works ends its turn, and an
+    empty string where none is new: a session is named once for its stretch of work, and again once it works after
+    a later report. It hands no call, since none serves a session the app runs. The caller saves what was told."""
     rows = controlled(s)
     told = s.get("idleWatch") if isinstance(s.get("idleWatch"), dict) else {}
-    new = {}
+    new, mine, others = {}, [], []
     for e in rows:
         sid, store = e["sessionId"], e.get("store") or ""
         if standing(store, sid)[0] != "working":
@@ -1131,10 +1155,13 @@ def idle_watch(home, s):
         when = last_report(store, sid)[0] or "-"
         if told.get(sid) != when:
             new[sid] = when
+            (mine if started_here(home, s, e) else others).append(f"\"{full_title(sid)}\"")
     if not new:
         return ""
     s["idleWatch"] = {**{k: v for k, v in told.items() if any(e["sessionId"] == k for e in rows)}, **new}
-    return IDLE_WATCH.format(calls="; ".join(f"\"{full_title(k)}\" with `to` `{k}`" for k in new))
+    parts = ([", ".join(mine) + ", " + TOLD_BY_APP] if mine else []) + (
+        [", ".join(others) + ", " + TOLD_BY_NOTHING + " " + (COVERED if UPKEEP else NOT_COVERED)] if others else [])
+    return TURN_END_WATCH.format(parts=" ".join(parts))
 
 
 def complete_text(ready):
