@@ -27,6 +27,13 @@ A, B = test_relay.A, test_relay.B
 ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
 
 
+def say_yes(p4):
+    """Puts the set in force for a store as ezexe's press does: the key, which the command writes, and the yes,
+    which phi.py's hook keeps at the end of the call whose approval card ezexe pressed."""
+    p4conf.set_key(p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+    assert p4conf.cards_yes(p4, session="local_top00001", call="toolu_yes")
+
+
 class TheSet(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -50,9 +57,10 @@ class TheSet(unittest.TestCase):
         return got if isinstance(got, list) else []
 
     def test_the_set_is_in_force_only_by_the_stores_own_file_and_only_as_this_copy_has_it(self):
-        """What is settled with no approval card is a permission, so nothing puts the set in force but ezexe's yes,
-        kept as `phi.cards` in the store's p4.json: the id of the set as this copy has it. No variable stands in
-        for the key, an id of another set is no yes to this one, and a set that changed has another id."""
+        """What is settled with no approval card is a permission, so nothing puts the set in force but ezexe's yes:
+        `phi.cards` in the store's p4.json names the set as this copy has it, and the store's record holds the yes
+        to that set. No variable stands in for the key, an id of another set is no yes to this one, and a set that
+        changed has another id."""
         self.assertFalse(p4conf.cards_on(self.p4), "off in a store that says nothing")
         self.assertFalse(p4conf.cards_on(""))
         sid = p4conf.card_set_id()
@@ -62,9 +70,10 @@ class TheSet(unittest.TestCase):
         self.assertNotIn(p4conf.CARDS_KEY, p4conf.env_keys(), "the key has no variable")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, "0123456789")
         self.assertFalse(p4conf.cards_on(self.p4), "the yes to another set")
+        self.assertFalse(p4conf.cards_yes(self.p4, session="s", call="c"), "and no yes is kept for a key that is not it")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, True)
         self.assertFalse(p4conf.cards_on(self.p4), "a plain true names no set")
-        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        say_yes(self.p4)
         self.assertTrue(p4conf.cards_on(self.p4))
         self.assertNotIn(p4conf.CARDS_KEY, p4conf.env_wants(self.p4), "and none is written for it")
         changed = p4conf.CARD_SET + (("more", "One more thing settled with no card."),)
@@ -76,6 +85,59 @@ class TheSet(unittest.TestCase):
         for word in ("deny", "credential", "password", "token"):
             self.assertNotIn(word, json.dumps(p4conf.CARD_SET).lower(), "it lifts no deny rule, touches no credential")
 
+    def test_a_write_of_the_key_by_any_way_but_the_approved_command_leaves_the_set_off(self):
+        """The guard asked ezexe for the command and not for the key, so a session could write `phi.cards` into
+        p4.json another way and have the set in force with no yes. The set is now in force only with the yes that
+        phi.py's hook keeps in the store's record at the end of the call whose approval card ezexe pressed. The key
+        written by set_key, by an edit of the file, or by the command itself where no hook of p4-phi runs, as in
+        the app's Terminal panel, leaves the set off, and the keeper writes none of the set's rules."""
+        sid = p4conf.card_set_id()
+        p4conf.keep_settings(self.proj)
+        tools = lambda: [r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__")]   # noqa: E731
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        self.assertFalse(p4conf.cards_on(self.p4), "set_key")
+        data = jload(p4conf.path(self.p4))
+        data["phi"]["cards"] = sid
+        write(p4conf.path(self.p4), json.dumps(data))
+        self.assertFalse(p4conf.cards_on(self.p4), "an edit of p4.json")
+        status, lines = cards.switch(self.p4, True, sid)
+        self.assertEqual(status, 0)
+        self.assertIn("The set is not in force yet", lines[0])
+        self.assertIn("0 of the 6 allow rules", lines[1])
+        self.assertFalse(p4conf.cards_on(self.p4), "the command where no card was raised for it")
+        self.assertEqual(tools(), [], "the keeper writes no rule of a set that is not in force")
+        self.assertIn("no yes of ezexe's is kept for it", cards.text(self.p4)[0])
+        # a record that is not this store's, and a yes to another set
+        yes = {"set": sid, "store": p4conf.fwd(os.path.join(self._tmp.name, "other", ".claude", "p4")), "at": "x"}
+        write(p4conf.record_path(self.p4), json.dumps({**p4conf.read_record(self.p4), p4conf.YES: yes}))
+        self.assertFalse(p4conf.cards_on(self.p4), "a yes given for another store")
+        write(p4conf.record_path(self.p4), json.dumps({**p4conf.read_record(self.p4),
+                                                       p4conf.YES: {**yes, "store": p4conf.fwd(self.p4), "set": "0" * 10}}))
+        self.assertFalse(p4conf.cards_on(self.p4), "a yes to another set")
+        # the yes, as the hook keeps it
+        said = cards.kept(self.p4, "local_top00001", "toolu_1")
+        self.assertIn(f"ezexe's yes to the set {sid} is kept", said[0])
+        self.assertIn("the set is in force", said[0])
+        self.assertTrue(p4conf.cards_on(self.p4))
+        self.assertEqual(sorted(tools()), sorted(p4conf.CARD_TOOLS), "and the keeper ran with it")
+        kept = p4conf.read_record(self.p4)[p4conf.YES]
+        self.assertEqual((kept["set"], kept["session"], kept["call"]), (sid, "local_top00001", "toolu_1"))
+        # each yes is one press for one writing of the key
+        self.assertEqual(cards.switch(self.p4, False)[0], 0)
+        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "`off` takes the yes out with the key")
+        self.assertEqual(tools(), [])
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        self.assertFalse(p4conf.cards_on(self.p4), "the key written again after an `off`")
+        say_yes(self.p4)
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
+        p4conf.keep_settings(self.proj)
+        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "the key taken out by hand: the keeper drops the yes")
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        self.assertFalse(p4conf.cards_on(self.p4))
+        say_yes(self.p4)
+        cards.switch(self.p4, True, sid)
+        self.assertFalse(p4conf.cards_on(self.p4), "the command run again asks again")
+
     def test_the_keeper_writes_the_tool_rules_only_while_the_set_is_in_force(self):
         """The `tools` part of the set: an allow rule for each tool a p4 hooks module declares, as entries of
         `permissions.allow` p4 owns under the record's `toolRules`. They come with the yes and go with it, a rule a
@@ -86,7 +148,7 @@ class TheSet(unittest.TestCase):
         before = self.rules(p4conf.ALLOW_KEY)
         self.assertEqual([r for r in before if r.startswith("mcp__")], [mine], "set off: no rule of the set")
         self.assertEqual(self.rules(p4conf.ASK_KEY), [ARCHIVE], "the ask rule stands while phi.upkeep is off")
-        p4conf.set_key(self.p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+        say_yes(self.p4)
         p4conf.keep_settings(self.proj)
         allow = self.rules(p4conf.ALLOW_KEY)
         self.assertEqual(sorted(r for r in allow if r.startswith("mcp__")), sorted(p4conf.CARD_TOOLS))
@@ -111,7 +173,7 @@ class TheSet(unittest.TestCase):
         p4conf.set_key(self.p4, "phi.upkeep", True)
         p4conf.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ASK_KEY), [ARCHIVE, other], "set off: not p4's own by the record, so left")
-        p4conf.set_key(self.p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+        say_yes(self.p4)
         p4conf.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ASK_KEY), [other], "the leftover is taken out, and no other ask rule")
         self.assertNotIn("askRules", p4conf.read_record(self.p4))
@@ -209,11 +271,12 @@ class Guards(unittest.TestCase):
         self._tmp.cleanup()
 
     def on(self):
-        p4conf.set_key(self.t.p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+        say_yes(self.t.p4)
 
-    def guard(self, name, host, cmd, cwd=None, tool="Bash"):
+    def guard(self, name, host, cmd, cwd=None, tool="Bash", call=None):
         r = self.t.hook(name, host, {"hook_event_name": "PreToolUse", "tool_name": tool,
-                                     "tool_input": {"command": cmd}, **({"cwd": cwd} if cwd else {})})
+                                     "tool_input": {"command": cmd}, **({"cwd": cwd} if cwd else {}),
+                                     **({"tool_use_id": call} if call else {})})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
 
@@ -375,7 +438,7 @@ class Guards(unittest.TestCase):
             source = f.read()
         self.assertIn("CARDS_ON.test(text)", source, "the hooks module passes the call to python's check")
         self.assertIn("]+cards[^A-Za-z0-9]+on[", source, "by a pattern that takes any run of separators, as python's")
-        # the command itself: refused in a started session, refused for another set's id, and read back
+        # the command itself: refused in a started session, refused for another set's id, and it only asks
         r = self.t.cli(A, "cards", "on", sid)
         self.assertEqual(r.returncode, 2)
         self.assertFalse(p4conf.cards_on(self.t.p4))
@@ -385,12 +448,62 @@ class Guards(unittest.TestCase):
         self.assertFalse(p4conf.cards_on(self.t.p4))
         r = self.t.cli(TOP, "cards", "on", sid)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("the set is in force", r.stdout)
+        self.assertIn("The set is not in force yet", r.stdout)
+        self.assertEqual(p4conf.cards_asked(self.t.p4), sid)
+        self.assertFalse(p4conf.cards_on(self.t.p4), "run where no card was raised: the key and no yes")
+
+    def after(self, host, cmd, call, event="PostToolUse", tool="Bash"):
+        r = self.t.hook("cards-yes", host, {"hook_event_name": event, "tool_name": tool, "tool_use_id": call,
+                                            "tool_input": {"command": cmd}, "tool_response": {"stdout": ""}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
+
+    def test_the_yes_is_kept_at_the_end_of_the_call_whose_card_was_raised_and_of_no_other(self):
+        """The whole way a yes is given: the guard raises the card for a call and marks that call, ezexe presses,
+        the command writes the key, and the hook after the call keeps the yes for the store the card named.
+        hooks.md gives PostToolUse as fired "after a tool has already executed successfully", so that hook's run
+        for a marked call is the press. A call that failed, a call no card was raised for, a second end of the
+        same call, a call in a session another session started and a card whose command wrote no key keep none."""
+        sid = p4conf.card_set_id()
+        cmd = f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'
+        self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
+        self.assertEqual(self.after(TOP, cmd, "toolu_unasked"), "", "no card was raised for this call")
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_failed")["permissionDecision"], "ask")
+        self.assertEqual(self.after(TOP, cmd, "toolu_failed", event="PostToolUseFailure"), "", "the call failed")
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        self.assertEqual(self.guard("cards-guard", A, cmd, call="toolu_kid")["permissionDecision"], "deny")
+        self.assertEqual(self.after(A, cmd, "toolu_kid"), "", "refused in a started session, so nothing to keep")
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_other")["permissionDecision"], "ask")
+        self.assertEqual(self.after(TOP, "git status", "toolu_other"), "", "another command under the same id")
+        # the card pressed for a command that wrote no key
+        self.assertEqual(self.t.cli(TOP, "cards", "off").returncode, 0)
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_nokey")["permissionDecision"], "ask")
+        self.assertEqual(self.after(TOP, cmd, "toolu_nokey"), "", "the key names no set")
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        # the press
+        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_yes1")["permissionDecision"], "ask")
+        self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
+        self.assertFalse(p4conf.cards_on(self.t.p4), "asked about and not ended yet")
+        said = self.after(TOP, cmd, "toolu_yes1")
+        self.assertIn(f"phi (p4-phi): ezexe's yes to the set {sid} is kept for the store", said)
+        self.assertIn("the set is in force", said)
         self.assertTrue(p4conf.cards_on(self.t.p4))
+        kept = p4conf.read_record(self.t.p4)[p4conf.YES]
+        self.assertEqual((kept["session"], kept["call"]), (TOP, "toolu_yes1"))
         shown = self.t.cli(A, "cards").stdout
         self.assertIn(f"The set {sid} of what p4-phi settles with no approval card is in force", shown)
+        # one press keeps one yes: the same call's end a second time keeps nothing after an `off`
         self.assertEqual(self.t.cli(TOP, "cards", "off").returncode, 0)
         self.assertFalse(p4conf.cards_on(self.t.p4))
+        p4conf.set_key(self.t.p4, p4conf.CARDS_KEY, sid)
+        self.assertEqual(self.after(TOP, cmd, "toolu_yes1"), "")
+        self.assertFalse(p4conf.cards_on(self.t.p4))
+        import hook
+        self.assertEqual(hook.PHI_YES, {"Bash": "cards-yes", "PowerShell": "cards-yes"})
+        for tool in ("Bash", "PowerShell"):
+            self.assertIn(tool, hook.WAITED, "the yes is kept in the entry the call waits on")
 
 
 if __name__ == "__main__":

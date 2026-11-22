@@ -1099,6 +1099,7 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["ask"], [], "set off: left as it is")
         p4conf.set_key(p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+        self.assertTrue(p4conf.cards_yes(p4, session="local_top", call="toolu_yes"), "the yes, as the hook keeps it")
         p4conf.keep_settings(self.project, platform="linux")
         got = self.read(self.local())["permissions"]
         self.assertNotIn("ask", got)

@@ -3492,8 +3492,9 @@ def h_store_guard(payload):
 def h_cards_guard(payload):
     """PreToolUse on a shell call that runs `phi.py cards on`: the one approval card the set has. What p4-phi
     settles with no card is a permission, so the yes is ezexe's own press on Claude Code's card, which a hook's
-    `ask` raises in every permission mode, and the card's text is the set whole. A session another session started
-    is refused the command: the top session brings the set to ezexe."""
+    `ask` raises in every permission mode, and the card's text is the set whole. The call is marked as asked about,
+    with the store and the set the card names, for h_cards_yes to read once the call has run. A session another
+    session started is refused the command: the top session brings the set to ezexe."""
     if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -3510,8 +3511,50 @@ def h_cards_guard(payload):
                                            f"session started. What p4-phi settles with no approval card is "
                                            f"ezexe's to decide, in the top session \"{title}\" `{top}`: send it "
                                            f"the set with SendMessage, as `phi.py cards` prints it.")}}
+    store = me.store or me.home
+    mark = cards_mark(me.home, me.id, payload)
+    if mark:
+        write_atomic(mark, json.dumps({"store": store, "set": p4conf.card_set_id(), "time": now()}) + "\n")
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "ask",
-                                   "permissionDecisionReason": cards.approval(me.store or me.home)}}
+                                   "permissionDecisionReason": cards.approval(store)}}
+
+
+def cards_mark(home, sid, payload):
+    """The file that says p4-phi raised the set's approval card for a call, by the call's id, in the session's
+    folder beside the marks of once; '' for a call with no id or a hook with no session."""
+    tid = SAFE.sub("_", str(payload.get("tool_use_id") or ""))[:80]
+    return os.path.join(session_dir(home, sid), ".calls", f"cards-asked-{tid}") if tid and home and sid else ""
+
+
+def h_cards_yes(payload):
+    """PostToolUse on a shell call that ran `phi.py cards on`: ezexe's yes to the set, kept. The command writes the
+    key and no more, so a key written any other way leaves the set off, p4conf.cards_on. hooks.md gives PostToolUse
+    as fired "after a tool has already executed successfully", and a call h_cards_guard answered `ask` for runs
+    only once ezexe has pressed its card, so this hook's run for a call that guard marked is the press. The yes is
+    kept for the store the card named, and only where that store's key names the set the card showed. A call that
+    failed raises PostToolUseFailure and keeps none, and so does a call no card was raised for, as one made while
+    another copy of the plugin was loaded. Says how the set stands, beside the call's result."""
+    if str(payload.get("hook_event_name") or "") != "PostToolUse":
+        return None
+    if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    if not cards.CARDS_ON.search(str(inp.get("command") or "")):
+        return None
+    me = Me(payload)
+    mark = cards_mark(me.home, me.id, payload)
+    asked = read_json(mark) if mark else {}
+    if not asked.get("store") or asked.get("set") != p4conf.card_set_id():
+        return None
+    try:
+        os.remove(mark)                            # one press keeps one yes
+    except OSError:
+        pass
+    if spawned_from(load_session(me.home, me.id)):
+        return None
+    lines = cards.kept(str(asked["store"]), me.id, str(payload.get("tool_use_id") or ""))
+    RAN["cards_yes"] = bool(lines)
+    return "phi (p4-phi): " + " ".join(lines) if lines else None
 
 
 def once(home, sid, kind, payload):
@@ -3771,6 +3814,7 @@ ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 HOOKS["issue-tie"] = ROUTED["issue-tie"] = ("PostToolUse", h_issue_tie)
+HOOKS["cards-yes"] = ROUTED["cards-yes"] = ("PostToolUse", h_cards_yes)
 
 
 def hook_main(name):

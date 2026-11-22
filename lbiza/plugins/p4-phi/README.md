@@ -233,8 +233,9 @@ What needs ezexe is settled by the top session before the start, and never by th
 The page `docs/claude-settings.html`, "Approval cards and a session's start", lists every kind of card, what raises it, and how it is settled before a start or why it stays.
 
 - The set is `p4conf.CARD_SET`, kept in `p4conf.py` and nowhere else: an allow rule for each tool a p4 hooks module declares, the leftover ask rule on the archive tool taken out where `phi.upkeep` is on, a worktree's own branch moved unasked, a push made unasked where the brief tells the session to push, a refusal with the session to ask in place of every other card a guard of p4-phi raised, and a refusal of a start that would leave its session cut off or waiting.
-- It is in force for a store only while `phi.cards` in that store's `p4.json` holds the set's name, which `phi.py cards` prints with the set and every kind of card.
-- `phi.py cards on <id>` puts it in force and `phi.py cards off` takes it out. For the first, p4-phi's guard raises one approval card in every permission mode, with the set whole as its text, so the yes is ezexe's own press in the top session. A session another session started is refused the command.
+- It is in force for a store only while `phi.cards` in that store's `p4.json` holds the set's name, which `phi.py cards` prints with the set and every kind of card, and the store's record `claude-settings.json` holds ezexe's yes to that set.
+- `phi.py cards on <id>` asks for it and `phi.py cards off` takes it out. For the first, p4-phi's guard raises one approval card in every permission mode, with the set whole as its text, and p4-phi's hook after that call keeps the yes, so the yes is ezexe's own press in the top session. A session another session started is refused the command.
+- The key alone puts nothing in force. Written by an edit of `p4.json`, or by the command run where no hook of p4-phi runs, such as the app's Terminal panel, it has no yes beside it and the set stays off.
 - A copy of p4-phi whose set differs has another name, so a changed set is in force nowhere until ezexe has said yes to it.
 - With the set off nothing changes: each guard raises Claude Code's approval card as before.
 
@@ -352,7 +353,7 @@ Every key is optional.
 | `tree_checks` | 6 | the read-only checks of its trees, 0 to 100, an orchestrator runs in one work step |
 | `keep_going_max` | 2 | the times, 0 to 7, one turn is sent back while it has open steps, counted together with the turns in a row the hooks module starts for work a wait left unmoved, and the most turns it starts for upkeep until ezexe's own message begins one |
 | `upkeep` | false | true has a session that started others handed their upkeep as acts that wait on nobody, with no ask rule on the archive tool; `phi.py upkeep on` and `off` set it |
-| `cards` | none | the name of the set of what p4-phi settles with no approval card, as `phi.py cards` prints it, which puts that set in force; read from the file alone, with no variable, and written by `phi.py cards on <id>` behind one approval card that is ezexe's yes to the set whole |
+| `cards` | none | the name of the set of what p4-phi settles with no approval card, as `phi.py cards` prints it, which asks for that set; read from the file alone, with no variable, and written by `phi.py cards on <id>` behind one approval card. The set is in force only with ezexe's yes beside it, which p4-phi's hook keeps in the store's record at the end of that call |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
 

@@ -735,6 +735,10 @@ WAITED = ("Bash", "PowerShell", "Write", "Edit", "TaskStop", "mcp__ccd_turn__upd
 # After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
 # nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
 PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
+# After a shell call that worked: phi.py keeps ezexe's yes to the set of what p4-phi settles with no approval card,
+# for the call its `cards-guard` raised the card for, and says how the set stands. It runs in the entry the call
+# waits on, so the next call reads the set as it stands, and for no call that failed.
+PHI_YES = {"Bash": "cards-yes", "PowerShell": "cards-yes"}
 
 # A call a plugin's hooks module made itself, with `$.tool.call`, carries an id that begins so. Seen with a probe mod
 # on Claude Code 2.1.326 in the desktop app and on 2.1.328 in a scripted run: the PreToolUse and PostToolUse command
@@ -825,15 +829,15 @@ def h_lookup_record(payload):
     out = phi_route(payload, PHI_RECORD)
     if out and str(payload.get("tool_name") or "") in ("mcp__ccd_turn__update_plan", "mcp__ccd_turn__wrap_up", "Write", "Edit"):
         return out
+    yes = phi_route(payload, PHI_YES) if payload.get("hook_event_name") == "PostToolUse" else None
+    said = ((yes or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
     import lookups
     p4 = ready(payload)
-    if not p4:
-        return None
-    text = lookups.record(p4, payload, now())
-    if not text:
+    text = lookups.record(p4, payload, now()) if p4 else ""
+    if not text and not said:
         return None
     return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name") or "PostToolUse",
-                                   "additionalContext": text}}
+                                   "additionalContext": "\n\n".join(x for x in (said, text) if x)}}
 
 
 def h_train(payload):

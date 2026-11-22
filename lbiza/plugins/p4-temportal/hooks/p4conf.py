@@ -1259,8 +1259,9 @@ PLANS = "temportal/plans"        # the store's folder of plan files, from the st
 ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns is the dotted key env.<name>
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at,
-# and 10 with _drop_strays, so a rule for a copy that does not run is.
-KEEPER = 10
+# 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with YES, so the rules of a set whose key
+# has no yes beside it go.
+KEEPER = 11
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1347,6 +1348,8 @@ def read_record(p4):
             rec[k].pop(name)
     if "asked" in rec and not isinstance(rec["asked"], dict):
         rec.pop("asked")
+    if YES in rec and not (isinstance(rec[YES], dict) and isinstance(rec[YES].get("set"), str)):
+        rec.pop(YES)
     if "claude" in rec and not isinstance(rec["claude"], dict):
         rec.pop("claude")
     owed = rec.get("changelog")
@@ -1733,13 +1736,24 @@ LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules"), ASK_KEY: ("askRules",), DENY_KE
 # on 2026-11-19 the transcripts of this tree held 39 approvals of p4-phi's own branch guard and 32 of the ask rule
 # on the archive tool, every one in a session that bypasses permission prompts.
 # What may be settled with no card is a permission, so it is ezexe's to decide. The whole set is CARD_SET, kept here
-# and nowhere else, and it is in force for a store only while `phi.cards` in that store's p4.json holds
-# card_set_id(), the name of the set as this copy has it. `phi.py cards on <id>` writes the key, behind an approval
-# card p4-phi raises for that command in every permission mode, so the yes is ezexe's own press and covers the set
-# whole. A copy whose set differs has another id, so a changed set is in force nowhere until ezexe has said yes to
-# it. The key is read from the file alone and has no variable. Nothing in the set lifts a deny rule, and nothing
-# in it touches a credential.
+# and nowhere else, and it is in force for a store only while two things hold: `phi.cards` in that store's p4.json
+# holds card_set_id(), the name of the set as this copy has it, and the store's record holds ezexe's yes to that
+# set, under YES. `phi.py cards on <id>` writes the key and nothing more: the key is what is asked for. The yes is
+# kept by cards_yes, which phi.py's hook runs at the end of the shell call that ran the command, and only for a call
+# p4-phi's guard had raised its approval card for, so the yes is ezexe's own press, in every permission mode, and
+# covers the set whole. No docs page gives a hook a field that says a person approved a call. hooks.md gives
+# PostToolUse as fired "after a tool has already executed successfully", and a call the guard answered `ask` for
+# runs only once the card is pressed, so that hook's run for that call is the press as p4 can know it. A key
+# written any other way, by an edit of p4.json, by set_key, or by the command run where no hook of p4-phi runs,
+# such as the app's Terminal panel, has no yes beside it and leaves the set off. The record is the keeper's,
+# claude-settings.json, which the store's seeded .gitignore keeps on one machine, so a yes is no part of a store's
+# sync, and it names the store it was given for. What this does not close: a session runs with ezexe's own rights
+# on the machine, so one that sets out to write the record of a press ezexe never made can write that file too.
+# A copy whose set differs has another id, so a changed set is in force nowhere until ezexe has said yes to it. The
+# key is read from the file alone and has no variable. Nothing in the set lifts a deny rule, and nothing in it
+# touches a credential.
 CARDS_KEY = "phi.cards"
+YES = "cardsYes"
 CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
               "mcp__p4-temportal__lifetime", "mcp__p4-native__native")
 CARD_SET = (
@@ -1770,11 +1784,72 @@ def card_set_id():
 
 def cards_on(p4):
     """True when ezexe's yes to the set stands for the store `p4`: `phi.cards` in its p4.json is this copy's
-    card_set_id(). The file alone is read, so no variable puts the set in force."""
+    card_set_id(), and the store's record holds the yes to that set, kept for this store by cards_yes. The two
+    files alone are read, so no variable puts the set in force, and neither does a write of the key by itself."""
     try:
-        return bool(p4) and _get(_load_file(p4, write=False, warn=False), CARDS_KEY) == card_set_id()
+        sid = card_set_id()
+        if not p4 or cards_asked(p4) != sid:
+            return False
+        yes = read_record(p4).get(YES)
+        return isinstance(yes, dict) and yes.get("set") == sid and _norm(yes.get("store")) == _norm(p4)
     except Exception:  # noqa: BLE001 — a store that cannot be read has the set off
         return False
+
+
+def cards_asked(p4):
+    """The set `phi.cards` names in the store's p4.json, as a text, or '' for none: what was asked for, in force or
+    not."""
+    try:
+        held = _get(_load_file(p4, write=False, warn=False), CARDS_KEY) if p4 else None
+    except Exception:  # noqa: BLE001 — a store that cannot be read asks for none
+        held = None
+    return held if isinstance(held, str) else ""
+
+
+def cards_yes(p4, **by):
+    """Keeps ezexe's yes to the set for the store `p4`, in the store's record under its settings lock, with what
+    `by` says of the press: the session and the call whose approval card ezexe pressed. phi.py's hook after that
+    call is its one caller. The key must already name this copy's set, which the approved command wrote, so a card
+    pressed for a command that wrote nothing keeps no yes. True when the yes is kept."""
+    sid = card_set_id()
+    if not p4 or not os.path.isdir(p4) or cards_asked(p4) != sid:
+        return False
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not _take_lock(lock):
+        return False
+    try:
+        rec = read_record(p4)
+        rec[YES] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    **{k: str(v) for k, v in by.items() if v}}
+        write_record(p4, rec)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+    return True
+
+
+def cards_no(p4):
+    """Takes the kept yes out of the store's record, as the command's `off` does and as its `on` does before it
+    writes the key, so each yes is one press for one writing of the key. True when one was there."""
+    if not p4 or not os.path.exists(record_path(p4)):
+        return False
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not _take_lock(lock):
+        return False
+    try:
+        rec = read_record(p4)
+        if YES not in rec:
+            return False
+        rec.pop(YES)
+        write_record(p4, rec)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+    return True
 
 
 def card_tool_rules(p4, phi):
@@ -2082,6 +2157,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     allow = allow_rules(platform, conf)
     if not owned_only:
         _drop_strays(new, rec, name, allow)             # a rule of p4's shape for a copy that does not run
+        if YES in rec and rec[YES].get("set") != cards_asked(p4):
+            rec.pop(YES)                                # the key no longer names the set the yes was for
     _keep_rules(new, rec, name, allow, owned_only)
     phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves both rules
     ask = list(ASK_RULES) if phi and not upkeep_on(p4) else []

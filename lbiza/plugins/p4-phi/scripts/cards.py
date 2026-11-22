@@ -175,48 +175,81 @@ def approval(store):
     """The reason of the one approval card the set has: what a yes puts in force, whole."""
     lines = [f"{n}. {text}" for n, (_, text) in enumerate(p4conf.CARD_SET, 1)]
     return (f"phi (p4-phi): this puts in force, for the store {p4conf.fwd(store)}, the set {p4conf.card_set_id()} of "
-            f"what p4-phi settles with no approval card. A yes here is ezexe's yes to all of it:\n" + "\n".join(lines)
-            + "\n`phi.py cards off` takes it out of force again.")
+            f"what p4-phi settles with no approval card. A yes here is ezexe's yes to all of it, kept when this "
+            f"call has ended:\n" + "\n".join(lines) + "\n`phi.py cards off` takes it out of force again.")
+
+
+# What the command says once it has written the key: the key asks, and the yes is the hook's to keep.
+ASKED = ("The set is not in force yet. It comes in force when p4-phi's hook keeps ezexe's yes, at the end of the "
+         "shell call that ran this command and whose approval card ezexe pressed. A line run where no hook of "
+         "p4-phi runs, such as the app's Terminal panel, keeps no yes, and neither does a write of the key.")
 
 
 def text(store):
     """What `phi.py cards` prints: whether the set is in force for the store, the set, and every kind of card."""
     sid = p4conf.card_set_id()
-    held = p4conf._get(p4conf._load_file(store, write=False, warn=False), p4conf.CARDS_KEY) if store else None
-    held = held if isinstance(held, str) else ""
-    stands = ("in force" if held == sid else f"not in force: the store holds the yes to an earlier set, {held}"
-              if held else "not in force: ezexe has not said yes to it")
+    held = p4conf.cards_asked(store)
+    stands = ("in force" if p4conf.cards_on(store) else
+              "not in force: `phi.cards` names it and no yes of ezexe's is kept for it, so the key was written "
+              "another way than by the command behind its approval card" if held == sid else
+              f"not in force: the store names an earlier set, {held}" if held else
+              "not in force: ezexe has not said yes to it")
     out = [f"The set {sid} of what p4-phi settles with no approval card is {stands}, for the store "
            f"{p4conf.fwd(store) or 'of no project'}.", ""]
     out += [f"{n}. {name}: {words}" for n, (name, words) in enumerate(p4conf.CARD_SET, 1)]
     out += ["", f"`phi.py cards on {sid}` puts it in force and `phi.py cards off` takes it out. The first raises "
-                f"one approval card in every permission mode, which is ezexe's yes to the set as a whole, and it is "
-                f"refused in a session another session started.", "", "Every kind of approval card:"]
+                f"one approval card in every permission mode, which is ezexe's yes to the set as a whole and is "
+                f"kept at the end of that call, and it is refused in a session another session started.", "",
+            "Every kind of approval card:"]
     for name, why, how in KINDS:
         out += [f"- {name}. {why} {how}"]
     return out
 
 
-def switch(store, on, given=""):
-    """`phi.py cards on <id>` and `cards off`: `phi.cards` written to the store's p4.json, and the settings keeper
-    run for the project the store sits in, so the allow rules of the set come or go at once. `on` with an id that
-    is not this copy's set writes nothing. Returns (the exit status, the lines to print)."""
+def held_line(store):
+    """One line on what the local settings file of the store's project holds of the set, after the keeper ran for
+    it: how many of the allow rules for p4's tools, and whether the ask rule on the archive tool. '' for a store
+    that sits in no project's `.claude`."""
     import os
+    project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
+    if os.path.basename(os.path.dirname(os.path.abspath(store))) != ".claude":
+        return ""
+    kept = p4conf.keep_settings(project, p4=store)
+    data = p4conf.read_json(kept["file"]) or {}
+    allow = p4conf._get(data, p4conf.ALLOW_KEY)
+    ask = p4conf._get(data, p4conf.ASK_KEY)
+    have = [t for t in p4conf.CARD_TOOLS if isinstance(allow, list) and t in allow]
+    return (f"{p4conf.fwd(kept['file'])} holds {len(have)} of the {len(p4conf.CARD_TOOLS)} allow rules for p4's "
+            f"tools and " + ("an" if isinstance(ask, list) and p4conf.ASK_RULES[0] in ask else "no")
+            + f" ask rule on `{p4conf.ASK_RULES[0]}`.")
+
+
+def switch(store, on, given=""):
+    """`phi.py cards on <id>` and `cards off`. `on` writes `phi.cards` to the store's p4.json and takes out a yes
+    kept before, so the key asks for the set and one press of ezexe's answers one writing of it: the set comes in
+    force only when `kept` runs for the call that ran the command. `off` takes the key and the kept yes out. Either
+    way the settings keeper runs for the project the store sits in, so the allow rules of the set go at once. `on`
+    with an id that is not this copy's set writes nothing. Returns (the exit status, the lines to print)."""
     sid = p4conf.card_set_id()
     if on and given != sid:
         return 2, [f"phi: the set as this copy of p4-phi has it is {sid}, not {given or 'named'}: nothing is "
                    f"written. `phi.py cards` prints the set."]
+    p4conf.cards_no(store)
     p4conf.set_key(store, p4conf.CARDS_KEY, sid if on else None)
-    out = [f"phi.cards is {sid if on else 'off'} in {p4conf.fwd(p4conf.path(store))}: the set is "
+    out = [f"phi.cards is {sid if on else 'off'} in {p4conf.fwd(p4conf.path(store))}."
+           + (f" {ASKED}" if on else " The set is not in force.")]
+    line = held_line(store)
+    return 0, out + ([line] if line else [])
+
+
+def kept(store, session, call):
+    """ezexe's yes kept, for the call whose approval card p4-phi raised and that then ran: p4conf.cards_yes for the
+    store the card named, and the settings keeper for its project, so the allow rules of the set come at once.
+    Returns the lines that say so, or [] where the key does not name this copy's set, as after a command that
+    wrote nothing."""
+    if not p4conf.cards_yes(store, session=session, call=call):
+        return []
+    out = [f"ezexe's yes to the set {p4conf.card_set_id()} is kept for the store {p4conf.fwd(store)}: the set is "
            f"{'in force' if p4conf.cards_on(store) else 'not in force'}."]
-    project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
-    if os.path.basename(os.path.dirname(os.path.abspath(store))) == ".claude":
-        kept = p4conf.keep_settings(project, p4=store)
-        data = p4conf.read_json(kept["file"]) or {}
-        allow = p4conf._get(data, p4conf.ALLOW_KEY)
-        ask = p4conf._get(data, p4conf.ASK_KEY)
-        have = [t for t in p4conf.CARD_TOOLS if isinstance(allow, list) and t in allow]
-        out.append(f"{p4conf.fwd(kept['file'])} holds {len(have)} of the {len(p4conf.CARD_TOOLS)} allow rules for "
-                   f"p4's tools and " + ("an" if isinstance(ask, list) and p4conf.ASK_RULES[0] in ask else "no")
-                   + f" ask rule on `{p4conf.ASK_RULES[0]}`.")
-    return 0, out
+    line = held_line(store)
+    return out + ([line] if line else [])
