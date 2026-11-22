@@ -239,6 +239,14 @@ p4-phi has no setting for a subagent's model or effort, since Claude Code sets b
 | `p4-phi:check`, the plugin's own | `model: sonnet` and `effort: medium` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
 | Every subagent | One model under `env` of a settings file: "set `CLAUDE_CODE_SUBAGENT_MODEL` to that model and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`" | "While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent." |
 
+### The round for what a subagent wrote
+
+What a subagent wrote is read once before it counts, by `p4-phi:check` or, for a code change, by the skill `code-review` without `--fix`, and what the read finds goes back to the same agent with `SendMessage`, which continues it with its context.
+A finding is mended or answered with the reason it is no fault, one second read follows a mend, and there is no third.
+The built-in rule `levels` says so in every session's system prompt, and the skill `sub-agentic` holds it as its rule 11.
+A subagent cannot run the round itself, since `sub-agents.md`, "Available tools", takes `ScheduleWakeup` from every subagent, so the session that started it does.
+A worker's own goal asks for the same round on its own change where `phi.goal_review` is on.
+
 ### A team in a terminal session
 
 Agent teams run in the terminal `claude` command and not in the desktop app, so a desktop session that wants one starts a terminal session to lead it, from the app's Terminal panel, and talks to that lead by message.

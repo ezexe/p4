@@ -1685,6 +1685,26 @@ class Rules(unittest.TestCase):
         self.assertNotIn("built-in, levels", off)
         self.assertIn("act-don't-wait", off)
 
+    def test_the_round_for_what_a_subagent_wrote_reaches_a_session_and_the_skill_holds_it_as_its_own_rule(self):
+        """The built-in rule levels hands a session the round a subagent's writing goes through before it counts,
+        phi.ROUND: a read by a reader that has not seen it, the findings back to the same agent with SendMessage, and
+        no third read. best-practices.md, "Give Claude a check to run": "A reviewer that's asked to find problems
+        will always find something." The skill sub-agentic holds the round as its rule 11, where every agent, skill,
+        tool and flag the rule's sentence names is named too, and the agent it names is one the plugin ships. A
+        project that turns the delegation rule off is handed neither."""
+        self.assertIn(phi.ROUND, self.t.rules(TOP), "the round is in a session's system prompt")
+        named = re.findall(r"`([^`]+)`", phi.ROUND)
+        self.assertTrue(named)
+        with open(os.path.join(ROOT, "skills", "sub-agentic", "SKILL.md"), encoding="utf-8") as f:
+            rule = [line for line in f if line.startswith("11. ")]
+        self.assertEqual(len(rule), 1, "the skill's rule on the round")
+        for name in named:
+            self.assertIn(f"`{name}`", rule[0], name)
+        for agent in (n.split(":", 1)[1] for n in named if n.startswith("p4-phi:")):
+            self.assertTrue(os.path.isfile(os.path.join(ROOT, "agents", agent + ".md")), agent)
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
+        self.assertNotIn(phi.ROUND, self.t.rules(TOP))
+
     def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
         """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
         notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A

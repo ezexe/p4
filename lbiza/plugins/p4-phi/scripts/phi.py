@@ -1378,6 +1378,23 @@ WORKFLOW = ("A Workflow script names a `model` and an `effort` for each stage, `
             "the role the skill `p4-phi:sub-agentic` gives it, since by the workflows page of the Claude Code docs \"A "
             "model the script names for a stage counts as the per-invocation model\" and an agent with none \"runs "
             "on your session's model\".")
+# The round a subagent's writing goes through before it counts, which the skill sub-agentic holds as its rule 11:
+# - best-practices.md, in the table of habits to drop: "A fresh reviewer does help, because it hasn't seen your
+#   reasoning, which is a different thing from delegating." And "Give Claude a check to run": "A reviewer that's
+#   asked to find problems will always find something. If you fix every finding, you end up with extra abstraction
+#   layers and tests for cases that can't happen." So a finding may be answered, and the rounds are capped.
+# - building-effective-agents, the evaluator-optimizer: "one LLM call generates a response while another provides
+#   evaluation and feedback in a loop", with "stopping conditions" such as "a maximum number of iterations".
+# - The Agent tool's own text: "Use SendMessage with the agent's ID or name to continue a previously spawned agent
+#   with its context intact". So the findings go back to the agent that wrote, which knows why it wrote so.
+# - A subagent cannot loop by itself: sub-agents.md, "Available tools", takes `ScheduleWakeup` from every subagent.
+# Seen on 2026-11-22 in a scripted run of Claude Code 2.1.328: a session sent each of two reviewing subagents a
+# message by its id, the tool answered "Resuming agent", and each read the commit against its own findings.
+# A session's goal has the same round for its own change, in plans.REVIEW_PART.
+ROUND = ("What a subagent wrote is read before it counts as done, by `p4-phi:check` or, for a code change, by the "
+         "skill `code-review` without `--fix`, and what the read finds goes back to the same agent with "
+         "`SendMessage`, which continues it with what it knows. A finding is mended or answered with the reason it "
+         "is no fault, one second read follows a mend, and there is no third.")
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
           "never held by it. Before an Agent call, a fork, a Workflow call or a session start, the skill "
           "`p4-phi:sub-agentic` decides whether to delegate at all, how many agents, and each one's type, `model` "
@@ -1388,7 +1405,8 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "such a read of a result that is no code change goes to the subagent `p4-phi:check`, on `sonnet` at "
           "`medium` effort as its file says; a subagent that writes new content or changes behaviour is "
           "`p4-phi:writer`, on `opus` at `medium`, and one that lands written work or verified findings is "
-          "`p4-phi:integrator`, on `sonnet` at `medium`. A worker is started with the `model` and the `effort` of its step's "
+          "`p4-phi:integrator`, on `sonnet` at `medium`. " + ROUND + " "
+          "A worker is started with the `model` and the `effort` of its step's "
           "role, as the advice that hands out each start call names them; an effort above this session's own is "
           "not accepted. " + WORKFLOW + " After a run, the report says the agents launched and finished and what "
           "they spent.")
