@@ -1487,8 +1487,14 @@ class TopOrchestrates(unittest.TestCase):
         for work in ("Watch the lock file while two hooks write and record each failed read",
                      "Watch how the hook runs on Windows and fix what fails",
                      "Update the plugin's README with the new command",
-                     "Check the workflow file for a missing matcher"):
+                     "Check the workflow file for a missing matcher",
+                     "Confirm this runs on Windows", "Verify the actions run correctly in the parser",
+                     "Confirm the workflow finishes within the timeout in the engine code",
+                     "Update the installed plugin loader code",
+                     "Update installed plugins loader to read manifest"):
             self.assertEqual(plans.top_stays(work), "", work)
+        # a pipeline that passes is code of the repository, no run, though LANDS keeps a check that names a test
+        self.assertIsNone(plans.WATCHES_RUN.search("Check the data pipeline passes the schema test"))
         # the advice gives a child only the watch that is work, and the split advice keeps an update that names a path
         steps = [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
             "Watch GitHub's run on piece D", "Update the installed plugins from lbiza/plugins/p4-phi",

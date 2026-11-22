@@ -569,13 +569,18 @@ SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
 # the advice named a new session in a worktree for each, and the nudge called the first "a build that changes
 # behaviour, a writer's", while "Land piece D" stayed as landing. The object decides: a watch of anything else, as
 # of a lock file or of how a hook runs on one system, is work, and so is a change to a plugin's own files.
-RUN_OF = (r"(?:(?:workflow|ci|release|actions?|pipeline|github(?:'s|’s)?)\s+runs?\b"
-          r"|(?:the|its|that|this|each|every)\s+runs?\s+on\b"
-          r"|(?:workflows?|ci|pipelines?)(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|"
-          r"green|red)\b|\W*$))")
+# The run is a noun here. In "Confirm this runs on Windows" and "Verify the actions run correctly" it is a verb, and
+# the step is work. Only CI is read as a run when a verb follows it, as in "CI passed": a workflow or a pipeline that
+# passes or finishes may be code of the repository, so it takes a preposition, a result or the end of the step.
+RUN_OF = (r"(?:(?:workflow|ci|release|action|pipeline|github(?:'s|’s)?(?:\s+actions?)?)\s+runs?\b"
+          r"|(?:the|its|each|every)\s+runs?\s+on\b|this\s+run\s+on\b"
+          r"|ci(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|green|red)\b|\W*$)"
+          r"|(?:workflows?|pipelines?)(?:\s+(?:on|for|to|until|through|results?|green|red)\b|\W*$))")
 WATCHES_RUN = re.compile(r"\b(?:watch|follow|monitor|poll|a?wait|check|verify|confirm)\w*\b[^.;]*?\b" + RUN_OF, re.I)
-INSTALLS = re.compile(r"\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?\b"
-                      r"(?!['’])|\bplugin\s+update\b", re.I)
+# The installed plugins end the object, so "the installed plugin loader code" is code of a plugin, and work.
+INSTALLS = re.compile(r"\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?"
+                      r"(?=\s*(?:$|[.;,:!?)])|\s+(?:from|to|for|with|in|on|at|and|of|after|before|via|by|once|then|"
+                      r"using|so|when|until)\b)|\bplugin\s+update\b", re.I)
 
 
 # a step whose doer is another session, or that waits on, awaits, collects or checks other sessions' or trees'
