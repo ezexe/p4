@@ -223,12 +223,51 @@ class CarriedPlaces(unittest.TestCase):
         self.assertIn("moved 3 plans of the main checkout's store", said[-1])
         self.assertIn(f"{lifetime.PLANS}/complete.md", said[-1])
 
-    def test_a_plan_revived_in_a_worktree_leaves_the_parked_place(self):
-        put(os.path.join(self.there, "todo", "p.md"), "STATUS: TODO\n", age_days=1)
-        put(os.path.join(self.here, "p.md"), "# worked again\n")
+    def test_a_plan_worked_under_a_sorted_name_is_carried_and_the_sorted_copy_goes_once_it_is_sorted_again(self):
+        """Plan mode gives every plan of one session the same name, so a worked plan newer than a sorted one of its
+        name takes no sorted plan away. A revived plan's sorted copy goes once the plan is sorted again."""
+        parked = put(os.path.join(self.there, "todo", "p.md"), "STATUS: TODO\n", age_days=2)
+        put(os.path.join(self.here, "p.md"), "# worked again\n", age_days=1)
         lifetime.carry_over(self.tree)
-        self.assertFalse(os.path.exists(os.path.join(self.there, "todo", "p.md")))
+        self.assertEqual(read(parked), "STATUS: TODO\n")
         self.assertEqual(read(os.path.join(self.there, "p.md")), "# worked again\n")
+        os.remove(os.path.join(self.here, "p.md"))
+        put(os.path.join(self.here, "complete", "p.md"), "STATUS: COMPLETED\n")
+        lifetime.carry_over(self.tree)
+        self.assertFalse(os.path.exists(parked))
+        self.assertFalse(os.path.exists(os.path.join(self.there, "p.md")))
+        self.assertEqual(read(os.path.join(self.there, "complete", "p.md")), "STATUS: COMPLETED\n")
+
+    def test_a_sessions_next_plan_in_a_worktree_takes_away_no_plan_the_main_checkout_holds_closed(self):
+        first = put(os.path.join(self.there, "complete", "s.md"), "STATUS: COMPLETED\n", age_days=1)
+        put(os.path.join(self.here, "complete", "s.md"), "STATUS: COMPLETED\n", age_days=2)
+        put(os.path.join(self.here, "s.md"), "# the next plan\n")
+        lifetime.carry_over(self.tree)
+        self.assertEqual(read(first), "STATUS: COMPLETED\n")
+        self.assertEqual(read(os.path.join(self.there, "s.md")), "# the next plan\n")
+
+    def test_a_numbered_close_in_a_worktree_leaves_the_worked_place_and_an_older_copy_brings_it_back_nowhere(self):
+        one = put(os.path.join(self.there, "complete", "s.md"), "STATUS: COMPLETED one\n", age_days=3)
+        put(os.path.join(self.there, "s.md"), "# the second\n", age_days=2)
+        put(os.path.join(self.here, "complete", "s.2.md"), "STATUS: COMPLETED two\n", age_days=1)
+        said = lifetime.carry_over(self.tree)
+        self.assertFalse(os.path.exists(os.path.join(self.there, "s.md")))
+        self.assertEqual(read(os.path.join(self.there, "complete", "s.2.md")), "STATUS: COMPLETED two\n")
+        self.assertEqual(read(one), "STATUS: COMPLETED one\n")
+        self.assertIn("moved 1 plan of the main checkout's store", said[-1])
+        put(os.path.join(self.here, "s.md"), "# the second\n", age_days=2)
+        self.assertEqual(lifetime.carry_over(self.tree), [])
+        self.assertFalse(os.path.exists(os.path.join(self.there, "s.md")))
+        self.assertIsNotNone(lifetime.NUMBERED.fullmatch("s.2.md"))
+        self.assertIsNone(lifetime.NUMBERED.fullmatch("quick-plan-brave-otter.md"))
+
+    def test_a_numbered_close_leaves_the_plan_the_worktree_still_works_under_the_stem(self):
+        put(os.path.join(self.here, "s.md"), "# the third\n", age_days=2)
+        lifetime.carry_over(self.tree)
+        put(os.path.join(self.here, "complete", "s.2.md"), "STATUS: COMPLETED two\n", age_days=1)
+        lifetime.carry_over(self.tree)
+        self.assertEqual(read(os.path.join(self.there, "s.md")), "# the third\n")
+        self.assertEqual(read(os.path.join(self.there, "complete", "s.2.md")), "STATUS: COMPLETED two\n")
 
     def test_an_older_worked_copy_in_a_worktree_brings_back_no_plan_the_main_checkout_closed(self):
         put(os.path.join(self.here, "p.md"), "# worked\n", age_days=1)

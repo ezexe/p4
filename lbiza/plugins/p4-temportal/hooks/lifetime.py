@@ -30,6 +30,9 @@ ezexe parks it and unplanned/ once ezexe drops it, while a plan being worked sta
 clears only the files directly in the folder, where plan mode writes them, so a sorted plan stays until ezexe's
 word moves it, and no subfolder of the three takes a cookie whole. keep_plans copies no plan whose name one of
 them holds, and carry_over moves a plan of the main checkout's store into the place a worktree moved it to.
+Plan mode gives every plan of one session the same file name, so a plan sorted where a subfolder holds its name
+is named `<stem>.<n>.md`, which NUMBERED tells, and a worked plan newer than the sorted plans of its name is the
+session's next plan: carry_over carries it and takes no sorted plan away.
 
 The folder is temportal/plan-planner since p4-temportal 0.3.55 and was temportal/plans before, which p4conf's layout
 move takes into the new folder once, with its complete/ and todo/ and the cookies and cache rules set on it, and the
@@ -119,6 +122,9 @@ PLANS = p4conf.PLANS.split("/", 1)[-1]  # the plan files under temportal/, where
 # clears and no session reads unless ezexe names the file
 COMPLETE, TODO, UNPLANNED = "complete", "todo", "unplanned"
 SHELVES = (COMPLETE, TODO, UNPLANNED)
+# a plan sorted as `<stem>.<n>.md`, since its subfolder already held the name plan mode gives every plan of one
+# session. Claude Code's plan names are words joined by hyphens, and none ends in a dot and a number.
+NUMBERED = re.compile(r"(?P<stem>.+)\.[0-9]+\.md", re.I)
 # the notebook, saved code, plans, the finished and parked plans and the cookies, which no cookie clears whole
 WHOLE = (NOTEBOOK, "src", PLANS, *(f"{PLANS}/{shelf}" for shelf in SHELVES), EXPIRES)
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
@@ -680,11 +686,14 @@ def carry_over(root):
     of a carried file goes with it, by carry_cookies.
 
     A plan has four places by plan-planner: the plans folder while it is worked, and its complete/, todo/ and
-    unplanned/ once sorted. A plan the worktree moved is carried into its new place only where it is newer than
-    every copy of its name the main checkout's store holds in the other three, and those older
-    copies are then removed there, their removal staged where that store is a git repository of its own. So a
-    close in a worktree does not leave the plan worked in the main checkout too, and a plan the main checkout
-    closed is not brought back by an older copy a worktree still holds."""
+    unplanned/ once sorted. Plan mode gives every plan of one session the same name, so a name alone does not
+    tell one plan from the next, and _other_places says which copies in the main checkout's store are this
+    plan's. A sorted plan is carried only where it is newer than every copy of its name in the other two
+    subfolders, and the older copies of it there and in the worked place are then removed, their removal staged
+    where that store is a git repository of its own. A worked plan is carried only where it is newer than every
+    sorted copy of its name, and removes none. So a close in a worktree does not leave the plan worked in the
+    main checkout too, a plan the main checkout closed is not brought back by an older copy a worktree still
+    holds, and a session's next plan takes no sorted plan away."""
     main, in_git = p4conf.main_root(root)
     if not in_git or os.path.normcase(os.path.realpath(main)) == os.path.normcase(os.path.realpath(root)):
         return []
@@ -701,21 +710,23 @@ def carry_over(root):
             for file in files:
                 path = os.path.join(folder, file)
                 kept = os.path.join(there, os.path.relpath(path, here))
-                others = _other_places(there, os.path.relpath(path, here))
+                held, behind = _other_places(here, there, os.path.relpath(path, here))
                 try:
                     if p4conf.is_link(path) or not os.path.isfile(path) or p4conf.is_link(kept):
                         continue
                     if os.path.lexists(kept) and (not os.path.isfile(kept)
                                                   or os.path.getmtime(path) <= os.path.getmtime(kept)):
                         continue                        # the main checkout's file is no older: it stays as it is
-                    if any(not os.path.isfile(o) or os.path.getmtime(path) <= os.path.getmtime(o) for o in others):
+                    when = os.path.getmtime(path)
+                    if any(not os.path.isfile(o) or when <= os.path.getmtime(o) for o in held):
                         continue                        # the plan's newest copy is in another of its places there
+                    gone = [o for o in behind if os.path.isfile(o) and os.path.getmtime(o) < when]
                     os.makedirs(os.path.dirname(kept), exist_ok=True)
                     shutil.copy2(path, kept)
                 except OSError:
                     continue                            # this file stays in the worktree, and the sweep goes on
                 carried += 1
-                for other in others:                    # the plan moved: its older copy goes from its old place
+                for other in gone:                      # the plan moved: its older copy goes from its old place
                     if remove(other):
                         moved.append(other)
     said = []
@@ -735,22 +746,56 @@ def carry_over(root):
     return said
 
 
-def _other_places(there, rel):
+def _other_places(here, there, rel):
     """For `rel`, a path under temportal/ with the platform's separator, that is a plan in one of plan-planner's
-    places, the plans folder or one of SHELVES under it -> the files of the same name the store under `there`
-    holds in the other places. [] for any other path. A plan is in one place at a time, so the place of its
-    newest copy is where it is."""
+    places in the worktree's store under `here` -> (held, behind), the copies of that plan the main checkout's
+    store under `there` holds in its other places. A copy in `held` that is no older keeps this one from being
+    carried, and a copy in `behind` that is older goes once this one is carried. ([], []) for any other path.
+
+    Plan mode gives every plan of one session the same name. So a worked plan is held back by a sorted copy of
+    its name, or of its name numbered, that is no older, and takes none away: where it is the newer it is the
+    session's next plan. A sorted plan is held back by a newer copy of its name in another subfolder, and takes
+    away the older copies in the other subfolders and the older worked copy, under its own name and under the
+    name its number was added to. A worked name the worktree itself still holds is left out, since the worked
+    copy in the main checkout's store is then that plan's and not this one's."""
     parts = rel.replace("\\", "/").split("/")
     if parts[0] != PLANS or not parts[-1].lower().endswith(".md"):
-        return []
+        return [], []
+    name, plans = parts[-1], os.path.join(there, PLANS)
     if len(parts) == 2:
-        place = ""
-    elif len(parts) == 3 and parts[1] in SHELVES:
-        place = parts[1]
-    else:
-        return []
-    return [p for p in (os.path.join(there, PLANS, *([shelf] if shelf else []), parts[-1])
-                        for shelf in ("", *SHELVES) if shelf != place) if os.path.lexists(p)]
+        return _shelf_copies(plans, name), []
+    if len(parts) != 3 or parts[1] not in SHELVES:
+        return [], []
+    held = [p for p in (os.path.join(plans, shelf, name) for shelf in SHELVES if shelf != parts[1])
+            if os.path.lexists(p)]
+    numbered = NUMBERED.fullmatch(name)
+    names = [name] + ([numbered.group("stem") + ".md"] if numbered else [])
+    worked = [os.path.join(plans, n) for n in names if not os.path.lexists(os.path.join(here, PLANS, n))]
+    return held, held + [p for p in worked if os.path.lexists(p)]
+
+
+def _same_plan(name, other):
+    """True where `other`, a file name in a subfolder of SHELVES, is a copy of the plan worked as `name`: the same
+    name, or, where `name` is one plan mode gave, that name numbered."""
+    a, b = os.path.normcase(name), os.path.normcase(other)
+    if a == b:
+        return True
+    numbered = NUMBERED.fullmatch(b)
+    return numbered is not None and NUMBERED.fullmatch(a) is None and numbered.group("stem") == a[:-3]
+
+
+def _shelf_copies(plans, name):
+    """The copies the subfolders of SHELVES under `plans` hold of the plan worked as `name` -> their paths, by
+    _same_plan. A subfolder that is not there holds none."""
+    found = []
+    for shelf in SHELVES:
+        folder = os.path.join(plans, shelf)
+        try:
+            entries = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        found += [os.path.join(folder, entry) for entry in entries if _same_plan(name, entry)]
+    return found
 
 
 FROM = "from"                           # in a cookie of the main checkout's store: the worktree it was carried from
