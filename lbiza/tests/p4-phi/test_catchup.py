@@ -29,7 +29,12 @@ def write(path, data):
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.mkdtemp(prefix="p4-catchup-")
+        # A TemporaryDirectory and no plain shutil.rmtree: git writes its object files read-only, and on Windows a
+        # plain removal stops at the first of them. This folder's cleanup clears that mark and removes the file
+        # again, and it raises where a removal still fails, so no test leaves its folder behind unseen.
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-catchup-")
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = self._tmp.name
         self.conf = os.path.join(self.tmp, "config")
         self.project = os.path.join(self.tmp, "proj")
         os.makedirs(self.project)
@@ -41,7 +46,6 @@ class Base(unittest.TestCase):
             os.environ.pop("CLAUDE_CONFIG_DIR", None)
         else:
             os.environ["CLAUDE_CONFIG_DIR"] = self.old
-        shutil.rmtree(self.tmp, ignore_errors=True)
 
     def install(self, rows, enabled_user=None, enabled_local=None):
         cache = os.path.join(self.conf, "plugins", "cache", M)
