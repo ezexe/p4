@@ -1321,7 +1321,8 @@ class TopOrchestrates(unittest.TestCase):
                       "Plan the exporter's move"):
             self.assertEqual(plans.top_stays(stays), plans.PLANNING_WHY, stays)
         for stays in ("Loop the plan until two rounds are dry", "Revise the development plan after the read",
-                      "Enter plan mode"):
+                      "Enter plan mode", "Write up the plan", "Research and write the plan",
+                      "Put together a plan for the exporter"):
             self.assertEqual(plans.top_stays(stays), plans.PLANNING_WHY, stays)
         for work in ("Write the plan parser in src/plan.py", "Write the plan-file reader",
                      "Port the exporter to the new writer", "Write the docs for plan mode",
@@ -1373,6 +1374,9 @@ class TopOrchestrates(unittest.TestCase):
                                            "hook_event_name": "PostToolUseFailure"})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a plan sent back is no approval")
         self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1b"), "", "and the session still plans")
+        r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode", "agent_id": "agent-1"})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a subagent's call is not the session's approval")
+        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1c"), "", "and the session still plans")
         r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode"})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("orchestrator of its tree", r.stdout, "the advice plan mode held back, at the approval")

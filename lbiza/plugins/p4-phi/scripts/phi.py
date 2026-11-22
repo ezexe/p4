@@ -2042,8 +2042,9 @@ def h_plan_mode(payload):
     it an orchestrator is handed what plan mode held back: the advice on its open work steps and the feature
     line, as h_plan builds them."""
     me = Me(payload)
-    if not me.home or not me.id or payload.get("hook_event_name") != "PostToolUse":
-        return None                                # a call that failed, such as a plan sent back, changed no mode
+    if not me.home or not me.id or payload.get("agent_id") or payload.get("hook_event_name") != "PostToolUse":
+        return None                                # a subagent's call, or one that failed, such as a plan sent
+                                                   # back, changed no mode here
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     s["planMode"] = str(payload.get("tool_name") or "") == "EnterPlanMode"
     save_session(me.home, s)

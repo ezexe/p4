@@ -605,7 +605,8 @@ AWAITS_WHY = "waits on or checks other sessions' reports, which only this sessio
 # most, so "Write the docs for plan mode" and "Put the fixtures under tests/plan/" are work. A step that builds code
 # or a page about plans is work too, which the noun after the plan or a file named plan tells: "Write the plan
 # parser in src/plan.py".
-PLAN_OBJECT = (r"(?:(?:the|a|an|this|that|its|each|every|whole|new|next|first|final|how|development|build)\s+){0,3}"
+PLAN_OBJECT = (r"(?:(?:the|a|an|this|that|its|each|every|whole|new|next|first|final|how|development|build"
+               r"|up|together|out|and|write|draft|revise|refine)\s+){0,3}"
                r"plans?\b")
 PLANNING = re.compile(r"^\W*(?:enter\s+plan\s+mode\b|plan\b"
                       r"|(?:research|write|draft|loop|revise|refine|put|present|submit)\s+" + PLAN_OBJECT + ")", re.I)
