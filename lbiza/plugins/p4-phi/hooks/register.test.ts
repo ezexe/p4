@@ -83,6 +83,9 @@ type Machine = {
   hookEnv?: () => Record<string, string> | undefined
   // The session's own folder, where it is not the project's: a git worktree's.
   root?: string
+  // The main checkout of the repository, as `$.session.repo` answers it. With none given the session is in no
+  // repository.
+  main?: string
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
 }
@@ -203,6 +206,9 @@ function machine(on: On, has: Machine): Seen {
   })
   on('session.id', () => ({ value: 'cli-0001' }))
   on('session.root', () => ({ value: has.root ?? '/work/project' }))
+  on('session.repo', () => ({
+    value: has.main === undefined ? null : { root: has.main, remote: null, internal: false, name: null },
+  }))
   // `$.process.hookEnv`, which Claude Code 2.1.311 and 2.1.322 lack: a glob stands for it, since a test file that
   // names an event its build lacks is refused whole. Every other event of `process` goes down as it came.
   if (has.hookEnv !== undefined) {
@@ -2718,6 +2724,63 @@ test("what the module keeps for python in a worktree session lands in the main c
   const project = seen.envs > 0 ? MAIN : WORKTREE
   const kept = seen.wrote.map(write => write.path).filter(path => path.endsWith('/origin.json'))
   expect(kept).toEqual([`${project}/.claude/p4/phi/models/served/start-cli-0001/origin.json`])
+})
+
+// p4-native keeps its map in the main checkout's store for a session in a git worktree, and in the worktree's own
+// where the main checkout has no store. Each machine below finds no python, so the search runs, and its order says
+// which entry the module read: the launcher first for Windows, `python3` first for Linux.
+const MAIN_MAP = `${MAIN}/.claude/p4/native/host.json`
+const WORKTREE_MAP = `${WORKTREE}/.claude/p4/native/host.json`
+
+test("in a worktree session p4-native's map is read from the main checkout's store, where that plugin keeps it", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  // The worktree's own store holds an entry of this session that says the other system: one a build before
+  // p4-native kept the map in the main checkout left there. The main checkout's is the one read.
+  const seen = machine(on, {
+    files: { [MAIN_MAP]: mapOf({ platform: 'windows' }), [WORKTREE_MAP]: mapOf({ platform: 'linux' }) },
+    pythons: { python: KEPT },
+    root: WORKTREE,
+    main: MAIN,
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(['py', 'python'])
+  expect(seen.read).toContain(MAIN_MAP)
+  expect(seen.read).not.toContain(WORKTREE_MAP)
+})
+
+test("where the main checkout's store holds no entry of the session, the worktree's own map is read", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const other = JSON.stringify({ sessions: { 'another-session': { platform: 'windows' } } })
+  const seen = machine(on, {
+    files: { [MAIN_MAP]: other, [WORKTREE_MAP]: mapOf({ platform: 'linux' }) },
+    pythons: { python: KEPT },
+    root: WORKTREE,
+    main: MAIN,
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(['python3', 'python'])
+  expect(seen.read).toContain(MAIN_MAP)
+  expect(seen.read).toContain(WORKTREE_MAP)
+})
+
+test("a session whose root is the main checkout reads the map once, there", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { [MAIN_MAP]: mapOf({ platform: 'linux' }) }, pythons: { python: KEPT }, root: MAIN, main: MAIN })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(['python3', 'python'])
+  expect(seen.read.filter(path => path === MAIN_MAP).length).toBe(1)
 })
 
 test('where the engine gives no such variables the module names the session and its root, as before', async ($, on) => {

@@ -411,11 +411,9 @@
   },
   "$.session.repo": {
    "kind": "method",
-   "declined": {
-    "p4-phi": "git is read by the python scripts, which run where no module loads too."
-   },
    "used": [
     "p4-native",
+    "p4-phi",
     "p4-temportal"
    ],
    "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."

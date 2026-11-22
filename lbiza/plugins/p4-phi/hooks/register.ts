@@ -437,10 +437,42 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
 // where p4-native is not installed, where the project has no store, where the map is no JSON, and where the entry
 // is not written yet, since that plugin's start does not wait for it. Another session's entry is never read: one
 // folder can be open in the desktop app and in a terminal, on Windows and under WSL.
+//
+// The map is read where p4-native keeps it: in the main checkout's store for a session in a git worktree, and in
+// the session's own root where the main checkout holds no entry of this session, as where it has no store.
+// `$.session.repo` gives the main checkout: its `root` is, by the API types, "The repository's root, absolute:
+// the main working tree's for a worktree". A session in no repository reads its own root alone, as before.
 async function mapped($: EngineInterface): Promise<Record<string, unknown> | undefined> {
   try {
     const id = await $.session.id()
-    const map: unknown = JSON.parse(await $.fs.read(`${slashed(await $.session.root())}/${MAP}`))
+    for (const root of await mapRoots($)) {
+      const entry = entryOf(await $.fs.read(`${root}/${MAP}`).catch(() => ''), id)
+      if (entry !== undefined) return entry
+    }
+
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The folders whose store may hold the map, in p4-native's own order: the main checkout's, then the session's root.
+async function mapRoots($: EngineInterface): Promise<string[]> {
+  const own = slashed(await $.session.root())
+  let main: string | undefined
+  try {
+    main = slashed((await $.session.repo())?.root ?? '') || undefined
+  } catch {
+    main = undefined
+  }
+
+  return main === undefined || main === own ? [own] : [main, own]
+}
+
+// One session's entry of a map's text, or nothing where the text is no JSON or holds no such entry.
+function entryOf(text: string, id: string): Record<string, unknown> | undefined {
+  try {
+    const map: unknown = JSON.parse(text)
     const sessions = isRecord(map) ? map.sessions : undefined
     const entry = isRecord(sessions) ? sessions[id] : undefined
 

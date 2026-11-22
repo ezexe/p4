@@ -162,7 +162,7 @@ This rests on the words of that answer: a build that words it another way answer
 Tried and refused by the builds: a hook that names `tool.run` inside a `try`, a second file under `modules` in `hooks.json`, and an event name that is no string literal.
 A python child of the module is started with the variables `$.process.hookEnv` gives, on Claude Code 2.1.326 and later, which are the ones a command hook of the session gets.
 So in a session whose folder is a git worktree, where a command hook's `CLAUDE_PROJECT_DIR` is the main checkout's root by `worktrees.md`, "What worktrees share with the main checkout", the module's scripts read and write the main checkout's store as the hooks do, and the files the module keeps for python land there.
-Until p4-phi 0.11.112 the module named the session's own folder as the project, so in such a session its scripts kept a second store in the worktree.
+Until p4-phi 0.11.113 the module named the session's own folder as the project, so in such a session its scripts kept a second store in the worktree.
 The input of the check before a call still carries the session's own folder as `cwd`, which is the worktree.
 On 2.1.311 and 2.1.322, which have no such method, the module names the session's id and its folder as before.
 The check before a tool call hands python the transcript's path from `$.session.info`, and none on a build with no such method, where a session's brief is then read from the task p4-phi kept.
@@ -340,6 +340,9 @@ So the kept list and the check stay, and they rest on the native list alone: whe
 p4-native writes what the host is into `<project>/.claude/p4/native/host.json`, a session's entry under `sessions.<session id>`, and its README gives that file as the one way to read it.
 Where the file holds an entry for the session, p4-phi's hooks module reads it first in the two places where it worked the host out by itself.
 Its own reading stays in both, for a machine with no p4-native, a project with no store, a map that is no JSON and an entry that is not written yet, since p4-native's start does not wait for the map.
+For a session in a git worktree p4-native keeps the map in the main checkout's store, so the module reads it there first and then in the session's own folder, in that plugin's own order.
+The main checkout's root is `$.session.repo`'s to give, whose `root` is by the types of `claude-code` "The repository's root, absolute: the main working tree's for a worktree".
+Until p4-phi 0.11.114 the module read the map in the session's own folder alone, so a worktree session found no entry and fell back to its own reading.
 
 - The search for a python, where no runner kept one: whether this is Windows is the entry's `platform`, and the shape of the plugin's own folder where the entry has none or says `unknown`.
 - The first round of calls of the desktop app's own tools: an entry whose `host` is not `desktop` and whose `tools.app` is empty says that no such tool answers, so none is called. p4-phi's own reading is the call itself, which the engine rejects in a session the app does not host.
