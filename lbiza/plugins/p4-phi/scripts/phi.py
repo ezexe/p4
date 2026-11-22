@@ -908,6 +908,8 @@ def request_of(prompt, by=""):
             return ""                              # p4-phi's own sweep, which a schedule fires: nobody typed it
         if plans.app_notice(text):
             return ""                              # the app speaking: its notice about a message this session sent
+        if plans.system_note(text):
+            return ""                              # Claude Code speaking: the frame of a background task's event
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or
     # with their own words: a notification or another session's message that quotes a pasted block stays Claude Code's.
     return PASTED.sub(lambda m: m.group(1), text).strip()

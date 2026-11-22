@@ -1466,6 +1466,19 @@ def app_notice(prompt):
     return bool(APP_NOTICE.match(str(prompt or "")))
 
 
+# The frame Claude Code puts at the head of a background task's event that reaches a session as a prompt, such as a
+# background subagent's report: "[SYSTEM NOTIFICATION - NOT USER INPUT]", then "This is an automated background-task
+# event, NOT a message from the user." hooks.md, "UserPromptSubmit", has the hooks run on "A background subagent
+# reporting back to the session that started it", and the desktop app stamps such a prompt with a kind rows.whose
+# names nobody for. Its words are Claude Code's, never ezexe's.
+SYSTEM_NOTE = re.compile(r"\A\s*\[SYSTEM NOTIFICATION\b")
+
+
+def system_note(prompt):
+    """True for a prompt that opens with the frame of a background task's event."""
+    return bool(SYSTEM_NOTE.match(str(prompt or "")))
+
+
 def wakes(disk):
     """How many turns in a row the hooks module started for a session, by its session.json."""
     w = disk.get("woke") if isinstance(disk, dict) else None

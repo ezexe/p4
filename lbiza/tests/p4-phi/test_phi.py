@@ -309,6 +309,29 @@ class Requests(unittest.TestCase):
             self.assertEqual(tree.session(TOP)["turnBy"], "event", "not the person's turn")
             self.assertEqual(tree.session(TOP)["task"], TASK)
 
+    def test_the_frame_of_a_background_tasks_event_is_no_request_of_ezexes(self):
+        """hooks.md, "UserPromptSubmit": the hooks also run on "A background subagent reporting back to the session
+        that started it". In the desktop app such a prompt opens with the frame below and carries a kind rows.whose
+        names nobody for, and routing drafted a new orchestrator for each report. A message that quotes the frame
+        further in is still ezexe's, and so is one the origin says ezexe typed."""
+        import plans
+        frame = ("[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message "
+                 "from the user.\nThe finder found three call sites in src/export/.")
+        for said in (frame, "  \n" + frame, "<system-reminder>x</system-reminder>\n" + frame):
+            self.assertEqual(phi.request_of(said), "", said[:40])
+        self.assertTrue(plans.system_note(frame))
+        asked = "what does this mean: " + frame
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(plans.system_note(asked))
+        self.assertEqual(phi.request_of(frame, "user"), frame, "the origin says ezexe typed it")
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Tree(tmp)
+            tree.record(TOP)
+            tree.say(TOP, TASK)
+            tree.say(TOP, frame)
+            self.assertEqual(tree.session(TOP)["turnBy"], "event", "not the person's turn")
+            self.assertEqual(tree.session(TOP)["task"], TASK)
+
     def test_a_paste_only_message_is_the_persons_request(self):
         said = "Fix the port table.\nIt drops the last row."
         paste = '<pasted_content id="9b38">\n' + said + '\n</pasted_content id="9b38">\n'
