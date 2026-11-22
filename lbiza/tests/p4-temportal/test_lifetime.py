@@ -886,21 +886,6 @@ class Lifetime(unittest.TestCase):
         self.assertEqual((old.returncode, old.stdout, lifetime.read_expires(self.p4)), (2, "", {}))
         self.assertIn("unrecognized arguments: --session abc", old.stderr)
 
-    def test_a_cookie_an_earlier_version_set_for_a_session_is_never_cleared(self):
-        """An entry of expires.json that an earlier version set to end with a session stays with its file through
-        the module's sweep, as the one at that session's end is, `list` says what it is, and `set` gives it a
-        lifetime."""
-        f = put(os.path.join(self.t, "notebook", "state.md"))
-        lifetime.write_expires(self.p4, {"notebook/state.md": {"session": "abc12345-rest"}})
-        ended = run("tick", CLAUDE_PROJECT_DIR=self.root, CLAUDE_CODE_SESSION_ID="abc12345-rest")
-        swept = lifetime.sweep(self.p4, now=time.time() + 400 * DAY)
-        listed = lifetime.listing(self.p4)[0]
-        self.assertEqual((json.loads(ended.stdout)["said"], swept, os.path.exists(f)), ([], "", True))
-        self.assertEqual(listed, "cookie  notebook/state.md  set by an earlier version to end with session abc12345, "
-                                 "so never cleared: set a lifetime on it or clear it")
-        lifetime.set_cookie(self.p4, f, "1h")
-        self.assertEqual(list(lifetime.read_expires(self.p4)["notebook/state.md"]), ["expires"])
-
     def test_set_reads_a_relative_path_from_the_working_folder_and_refuses_a_missing_one(self):
         """`set notes.md 7d` run inside a folder gives that folder's file a cookie, `clear` reads its path the same
         way, and a path that does not exist is refused."""

@@ -133,7 +133,7 @@ footer{margin-top:36px;padding-top:14px;border-top:1px solid var(--line);font-si
         <tr id="row-scratchpad"><th scope="row">A session's scratch files</th>
           <td><p><code>b01f260</code>: one plugin "for what Claude Code leaves in AppData and temp". Issue 131: "The scratchpad is the app's."</p></td>
           <td><p><code>claude-directory.md</code>, "Session scratchpad directory": one folder for each session under the system temp directory, named to hooks as <code>scratchpad_dir</code>, and "Scratchpad files last as long as the session's transcript".</p></td>
-          <td><p>It leaves each scratchpad to the app, and the skill page sends temporary files there.</p><p>At every start <code>scratchpad.py tmp-unlink</code> looks for scratchpads that version 0.3.9 linked into the store, since such a link is still on a disk until it is found. The four commands of the copy are deleted from the script, and the runner's line for one of them with it.</p></td>
+          <td><p>It leaves each scratchpad to the app, and the skill page sends temporary files there.</p><p>The commands of the copy are deleted from the script, the last of them <code>tmp-unlink</code>, which made each scratchpad that version 0.3.9 linked into the store a folder again, and the runner's line for one of them with it.</p></td>
           <td><p>Nothing.</p></td>
           <td><p>Nothing.</p></td>
           <td class="n">4</td></tr>

@@ -12,8 +12,7 @@
       {
         "hooks": [
           {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad notebook-out", "timeout": 20, "onFailure": "continue"},
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20, "onFailure": "continue"},
-          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad tmp-unlink", "timeout": 60, "onFailure": "continue"}
+          {"type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" scratchpad repo-uses", "timeout": 20, "onFailure": "continue"}
         ]
       }
     ],

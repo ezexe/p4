@@ -124,7 +124,6 @@ WHOLE = (NOTEBOOK, "src", PLANS, *(f"{PLANS}/{shelf}" for shelf in SHELVES), EXP
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
 ASIDE = sorted({place.split("/")[0] for place in p4conf.LAYOUT.values()} - {"temportal"})
 UNITS = {"m": 60, "h": 3600, "d": 86400, "w": 7 * 86400}
-SESSION = "session"                     # the lifetime an earlier version took, and the key of the entries it wrote
 NO_SESSION = ("no lifetime ends with a session: a file that goes when its session goes belongs in that session's "
               "scratchpad directory, which Claude Code deletes with its transcript")
 FRESH_S = 3600                          # a set-aside copy this young came with this start's move: no rule clears it
@@ -172,7 +171,7 @@ def parse_lifetime(text, now=None):
     NO_SESSION."""
     now = time.time() if now is None else now
     t = str(text).strip().lower()
-    if t == SESSION:
+    if t == "session":
         raise ValueError(f"{NO_SESSION}; use 30m, 12h, 7d, 2w or an ISO date")
     m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([mhdw])", t)
     if m:
@@ -477,8 +476,7 @@ def _days(days):
 
 
 def sweep_cookies(p4, now=None):
-    """Clear every cookie whose time is up -> [rel cleared]. An entry whose expiry cannot be read is left as it is,
-    and so is one an earlier version set to end with a session."""
+    """Clear every cookie whose time is up -> [rel cleared]. An entry whose expiry cannot be read is left as it is."""
     now = time.time() if now is None else now
     d = read_expires(p4)
     cleared, changed = [], False
@@ -847,9 +845,6 @@ def listing(p4, now=None, days=None, is_told=False):
                 t = float(v["expires"])
                 when = datetime.fromtimestamp(t, timezone.utc).astimezone().isoformat(timespec="minutes")
                 line = f"cookie  {rel}  expires {when}" + ("  past due" if t <= now else "")
-            elif SESSION in v:
-                line = (f"cookie  {rel}  set by an earlier version to end with session {str(v[SESSION])[:8]}, so "
-                        "never cleared: set a lifetime on it or clear it")
         except (TypeError, ValueError, OverflowError, OSError):
             pass
         why = refusal(p4, rel)[1]

@@ -50,7 +50,7 @@ class AppScratchpadTest(unittest.TestCase):
         """ezexe/p4#131: each session's scratchpad is the app's, so no start, turn end or session end links, stages,
         commits or sweeps one."""
         tmp = [c for e in ("SessionStart", "Stop", "SessionEnd") for s in ("startup", "resume", "clear", "compact", "")
-               for c in runs(e, s) if "scratchpad tmp-" in c and "scratchpad tmp-unlink" not in c]
+               for c in runs(e, s) if "scratchpad tmp-" in c]
         self.assertEqual(sorted(set(tmp)), [])
 
 
