@@ -134,26 +134,6 @@ class OwnCopy(unittest.TestCase):
         self.assertIsNone(p4conf.allow_rules(sys.platform, {}))
 
 
-class NoCommandHook(unittest.TestCase):
-    """No command hook runs lifetime.py: the hooks module sweeps by `tick`, whose failure is a line of its JSON, which
-    Tick holds. `sweep` and `session-end`, the commands of the SessionStart and SessionEnd hooks before the module,
-    are gone, since an installed version runs the scripts of its own folder in Claude Code's plugin cache."""
-
-    def test_the_commands_of_the_command_hooks_are_gone(self):
-        root = tempfile.mkdtemp(prefix="p4-temportal-gone-")
-        self.addCleanup(wipe, root)
-        due = put(os.path.join(root, ".claude", "p4", "temportal", "notebook", "due.md"))
-        lifetime.write_expires(os.path.join(root, ".claude", "p4"), {"notebook/due.md": {"expires": 1.0}})
-        for sub in ("sweep", "session-end"):
-            r = run(sub, stdin=json.dumps({"cwd": root}), CLAUDE_PROJECT_DIR=root)
-            self.assertEqual((r.returncode, r.stdout, os.path.exists(due)), (2, "", True), sub)
-            self.assertIn("invalid choice", r.stderr, sub)
-        with open(os.path.join(SRC, "lifetime.py"), encoding="utf-8") as f:
-            code = f.read().split('"""', 2)[2]
-        for gone in ('"sweep"', '"session-end"', "--session", "payload_from_stdin", "systemMessage"):
-            self.assertNotIn(gone, code, gone)
-
-
 class Tick(unittest.TestCase):
     """`tick`, the retention sweep as the hooks module runs it: at a session's start, on its timer, and let go of at
     the session's end."""

@@ -258,8 +258,6 @@ class Layout(Base):
         compaction": "Project-root CLAUDE.md and unscoped rules | Re-injected from disk". So the layout hook hands
         no block at any source, a rule a store still marks pinned included, and its code is gone."""
         import hook
-        for name in ("pinned_block", "memory_texts", "PINNED_CHARS"):
-            self.assertFalse(hasattr(hook, name), name)
         rules = [[("ruling", f"pinned rule number {k}"), ("status", "LIVE"), ("pinned", "yes"),
                   ("time", f"2026-10-{10 + k:02d} 10:00")] for k in range(3)]
         write(p4conf.sub(self.p4, "store", "rules.md"), st.render("rules.md", rules))

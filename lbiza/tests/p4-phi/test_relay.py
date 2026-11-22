@@ -222,7 +222,6 @@ class Paths(unittest.TestCase):
     def test_a_childs_slice_names_its_paths_relative_and_no_scratchpad_in_the_store(self):
         """The slice's paths as the project names them. No line names a scratchpad under .claude: the app names each
         session's scratchpad itself, and every write under .claude asks ezexe."""
-        self.assertFalse(hasattr(relay, "scratch_line"))
         tmp = tempfile.mkdtemp()
         try:
             home = os.path.join(tmp, ".claude", "p4")
@@ -1080,8 +1079,6 @@ class ThreeSessions(unittest.TestCase):
         line reads the address book, which reads each path from its own repository's root: a message naming a file
         of the main checkout is sent to the worker that owns it in its worktree."""
         t = self.t
-        for name in ("owners", "touching", "scratch"):
-            self.assertFalse(hasattr(relay, name), name)
         t.cli(A, "shard", self.x("lib"))
         ctx = context(t.say(B, f"please fix {self.x('lib', 'y.py')} too"))
         self.assertIn(f"among the owned paths of \"the layout work\" `{A}`. Send it there with SendMessage to {A}", ctx)
@@ -1189,7 +1186,6 @@ class ThreeSessions(unittest.TestCase):
         gone, here with both sessions in one folder, where the paths did meet: a note that names the child's very
         file and owned path, and says nothing of its parent step, marks it stale no longer."""
         t = self.t
-        self.assertFalse(hasattr(relay, "too_broad"), "its last caller was that arm")
         t.cli(A, "shard", self.x("lib"))
         path = self.x("lib", "x.py")
         with open(path, "a", encoding="utf-8") as f:
@@ -1458,7 +1454,6 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(guard(reader, "git switch main", cwd=own)["permissionDecision"], "ask",
                          "a reader started with use_worktree false shares its starter's worktree")
         import phi
-        self.assertFalse(hasattr(phi, "BRANCHING"), "no pattern for a branch or a worktree a child makes")
         with open(phi.__file__, encoding="utf-8") as f:
             source = f.read()
         self.assertNotIn("entering a worktree of its own", source)

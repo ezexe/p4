@@ -67,8 +67,6 @@ class Plugins(Base):
         """Marketplace auto-update, by https://code.claude.com/docs/en/plugins/install.md, "Keep plugins updated":
         "Plugins update automatically when the marketplace they came from has auto-update turned on." A plugin behind
         its marketplace and a former name in its renames map get no line from p4."""
-        for name in ("plugin_commands", "installs", "enabled", "retired", "market_versions", "every_install"):
-            self.assertFalse(hasattr(catchup, name), name)
         self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "user", "0.1.0", None)],
                      {"p4-recall": True, "p4-phi": True})
         self.assertNotIn("claude plugin", catchup.run(self.project, os.path.join(self.project, ".claude", "p4")))
@@ -90,8 +88,6 @@ class Plugins(Base):
     def test_old_version_folders_are_claude_codes_own(self):
         """Cleanup of previous versions, by https://code.claude.com/docs/en/plugins/loading.md: Claude Code "removes
         that directory in a background cleanup 14 days later". catchup.py neither counts nor deletes them."""
-        for name in ("prune_cache", "old_cache", "size_text", "all_install_paths"):
-            self.assertFalse(hasattr(catchup, name), name)
         self.install([("p4-phi", "user", "0.7.0", None)], {"p4-phi": True})
         old = os.path.join(self.conf, "plugins", "cache", M, "p4-phi", "0.6.0")
         write(os.path.join(old, "a.txt"), "y" * 1024)

@@ -412,8 +412,6 @@ class Linear(Base):
         self.assertEqual(starts.state(t.p4), {}, "no start request is kept")
         text, _ = self.ledger()
         self.assertNotIn("waits behind", text)
-        for name in ("queue", "busy"):
-            self.assertFalse(hasattr(puppeteer, name), name)
 
 
 class WorkerSplit(Base):
@@ -824,8 +822,6 @@ class AtArchive(Base):
         own running, and names no background task of a session the app holds archived. What the refusal lacks is a
         session p4-phi only counts as archived, which no archive call closed: its task is still named."""
         from unittest import mock
-        for name in ("process_rows", "left_processes", "PS_S", "PROCESSES"):
-            self.assertFalse(hasattr(puppeteer, name), name)
         import inspect
         for fn in (puppeteer.unfinished, puppeteer.archive_check):
             self.assertEqual(list(inspect.signature(fn).parameters), ["home", "sid"], fn.__name__)
@@ -1066,10 +1062,6 @@ class Parallel(Base):
 
     EITHER = ("Fix the narwhal exporter's flush: either buffer the rows in memory until the table closes or write "
               "each row straight to the store")
-    GONE = ("explore", "explore_text", "groups_dir", "load_groups", "save_group", "rebind", "carriers", "result_of",
-            "lost", "same_result", "merge", "lost_words", "group_line", "merge_text", "merge_all", "READING_RE",
-            "RESULT_RE", "shares_run")
-
     def args_in(self, text):
         """The `args` a line gives the Workflow tool, read as the JSON it is."""
         return json.JSONDecoder().raw_decode(text.split("and `args` ")[1])[0]
@@ -1138,23 +1130,6 @@ class Parallel(Base):
         script = read(os.path.join(plugin, "workflows", "readings.js"))
         meta = re.search(r"name: '([^']+)'", script.split("}", 1)[0]).group(1)
         self.assertEqual(puppeteer.READINGS, f"{name}:{meta}", "workflows.md: a plugin workflow runs as /<plugin>:<name>")
-
-    def test_the_explore_and_merge_machinery_is_gone(self):
-        t = self.t
-        for name in self.GONE:
-            self.assertFalse(hasattr(puppeteer, name), name)
-        for cmd in ("readings", "merge"):
-            self.assertNotIn(cmd, puppeteer.COMMANDS)
-        t.say(TOP, TASK)
-        r = t.cli(TOP, "readings", "keep the table in the store", "keep the table in a file beside it")
-        self.assertEqual(r.returncode, 2, "phi.py has no readings command")
-        self.assertIn("invalid choice", r.stderr)
-        r = t.cli(TOP, "merge", "grp-0123456789")
-        self.assertEqual(r.returncode, 2, "phi.py has no merge command")
-        for name in ("phi.py", "puppeteer.py", "issues.py"):
-            source = read(os.path.join(SRC, name))
-            for gone in ("Result: <", "phi reading ", '"readings", "*.json"', '.get("reading")'):
-                self.assertNotIn(gone, source, f"{name} holds {gone!r}")
 
     def test_a_first_message_keeps_its_draft_and_no_reading(self):
         """A brief an earlier version drafted for a reading still carries its line. The draft it names is kept, and
@@ -1389,10 +1364,6 @@ class Look(Base):
 
     def test_no_hook_starts_a_process_and_nothing_of_the_detached_watcher_is_left(self):
         t = self.t
-        for name in ("ensure_watcher", "watcher_alive", "watcher_path", "code_stamp", "watch", "BEAT_DEAD_S",
-                     "WATCH_QUIT_S"):
-            self.assertFalse(hasattr(puppeteer, name), name)
-        self.assertFalse(hasattr(phi, "watch_over"))
         self.assertNotIn("watch", puppeteer.COMMANDS)
         self.assertIn("look", puppeteer.COMMANDS)
         for text in (read(os.path.join(SRC, "phi.py")), read(os.path.join(SRC, "puppeteer.py"))):

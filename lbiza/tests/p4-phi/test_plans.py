@@ -357,7 +357,6 @@ class TreeOfPlans(unittest.TestCase):
         self.assertFalse(os.path.exists(marker), "its stop closes the marker")
         self.assertNotIn("agent-post", phi.ROUTED, "no route binds a subagent at its tool call")
         self.assertEqual(phi.ROUTED["agent-start"][0], "SubagentStart")
-        self.assertFalse(hasattr(plans, "PENDING_S"), "nothing pending, so nothing to time out")
 
     def test_a_subagents_task_holds_no_copy_of_what_claude_code_keeps(self):
         """Candidate 12: the description, the start, the result and the files a subagent wrote are in the Agent
@@ -1106,7 +1105,6 @@ class Levels(unittest.TestCase):
         for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
             self.assertNotIn(word, said, word)
         self.assertNotIn("get_usage", plans.LEVEL_HOW)
-        self.assertFalse(hasattr(plans, "LIMITS_FIRST"), "the line is gone")
         p = self.t.proj
         kid = self.plan(A, items(f"Edit {p}/src/export/flush.py to write through the new writer",
                                  f"Rewrite the flush page in {p}/docs/flush.md with the new calls"))

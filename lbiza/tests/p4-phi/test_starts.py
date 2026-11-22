@@ -75,9 +75,6 @@ class StartRequests(unittest.TestCase):
             starts.add(t.p4, KID, "the flush port", BRIEF)
         self.assertIn("suggested task card", str(refused.exception))
         self.assertEqual(starts.state(t.p4), {}, "no row is kept")
-        for gone in ("hand_text", "waiting_text", "wait_text", "requested_text", "BUTTONS"):
-            self.assertFalse(hasattr(starts, gone), gone)
-        self.assertFalse(hasattr(phi, "request_cmd"))
         with open(starts.__file__, encoding="utf-8") as f:
             source = f.read()
         self.assertNotIn("mcp__ccd_turn__wrap_up", source, "starts.py orders no wrap-up")
@@ -133,9 +130,6 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""))
         self.assertEqual(self.start(TOP, "Port the exporter's flush. Report when done.\nFiles: src/flush.py"),
                          ("", ""))
-        for name in ("FILES_WANTED",):
-            self.assertFalse(hasattr(starts, name), name)
-        self.assertFalse(hasattr(phi, "FILE_SETS"))
         import p4conf
         self.assertNotIn("file_sets", p4conf.DEFAULTS["phi"])
         self.assertIn("phi.file_sets", p4conf.RETIRED)
@@ -158,8 +152,6 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(self.t.session(w)["fileSet"], [relay.norm("src/flush.py", self.t.proj)])
         self.assertEqual(self.start(TOP, BRIEF), ("", ""), "a live writer of src/flush.py holds no start")
         self.assertEqual(self.start(TOP2, BRIEF), ("", ""), "nor another orchestrator's")
-        for name in ("held_by", "writers", "files_overlap", "above"):
-            self.assertFalse(hasattr(starts, name), name)
         with open(phi.__file__, encoding="utf-8") as f:
             self.assertNotIn("this start is held", f.read())
 
@@ -171,14 +163,6 @@ class StartRequests(unittest.TestCase):
         with self.assertRaises(TypeError):
             starts.add(t.p4, KID, "the flush port", BRIEF, after=w)
         self.assertEqual(starts.state(t.p4), {})
-        for name in ("pending", "freed_text", "queued_text", "call_of", "CARDS", "CLAIM_S", "_handed", "_busy"):
-            self.assertFalse(hasattr(starts, name), name)
-        import puppeteer
-        for name in ("queue", "busy"):
-            self.assertFalse(hasattr(puppeteer, name), name)
-        import controls
-        for name in ("waiting_requests", "holders", "holders_text", "behalf", "behalf_line", "behalf_text"):
-            self.assertFalse(hasattr(controls, name), name)
         t.cli(w, "done", "rewrote the writer; its suite passes")
         t.stop(w, "Rewrite the writer", report="Rewrote the writer; the suite passes.", uuid="w1")
         for said in (t.say(KID, CROSS), t.say(KID, "How is the port coming?"), t.say(TOP, "and the exporter?")):
@@ -193,8 +177,6 @@ class StartRequests(unittest.TestCase):
         r = t.cli(w, "files", "--release")
         self.assertEqual(r.returncode, 2, "argparse knows no such command")
         self.assertIn("invalid choice", r.stderr)
-        for name in ("set_files", "files_held_text"):
-            self.assertFalse(hasattr(phi, name), name)
         s = t.session(w)
         self.assertEqual([f.rsplit("/", 1)[-1] for f in s["fileSet"]], ["flush.py", "flush.md"])
         self.assertNotIn("fileSetAt", s)

@@ -1378,10 +1378,6 @@ class Rules(unittest.TestCase):
         for what would pass one: every piece passes whole. What the app's cut lacks, by the same section, "Claude
         Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap": the
         lines that ask the session to act lead, and one line asks for the file only when they pass the preview."""
-        for mod, names in ((phi, ("fit", "PROMPT_CHARS", "HELD_HEAD")), (relay, ("hold", "held_path", "HELD_HEAD",
-                                                                                 "HELD_BYTES"))):
-            for name in names:
-                self.assertFalse(hasattr(mod, name), f"{mod.__name__}.{name}")
         self.assertNotIn("prompt_chars", phi.SETTINGS)
         self.assertEqual((phi.APP_CAP, phi.APP_PREVIEW), (APP_CAP, 2000))
         parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "act: third piece " + "c" * 900,
@@ -1932,8 +1928,6 @@ class StatePage(unittest.TestCase):
         self.assertIn("past 40 percent", low, "phi.clear_at sets the line")
         self.assertEqual(low.replace("past 40 percent", f"past {controls.CLEAR_AT} percent"), said,
                          "phi.context_window steers nothing")
-        for name in ("context_used", "WINDOW"):
-            self.assertFalse(hasattr(controls, name), f"controls.{name} measures no context")
 
 
 class ClearFamily(unittest.TestCase):

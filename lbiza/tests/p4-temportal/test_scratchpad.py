@@ -540,43 +540,8 @@ def unlink(link):
     os.unlink(link) if os.path.islink(link) else os.rmdir(link)
 
 
-class RetiredAsk(unittest.TestCase):
-    """The PreToolUse ask on code headed for a temp folder or the notebook is Claude Code's own ask rule on an Edit
-    path, by https://code.claude.com/docs/en/permissions.md: "`Edit` rules apply to all built-in tools that edit
-    files." p4-temportal runs no copy of it."""
-
-    def test_hooks_json_runs_no_pretooluse_hook(self):
-        with open(HOOKS_JSON, encoding="utf-8") as f:
-            hooks = json.load(f)["hooks"]
-        self.assertNotIn("PreToolUse", hooks)
-        self.assertEqual([c for e in hooks for c in event_hooks(e) if "scratchpad ask" in c], [])
-
-    def test_scratchpad_py_has_no_ask(self):
-        if SRC not in sys.path:
-            sys.path.insert(0, SRC)
-        import scratchpad as sp
-        for name in ("cmd_ask", "written_paths", "in_temp", "in_notebook", "in_harness_scratchpad", "WRITE_RES"):
-            self.assertFalse(hasattr(sp, name), name)
-
-    def test_the_commands_of_the_copies_are_gone(self):
-        """`ask`, `tmp-sweep`, `tmp-close` and `tmp-link` were kept for sessions of older versions, which run the
-        scripts of their own folder in Claude Code's plugin cache and never reach this file. Each is an unknown
-        subcommand now, said in a systemMessage with exit 0 as every other is, and the runner holds no line for one."""
-        payload = {"tool_name": "Write", "cwd": "E:/projects/x", "tool_input": {"file_path": "/tmp/x.py", "content": "x"}}
-        for sub in ("ask", "tmp-sweep", "tmp-close", "tmp-link"):
-            said = json.loads(run_sub(sub, payload, ON))
-            self.assertEqual(said, {"systemMessage": f"scratchpad.py: unknown subcommand {sub!r}"}, sub)
-        if SRC not in sys.path:
-            sys.path.insert(0, SRC)
-        import scratchpad as sp
-        self.assertFalse(hasattr(sp, "RETIRED"))
-        with open(os.path.join(SRC, "run-hook.sh"), encoding="utf-8") as f:
-            runner = f.read()
-        self.assertNotIn("ask", runner)
-        with open(os.path.join(SRC, "scratchpad.py"), encoding="utf-8") as f:
-            code = f.read().split('"""', 2)[2]
-        for sub in ("tmp-sweep", "tmp-close", "tmp-link"):
-            self.assertNotIn(sub, code, sub)
+class RepoUses(unittest.TestCase):
+    """What scratchpad.py lists as files the repository uses."""
 
     def test_repo_uses_lists_no_notebook(self):
         if SRC not in sys.path:

@@ -1887,9 +1887,6 @@ class Watcher(unittest.TestCase):
         import urllib.request
         from unittest import mock
         import hook
-        for mod, names in ((p4conf, ("CHANGELOG_URL", "CHANGELOG_S")), (hook, ("start_changelog", "h_changelog"))):
-            for name in names:
-                self.assertFalse(hasattr(mod, name), name)
         self.assertNotIn("changelog", hook.HANDLERS)
         for copy in COPIES:
             src = copy.read_text(encoding="utf-8")

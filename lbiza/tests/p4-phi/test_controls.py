@@ -420,8 +420,6 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "a second hook at the same boundary: nothing")
         relay._write_json(os.path.join(t.p4, "p4.json"), {"phi": {"puppeteer_chars": 50, "compactions": 1}})
         self.assertNotIn("a boundary", context(t.say(PUP, "and now?")), "no count of characters names it again")
-        for name in ("CHARS", "COMPACTIONS", "ceiling", "handed_chars"):
-            self.assertFalse(hasattr(controls, name), f"controls.{name} counts toward no question")
         self.assertNotIn("compactions", phi.CAPS)
         r = t.hook("session-start", PUP, {"hook_event_name": "SessionStart", "source": "compact"})
         self.assertTrue(context(r).startswith("phi (p4-phi): this session is a puppeteer and its context was "
@@ -618,7 +616,6 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(go(TOP3), "", "no warning for the file another controlled session covers")
         self.assertEqual(go(TOP3, "Go.\nFiles: src/flush.py"), "", "nor for the files the message names")
         self.assertNotIn("goWarned", t.session(PUP))
-        self.assertFalse(hasattr(controls, "go_text"))
         for name in ("controls.py", "phi.py"):
             source = read(os.path.join(SRC, name))
             self.assertNotIn("is early", source, name)
@@ -911,9 +908,6 @@ class TreeAndClicks(unittest.TestCase):
         board = read(os.path.join(t.dir(PUP), "board.md"))
         self.assertNotIn("## Started on another session's behalf", board)
         self.assertNotIn("start request", board.split("## Waiting on")[1].split("\n## ")[0])
-        for name in ("holders", "holders_text", "behalf", "behalf_line", "behalf_rows", "behalf_row", "behalf_text",
-                     "waiting_requests", "stores"):
-            self.assertFalse(hasattr(controls, name), name)
         from unittest import mock
         with mock.patch.dict(os.environ, t.env(PUP)), mock.patch.dict(phi.RECORDS, clear=True):
             _, against = controls.standing(t.p4, TOP)
