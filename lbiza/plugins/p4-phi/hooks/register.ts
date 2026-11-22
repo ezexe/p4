@@ -119,10 +119,19 @@ const APP_STOP = 'mcp__ccd_session_mgmt__stop_session'
 // What a sender is told beside a queued answer, once for each such send. Seen on 2026-11-19 and again on
 // 2026-11-22: a worker waited inside its turn for an answer, the answer sat queued behind that wait, and it ran
 // only once the worker's starter stopped the turn.
+// The line says what the stop costs too. plugins/mods/api.md, "Calls and background work after the user
+// interrupts a turn": "calls that start new work in the session are refused until the user's next input, such as
+// a message at the prompt", and "What refused calls return" gives `$.command.run` as rejected and
+// `$.prompt.submit` as resolved with `{ drop }`, "and queues no prompt". Those are the two calls this module
+// starts work with, setGoal and wake. Seen on 2026-11-22 in the desktop app on Claude Code 2.1.326: after a
+// starter's stop, the starter's own message began a turn in the stopped session and the goal command of the look
+// at that turn's end was refused still, "the session was stopped and nobody has sent input since".
 const QUEUED_LINE =
   'phi (p4-phi): this message is queued and not read yet: it waits for that session\'s turn to end and begins ' +
   'its next turn then, so no answer comes sooner. Where that session waits only on this message, and this session ' +
-  `started it, \`${APP_STOP}\` with its session id ends that turn and the queued message runs next.`
+  `started it, \`${APP_STOP}\` with its session id ends that turn and the queued message runs next. The stop ` +
+  'has a cost in that session: until a person types there, Claude Code refuses what a plugin starts in it, so ' +
+  'p4-phi sets no goal there and begins no turn of its own there, and no message from a session lifts that.'
 
 // A shell call phi.py's branch guard reads: `git` as a word of the call's JSON text, where a newline, tab or
 // return beside it is the escape \n, \t or \r, so `cd a && git push` and `cd repo\ngit push` count, a `.` or `-`
@@ -865,6 +874,11 @@ async function report(
 
 // Starts a turn of the session's own with what a look answered. A turn that began since is left alone, and its own
 // end is looked at. The call resolves when the turn has started, so nothing waits on it.
+// After a stop the prompt is refused as the goal command is, until a person types in the session: the API types of
+// Claude Code 2.1.326 give `{ drop }` of PromptSubmitResult as "the engine's own (a Stop stands, a host's limit
+// reached)", and plugins/mods/api.md, "What refused calls return", says the call "Resolves with `{ drop:
+// '<reason>' }` and queues no prompt". Python answered that prompt once for the turn that ended, so that turn's
+// move is not made, and it answers anew for the next turn that ends on a wait. Not seen in a session.
 function wake($: EngineInterface, text: string): void {
   if (isInTurn) return
   $.prompt.submit({ text }).then(
@@ -891,7 +905,9 @@ function wake($: EngineInterface, text: string): void {
 // minutes behind a turn a queued message had begun and then set the goal, and one in the queue at a stop_session
 // was never run. So while the call is open each look is told so and python answers no condition, there is never a
 // second command beside it, and a call that rejects or answers other than `Goal set` is told to python with what
-// it said, which answers the condition again to the look after a later turn's end, three looks in all.
+// it said, which answers the condition again to the look after a later turn's end, three looks in all. A command
+// a stop took counts as none of the three: python reads the stop in what the call said, and where the call was
+// refused it answers the condition again only at the end of a turn a person's own words began.
 function setGoal($: EngineInterface, condition: string): void {
   if (goalFlying !== undefined) return
   goalFlying = condition

@@ -1879,6 +1879,8 @@ test('a sender whose message was queued is told what that means, and one whose m
     expect(words[1]).toContain("it waits for that session's turn to end")
     expect(words[1]).toContain('`mcp__ccd_session_mgmt__stop_session` with its session id ends that turn')
     expect(words[1]).toContain('this session started it')
+    // and what that stop costs the stopped session, which the sender weighs before it stops one
+    expect(words[1]).toContain('until a person types there')
     expect(words[1]?.includes('\n')).toBe(false)
   }
   // The answer as an object, as a tool's structured result reaches a hook.

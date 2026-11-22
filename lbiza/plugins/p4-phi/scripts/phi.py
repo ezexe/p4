@@ -687,6 +687,12 @@ def _save_session(home, s):
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
         s["controls"] = disk["controls"]          # only `controls` and a puppeteer's own start change it
+    if not s.pop("_goalSet", None):                # only the goal commands change the goal and the ask, save_goal:
+        for k in ("goal", "goalAsk"):              # a hook that read the session before one ran keeps its word
+            if k in disk:
+                s[k] = disk[k]
+            else:
+                s.pop(k, None)
     if int(disk.get("anchorSeen") or 0) > int(s.get("anchorSeen") or 0):
         s["anchorSeen"] = disk["anchorSeen"]
     moved = disk.get("spawnedFrom") if isinstance(disk.get("spawnedFrom"), dict) else {}
@@ -2531,6 +2537,8 @@ def h_user_prompt_submit(payload):
         "session" if from_peer(payload.get("prompt"), by) else "event")
     s["toldBy"] = by                               # '' where the origin did not say and the text's opening told
     s["toldFrom"] = upkeep.teller(by, origin, payload.get("prompt"))   # the session or the plugin that sent them
+    if s["turnBy"] == "user":
+        s["inputAt"] = now_exact()                 # a person's own input, which lifts what a stop refuses: goal_again
     s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
     if payload.get("permission_mode"):             # hooks.md: the mode the session is in, kept for mode_now
         s["permissionMode"] = str(payload["permission_mode"])
@@ -3068,7 +3076,7 @@ def goal_ask(home, s, condition):
     if len(line) > plans.GOAL_CHARS:
         raise ValueError(GOAL_LONG)
     s["goalAsk"] = {"condition": line, "asked": now()}
-    save_session(home, s)
+    save_goal(home, s)
     return GOAL_ASKED
 
 
@@ -3082,6 +3090,29 @@ def goal_ask(home, s, condition):
 # stop_session, and another worker's command waited four minutes in the queue behind a turn a queued message began
 # and then set the goal, so a turn that begins at once loses nothing.
 GOAL_TRIES = 3
+# How Claude Code names a command a stop took, which costs no look. plugins/mods/api.md, "Calls and background work
+# after the user interrupts a turn": "The reason `the session was stopped and nobody has sent input since` in a
+# result or error means the user stopped a running turn", and "After that interruption, calls that start new work
+# in the session are refused until the user's next input, such as a message at the prompt". "Retry a refused or
+# dropped call" gives that reason for a call that "was refused", and `was removed from the queue before it ran` for
+# one that "left the queue without running and was dropped, for example when the user stopped the turn".
+# Seen on 2026-11-22 in the desktop app on Claude Code 2.1.326, in a session whose starter ended its turn with
+# `mcp__ccd_session_mgmt__stop_session`: the command in the queue was dropped, a message from the starter began a
+# turn, and the command of the look at that turn's end was refused with the first reason, so a message from
+# another session is not that input. Each counted as a look then, and one more such turn would have spent the
+# last, with the goal never set unless a person typed there first. Seen there too, once: a person's own message
+# lifted the refusal, and the command of the look at the end of the turn it began set the goal.
+STOP_REFUSED = "the session was stopped and nobody has sent input since"
+STOP_DROPPED = "was removed from the queue before it ran"
+
+
+def save_goal(home, s):
+    """Saves a session whose goal or ask a goal command changed. Those commands run beside the session's hooks, as
+    the word of a command a stop dropped runs beside the prompt hook of the message that stop let through, and a
+    hook saves the copy it read at its start. So _save_session keeps the goal and the ask of the file for every
+    save but this one."""
+    s["_goalSet"] = True
+    save_session(home, s)
 
 
 def same_condition(row, kept):
@@ -3097,24 +3128,32 @@ def goal_again(home, s, flying=False):
     """The condition of a goal that was asked for and is not set, answered to one more look, or ''. Where the
     transcript's last goal row shows the condition set, the module's word of it was lost: the goal is marked set
     and nothing is answered. Nothing is answered either while the module says its command has not answered yet,
-    `flying`, once GOAL_TRIES looks were answered, or before a turn has ended since the last answer: after a stop
-    Claude Code refuses the command until the session's next input, so a look on the timer would spend every try
-    while none can work, and the look at the end of the turn that input begins is the one that can."""
+    `flying`, once GOAL_TRIES looks were answered, or before a turn has ended since the last answer, so a look on
+    the timer spends no try. And nothing is answered while Claude Code refuses the command for a stop, which
+    goal_failed keeps as `stopped`: the refusal lasts until a person's own words begin a turn, `inputAt`, so the
+    look at that turn's end is the first that answers, and no look before it is spent."""
     g = s.get("goal")
     if not isinstance(g, dict) or not g.get("condition") or g.get("set") or g.get("over"):
         return ""
     row = plans.goal_row(s.get("transcript") or "")
     if same_condition(row.get("condition"), g["condition"]) and not plans.goal_over(row):
         g["set"] = now()                           # Claude Code holds it as set
-        g.pop("failed", None)
-        save_session(home, s)
+        for k in ("failed", "stopped", "answered"):
+            g.pop(k, None)
+        save_goal(home, s)
         return ""
     tries = g.get("tries") if isinstance(g.get("tries"), int) else 1
-    ended = str(last_turn_row(home, s["sessionId"]).get("id") or "")
+    last = last_turn_row(home, s["sessionId"])
+    ended = str(last.get("id") or "")
     if flying or tries >= GOAL_TRIES or not ended or ended == g.get("turn"):
         return ""
-    g.update(tries=tries + 1, turn=ended)
-    save_session(home, s)
+    if g.get("stopped"):
+        said = str(s.get("inputAt") or "")
+        if not (said >= str(g["stopped"]) and str(last.get("at") or "") >= said):
+            return ""                              # refused until a person's own words begin a turn and it ends
+        g.pop("stopped")
+    g.update(tries=tries + 1, turn=ended, answered=now_exact())
+    save_goal(home, s)
     return g["condition"]
 
 
@@ -3126,8 +3165,9 @@ def goal_due(home, sid, flying=False):
     how many looks it was answered to and the turn that had ended last by then, and one the session asked for with
     `own`. Either is set as goal_condition words it, so a session another session started is given a condition its
     starter's later message can settle. A condition that was answered and is not set is answered again by
-    goal_again, to GOAL_TRIES looks in all. `flying` is the hooks module's word that a goal command of its own has
-    not answered yet."""
+    goal_again, to GOAL_TRIES looks in all, with `answered` the exact time of the last such look, which goal_failed
+    reads for a command a stop took. `flying` is the hooks module's word that a goal command of its own has not
+    answered yet."""
     s = load_session(home, sid) if sid else {}
     if not s.get("sessionId") or s.get("doneRetired") or s.get("archived"):
         return ""
@@ -3137,8 +3177,8 @@ def goal_due(home, sid, flying=False):
         s.pop("goalAsk", None)
         condition = goal_condition(s, ask["condition"], cut_to_fit=False)
         s["goal"] = {"condition": condition, "asked": ask.get("asked") or now(), "own": True, "tries": 1,
-                     "turn": ended}
-        save_session(home, s)
+                     "turn": ended, "answered": now_exact()}
+        save_goal(home, s)
         return condition
     if ask.get("condition"):
         return ""                                  # the command in flight answers first, then the new ask
@@ -3147,8 +3187,8 @@ def goal_due(home, sid, flying=False):
     if not GOAL or not spawned_from(s) or not s.get("doneLine") or not ended or flying:
         return ""
     condition = goal_condition(s, s["doneLine"], review=bool(s.get("doneReview")))
-    s["goal"] = {"condition": condition, "asked": now(), "tries": 1, "turn": ended}
-    save_session(home, s)
+    s["goal"] = {"condition": condition, "asked": now(), "tries": 1, "turn": ended, "answered": now_exact()}
+    save_goal(home, s)
     return condition
 
 
@@ -3160,21 +3200,35 @@ def goal_set(home, sid):
     if not isinstance(g, dict) or g.get("set"):
         return False
     g["set"] = now()
-    g.pop("failed", None)
-    save_session(home, s)
+    for k in ("failed", "stopped", "answered"):
+        g.pop(k, None)
+    save_goal(home, s)
     return True
 
 
 def goal_failed(home, sid, reason):
     """The hooks module's word that the goal command did not set the goal, with what the command answered or why the
-    call was rejected, kept on the goal as `failed` for `phi.py goal` to print. It counts nothing: goal_due counted
-    the look it answered. True when a goal that is not set took the word."""
+    call was rejected, kept on the goal as `failed` for `phi.py goal` to print. goal_due counted the look it
+    answered, and the look stays counted but for a stop: where the reason holds STOP_DROPPED or STOP_REFUSED the
+    look is given back, since no command could have worked. A refusal, STOP_REFUSED, is kept as `stopped` too,
+    with when that look was answered, and goal_again answers nothing until a person's own input later than that
+    has begun a turn. Input on record from after the look came after the refusal, which names none before it, so
+    nothing is held then. True when a goal that is not set took the word."""
     s = load_session(home, sid) if sid else {}
     g = s.get("goal")
     if not isinstance(g, dict) or g.get("set") or g.get("over"):
         return False
-    g.update(failed=cut(clean(reason), 300) or "no answer", failedAt=now())
-    save_session(home, s)
+    why = str(reason or "")
+    g.update(failed=cut(clean(why), 300) or "no answer", failedAt=now())
+    answered = str(g.pop("answered", None) or "")  # the look this word answers, counted and not settled yet
+    g.pop("stopped", None)
+    if STOP_REFUSED in why or STOP_DROPPED in why:
+        if answered and isinstance(g.get("tries"), int):
+            g["tries"] = max(0, g["tries"] - 1)    # the look a stop took costs nothing
+        at = answered or now_exact()
+        if STOP_REFUSED in why and str(s.get("inputAt") or "") < at:
+            g["stopped"] = at
+    save_goal(home, s)
     return True
 
 
@@ -3193,7 +3247,7 @@ def goal_verdict(home, sid):
         return ""
     reason = cut(clean(row.get("reason")), 300)
     s["goal"].update({"over": over, "overAt": now()}, **({"reason": reason} if reason else {}))
-    save_session(home, s)
+    save_goal(home, s)
     last = last_turn_row(home, s["sessionId"]) if over == "met" else {}
     if last and not last.get("done"):
         last["done"] = cut(clean("goal met: " + (reason or str(s["goal"].get("condition") or ""))), 400)
@@ -3284,9 +3338,15 @@ def goal_text(s):
     why = ""
     if not g.get("set") and not g.get("over") and (g.get("failed") or tries):
         left = max(0, GOAL_TRIES - tries)
-        why = ("\n" + (f"the command did not set it: {g['failed']}. " if g.get("failed") else "")
-               + f"The condition was answered to {tries} of {GOAL_TRIES} looks"
-               + (", and the look after a later turn's end answers it again." if left else
+        failed = str(g.get("failed") or "")
+        why = ("\n" + (f"the command did not set it: {failed}. " if failed else "")
+               + ("A stop of this session's turn took that command, which counts as no look. "
+                  if STOP_REFUSED in failed or STOP_DROPPED in failed else "")
+               + f"{tries} of {GOAL_TRIES} looks count against the condition"
+               + (", and Claude Code refuses the command until a person types in this session, which a message "
+                  "from another session does not lift: the look at the end of the turn a person's own words "
+                  "begin answers the condition again." if g.get("stopped") and left else
+                  ", and the look after a later turn's end answers it again." if left else
                   ", so no look answers it again: ask for it anew with the tool `mcp__p4-phi__goal`."))
     return f"goal {state}: {g.get('condition')}" + (f"\n{g['reason']}" if g.get("reason") else "") + why
 

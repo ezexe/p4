@@ -114,6 +114,7 @@ A session's own send is told the same where it matters.
 In the desktop app a message to a session whose turn is running waits for that turn to end: the send tool's own text gives "queued" as "waiting behind that session's current work", and its answer then ends with `(delivery: queued; ...)`.
 At such an answer the module hands the sender one line beside the result, with no process started: the message waits for that session's turn to end, and where that session waits only on the message and the sender started it, `mcp__ccd_session_mgmt__stop_session` ends that turn and the queued message runs next.
 That is the stop tool's own text, "a message already queued in it runs next", and "Usually no prompt when the target is a session this session started".
+The line names what the stop costs too: by `plugins/mods/api.md`, "Calls and background work after the user interrupts a turn", calls that start new work in a stopped session "are refused until the user's next input", so until a person types there p4-phi sets no goal in that session and begins no turn of its own in it.
 p4-phi calls that tool nowhere, and an answer that says `delivered` is told nothing.
 Seen on 2026-11-19 and on 2026-11-22: a worker waited inside its turn for an answer that sat queued behind that wait, fifteen minutes the first time, until its starter stopped the turn.
 
@@ -157,7 +158,12 @@ The goal of a worker in the Terminal panel carries the same words, kept in one p
 Seen in scripted runs of Claude Code 2.1.328 whose whole prompt was `/goal`: with those words the goal's check judged the goal met at its first pass after two reviews, and with words that asked for no unmended "confirmed" finding and capped the rounds at two, the check held out for a review that came back clean and the run ended with the goal unmet.
 `$.command.run` queues the command until the session is idle, so it waits through a turn that begins at once, and a stop of that turn drops it: `plugins/mods/api.md`, "Work your mod started before the interruption", gives the call as rejected with `the command was removed from the queue before it ran`, and as refused from then until the session's next input.
 So a condition that was answered and is not set is answered again, to the look after a later turn's end and to three looks in all, and never while the module's command has not answered.
-The module tells `phi.py` what a command that set no goal said, and `phi.py goal` prints it with how many looks the condition was answered to.
+A command a stop took counts as none of the three.
+One the stop dropped is answered again after a later turn's end, and one Claude Code refused with `the session was stopped and nobody has sent input since` waits for the end of a turn a person's own words began, which the prompt's origin and the opening of its text tell.
+Seen in the desktop app on Claude Code 2.1.326, after a starter ended a worker's turn with `mcp__ccd_session_mgmt__stop_session`: the starter's own message began a turn there and the command was refused still, so another session's message is not that input.
+A person's own message there lifted the refusal, seen once: the command of the look at the end of the turn it began set the goal.
+The goal and the ask on a session's record are the goal commands' alone to change, so a hook that read the record before one of them ran saves over neither.
+The module tells `phi.py` what a command that set no goal said, and `phi.py goal` prints it with how many of the three looks count against the condition.
 A goal the transcript's own goal row shows as set is marked set with no word from the module, so no second command starts a second turn on it.
 The condition of a session another session started ends with two sentences p4-phi adds: the id of the session that started it, and that a part of the condition counts as met once a message from that session in the conversation says that session does that part itself or takes that part or the whole work as done.
 The evaluator "judges your condition against what Claude has surfaced in the conversation", by `goal.md`, so a brief's line cannot follow a later change of orders unless the condition says such a message counts.
