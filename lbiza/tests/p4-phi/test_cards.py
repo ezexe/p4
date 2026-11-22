@@ -355,6 +355,87 @@ class Guards(unittest.TestCase):
         self.assertIs(self.t.session(self.keeper).get("pushes"), True, "read once, and kept")
         self.assertTrue(callable(phi.brief_pushes))
 
+    def push(self, host, path):
+        r = self.t.hook("branch-guard", host, {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                               "tool_input": {"command": "git push origin HEAD:main"},
+                                               "cwd": self.own, "transcript_path": path})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"] if r.stdout.strip() else ""
+
+    def before_the_key(self, host, clis, task):
+        """A session as one from before the key: no `pushes`, the CLI session ids it has run under, and the task
+        kept at its first message."""
+        s = self.t.session(host)
+        s.pop("pushes", None)
+        s.update(cliSessionIds=list(clis), task=task)
+        write(os.path.join(self.t.dir(host), "session.json"), json.dumps(s))
+
+    def test_a_transcript_that_opens_with_a_compactions_summary_is_not_read_as_the_brief(self):
+        """A review point of the set: a session from before the key whose transcript opens with a compaction's
+        summary had the summary read as its brief, so a push its brief covers was refused, and a summary that
+        speaks of a push would have passed one its brief forbids. The summary row, which Claude Code marks
+        `isCompactSummary`, is no brief: the brief is read from the transcript of an earlier CLI session id of the
+        session, and where none holds it, from the task kept at its first message."""
+        self.on()
+        folder = os.path.join(self._tmp.name, "transcripts")
+        row = lambda text, **more: json.dumps({"type": "user", "message": {"role": "user", "content": text},   # noqa: E731
+                                               **more}) + "\n"
+        summary = "This session is being continued from a previous conversation. The work is to rework the flush."
+        opened = os.path.join(folder, "new-cli.jsonl")
+        write(opened, row(summary, isCompactSummary=True, isVisibleInTranscriptOnly=True)
+              + row("Carry on from where you stopped."))
+        # the brief stands in the transcript of the session's first CLI id
+        write(os.path.join(folder, "old-cli.jsonl"), row("Task:\nRework the flush, then push it to origin."))
+        self.before_the_key(self.keeper, ["old-cli", "new-cli"], "Rework the flush.")
+        self.assertEqual(self.push(self.keeper, opened), "", "its brief said to push")
+        self.assertIs(self.t.session(self.keeper).get("pushes"), True)
+        # no earlier transcript holds it: the task kept at the first message is read
+        self.before_the_key(self.keeper, ["new-cli"], "Rework the flush, then push it to origin.")
+        self.assertEqual(self.push(self.keeper, opened), "", "the kept task said to push")
+        # and a summary that speaks of a push is no brief that tells the session to push
+        pushy = os.path.join(folder, "pushy-cli.jsonl")
+        write(pushy, row("This session is being continued. Earlier turns push the branch to origin.",
+                         isCompactSummary=True) + row("Carry on."))
+        write(os.path.join(folder, "first-cli.jsonl"), row("Task:\nRework the flush and commit it. Do not push."))
+        self.before_the_key(self.pusher, ["first-cli", "pushy-cli"], "Rework the flush and commit it.")
+        self.assertEqual(self.push(self.pusher, pushy), "deny", "its brief said not to")
+        self.assertIs(self.t.session(self.pusher).get("pushes"), False)
+
+    def test_a_starter_whose_app_record_holds_no_mode_is_still_checked_before_a_start(self):
+        """A review point of the set: the step before a start read the starter's permission mode from the app's
+        record alone, so a starter whose record holds none had a start of another class pass unchecked. The mode is
+        read from the hook's own input, hooks.md's `permission_mode`, then the app's record, then what the
+        session's last prompt carried. Where nothing says, a start that names a mode is refused, and one that
+        leaves the mode out goes on."""
+        self.on()
+        self.assertNotIn("permissionMode", jload(os.path.join(self.t.app, A + ".json")))
+        out = self.start(A, permission_mode="plan")
+        self.assertEqual(out["permissionDecision"], "deny", "nothing says the starter's mode")
+        self.assertIn("this session's own mode is not known", out["permissionDecisionReason"])
+        self.assertIn("Leave `permission_mode` out", out["permissionDecisionReason"])
+        self.assertIsNone(self.start(A), "the mode left out inherits the starter's, whatever it is")
+        # the mode the session's last prompt carried
+        r = self.t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": "carry on",
+                                                  "permission_mode": "bypassPermissions"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.t.session(A).get("permissionMode"), "bypassPermissions")
+        out = self.start(A, permission_mode="plan")
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("is of another class than this session's own `bypassPermissions`", out["permissionDecisionReason"])
+        self.assertIsNone(self.start(A, permission_mode="bypassPermissions"), "of the starter's class")
+        # the hook's own input says the mode the session is in now, ahead of what was kept
+        path = os.path.join(self._tmp.name, A + "-t.jsonl")
+        write(path, "x")
+        r = self.t.hook("start-advice", A, {"hook_event_name": "PreToolUse", "permission_mode": "auto",
+                                            "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
+                                            "tool_input": {"initiation": "user_asked", "context": "fresh",
+                                                           "title": "a child", "use_worktree": True,
+                                                           "permission_mode": "plan",
+                                                           "prompt": "Read the docs.\nFiles: none"}})
+        self.assertEqual(r.stdout.strip(), "", "auto and plan are one class")
+        self.assertEqual(cards.before_start({"permission_mode": "auto"}, "", TOP, (TOP, "top"))[:12], "phi (p4-phi)")
+        self.assertEqual(cards.before_start({"permission_mode": "auto"}, "", "", (TOP, "top")), "", "no child: no step")
+
     def test_the_store_guard_and_the_start_advice_refuse_in_a_started_session_and_ask_at_the_top(self):
         """A hand push in a store and a start p4-phi advises another way were asked about in every session. With
         the set in force a started session is refused with the session to ask, and the top session, where ezexe

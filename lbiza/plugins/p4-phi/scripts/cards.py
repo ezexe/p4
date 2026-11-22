@@ -144,11 +144,19 @@ ELSEWHERE = ("cwd", "host", "preset", "environment", "repository")
 def before_start(inp, own_mode, parent, top, here=""):
     """The step before a start, for a session that `parent` started and with the set in force: why this start is
     refused, or '' for a start that leaves nothing to ask. `inp` is the start call's input, `own_mode` the starter's
-    permission mode as the app records it, and `top` the tree's top session, as (its id, its title)."""
+    permission mode, '' where nothing says what it is, and `top` the tree's top session, as (its id, its title). A
+    start that names a mode is judged against the starter's own, so where that is not known it is refused too: a
+    start that leaves the mode out inherits the starter's and needs no judging."""
     if not parent:
         return ""
     asked = str(inp.get("permission_mode") or "")
-    if asked and mode_class(own_mode) and mode_class(asked) != mode_class(own_mode):
+    if asked and not mode_class(own_mode):
+        return (f"phi (p4-phi): this start is refused before it runs: it names `permission_mode` `{asked}`, and this "
+                f"session's own mode is not known, from the hook's input, the app's record or the session's last "
+                f"prompt, so whether the two are of one class is not either. cross-session-messaging.md holds every "
+                f"message between two sessions of different classes for an approval the desktop app cannot show. "
+                f"Leave `permission_mode` out, so the session inherits this one's.")
+    if asked and mode_class(asked) != mode_class(own_mode):
         return (f"phi (p4-phi): this start is refused before it runs: `permission_mode` `{asked}` is of another "
                 f"class than this session's own `{own_mode}`, and cross-session-messaging.md holds every message "
                 f"between two such sessions for an approval the desktop app cannot show. Leave `permission_mode` "

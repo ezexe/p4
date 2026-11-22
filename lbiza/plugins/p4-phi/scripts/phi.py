@@ -2432,6 +2432,8 @@ def h_user_prompt_submit(payload):
     s["toldBy"] = by                               # '' where the origin did not say and the text's opening told
     s["toldFrom"] = upkeep.teller(by, origin, payload.get("prompt"))   # the session or the plugin that sent them
     s.pop("waitEnded", None)                       # the wait the turn before ended on: this turn's end says anew
+    if payload.get("permission_mode"):             # hooks.md: the mode the session is in, kept for mode_now
+        s["permissionMode"] = str(payload["permission_mode"])
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
     plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
@@ -3278,7 +3280,7 @@ def h_start_advice(payload):
     mine = load_session(me.home, me.id)
     parent, on = spawned_from(mine), cards_on(me)
     if on and parent:                               # the step before a start: nothing left for its session to ask
-        why = cards.before_start(inp, upkeep.mode_of(me.id), parent, issues.lander(me.home, mine),
+        why = cards.before_start(inp, mode_now(me, mine, payload), parent, issues.lander(me.home, mine),
                                  str(payload.get("cwd") or mine.get("cwd") or ""))
         if why:
             RAN["before_start"] = True
@@ -3316,18 +3318,47 @@ def cards_on(me):
     return p4conf.cards_on(me.store or me.home)
 
 
+def mode_now(me, s, payload):
+    """The permission mode this session is in, or '' where nothing says: as the hook's own input gives it, hooks.md's
+    `permission_mode`, else as the app's record holds it, else as h_user_prompt_submit kept it at the session's last
+    prompt. The app's record holds none for a session it did not start and for one whose record is not read, and
+    the hooks module's check hands a PreToolUse input with no mode."""
+    return str(payload.get("permission_mode") or upkeep.mode_of(me.id) or s.get("permissionMode") or "")
+
+
+def first_message(path):
+    """The first message a transcript holds, a session's brief, as (its text, False), or ('', True) where the
+    transcript opens with a compaction's summary: a row Claude Code marks `isCompactSummary` comes before any
+    message, so the brief was written before the rows this file holds and the next message is a later one. A meta
+    row and a subagent's row are no message."""
+    for d in read_rows(path):
+        if d.get("type") != "user" or d.get("isSidechain") or d.get("isMeta"):
+            continue
+        if d.get("isCompactSummary"):
+            return "", True
+        content = (d.get("message") or {}).get("content")
+        if isinstance(content, list):
+            content = "\n".join(str(b.get("text") or "") for b in content
+                                if isinstance(b, dict) and b.get("type") == "text")
+        if isinstance(content, str) and content.strip():
+            return content, False
+    return "", False
+
+
 def brief_pushes(me, s, payload):
     """Whether this session's brief tells it to push, as kept at its first message. A session that began before the
-    key existed has none, so its first message is read from its transcript once and kept."""
+    key existed has none, so its first message is read from its transcript once and kept. Where that transcript
+    opens with a compaction's summary the summary is no brief: the brief is read from the transcript of an earlier
+    CLI session id of the session, in the same folder, oldest first as session.json's cliSessionIds holds them, and
+    where none holds it, from the task kept at the session's first message."""
     if "pushes" not in s:
-        first = ""
-        for d in read_rows(payload.get("transcript_path") or ""):
-            content = (d.get("message") or {}).get("content") if d.get("type") == "user" else None
-            if isinstance(content, list):
-                content = "\n".join(str(b.get("text") or "") for b in content
-                                    if isinstance(b, dict) and b.get("type") == "text")
-            if isinstance(content, str) and content.strip():
-                first = content
+        path = str(payload.get("transcript_path") or "")
+        first, summed = first_message(path)
+        for cli in (s.get("cliSessionIds") or []) if summed else []:
+            older = os.path.join(os.path.dirname(path), f"{safe_id(cli)}.jsonl")
+            if relay.norm(older) != relay.norm(path):
+                first = first_message(older)[0]
+            if first:
                 break
         s["pushes"] = cards.brief_pushes(first or s.get("task"))
         save_session(me.home, s)
