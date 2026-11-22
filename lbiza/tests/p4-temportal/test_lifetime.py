@@ -37,6 +37,24 @@ def wipe(path):
         shutil.rmtree(path, onerror=again)
 
 
+def make_link(link, target):
+    """A junction on Windows and a symlink elsewhere, from `link` to the folder `target`."""
+    if os.name == "nt":
+        import _winapi
+        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(link))
+    else:
+        os.symlink(os.path.abspath(target), link, target_is_directory=True)
+
+
+def unlink(link):
+    """Remove the link itself, never what it reaches: a junction is removed as a folder, which drops only its
+    reparse point."""
+    if os.path.islink(link):
+        os.unlink(link)
+    else:
+        os.rmdir(link)
+
+
 def read(path):
     with open(path, encoding="utf-8") as f:
         return f.read()
@@ -804,11 +822,11 @@ class Lifetime(unittest.TestCase):
             reached = set_aside(os.path.join(target, *inside), 40)
             link = os.path.join(self.p4, *place.split("/"))
             os.makedirs(os.path.dirname(link), exist_ok=True)
-            p4conf._make_link(link, target)
+            make_link(link, target)
             try:
                 r = run("--p4", self.p4, "now")
             finally:
-                p4conf._unlink(link)
+                unlink(link)
             if not os.path.exists(reached) or r.stdout != "nothing has expired\n":
                 cleared[place] = r.stdout.strip()
         self.assertEqual(cleared, {}, "the rule of .layout-conflicts cleared a folder through a link")
@@ -1294,7 +1312,7 @@ class Layout(unittest.TestCase):
         put(os.path.join(self.p4, "store", "facts.md"), "f\n")
         harness = os.path.join(temp, "claude", "proj", sid, "scratchpad")
         os.makedirs(os.path.dirname(harness))
-        p4conf._make_link(harness, old)
+        make_link(harness, old)
         try:
             p4conf.migrate_layout(self.p4, commit=False)
             self.assertTrue(p4conf.is_link(harness))
@@ -1302,7 +1320,7 @@ class Layout(unittest.TestCase):
             self.assertTrue(os.path.isfile(os.path.join(harness, "n.md")))
             self.assertFalse(os.path.exists(os.path.join(self.p4, "temportal", "tmp")), "a tmp/ was moved")
         finally:
-            p4conf._unlink(harness)
+            unlink(harness)
             wipe(temp)
 
 

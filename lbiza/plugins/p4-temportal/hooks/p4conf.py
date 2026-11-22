@@ -228,21 +228,6 @@ def _same(a, b):
         return False
 
 
-def _make_link(link, target):
-    if os.name == "nt":
-        import _winapi
-        _winapi.CreateJunction(os.path.abspath(target), os.path.abspath(link))
-    else:
-        os.symlink(os.path.abspath(target), link, target_is_directory=True)
-
-
-def _unlink(link):
-    if os.path.islink(link):
-        os.unlink(link)
-    else:
-        os.rmdir(link)                                  # a junction: RemoveDirectory drops the reparse point only
-
-
 # The files a move put in a new place in this process, so the layout commit holds those and nothing else.
 _LANDED = []
 _STORE = []                                       # the store being moved, for _ignored
