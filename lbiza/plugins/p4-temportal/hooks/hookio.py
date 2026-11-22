@@ -48,12 +48,3 @@ def settings_store(p4):
     main, in_git = p4conf.main_root(root)
     there = os.path.join(main, ".claude", "p4")
     return there if in_git and not same(main, root) and os.path.isdir(there) else p4
-
-
-def remove_link(path):
-    """Remove a symlink or a junction itself, never what it points at: a junction is removed as a folder, which drops
-    only its reparse point."""
-    if os.path.islink(path):
-        os.unlink(path)
-    else:
-        os.rmdir(path)
