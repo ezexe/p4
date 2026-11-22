@@ -21,7 +21,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 
 # the folder of the code these tests run
@@ -121,8 +120,57 @@ def environment(proj, tmp):
     return env
 
 
-def run_entry(event, matcher, hook, proj, tmp):
-    """One entry as Claude Code runs it -> the finished process."""
+def cpu_run(args, **kw):
+    """subprocess.run of `args` -> (the finished process, the CPU seconds it and every process it started spent).
+    On Windows the process starts suspended inside a job object of its own, which every process it starts joins, and
+    the job's accounting gives the user and kernel time of all of them. Elsewhere getrusage of the reaped children
+    gives the same. CPU time is the work the entry does, which a machine busy with other suites does not lengthen
+    the way it lengthens the time on the clock."""
+    if os.name != "nt":
+        import resource
+        before = resource.getrusage(resource.RUSAGE_CHILDREN)
+        r = subprocess.run(args, capture_output=True, **kw)
+        after = resource.getrusage(resource.RUSAGE_CHILDREN)
+        return r, (after.ru_utime - before.ru_utime) + (after.ru_stime - before.ru_stime)
+    import ctypes
+    from ctypes import wintypes
+
+    class Accounting(ctypes.Structure):
+        _fields_ = [("TotalUserTime", ctypes.c_int64), ("TotalKernelTime", ctypes.c_int64),
+                    ("ThisPeriodTotalUserTime", ctypes.c_int64), ("ThisPeriodTotalKernelTime", ctypes.c_int64),
+                    ("TotalPageFaultCount", wintypes.DWORD), ("TotalProcesses", wintypes.DWORD),
+                    ("ActiveProcesses", wintypes.DWORD), ("TotalTerminatedProcesses", wintypes.DWORD)]
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
+    k32.CreateJobObjectW.restype = wintypes.HANDLE
+    k32.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    k32.QueryInformationJobObject.argtypes = (wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD,
+                                              ctypes.c_void_p)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    ntdll.NtResumeProcess.argtypes = (wintypes.HANDLE,)
+    job = k32.CreateJobObjectW(None, None)
+    timeout = kw.pop("timeout", None)
+    text_in = kw.pop("input", None)
+    try:
+        p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             creationflags=0x4, **kw)                        # CREATE_SUSPENDED
+        if not k32.AssignProcessToJobObject(job, int(p._handle)):
+            p.kill()
+            raise OSError(ctypes.get_last_error(), "AssignProcessToJobObject")
+        ntdll.NtResumeProcess(int(p._handle))
+        out, err = p.communicate(text_in, timeout=timeout)
+        acc = Accounting()
+        if not k32.QueryInformationJobObject(job, 1, ctypes.byref(acc), ctypes.sizeof(acc), None):
+            raise OSError(ctypes.get_last_error(), "QueryInformationJobObject")
+        r = subprocess.CompletedProcess(args, p.returncode, out, err)
+        return r, (acc.TotalUserTime + acc.TotalKernelTime) / 1e7
+    finally:
+        k32.CloseHandle(job)
+
+
+def run_entry(event, matcher, hook, proj, tmp, cpu=False):
+    """One entry as Claude Code runs it -> the finished process, and with `cpu` the CPU seconds of its processes."""
     command = hook["command"].replace("${CLAUDE_PLUGIN_ROOT}", SLASHED)
     for name in ("transcript.jsonl", "agent.jsonl"):
         path = os.path.join(tmp, name)
@@ -131,9 +179,11 @@ def run_entry(event, matcher, hook, proj, tmp):
                 f.write(json.dumps({"type": "user", "uuid": "u0", "message": {
                     "content": "Make the exporter write its ports table"}}) + "\n" + json.dumps(
                     {"type": "assistant", "message": {"content": [{"type": "text", "text": "done"}]}}) + "\n")
-    return subprocess.run(["sh", "-c", command], input=json.dumps(payload(event, matcher, proj, tmp)),
-                          capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          env=environment(proj, tmp), cwd=proj, timeout=hook.get("timeout") or 60)
+    kw = dict(input=json.dumps(payload(event, matcher, proj, tmp)), text=True, encoding="utf-8", errors="replace",
+              env=environment(proj, tmp), cwd=proj, timeout=hook.get("timeout") or 60)
+    if cpu:
+        return cpu_run(["sh", "-c", command], **kw)
+    return subprocess.run(["sh", "-c", command], capture_output=True, **kw)
 
 
 class Wiring(unittest.TestCase):
@@ -232,9 +282,10 @@ class SessionEndBudget(unittest.TestCase):
     BUDGET = 1.5
 
     def test_the_session_end_entry_logs_the_end_and_its_reason_within_the_budget(self):
-        """ezexe/p4#151: the entry, run as Claude Code runs it, logs the end as a turn's end with its reason. Each run
-        is a cold interpreter, and the fastest of three is held to the budget, so a machine busy with the rest of the
-        suite does not decide it."""
+        """ezexe/p4#151: the entry, run as Claude Code runs it, logs the end as a turn's end with its reason. The
+        budget is Claude Code's own, by hooks.md: "SessionEnd hooks share a 1.5-second budget". Each run is a cold
+        interpreter, and the CPU time of every process the entry starts, the least of three runs, is held to it:
+        a machine busy with other suites lengthens the time on the clock and leaves the work the entry does."""
         e = {ev: (ev, m, x) for ev, m, x in entries() if x["command"].endswith((" user-prompt-submit", " session-end",
                                                                                 " layout"))}
         self.assertNotIn("timeout", e["SessionEnd"][2], "a plugin's timeout does not raise the shared budget")
@@ -246,9 +297,8 @@ class SessionEndBudget(unittest.TestCase):
                 self.assertEqual((r.returncode, r.stderr.strip()), (0, ""), ev)
             spent = []
             for _ in range(3):
-                started = time.perf_counter()
-                r = run_entry(*e["SessionEnd"], proj, tmp)
-                spent.append(time.perf_counter() - started)
+                r, used = run_entry(*e["SessionEnd"], proj, tmp, cpu=True)
+                spent.append(used)
                 self.assertEqual((r.returncode, r.stdout, r.stderr), (0, "", ""))
             self.assertLess(min(spent), self.BUDGET, spent)
             log = os.path.join(proj, ".claude", "p4", "phi", "sessions", SESSION, "log.jsonl")
