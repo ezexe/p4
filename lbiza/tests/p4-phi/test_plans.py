@@ -1320,8 +1320,13 @@ class TopOrchestrates(unittest.TestCase):
                       "Write plan sections with fences and edits", "Put the plan to ezexe for approval",
                       "Plan the exporter's move"):
             self.assertEqual(plans.top_stays(stays), plans.PLANNING_WHY, stays)
+        for stays in ("Loop the plan until two rounds are dry", "Revise the development plan after the read",
+                      "Enter plan mode"):
+            self.assertEqual(plans.top_stays(stays), plans.PLANNING_WHY, stays)
         for work in ("Write the plan parser in src/plan.py", "Write the plan-file reader",
-                     "Port the exporter to the new writer"):
+                     "Port the exporter to the new writer", "Write the docs for plan mode",
+                     "Revise the plan-mode nudge in phi.py", "Draft the README section on plans",
+                     "Write the floor plan renderer in src/render.py", "Put the fixtures under tests/plan/"):
             self.assertEqual(plans.top_stays(work), "", work)
         self.assertEqual(plans.top_stays("Land section 2 of the plan"), "checks or lands the work")
 

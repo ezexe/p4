@@ -601,11 +601,17 @@ AWAITS_WHY = "waits on or checks other sessions' reports, which only this sessio
 # plan file has one writer, the session that holds it. Seen in an orchestrator on p4-phi 0.11.143: for its steps
 # "Enter plan mode", "Research how plans are built and distributed", "Write plan sections with fences and edits"
 # and "Put the plan to ezexe for approval" the advice named a new session in a worktree for each, and the nudge a
-# worker for the second. The opening verb decides, and a step that builds code about plans is work, which the noun
-# after the plan or a file named plan tells: "Write the plan parser in src/plan.py".
+# worker for the second. The opening verb decides, with the plan as its object and a few small words between them at
+# most, so "Write the docs for plan mode" and "Put the fixtures under tests/plan/" are work. A step that builds code
+# or a page about plans is work too, which the noun after the plan or a file named plan tells: "Write the plan
+# parser in src/plan.py".
+PLAN_OBJECT = (r"(?:(?:the|a|an|this|that|its|each|every|whole|new|next|first|final|how|development|build)\s+){0,3}"
+               r"plans?\b")
 PLANNING = re.compile(r"^\W*(?:enter\s+plan\s+mode\b|plan\b"
-                      r"|(?:research|write|draft|loop|revise|refine|put|present|submit)\b[^.;]*?\bplans?\b)", re.I)
-PLAN_CODE = re.compile(r"\bplans?[\s-]+(?:file\s+)?(?:parser|reader|module|code|command|script|tests?)\b"
+                      r"|(?:research|write|draft|loop|revise|refine|put|present|submit)\s+" + PLAN_OBJECT + ")", re.I)
+PLAN_CODE = re.compile(r"\bplans?[\s-]+(?:file\s+)?(?:parser|reader|writer|loader|renderer|module|code|command|script|"
+                       r"tests?|docs?|pages?|rules?|hooks?|skills?|folders?|director(?:y|ies)|formats?)\b"
+                       r"|\bplan[\s-]+mode[\s-]+(?:nudge|rule|docs?|hook|check|tests?|code|page|line|sentence|advice)\b"
                        r"|\bplans?\.\w+", re.I)
 PLANNING_WHY = "plans, which stays with the session that holds the plan until ezexe approves it"
 
