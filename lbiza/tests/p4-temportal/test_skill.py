@@ -31,6 +31,15 @@ class SkillCommands(unittest.TestCase):
         self.assertIn("const TOOL_ID = 'mcp__p4-temportal__lifetime'", module)
         self.assertIn("`mcp__p4-temportal__lifetime`", text)
 
+    def test_the_page_says_what_a_write_under_claude_codes_own_folder_meets(self):
+        """permission-modes.md, "Protected paths": `default` and `acceptEdits` are "Prompted", `dontAsk` is "Denied"
+        and `bypassPermissions` is "Allowed", so the page names no prompt in bypass mode."""
+        text = SKILL.read_text(encoding="utf-8")
+        self.assertIn("never under `.claude/`, a protected path", text)
+        self.assertNotIn("even in bypass mode", text)
+        self.assertIn("which Claude Code decides by the permission mode", text)
+        self.assertNotIn("never by a session's own tools", text)
+
 
 if __name__ == "__main__":
     unittest.main()

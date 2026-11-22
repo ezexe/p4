@@ -12,9 +12,9 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 
 - `temportal/memory/` is the project's auto memory directory once `autoMemoryDirectory` in `.claude/settings.local.json` names it: Claude Code writes memory files and their `MEMORY.md` index there and loads the index at each start itself, and nothing in it is ever cleared.
 - Until that key is there, Claude Code keeps the memory in its own folder under `~/.claude/projects/`, and p4-temportal moves nothing out of it.
-- A temporary file, a probe, a log or a download goes in this session's own scratchpad, the folder Claude Code names to hooks as `scratchpad_dir`, never under `.claude/`, where every write asks ezexe even in bypass mode.
+- A temporary file, a probe, a log or a download goes in this session's own scratchpad, the folder Claude Code names to hooks as `scratchpad_dir`, never under `.claude/`, a protected path where Claude Code prompts for a write in the default and accept-edits modes and denies it in `dontAsk` mode.
 - A finding meant to outlast the session goes through p4-phi's `phi.py note "<claim>" --source "<where>"`, which p4 writes into the store.
-- `temportal/notebook/` is the notebook, kept across sessions and written by p4's scripts only, never by a session's own tools.
+- `temportal/notebook/` is the notebook, kept across sessions: p4's scripts write there, and a session's own write there is a write under `.claude/`, which Claude Code decides by the permission mode.
 - Logs, build output and binaries in the notebook are moved into its `.out/`, which git ignores, at each start and as soon as one is added or changed, so look for such a file under `.out/` at the same relative path.
 - `temportal/src/` holds code kept for reuse that the project's repository does not use.
 
