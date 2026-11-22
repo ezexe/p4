@@ -872,6 +872,16 @@ class ClaudeSettings(unittest.TestCase):
                          "a value a person set is left as it is")
         self.assertNotIn("plansDirectory", self.owned())
 
+    def test_a_list_key_that_is_no_list_leaves_no_part_in_the_record(self):
+        """_keep_rules returns where `permissions.allow` holds no list, and the record then keeps no empty part of
+        its own for that key, and the key stays as it is."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        _write(self.local(), {"permissions": {"allow": "Bash(ls)"}})
+        p4conf.keep_settings(self.project)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertNotIn("rules", rec)
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], "Bash(ls)")
+
     def test_plansDirectory_is_not_written_for_a_store_outside_the_project(self):
         """A session started in a worktree on Windows has a local file of its own and the main checkout's store,
         which lies outside the worktree. settings-reference.md says a plansDirectory that resolves outside the project

@@ -2030,6 +2030,8 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
     gen = mine.get("gen", 0) if isinstance(mine.get("gen", 0), int) else 0
     cur = _get(new, key)
     if cur is not _NONE and not isinstance(cur, list):
+        if not rules:
+            rec.pop(part, None)                         # the part made above holds nothing: no empty part stays
         return                                          # not a list: left as it is
     have = list(cur) if cur is not _NONE else []
     made = dict((rec.get(LISTS) or {}).get(name) or {})
