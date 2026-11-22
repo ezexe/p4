@@ -58,6 +58,7 @@ import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
+import sections  # noqa: E402  an approved plan's sections as the starts of the workers that land them
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, the meta pass
 import rows  # noqa: E402  whose message a prompt is, by the origin the hooks module kept of it
@@ -4252,7 +4253,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards"):
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "sections"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -4266,6 +4267,8 @@ def main(argv=None):
             p.add_argument("command", help="the regression test that proves this session's issue fixed, run from here")
         if name == "show":
             p.add_argument("which", nargs="?", default="")
+        if name == "sections":
+            p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed as starts")
         if name == "goal":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set", "failed", "ask"),
                            help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
@@ -4393,6 +4396,15 @@ def main(argv=None):
             store = a.p4 or me.store or me.home
             for line in upkeep.set_on(store, a.act == "on"):
                 print(line)
+            return 0
+        if a.cmd == "sections":                    # an approved plan's runs, each as the start of the worker that lands it
+            out = sections.calls(os.path.abspath(a.plan), os.getcwd())
+            if not out:
+                print("phi: no section of that plan names files on a `Files:` line, so it has no run to start",
+                      file=sys.stderr)
+                return 2
+            for call in out:
+                print("`mcp__ccd_session__start_session` with " + json.dumps(call, ensure_ascii=False))
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps
