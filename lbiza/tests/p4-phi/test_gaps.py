@@ -21,6 +21,7 @@ import gaps  # noqa: E402
 import relay  # noqa: E402
 import starts  # noqa: E402
 from test_phi import KID, TOP, Tree, context, write  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 
 CHILD_RULE = ("A session started from another works on the parent's branch, in the parent's checkout, and only the "

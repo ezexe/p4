@@ -22,6 +22,7 @@ import phi  # noqa: E402
 import plans  # noqa: E402
 import relay  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, handed, runs_of, write  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 
 A, B = KID, KID2

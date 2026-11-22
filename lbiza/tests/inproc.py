@@ -1,4 +1,5 @@
 """inproc.py: a hook or a command of these plugins run inside the test process, as its own process would run it.
+It is test code and lives under tests/, so no plugin ships it; conftest.py puts this folder on sys.path.
 
     import inproc
     inproc.prepare(HERE)          # once, when the test module is imported: every handler module of the folder
@@ -514,21 +515,3 @@ class Clock:
     def install(self):
         for k in _REAL_TIME:
             setattr(time, k, getattr(self, k))
-
-
-# --- the copy in the other plugin ---------------------------------------------------------------------------------
-
-def _same_as_sibling():
-    """p4-phi/scripts/inproc.py and p4-temportal/hooks/inproc.py are one file in two places, as p4conf.py is."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    plugins = os.path.dirname(os.path.dirname(here))
-    pair = [os.path.join(plugins, "p4-phi", "scripts", "inproc.py"), os.path.join(plugins, "p4-temportal", "hooks",
-                                                                                  "inproc.py")]
-    if all(os.path.isfile(p) for p in pair):
-        with open(pair[0], "rb") as a, open(pair[1], "rb") as b:
-            if a.read() != b.read():
-                raise ImportError("inproc.py differs between p4-phi/scripts and p4-temportal/hooks; copy one over the "
-                                  "other")
-
-
-_same_as_sibling()

@@ -20,6 +20,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
 import book  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402

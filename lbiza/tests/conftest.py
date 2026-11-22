@@ -49,6 +49,8 @@ SHELLS = ("bash.exe", "sh.exe", "bash", "sh")   # what CLAUDE_CODE_GIT_BASH_PATH
 GIT_SETTINGS = "[core]\n\tautocrlf = false\n\tlongpaths = true\n[user]\n\tname = tests\n\temail = tests@localhost\n"
 TEMP = None             # this process's own temp folder, once it is one that runs tests
 TESTS = os.path.dirname(os.path.abspath(__file__))
+if TESTS not in sys.path:           # the helpers every folder's tests import, such as inproc.py, after the plugins'
+    sys.path.append(TESTS)
 PLUGINS = os.path.join(os.path.dirname(TESTS), "plugins")       # the code under test, a folder for each plugin
 HELD = {}               # a folder of tests/ -> the modules of plugin code its files imported, set aside for now
 FOLDER = None           # the folder of tests/ whose modules of plugin code sys.modules holds now

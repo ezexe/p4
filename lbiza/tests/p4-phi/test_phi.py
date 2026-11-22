@@ -36,6 +36,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, SRC)
 import phi  # noqa: E402
 import relay  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 
 inproc.prepare(SRC)              # a hook or a command runs in this process, as its own process would run it

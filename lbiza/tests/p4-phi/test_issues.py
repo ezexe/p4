@@ -26,6 +26,7 @@ import unittest.mock
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 import issues  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, read, write  # noqa: E402

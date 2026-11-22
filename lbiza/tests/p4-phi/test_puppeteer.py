@@ -39,6 +39,7 @@ sys.path.insert(0, SRC)
 import phi  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 from test_phi import CLI, KID, KID2, GRAND, TASK, TOP, Tree, context, jload, read, transcript, write  # noqa: E402
 from test_phi import PROMPT  # noqa: E402
