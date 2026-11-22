@@ -107,6 +107,26 @@ class SkillText(unittest.TestCase):
                      "`Ctrl+G`", "reads the plan in again from disk"):
             self.assertIn(word, body, word)
 
+    def test_a_taken_name_is_numbered_and_a_started_planner_and_a_prep_have_their_rules(self):
+        body = text()
+        for word in ("Plan mode gives every plan of one session that same name", "`<stem>.<n>.md`",
+                     "the smallest number from 2 that no place of a plan holds with that stem",
+                     "## A planner another session starts", "by the start tool's `permission_mode`",
+                     "under a name of the session's own making", "edits only its plan file",
+                     "`PREP COMPLETE <subject>` on line 1", "reads the prep as findings to check"):
+            self.assertIn(word, body, word)
+        self.assertLess(body.index("## Plan mode writes the plan"), body.index("## A planner another session starts"))
+        self.assertLess(body.index("## A planner another session starts"), body.index("## What a session reads"))
+
+    def test_the_loops_reader_traces_live_paths_and_a_check_runs_as_written(self):
+        body = text()
+        loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
+        for word in ("the feature not work in a real session", "traces the live path of each new hook",
+                     "names the interpreter by its full path", "says at its head how its loop ended"):
+            self.assertIn(word, loop, word)
+        hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
+        self.assertIn("the plugin's whole test folder is run once there before a push", hand)
+
     def test_a_move_makes_no_commit_and_no_orphan_branch(self):
         body = text()
         self.assertIn("A move is a plain move of the file into its subfolder", body)

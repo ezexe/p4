@@ -20,12 +20,22 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 
 - A plan is written in plan mode, where Claude Code writes it into the folder `plansDirectory` names, and p4-temportal's settings keeper names this folder there.
 - The file keeps the name plan mode gave it, since a resumed session writes its plan again by that name.
+- Plan mode gives every plan of one session that same name, so a session's next plan is written under the name of the plan before it, and a plan already sorted under that name keeps its own file by the rule of `Moving a plan`.
 - The plan mode file is shaped by the sections below, so the plan ezexe reviews at approval already holds its intents, fences and sources.
 - `Ctrl+G` opens the plan in ezexe's editor before approval, and approving it is ezexe's decision on the plan.
 - After a compaction Claude Code reads the plan in again from disk, so the plan file holds what the work needs and the conversation does not.
 - A plan in this folder is cleared once it is older than `cleanupPeriodDays`, as Claude Code clears its own plans, so an edit keeps a plan being worked, and a plan to keep unworked is parked.
 - The folder was `temportal/plans` before p4-temportal 0.3.55, and a session whose Claude Code read that value at its start writes its plan there until it ends, which each sweep then moves into this folder.
 - A session in a git worktree has the worktree's own store, and each retention sweep carries its plans into the main checkout's store, where a plan the worktree moved leaves its old place too.
+
+## A planner another session starts
+
+- A session started to write a plan is started in plan mode, by the start tool's `permission_mode` or by `claude --permission-mode plan`, so Claude Code names its plan file in this folder and blocks every other edit, and its turn ends with `ExitPlanMode`, whose card ezexe answers in that session.
+- A plan written into this folder under a name of the session's own making is no plan file to Claude Code: `.claude` is a protected path, and Claude Code exempts from it the session's own plan file and no other file here, so each write of such a plan waits on ezexe.
+- A session whose plan mode ended with no approval, as when its mode was changed from outside, edits only its plan file and asks ezexe to approve the plan before it edits any other file.
+- Prep is the research one session hands to the planner that follows it: the prep session is started in plan mode too, writes the prep as its plan file, and puts `PREP COMPLETE <subject>` on line 1 once the prep is whole, which is how the planner finds it among the files directly in this folder.
+- The planner reads the prep as findings to check, and reads each source the prep leans on before a fence rests on it.
+- A prep is closed with the plan it fed, by `STATUS: COMPLETED <date>: prep for <plan file>` on line 2 and the move into `complete/`.
 
 ## What a session reads
 
@@ -36,6 +46,10 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 ## Moving a plan
 
 A move is a plain move of the file into its subfolder, and nothing in it is cleared by age or takes a lifetime as a whole folder.
+Plan mode gives every plan of one session the same name, so look before a move: where one of the three subfolders already holds the plan's name, the plan moves as `<stem>.<n>.md`, where `<stem>` is its name without `.md` and `<n>` the smallest number from 2 that no place of a plan holds with that stem.
+A move onto a name that is taken would replace the plan sorted there.
+A revive into `plan-planner/` takes such a name the same way where a plan there holds its name.
+A plan revived in a git worktree leaves its sorted copy in the main checkout's store until the plan is sorted again, which takes that copy away.
 
 - **Close:** STATUS on line 2, as `STATUS: COMPLETED <date>: <sections by short sha>; <what ran where>; <what did not>`, then the plan moved into `complete/`.
 - **Park** on ezexe's word only: `STATUS: TODO <date>: <what landed>; <what did not>`, then moved into `todo/`.
@@ -50,8 +64,10 @@ A plan is looped until it holds the whole development, and nothing is built befo
 
 - **A round takes each section in turn:** it researches the section first, in the checkout and on the upstream pages read live, and then writes what it found into that section as its intents, its fences and each fence's Documented and Derivation.
 - **Research only reads:** a search or a read across files goes to a subagent that only reads, and the session that holds the plan is the one writer of the plan file.
-- **A round ends with one read by a reader that has not seen the writing:** it reads the plan against the sources and the checkout, and names each section that lacks a fence, a source, a file or a check, and each fence that does not fit the tree as it is. The loop's reads are counted by its rounds, and the one second read the skill `sub-agentic` allows after a mend is its rule for what an agent wrote.
-- **A round is dry when it changes no fence, no file list and no check.** The loop ends after two dry rounds in a row, or after five rounds, and a plan that ends at five names what is still open at its head.
+- **A round ends with one read by a reader that has not seen the writing:** it reads the plan against the sources and the checkout, and names each section that lacks a fence, a source, a file or a check, and each defect that would make a fence fail to apply, a new test fail, a test that passes now fail, the feature not work in a real session, or leave a worker a decision. The loop's reads are counted by its rounds, and the one second read the skill `sub-agentic` allows after a mend is its rule for what an agent wrote.
+- **One round's reader traces the live path of each new hook,** from Claude Code's event through every wrapper script to the handler, since a test that calls a handler by name passes with a gate shut in front of it.
+- **A check is a command its worker runs as written:** it names the interpreter by its full path, the folder it is run from and the test files, and the plan's writer runs that interpreter once to see that it holds the test runner.
+- **A round is dry when it changes no fence, no file list and no check.** The loop ends after two dry rounds in a row, or after five rounds, and the plan says at its head how its loop ended, and what is still open where it ended at five.
 - **The plan is whole when every edit the development makes is a fence in it,** every section that changes files names its files, what it depends on and its checks, and its section `Distribution` gives each of those sections to a run.
 - **Nothing is built before the approval:** until ezexe approves the whole plan, no session that writes is started and no file but the plan is edited.
 
@@ -61,6 +77,7 @@ A plan is looped until it holds the whole development, and nothing is built befo
 - **A section that changes no file gets no worker:** the context and the distribution are such sections, and each has no `**Files:**` line or says `**Files:** none`.
 - **Sections become runs:** sections that share a file or depend on one another are one worker's run, landed in the plan's order, and every other section is a run of its own, each run in a git worktree of its own.
 - **The plan's section `Distribution` is a table of the runs:** each run's sections in order, its files, and its role with the model and effort the skill `sub-agentic` gives that role. A section whose fences are whole is landed by an integrator.
+- **The table's last row is the merge:** the runs' branches are merged into one branch, and the plugin's whole test folder is run once there before a push, since each run proved only its own files.
 - **A worker's brief names the plan file by its full path and its sections by number,** carries their `Files:` line and their checks as what done looks like, and tells the worker to stop and report where a fence does not fit the tree, writing no approach of its own.
 - **p4-phi drafts those starts where it is installed:** `phi.py sections <plan file>` prints one start call for each run.
 - **A worker never edits the plan file:** its report holds the lines each fence landed at and each check's output, and the session that holds the plan writes them into the section as its Evidence.
