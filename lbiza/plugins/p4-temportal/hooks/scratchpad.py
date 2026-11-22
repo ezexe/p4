@@ -85,12 +85,14 @@ ASKS = False                # p4.json scratchpad.asks, with P4_SCRATCHPAD_ASKS a
 
 def configure(payload, write=True, root=None):
     """The scratchpad section of <project>/.claude/p4/p4.json over the constants, writing the file when it is
-    missing unless `write` is False."""
-    p4 = os.path.join(root or project_root(payload), ".claude", "p4")
+    missing unless `write` is False. For a session in a git worktree the p4.json is the main checkout's, by
+    hookio.settings_store, and is read only: it holds what ezexe turned on for the project."""
+    own = os.path.join(root or project_root(payload), ".claude", "p4")
+    p4 = hookio.settings_store(own)
     p4conf.configure(globals(), p4, "scratchpad", {
         "asks": "ASKS", "ignorable_ext": "IGNORABLE_EXT", "ignorable_dirs": "IGNORABLE_DIRS",
         "repo_uses_min_name": "REPO_USES_MIN_NAME", "repo_uses_max": "REPO_USES_MAX",
-        "repo_uses_lines": "REPO_USES_LINES"}, write=write)
+        "repo_uses_lines": "REPO_USES_LINES"}, write=write and hookio.same(p4, own))
 
 
 def layout(payload):

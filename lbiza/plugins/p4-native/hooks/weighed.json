@@ -393,10 +393,12 @@
   "$.session.repo": {
    "kind": "method",
    "declined": {
-    "p4-phi": "git is read by the python scripts, which run where no module loads too.",
-    "p4-temportal": "git is read by the python scripts, which run where no module loads too.",
-    "p4-native": "git is read by the python scripts, which run where no module loads too."
-   }
+    "p4-phi": "git is read by the python scripts, which run where no module loads too."
+   },
+   "used": [
+    "p4-native",
+    "p4-temportal"
+   ]
   },
   "$.session.root": {
    "kind": "method",

@@ -13,7 +13,8 @@
 // the session id is `$.session.id()`, which a command hook reads as `session_id` and a shell as
 // `CLAUDE_CODE_SESSION_ID`. That file is the one way to read it: a hooks module reads it by `$.fs.read`, a script
 // opens it, and a session asks the tool `native` or ezexe types `/native`, each of which prints the same entry. The
-// file holds the newest sessions, MOST at most, so it stays small with no sweep. A project with no `.claude/p4` gets
+// file holds the newest sessions, MOST at most, so it stays small with no sweep. For a session in a git worktree
+// the project's store is the main checkout's, by storeOf. A project with no `.claude/p4` gets
 // no file, and the tool and the command still answer from the session's own reading. The plugin's folder holds a
 // `.gitignore` of `*`, so nothing in it enters the store's own git repository.
 //
@@ -294,13 +295,37 @@ async function survey($: EngineInterface): Promise<Host> {
   return hostOf(facts, at)
 }
 
-// The project's store with the plugin's `.gitignore` in it, or nothing where the project has no store.
-async function storeOf($: EngineInterface): Promise<string | undefined> {
-  const store = `${slashed(await $.session.root())}/${STORE}`
-  if (!(await $.fs.exists(store).catch(() => false))) return undefined
-  if (!(await $.fs.exists(`${store}/${IGNORE}`).catch(() => true))) await $.fs.write(`${store}/${IGNORE}`, IGNORED)
+// The folders whose store may be the project's: the main checkout's first, where the session runs in a git
+// worktree, and then the session's own root. `$.session.repo` gives the main checkout: its `root` is, by the API
+// types, "The repository's root, absolute: the main working tree's for a worktree". A session in no repository,
+// and a Claude Code that lacks the call, have the session's own root alone.
+async function roots($: EngineInterface): Promise<string[]> {
+  const own = slashed(await $.session.root())
+  let main: string | undefined
+  try {
+    main = slashed((await $.session.repo())?.root ?? '') || undefined
+  } catch {
+    main = undefined
+  }
 
-  return store
+  return main === undefined || main === own ? [own] : [main, own]
+}
+
+// The project's store with the plugin's `.gitignore` in it, or nothing where the project has no store. For a
+// session in a git worktree it is the main checkout's store: the map and the probes' answers say what a host is
+// and can do, which is no fact about one checkout, and a worktree's own store goes with the worktree, so each new
+// worktree session would start with no answer kept and probe again. Where the main checkout has no store, the
+// worktree's own is the project's.
+async function storeOf($: EngineInterface): Promise<string | undefined> {
+  for (const root of await roots($)) {
+    const store = `${root}/${STORE}`
+    if (!(await $.fs.exists(store).catch(() => false))) continue
+    if (!(await $.fs.exists(`${store}/${IGNORE}`).catch(() => true))) await $.fs.write(`${store}/${IGNORE}`, IGNORED)
+
+    return store
+  }
+
+  return undefined
 }
 
 // Writes one session's entry into the store's file and answers the file, or nothing where the project has no store

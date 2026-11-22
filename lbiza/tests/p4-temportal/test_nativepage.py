@@ -82,7 +82,7 @@ class Page(unittest.TestCase):
         today = rows(text)["compaction"]
         for word in ("session.compact", "temportal.compact_at", "$.command.run", "2.1.326"):
             self.assertIn(word, today, word)
-        for word in ("mcp__p4-temportal__lifetime", "tool.run", "2.1.328"):
+        for word in ("mcp__p4-temportal__lifetime", "tool.run", "2.1.328", "worktrees.md", "settings.md"):
             self.assertIn(word, rows(text)["lifetimes"], word)
         self.assertIn("consolidate-memory", rows(text)["consolidation"])
         for name in ("memory", "scratchpad", "lifetimes"):
@@ -223,6 +223,21 @@ class Page(unittest.TestCase):
                      "It cannot be taken out by a plugin", "<code>$.prompt.submit</code>",
                      "<code>session.append</code>", "Not seen on screen with 0.3.46"):
             self.assertIn(said, open_still, said)
+
+    def test_a_worktree_sessions_store_is_settled_for_p4_json_cookies_and_the_map(self):
+        """The lifetimes row gives the decision for each of the three with its reason, what was seen live before
+        and after, and what is left to p4-phi's own code."""
+        row = rows(page())["lifetimes"]
+        for said in ('id="worktree-store"', "Since p4-temportal 0.3.47 and p4-native 0.5.19",
+                     "a worktree session reads the main checkout's", "In a worktree, it uses the file at the main "
+                     "checkout's root", "from the main checkout's root", "is read by nobody",
+                     "carries each into the main checkout's store with the file it names",
+                     "marked with the worktree it came from", "clears its own store first",
+                     "a worktree session reads and writes the main checkout's", "<code>$.session.repo</code>",
+                     "kept: for this session alone", "within a second of a call", "<code>phi.upkeep</code> false",
+                     "kept its bytes", "Not seen: p4-native 0.5.19", "which this does not change",
+                     "<code>CLAUDE_PROJECT_DIR</code> at the main checkout's root"):
+            self.assertIn(said, row, said)
 
     def test_the_first_sessions_plan_is_copied_into_the_store(self):
         """The plans row says how the plan of the session whose start wrote the key reaches the store, that the

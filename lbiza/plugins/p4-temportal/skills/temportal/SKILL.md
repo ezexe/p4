@@ -48,6 +48,7 @@ Two kinds of lifetime clear what is no longer relevant, the way a browser handle
 - **Plans:** a plan file in `temportal/plans/` is cleared once it is older than Claude Code's own `cleanupPeriodDays`, 30 days unless a settings file sets it, since Claude Code's cleanup does not reach a folder `plansDirectory` names. A cache rule on `plans` stands in place of that age, an empty one keeps every plan, and no plan is cleared by age where the setting cannot be read.
 
 The retention sweep clears what is past its lifetime at a session's start, while the session runs, and at its end.
+In a git worktree the store is the worktree's own `.claude/p4`, whose plans, notebook and saved code each sweep copies into the main checkout's store, a file's cookie with it. The settings are the main checkout's `p4.json` there, and the sweep clears the main checkout's store too.
 
 ezexe lists, sets and clears lifetimes with the slash command `/lifetime`, which p4-temportal's hooks module registers:
 

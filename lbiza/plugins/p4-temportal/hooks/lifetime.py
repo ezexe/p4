@@ -25,6 +25,17 @@ every plan, and a plan file takes a cookie as any other file does. The key holds
 whose start wrote it, so `tick` copies the plan files the hooks module names with `--plan` and `--plan-edited` from
 Claude Code's own folder into plans/, by keep_plans, and leaves each original.
 
+A session in a git worktree has a store of its own, `<worktree>/.claude/p4`, since what a session writes by a
+path from its folder lands there: its plans, its notebook and its saved code, which carry_over copies into the main
+checkout's store at each sweep. Three more things are settled for such a session. p4.json is read from the main
+checkout's store, by hookio.settings_store, since it holds what ezexe turned on for the project, so the cache rules
+and `temportal.compact_at` are the project's in every worktree and none is written into a worktree's store. A cookie
+stays in the worktree's own expires.json, where it names the worktree's file, and carry_cookies copies it into the
+main checkout's expires.json with the file it names, marked with the worktree it came from, so the copy there is
+cleared at the same time and not kept for good. And the sweep of a worktree session clears the main checkout's
+store too, after its own, so what was carried there is cleared when it is due though no session runs in the main
+checkout itself.
+
 No lifetime ends with a session. A file that goes when its session goes belongs in that session's scratchpad
 directory, which Claude Code makes for the session and deletes with its transcript, by
 https://code.claude.com/docs/en/claude-directory.md, "Session scratchpad directory": "Scratchpad files last as long as
@@ -119,9 +130,17 @@ def home(p4):
     return os.path.join(p4, "temportal")
 
 
+def settings(p4):
+    """The `temportal` section of the p4.json that holds for the store `p4`: the main checkout's where `p4` is the
+    store of a worktree, by hookio.settings_store, and then read only, so no load of this script writes the main
+    checkout's file from a worktree or makes one in a worktree's store."""
+    conf = hookio.settings_store(p4)
+    return p4conf.section(conf, "temportal", write=hookio.same(conf, p4))
+
+
 def rules(p4, warn=True):
     """The cache rules of p4.json, or none when `temportal.cache` is not an object, with a line saying so."""
-    r = p4conf.section(p4, "temportal").get("cache", {})
+    r = settings(p4).get("cache", {})
     if isinstance(r, dict):
         return r
     if warn:
@@ -526,7 +545,7 @@ def compact_at(p4):
     """The percent of a session's context at which the module compacts it in a quiet moment: p4.json
     temportal.compact_at when it is a number above 0 and under 100, 0 when it is 0 or false, which starts no
     compaction, and COMPACT_AT when it is unset or anything else. Claude Code's own compaction stays as it is."""
-    at = p4conf.section(p4, "temportal").get("compact_at")
+    at = settings(p4).get("compact_at")
     if at is False:
         return 0
     if not isinstance(at, (int, float)) or isinstance(at, bool):
@@ -620,7 +639,8 @@ def carry_over(root):
     Every sweep carries, the one at a session's start, the timer's and the last one, so a session that is killed has
     lost at most what it wrote since the sweep before. A file is copied where the main checkout's store holds none
     of its name or an older one, and nothing is ever removed on either side. Links, the notebook's `.out` and a
-    folder's own git are left where they are. Nothing is carried where the main checkout has no store."""
+    folder's own git are left where they are. Nothing is carried where the main checkout has no store. The cookie
+    of a carried file goes with it, by carry_cookies."""
     main, in_git = p4conf.main_root(root)
     if not in_git or os.path.normcase(os.path.realpath(main)) == os.path.normcase(os.path.realpath(root)):
         return []
@@ -648,10 +668,68 @@ def carry_over(root):
                 except OSError:
                     continue                            # this file stays in the worktree, and the sweep goes on
                 carried += 1
-    if not carried:
-        return []
-    return [f"carried {carried} file{'s' if carried > 1 else ''} of this worktree's plans, notebook and saved code "
-            "into the main checkout's store, where they stay when the worktree is removed."]
+    said = []
+    if carried:
+        said.append(f"carried {carried} file{'s' if carried > 1 else ''} of this worktree's plans, notebook and "
+                    "saved code into the main checkout's store, where they stay when the worktree is removed.")
+    cookies = carry_cookies(store_of(root), store_of(main), root)
+    if cookies:
+        said.append(f"carried the lifetime of {cookies} of this worktree's files into the main checkout's store, "
+                    "so the copy there is cleared when the worktree's is.")
+    return said
+
+
+FROM = "from"                           # in a cookie of the main checkout's store: the worktree it was carried from
+
+
+def carry_cookies(here, there, root):
+    """Bring the cookies of the worktree's store `here` into the main checkout's store `there` -> how many entries
+    of the main checkout's expires.json changed. A cookie stays the worktree's own, where the worktree's sweep
+    clears the worktree's file by it. Its copy in the main checkout's expires.json clears the carried copy of that
+    file at the same time, which would otherwise stay for good once the worktree is removed.
+
+    A cookie is carried where it holds an expiry, names a file or folder of CARRIED outside the notebook's `.out`,
+    and the main checkout's store holds what it names. The entry written there is marked with the worktree's
+    folder under FROM. An entry the main checkout holds that no worktree marked, or that another worktree marked,
+    is somebody else's word and stays as it is. An entry this worktree marked is taken out again where the
+    worktree's cookie is gone and its file is still there, which is a cookie `clear` removed. Where the file is
+    gone too, the worktree's sweep cleared it, and the entry stays for the main checkout's copy."""
+    mark = os.path.normpath(os.path.abspath(root)).replace("\\", "/")
+    own, held = read_expires(here), read_expires(there)
+    changed = 0
+    for rel, v in own.items():
+        parts = rel.split("/")
+        carried = parts[0] in CARRIED and OUT not in parts and ".git" not in parts
+        if not carried or not isinstance(v, dict) or "expires" not in v:
+            continue
+        if not os.path.lexists(os.path.join(home(there), *parts)):
+            continue
+        have = held.get(rel)
+        if have is not None and not (isinstance(have, dict) and have.get(FROM) == mark):
+            continue
+        want = {"expires": v["expires"], FROM: mark}
+        if have != want:
+            held[rel] = want
+            changed += 1
+    for rel, have in list(held.items()):
+        mine = isinstance(have, dict) and have.get(FROM) == mark
+        if mine and rel not in own and os.path.lexists(os.path.join(home(here), *rel.split("/"))):
+            del held[rel]
+            changed += 1
+    if changed:
+        write_expires(there, held)
+    return changed
+
+
+def project_sweep(p4, days=None):
+    """The retention sweep of the main checkout's store, for a session whose own store `p4` is a worktree's -> the
+    line saying what it cleared there, or ''. The project's store is cleared by its lifetimes whichever checkout a
+    session runs in, so what a worktree carried there goes when it is due."""
+    conf = hookio.settings_store(p4)
+    if hookio.same(conf, p4):
+        return ""
+    line = sweep(conf, days=days)
+    return f"{line[:-1]}, in the main checkout's store." if line else ""
 
 
 def tick(root, to_let_go=False, made=(), edited=(), handed=None):
@@ -667,10 +745,16 @@ def tick(root, to_let_go=False, made=(), edited=(), handed=None):
     p4 = store_of(root)
     try:
         said = keep_plans(root, made, edited)
-        said += carry_over(root)
         days = cleanup_days(root, handed)
-        said += [line[len(NAME):] if line.startswith(NAME) else line for line in start_sweep(p4, days)]
-        return {"said": said, "wait_s": round(next_wait(p4), 3), "compact_at": compact_at(p4)}
+        # the sweep of the session's own store comes before the carry, so a file past its lifetime is cleared and
+        # not carried back into a main checkout that has cleared its copy already
+        lines = start_sweep(p4, days)
+        said += [line[len(NAME):] if line.startswith(NAME) else line for line in lines]
+        said += carry_over(root)
+        there = project_sweep(p4, days)
+        said += [there[len(NAME):]] if there else []
+        wait = min(next_wait(p4), next_wait(hookio.settings_store(p4)))
+        return {"said": said, "wait_s": round(wait, 3), "compact_at": compact_at(p4)}
     except Exception as e:  # noqa: BLE001 — a sweep degrades, never raises
         return {"said": [f"the retention sweep degraded: {type(e).__name__}: {e}"], "wait_s": MOST_WAIT_S}
 
@@ -696,7 +780,7 @@ def listing(p4, now=None, days=None, is_told=False):
         if why:
             line = f"cookie  {rel}  refused, so never cleared: {why}"
         lines.append(line or f"cookie  {rel}  unreadable, so never cleared: {json.dumps(v)}")
-    raw = p4conf.section(p4, "temportal").get("cache", {})
+    raw = settings(p4).get("cache", {})
     if not isinstance(raw, dict):
         lines.append(f"cache   temportal.cache is not an object, so no cache rule applies: {json.dumps(raw)}")
     for rel, rule in sorted(rules(p4, warn=False).items()):
@@ -751,9 +835,15 @@ def main():
     elif a.cmd == "clear":
         print("cleared" if any(clear_cookie(p4, p) for p in named(p4, a.path)) else "no expiry was set")
     elif a.cmd == "list":
-        print("\n".join(listing(p4, days=days, is_told=True)) or "nothing has a lifetime")
+        lines = listing(p4, days=days, is_told=True)
+        conf = hookio.settings_store(p4)
+        if not hookio.same(conf, p4):                   # a worktree's session: the project's own cookies too
+            there = [line for line in listing(conf) if line.startswith("cookie")]
+            lines += ["in the main checkout's store:", *there] if there else []
+        print("\n".join(lines) or "nothing has a lifetime")
     else:
-        print(sweep(p4, days=days) or "nothing has expired")
+        lines = [line for line in (sweep(p4, days=days), project_sweep(p4, days)) if line]
+        print("\n".join(lines) or "nothing has expired")
     return 0
 
 

@@ -48,6 +48,8 @@ Not seen: the command typed in the desktop app.
 ## One way to read it
 
 The map is the file `<project>/.claude/p4/native/host.json`, and a session's entry is under `sessions.<session id>`.
+For a session in a git worktree the project is the main checkout, which the module asks of `$.session.repo`, so the map and the probes' answers of every worktree session are in the main checkout's store: what a host is and can do is no fact about one checkout, and a worktree's own store goes with the worktree.
+Where the main checkout has no store, a worktree's own is the project's.
 The session id is `$.session.id()` in a hooks module, `session_id` in a command hook's input and `CLAUDE_CODE_SESSION_ID` in a shell.
 
 ```json
@@ -149,7 +151,7 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `tool`: 122 rows, 48 used, 1 open, 73 declined, 0 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
-- `method`: 93 rows, 33 used, 2 open, 58 declined, 0 weighed by nobody
+- `method`: 93 rows, 34 used, 2 open, 57 declined, 0 weighed by nobody
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -166,7 +168,7 @@ The 36 module events and the 50 module methods are walked too, each against its 
 The types file lists 93 methods under `$`, and 13 of them had no row at all, so the record holds 93 now: `$.agent.spawn`, `$.config.set`, `$.prompt.compose`, `$.prompt.fill`, `$.prompt.media`, `$.prompt.suggest`, `$.session.append`, `$.telemetry.log`, `$.telemetry.mark`, `$.tool.check`, `$.ui.ask`, `$.ui.focus` and `$.ui.scroll`.
 The walk found one use the record had missed: p4-phi's pane reads and writes `$.state` through `read` and `update` of `claude-code`, so `$.state.get` and `$.state.set` are used, and the test reads those two helpers as the two methods.
 Of the events, 34 are declined, and `session.attach` and `session.detach` are open for p4-native, which would read the map's surfaces again when a surface joins or leaves.
-Of the methods, 58 are declined, and two are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
+Of the methods, 57 are declined, and two are open: `$.process.hookEnv` for p4-phi and p4-temportal, which would replace the environment each module builds by hand for a python child, and `$.ui.notify` for p4-native, which would add a notification where a session has no `PushNotification` tool.
 Most rows are declined for one of three reasons: the thing is ezexe's own interface, account or choice, it belongs to a part of Claude Code no p4 plugin touches, or a plugin already does the same by a call that also works where no hooks module loads.
 The nine tools the record had as weighed by nobody are walked as well, so no row of any kind says so now.
 `SetGoal`, `GetGoal` and `PauseGoal` are in the build's types file and in no session's tool list here: ToolSearch found none of the three in a desktop session on Claude Code 2.1.326, with a goal in force and with none, nor in a scripted run and in a terminal session at its prompt on 2.1.328, and `$.tool.list` held none of them in either of those two.

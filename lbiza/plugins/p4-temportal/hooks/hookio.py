@@ -23,6 +23,33 @@ def project_root(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
 
 
+def same(a, b):
+    """True when two paths name one place."""
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
+def settings_store(p4):
+    """The store whose p4.json holds for a session whose own store is `p4`: the main checkout's `.claude/p4` where
+    `p4` lies in a git worktree, or under a folder of a repository, and the main checkout has a store, and `p4`
+    itself anywhere else.
+
+    p4.json holds what ezexe turned on for the project, and a worktree is one more checkout of that project. Claude
+    Code keeps a project's own configuration the same way. https://code.claude.com/docs/en/settings.md, "Where
+    Claude Code keeps the local file in a git repository": "In a worktree, it uses the file at the main checkout's
+    root". https://code.claude.com/docs/en/worktrees.md, "What worktrees share with the main checkout": in a
+    worktree session started from the desktop app "Claude Code reads project configuration such as settings, hooks,
+    skills, agents, commands" and more "from the main checkout's root", and `${CLAUDE_PROJECT_DIR}` points at it.
+    So a p4.json a worktree's own store came to hold is read by nobody, and none is written there."""
+    import p4conf                                       # beside this file, where each script puts its folder first
+    p4 = os.path.abspath(p4)
+    if os.path.basename(p4) != "p4" or os.path.basename(os.path.dirname(p4)) != ".claude":
+        return p4
+    root = os.path.dirname(os.path.dirname(p4))
+    main, in_git = p4conf.main_root(root)
+    there = os.path.join(main, ".claude", "p4")
+    return there if in_git and not same(main, root) and os.path.isdir(there) else p4
+
+
 def remove_link(path):
     """Remove a symlink or a junction itself, never what it points at: a junction is removed as a folder, which drops
     only its reparse point."""

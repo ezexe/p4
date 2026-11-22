@@ -78,6 +78,10 @@ type Machine = {
   version?: () => string
   files?: Record<string, string>
   hasStore?: boolean
+  // The main checkout of the repository, for a session in a git worktree of it, as `$.session.repo` answers it,
+  // and whether that checkout has a store. With none given the session is in no repository.
+  main?: string
+  mainHasStore?: boolean
   isTaken?: boolean
   // What a write does in place of landing, for a write another session's took the place of.
   lost?: () => boolean
@@ -148,6 +152,9 @@ function machine(on: On, has: Machine): Seen {
   })
   on('session.id', () => ({ value: (has.id ?? (() => 'cli-0001'))() }))
   on('session.root', () => ({ value: ROOT }))
+  on('session.repo', () => ({
+    value: has.main === undefined ? null : { root: has.main, remote: null, internal: false, name: null },
+  }))
   on('session.surfaces', () => ({ value: (has.surfaces ?? (() => []))() as never }))
   on('session.version', () => {
     const version = (has.version ?? (() => '2.1.326'))()
@@ -189,9 +196,13 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: undefined }
   })
-  on('fs.exists', (_, e) => ({
-    value: plain(e.path) === `${ROOT}/.claude/p4` ? has.hasStore !== false : files[plain(e.path)] !== undefined,
-  }))
+  on('fs.exists', (_, e) => {
+    const path = plain(e.path)
+    if (path === `${ROOT}/.claude/p4`) return { value: has.hasStore !== false }
+    if (has.main !== undefined && path === `${has.main}/.claude/p4`) return { value: has.mainHasStore !== false }
+
+    return { value: files[path] !== undefined }
+  })
   on('command.list', () => ({
     value: (has.commands ?? (() => [])).call(undefined).map(command => ({ ...command, description: '' })) as never,
   }))
@@ -375,6 +386,32 @@ test('a write another session took the place of is made again, three times at mo
   expect(maps(seen)).toBe(3)
   expect(seen.debugged.length).toBe(1)
   expect(seen.debugged[0]).toContain('was not kept')
+})
+
+test("in a git worktree the map and the probes' answers are kept in the main checkout's store", async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { main: '/work/main', tools: () => [...OWN, ...OF_THE_APP] })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const kept = '/work/main/.claude/p4/native/host.json'
+  expect(seen.written).toEqual(['/work/main/.claude/p4/native/.gitignore', kept])
+  const mine = (JSON.parse(seen.files[kept] ?? '{}') as { sessions: Record<string, Entry> }).sessions['cli-0001']
+  expect(mine?.host).toBe('desktop')
+  const out = await $.command.run({ command: 'native', args: '', ...TYPED })
+  expect(out.text).toContain(`kept: ${kept}, under sessions.cli-0001`)
+  expect(seen.written.some(path => path.startsWith(`${ROOT}/`))).toBe(false)
+})
+
+test("where the main checkout has no store, a worktree's own store is the project's", async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { main: '/work/main', mainHasStore: false })
+
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  expect(seen.written).toEqual([IGNORE, FILE])
 })
 
 test('a project with no store gets no file, and the command still prints the map', async ($, on) => {

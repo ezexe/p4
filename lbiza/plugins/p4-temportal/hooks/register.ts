@@ -284,6 +284,24 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
+// The folders whose store may hold p4-native's map for this session: the main checkout's first, where the session
+// runs in a git worktree, and then the session's own root. p4-native keeps the map in the main checkout's store
+// for a worktree session, since what a host can do is no fact about one checkout and a worktree's store goes with
+// the worktree. `$.session.repo` gives the main checkout: its `root` is, by the API types, "The repository's
+// root, absolute: the main working tree's for a worktree". A session in no repository, and a Claude Code that
+// lacks the call, read the session's own root alone.
+async function roots($: EngineInterface): Promise<string[]> {
+  const own = slashed(await $.session.root())
+  let main: string | undefined
+  try {
+    main = slashed((await $.session.repo())?.root ?? '') || undefined
+  } catch {
+    main = undefined
+  }
+
+  return main === undefined || main === own ? [own] : [main, own]
+}
+
 // The operating system of this session as p4-native's capability map holds it, which that plugin asks of the
 // engine by `$.session.info`: `windows`, `macos`, `linux` or `wsl`. The map is the file MAP in the project's store,
 // with this session's entry under `sessions.<session id>`. None where p4-native is not installed, where the project
@@ -292,12 +310,17 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
 async function mappedPlatform($: EngineInterface): Promise<string | undefined> {
   try {
     const id = await $.session.id()
-    const map: unknown = JSON.parse(await $.fs.read(`${slashed(await $.session.root())}/${MAP}`))
-    const sessions = isRecord(map) ? map.sessions : undefined
-    const entry = isRecord(sessions) ? sessions[id] : undefined
-    const platform = isRecord(entry) ? entry.platform : undefined
+    for (const root of await roots($)) {
+      const text = await $.fs.read(`${root}/${MAP}`).catch(() => undefined)
+      if (text === undefined) continue
+      const map: unknown = JSON.parse(text)
+      const sessions = isRecord(map) ? map.sessions : undefined
+      const entry = isRecord(sessions) ? sessions[id] : undefined
+      const platform = isRecord(entry) ? entry.platform : undefined
+      if (typeof platform === 'string' && platform !== '' && platform !== 'unknown') return platform
+    }
 
-    return typeof platform === 'string' && platform !== '' && platform !== 'unknown' ? platform : undefined
+    return undefined
   } catch {
     return undefined
   }

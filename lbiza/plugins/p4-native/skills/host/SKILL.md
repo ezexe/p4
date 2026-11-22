@@ -19,7 +19,7 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 
 ## Where it is kept
 
-- The file is `.claude/p4/native/host.json` in the project's store, and this session's entry is under `sessions.<session id>`.
+- The file is `.claude/p4/native/host.json` in the project's store, and this session's entry is under `sessions.<session id>`. For a session in a git worktree that store is the main checkout's.
 - The session id is the one a shell reads as `CLAUDE_CODE_SESSION_ID` and a command hook reads as `session_id`.
 - The file holds the newest 24 sessions, so an older session's entry is gone and reads as not known.
 - A project with no `.claude/p4` gets no file, and the tool still answers.

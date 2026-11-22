@@ -113,6 +113,9 @@ type Machine = {
   compacted?: SessionCompactResult
   // What a slash command the module runs waits on before it answers, or why the engine rejects it.
   command?: () => Promise<void>
+  // The main checkout of the repository, for a session in a git worktree of it, as `$.session.repo` answers it.
+  // With none given the session is in no repository.
+  main?: string
   // What the SessionStart command hooks beneath the module hand as additional context.
   context?: readonly string[]
   // The conversation as the model is sent it, which `$.session.messages({ as: 'api' })` answers. With none given
@@ -245,6 +248,9 @@ function machine(on: On, has: Machine): Seen {
   }
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   on('session.root', () => ({ value: '/work/project' }))
+  on('session.repo', () => ({
+    value: has.main === undefined ? null : { root: has.main, remote: null, internal: false, name: null },
+  }))
   on('session.id', () => ({ value: 'cli-0001' }))
   on('ui.log', (_, e) => {
     const lines = e.to === 'debug' ? seen.debugged : seen.shown
@@ -1411,6 +1417,34 @@ test("with p4-native's map holding this session as windows, the search tries the
 
   expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
   expect(seen.read).toContain(MAP)
+})
+
+test("in a git worktree the map is read from the main checkout's store, where p4-native keeps it", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const kept = '/work/main/.claude/p4/native/host.json'
+  const seen = machine(on, { main: '/work/main', files: { [kept]: mapOf({ 'cli-0001': { platform: 'windows' } }) }, pythons: {} })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
+  expect(seen.read).toContain(kept)
+})
+
+test("where the main checkout's store holds no entry of this session, the map of the session's own root is read", async ($, on) => {
+  mock.env(on, {})
+  const clock = mock.clock(on)
+  const files = {
+    '/work/main/.claude/p4/native/host.json': mapOf({ 'cli-0002': { platform: 'linux' } }),
+    [MAP]: mapOf({ 'cli-0001': { platform: 'windows' } }),
+  }
+  const seen = machine(on, { main: '/work/main', files, pythons: {} })
+
+  await $.session.start(START)
+  await clock.settle()
+
+  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
 })
 
 test("with p4-native's map holding this session as wsl, as linux or macos, the search tries python3 first", async ($, on) => {

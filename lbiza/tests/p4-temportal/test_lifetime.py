@@ -320,7 +320,7 @@ class CarriedOver(unittest.TestCase):
         self.assertEqual(read(os.path.join(self.there, "notebook", "deep", "page.html")), "<p>a page</p>\n")
         self.assertEqual(read(os.path.join(self.there, "src", "tool.py")), "print(1)\n")
         self.assertFalse(os.path.exists(os.path.join(self.there, "notebook", ".out")))
-        self.assertFalse(os.path.exists(os.path.join(self.there, "expires.json")), "a cookie is the worktree's own")
+        self.assertFalse(os.path.exists(os.path.join(self.there, "expires.json")), "no cookie names a carried file")
         self.assertIn("carried 3 files", said[0])
 
     def test_a_newer_file_of_the_main_checkout_stays_and_an_older_one_takes_the_worktrees(self):
@@ -344,6 +344,167 @@ class CarriedOver(unittest.TestCase):
         outside = os.path.join(self.base, "plain")
         put(os.path.join(outside, ".claude", "p4", "temportal", "notebook", "a.md"), "a\n")
         self.assertEqual(lifetime.carry_over(outside), [], "a folder outside a repository has no main checkout")
+
+
+class WorktreeStore(CarriedOver):
+    """What a session in a git worktree reads and keeps beside its plans, its notebook and its saved code. p4.json
+    is the main checkout's, since it holds what ezexe turned on for the project. A cookie is the worktree's own and
+    goes into the main checkout's store with the file it names. And the worktree session's sweep clears the main
+    checkout's store too."""
+    maxDiff = None
+
+    def setUp(self):
+        super().setUp()
+        self.p4 = os.path.join(self.tree, ".claude", "p4")
+        self.main_p4 = os.path.join(self.main, ".claude", "p4")
+        os.makedirs(self.here)
+
+    def conf(self, p4, temportal):
+        with open(p4conf.path(p4), "w", encoding="utf-8") as fh:
+            json.dump({"temportal": temportal}, fh)
+
+    def test_the_settings_store_of_a_worktree_is_the_main_checkouts(self):
+        import hookio
+        self.assertTrue(hookio.same(hookio.settings_store(self.p4), self.main_p4))
+        self.assertTrue(hookio.same(hookio.settings_store(self.main_p4), self.main_p4))
+        deep = os.path.join(self.tree, "pkg", ".claude", "p4")
+        self.assertTrue(hookio.same(hookio.settings_store(deep), self.main_p4), "a folder under a worktree too")
+        outside = os.path.join(self.base, "plain", ".claude", "p4")
+        self.assertEqual(hookio.settings_store(outside), os.path.abspath(outside), "no repository, no main checkout")
+        self.assertEqual(hookio.settings_store(self.here), os.path.abspath(self.here), "a folder that is no store")
+        shutil.rmtree(self.main_p4)
+        self.assertEqual(hookio.settings_store(self.p4), os.path.abspath(self.p4),
+                         "where the main checkout has no store, the worktree's own is the project's")
+
+    def test_a_worktree_session_reads_the_main_checkouts_p4_json_and_writes_none_of_its_own(self):
+        """`temportal.compact_at` and the cache rules are the project's, whatever a p4.json in the worktree's own
+        store says. A reading for the worktree's store writes neither file, and the sweep makes no p4.json in the
+        worktree's store."""
+        self.conf(self.main_p4, {"compact_at": 33, "cache": {"notebook/.out": {"max_age_days": 3}}})
+        before = read(p4conf.path(self.main_p4))
+        self.assertEqual(lifetime.compact_at(self.p4), 33)
+        self.assertEqual(lifetime.rules(self.p4)["notebook/.out"], {"max_age_days": 3})
+        self.assertEqual(read(p4conf.path(self.main_p4)), before, "a reading for a worktree only reads the project's")
+        old = put(os.path.join(self.here, "notebook", ".out", "old.log"), age_days=5)
+        new = put(os.path.join(self.here, "notebook", ".out", "new.log"), age_days=1)
+        answer = lifetime.tick(self.tree)
+        self.assertEqual(answer["compact_at"], 33)
+        self.assertEqual([os.path.exists(p) for p in (old, new)], [False, True])
+        self.assertFalse(os.path.exists(p4conf.path(self.p4)), "no p4.json is made in a worktree's store")
+        self.conf(self.p4, {"compact_at": 0, "cache": {"notebook/.out": {"max_age_days": 400}}})
+        mine = read(p4conf.path(self.p4))
+        self.assertEqual(lifetime.compact_at(self.p4), 33, "a p4.json a worktree's store holds is read by nobody")
+        self.assertEqual(lifetime.rules(self.p4)["notebook/.out"], {"max_age_days": 3})
+        self.assertEqual(read(p4conf.path(self.p4)), mine)
+        r = run("list", CLAUDE_PROJECT_DIR=self.tree)
+        self.assertIn("cache   notebook/.out/  max_age_days=3", r.stdout)
+
+    def test_the_scratchpad_settings_of_a_worktree_session_are_the_main_checkouts(self):
+        import scratchpad
+        with open(p4conf.path(self.main_p4), "w", encoding="utf-8") as fh:
+            json.dump({"scratchpad": {"repo_uses_lines": 3}}, fh)
+        before = read(p4conf.path(self.main_p4))
+        was = scratchpad.REPO_USES_LINES
+        try:
+            scratchpad.configure({}, root=self.tree)
+            self.assertEqual(scratchpad.REPO_USES_LINES, 3)
+            self.assertFalse(os.path.exists(p4conf.path(self.p4)))
+            self.assertEqual(read(p4conf.path(self.main_p4)), before)
+        finally:
+            scratchpad.REPO_USES_LINES = was
+
+    def test_a_cookie_goes_into_the_main_checkouts_store_with_the_file_it_names(self):
+        page = put(os.path.join(self.here, "notebook", "page.html"), "<p>a page</p>\n")
+        log = put(os.path.join(self.here, "notebook", ".out", "run.log"), "noise\n")
+        _, cookie = lifetime.set_cookie(self.p4, page, "7d")
+        lifetime.set_cookie(self.p4, log, "1d")
+        said = lifetime.carry_over(self.tree)
+        self.assertEqual(len(said), 2, said)
+        self.assertIn("carried 1 file ", said[0])
+        self.assertIn("carried the lifetime of 1 of this worktree's files", said[1])
+        mark = os.path.normpath(os.path.abspath(self.tree)).replace("\\", "/")
+        self.assertEqual(lifetime.read_expires(self.main_p4),
+                         {"notebook/page.html": {"expires": cookie["expires"], "from": mark}},
+                         "the cookie of a file that is not carried stays behind")
+        self.assertEqual(sorted(lifetime.read_expires(self.p4)), ["notebook/.out/run.log", "notebook/page.html"])
+        self.assertEqual(lifetime.carry_over(self.tree), [], "a second sweep finds nothing to carry")
+        # the main checkout's sweep clears the carried copy when the cookie is due, with the worktree long gone
+        git(self.main, "worktree", "remove", "--force", self.tree)
+        kept = os.path.join(self.there, "notebook", "page.html")
+        self.assertEqual(lifetime.sweep(self.main_p4, now=time.time() + 6 * DAY), "")
+        self.assertTrue(os.path.exists(kept))
+        self.assertIn("expired files: 1, notebook/page.html", lifetime.sweep(self.main_p4, now=time.time() + 8 * DAY))
+        self.assertFalse(os.path.exists(kept))
+
+    def test_a_new_lifetime_of_the_worktree_replaces_the_one_it_carried_and_no_other(self):
+        page = put(os.path.join(self.here, "notebook", "page.html"))
+        theirs = put(os.path.join(self.here, "notebook", "theirs.md"))
+        other = put(os.path.join(self.here, "notebook", "other.md"))
+        lifetime.set_cookie(self.p4, page, "7d")
+        lifetime.set_cookie(self.p4, theirs, "7d")
+        lifetime.set_cookie(self.p4, other, "7d")
+        put(os.path.join(self.there, "notebook", "theirs.md"))
+        put(os.path.join(self.there, "notebook", "other.md"))
+        lifetime.write_expires(self.main_p4, {"notebook/theirs.md": {"expires": 5.0},
+                                              "notebook/other.md": {"expires": 6.0, "from": "E:/another/worktree"}})
+        lifetime.carry_over(self.tree)
+        held = lifetime.read_expires(self.main_p4)
+        self.assertEqual(held["notebook/theirs.md"], {"expires": 5.0}, "a cookie set in the main checkout stays")
+        self.assertEqual(held["notebook/other.md"], {"expires": 6.0, "from": "E:/another/worktree"})
+        _, later = lifetime.set_cookie(self.p4, page, "30d")
+        self.assertEqual(lifetime.carry_cookies(self.p4, self.main_p4, self.tree), 1)
+        self.assertEqual(lifetime.read_expires(self.main_p4)["notebook/page.html"]["expires"], later["expires"])
+
+    def test_a_cookie_that_was_cleared_is_taken_out_and_one_whose_file_was_swept_stays(self):
+        page = put(os.path.join(self.here, "notebook", "page.html"))
+        note = put(os.path.join(self.here, "notebook", "note.md"))
+        lifetime.set_cookie(self.p4, page, "7d")
+        lifetime.set_cookie(self.p4, note, "7d")
+        lifetime.carry_over(self.tree)
+        self.assertEqual(sorted(lifetime.read_expires(self.main_p4)), ["notebook/note.md", "notebook/page.html"])
+        self.assertTrue(lifetime.clear_cookie(self.p4, page))
+        lifetime.sweep(self.p4, now=time.time() + 8 * DAY)
+        self.assertEqual([os.path.exists(p) for p in (page, note)], [True, False])
+        self.assertEqual(lifetime.carry_cookies(self.p4, self.main_p4, self.tree), 1)
+        self.assertEqual(sorted(lifetime.read_expires(self.main_p4)), ["notebook/note.md"],
+                         "the file the worktree's sweep cleared keeps its lifetime in the main checkout")
+
+    def test_a_worktree_sessions_sweep_clears_the_main_checkouts_store_too_and_carries_no_due_file_back(self):
+        """The session's own store is swept first, so a file past its cookie is cleared and not carried, and then
+        the main checkout's store, where what a worktree carried earlier goes when it is due."""
+        due = put(os.path.join(self.here, "notebook", "due.md"))
+        kept = put(os.path.join(self.here, "notebook", "kept.md"))
+        there = put(os.path.join(self.there, "notebook", "carried-earlier.md"))
+        now = time.time()
+        lifetime.write_expires(self.p4, {"notebook/due.md": {"expires": now - 1}})
+        lifetime.write_expires(self.main_p4, {"notebook/carried-earlier.md": {"expires": now - 1},
+                                              "notebook/later.md": {"expires": now + 240}})
+        put(os.path.join(self.there, "notebook", "later.md"))
+        answer = lifetime.tick(self.tree)
+        self.assertEqual([os.path.exists(p) for p in (due, kept, there)], [False, True, False])
+        self.assertFalse(os.path.exists(os.path.join(self.there, "notebook", "due.md")))
+        self.assertTrue(os.path.exists(os.path.join(self.there, "notebook", "kept.md")))
+        self.assertEqual(answer["said"], [
+            "cleared expired files: 1, notebook/due.md.",
+            "carried 1 file of this worktree's plans, notebook and saved code into the main checkout's store, where "
+            "they stay when the worktree is removed.",
+            "cleared expired files: 1, notebook/carried-earlier.md, in the main checkout's store.",
+        ])
+        self.assertAlmostEqual(answer["wait_s"], 240, delta=5, msg="the next cookie of either store sets the wait")
+
+    def test_list_and_now_in_a_worktree_name_the_main_checkouts_store(self):
+        put(os.path.join(self.here, "notebook", "mine.md"))
+        put(os.path.join(self.there, "notebook", "theirs.md"))
+        now = time.time()
+        lifetime.write_expires(self.p4, {"notebook/mine.md": {"expires": now + 600}})
+        lifetime.write_expires(self.main_p4, {"notebook/theirs.md": {"expires": now - 1}})
+        listed = run("list", CLAUDE_PROJECT_DIR=self.tree).stdout
+        self.assertIn("cookie  notebook/mine.md  expires", listed)
+        self.assertIn("in the main checkout's store:\ncookie  notebook/theirs.md  expires", listed)
+        self.assertNotIn("in the main checkout's store", run("list", CLAUDE_PROJECT_DIR=self.main).stdout)
+        swept = run("now", CLAUDE_PROJECT_DIR=self.tree).stdout
+        self.assertIn("cleared expired files: 1, notebook/theirs.md, in the main checkout's store.", swept)
+        self.assertFalse(os.path.exists(os.path.join(self.there, "notebook", "theirs.md")))
 
 
 class KeptPlans(unittest.TestCase):
