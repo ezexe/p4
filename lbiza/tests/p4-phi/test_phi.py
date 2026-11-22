@@ -1816,7 +1816,7 @@ class Rules(unittest.TestCase):
         plans = phi.plans
         for key in p4conf.DEFAULTS["phi"]:
             self.assertNotIn("agent", key, "no key of p4.json's phi section names a subagent")
-        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "review", "static", "top"])
+        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "plan", "review", "static", "top"])
         given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
                                     "Explore": {"model": "opus"}})
         self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")

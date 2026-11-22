@@ -735,16 +735,22 @@ CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
                 "build": {"model": "claude-opus-5-5", "effort": "medium"},
                 "design": {"model": "claude-opus-5-5", "effort": "medium"},
                 "review": {"model": "claude-sonnet-5-5", "effort": "medium"},
+                "plan": {"model": "claude-fable-5-2", "effort": "inherit"},
                 "top": {"model": "inherit", "effort": "inherit"}}      # p4.json phi.child_levels sets each kind
 CHILD_KINDS = {"static": "static or mechanical work, an integrator's",
                "build": "a build that changes behaviour, a writer's",
                "design": "a design or a decision with its sources, a writer's",
                "review": "a review or check of another's work, a cross-check's",
+               "plan": "a plan held and written in plan mode, a planner's",
                "top": "a new top session, an orchestrator's"}
-ROLES = {"static": "integrator", "build": "writer", "design": "writer", "review": "cross-check", "top": "orchestrator"}
+ROLES = {"static": "integrator", "build": "writer", "design": "writer", "review": "cross-check", "plan": "planner",
+         "top": "orchestrator"}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|investigat|decid|analy[sz]|research|"
                      r"plan\b)\w*", re.I)
+# a planner's brief says so on a line of its own, as a new orchestrator's does for TOP: the session starts in plan
+# mode, where it holds and writes the plan
+PLANNER = re.compile(r"(?im)^[ \t>*-]*(?:this session|it) starts in plan mode\b")
 REVIEWS = re.compile(r"^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*", re.I)
 TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)    # starts.NEW_TOP, a new orchestrator
 CODE = re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
@@ -782,12 +788,15 @@ CHILD_LEVELS_DEFAULT = {k: dict(v) for k, v in CHILD_LEVELS.items()}
 
 
 def child_kind(text):
-    """'top' for a new orchestrator's brief, 'review' for a step that reviews or checks, 'design' for one that
+    """'top' for a new orchestrator's brief, 'plan' for a brief that says its session starts in plan mode and for a
+    step that plans, as top_stays reads one, 'review' for a step that reviews or checks, 'design' for one that
     designs or decides, 'static' for docs pages, a rename, a version bump or other mechanical work that names no
     code, else 'build'."""
     text = str(text or "")
     if TOP.search(text):
         return "top"
+    if PLANNER.search(text) or (PLANNING.search(text) and not PLAN_CODE.search(text)):
+        return "plan"
     if REVIEWS.search(text):
         return "review"
     if DESIGNS.search(text):
@@ -901,7 +910,8 @@ LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work c
 LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the role of its work in the "
              "skill `p4-phi:sub-agentic` decides: a build or a design is a writer's, on Opus at medium effort; a "
              "review is a cross-check's and static or mechanical work an integrator's, each on Sonnet at medium "
-             "effort; a new top session is an orchestrator's, on this session's own. Read that skill before the "
+             "effort; a plan written in plan mode is a planner's, on Fable at this session's own effort; a new top "
+             "session is an orchestrator's, on this session's own. Read that skill before the "
              "first start, and say the shape in the reply's first line ahead of the calls. An effort above this "
              "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
              "`Model and effort: <model> at <effort> effort`; to choose otherwise, pass another `model` or `effort` "
@@ -933,7 +943,8 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
                     f"it goes to {LEVEL_WHERE[level(g)]}, not a session")
         kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
-        hardest = next(st for k in ("top", "design", "build", "review", "static") for st, kd in zip(g, kinds) if kd == k)
+        hardest = next(st for k in ("top", "plan", "design", "build", "review", "static")
+                       for st, kd in zip(g, kinds) if kd == k)
         how = level_words(hardest.get("content"))
         if len(g) == 1:
             return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", with {how}"

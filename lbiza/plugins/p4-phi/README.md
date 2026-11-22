@@ -235,7 +235,8 @@ These are the defaults:
 | :- | :- | :- | :- |
 | `static`: docs pages, a rename, a version bump and other mechanical work that names no code | integrator | `claude-sonnet-5-5` | `medium` |
 | `build`: every other step, such as a change to behaviour or anything that names code | writer | `claude-opus-5-5` | `medium` |
-| `design`: a design, a plan or a decision with its sources | writer | `claude-opus-5-5` | `medium` |
+| `design`: a design or a decision with its sources | writer | `claude-opus-5-5` | `medium` |
+| `plan`: a brief that says its session starts in plan mode, and a step that plans | planner | `claude-fable-5-2` | the parent session's own |
 | `review`: a review, an audit or a check of another's work | cross-check | `claude-sonnet-5-5` | `medium` |
 | `top`: a brief that makes a new top session | orchestrator | the parent session's own | the parent session's own |
 
@@ -442,7 +443,7 @@ Every key is optional.
 | Key | Default | What `false` or a value does |
 | :- | :- | :- |
 | `levels` | `true` | `false`: no delegation rule |
-| `child_levels` | the table under Delegation | an object: a kind, `static`, `build`, `design`, `review` or `top`, with its `model`, an id or `inherit`, and its `effort`, a level or `inherit` |
+| `child_levels` | the table under Delegation | an object: a kind, `static`, `build`, `design`, `review`, `plan` or `top`, with its `model`, an id or `inherit`, and its `effort`, a level or `inherit` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `plan_mode` | `true` | `false`: the built-in plan rule, which hands plan mode, is left out |
 | `goal_review` | `true` | `false`: the goal p4-phi sets for a worker whose work changes files asks for no review of that change by a reader that has not seen the conversation |

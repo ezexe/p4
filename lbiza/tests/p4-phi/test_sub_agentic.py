@@ -150,6 +150,24 @@ class HandOuts(unittest.TestCase):
         self.assertEqual((call["model"], call["effort"]), ("claude-opus-5-5", "medium"))
         self.assertIn("a writer's, as the skill sub-agentic gives it", call["prompt"])
 
+    def test_a_planner_starts_on_fable_at_its_starters_own_effort(self):
+        self.assertIn("`claude-fable-5-2` and no `effort`", table()["planner"][1])
+        self.assertEqual(plans.CHILD_LEVELS_DEFAULT["plan"], {"model": "claude-fable-5-2", "effort": "inherit"})
+        self.assertEqual(plans.ROLES["plan"], "planner")
+        brief = "It starts in plan mode, and writes the plan of the exporter's move.\nFiles: none"
+        for text in ("Plan the exporter's move", "Write the plan for the exporter", "the exporter: planner\n" + brief):
+            self.assertEqual(plans.child_kind(text), "plan", text)
+        for text, kind in (("Write the plan parser in src/plan.py", "build"), ("Review the plan", "review"),
+                           ("Design the store's layout", "design"),
+                           ("Fix the case where a session starts in plan mode twice in phi.py", "build")):
+            self.assertEqual(plans.child_kind(text), kind, text)
+        call = plans.with_level({"initiation": "user_asked", "context": "fresh", "title": "the exporter: planner",
+                                 "prompt": brief})
+        self.assertEqual(call.get("model"), "claude-fable-5-2")
+        self.assertNotIn("effort", call, "the starter's own")
+        self.assertIn("Model and effort: claude-fable-5-2 at its own effort, since this is a plan held and written "
+                      "in plan mode, a planner's, as the skill sub-agentic gives it.", call["prompt"])
+
     def test_a_fork_takes_neither(self):
         call = {"context": "fork", "prompt": "Fix relay.py"}
         self.assertEqual(plans.with_level(call), call)
