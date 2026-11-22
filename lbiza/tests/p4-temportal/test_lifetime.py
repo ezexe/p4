@@ -947,8 +947,8 @@ class Lifetime(unittest.TestCase):
         self.assertEqual((s.returncode, s.stderr, sorted(lifetime.read_expires(self.p4))), (0, "", ["plans/due-plan.md"]))
         whole = run("--p4", self.p4, "set", "plans", "7d", cwd=self.root)
         self.assertEqual((whole.returncode, whole.stdout), (2, ""))
-        self.assertIn("plans takes no cookie: notebook/, src/, plans/, plans/complete/, plans/todo/ and expires.json "
-                      "are never cleared whole",
+        self.assertIn("plans takes no cookie: notebook/, src/, plans/, plans/complete/, plans/todo/, plans/unplanned/ "
+                      "and expires.json are never cleared whole",
                       whole.stderr)
         self.assertEqual(lifetime.sweep(self.p4), "", "with no retention period given, no plan is cleared by age")
         self.assertEqual([os.path.exists(p) for p in (old, due, kept)], [True, True, True])

@@ -25,11 +25,11 @@ every plan, and a plan file takes a cookie as any other file does. The key holds
 whose start wrote it, so `tick` copies the plan files the hooks module names with `--plan` and `--plan-edited` from
 Claude Code's own folder into plans/, by keep_plans, and leaves each original.
 
-The skill plan-planner gives a plan three places in the store: plans/ while it is worked, plans/complete/ once it
-is finished and plans/todo/ once ezexe parks it. The age clears only the files directly in plans/, where plan mode
-writes them, so a finished or parked plan stays until ezexe's word moves it, and neither folder takes a cookie
-whole. keep_plans copies no plan whose name either folder holds, and carry_over moves a plan of the main
-checkout's store into the place a worktree moved it to.
+The skill plan-planner sorts a plan into a subfolder of that folder: complete/ once it is finished, todo/ once
+ezexe parks it and unplanned/ once ezexe drops it, while a plan being worked stays directly in the folder. The age
+clears only the files directly in the folder, where plan mode writes them, so a sorted plan stays until ezexe's
+word moves it, and no subfolder of the three takes a cookie whole. keep_plans copies no plan whose name one of
+them holds, and carry_over moves a plan of the main checkout's store into the place a worktree moved it to.
 
 A session in a git worktree has a store of its own, `<worktree>/.claude/p4`, since what a session writes by a
 path from its folder lands there: its plans, its notebook and its saved code, which carry_over copies into the main
@@ -107,10 +107,11 @@ import hookio  # noqa: E402 - the hook input and link helpers p4-temportal's scr
 EXPIRES = "expires.json"
 NEVER = ("memory",)                     # folders no lifetime ever clears
 NOTEBOOK = p4conf.rel("scratchpad").split("/", 1)[-1]    # the notebook's folder under temportal/
-PLANS = "plans"                         # the plan files, where plansDirectory points Claude Code
-# the places of plan-planner under plans/: a finished plan and a parked one, which no age clears
-COMPLETE, TODO = "complete", "todo"
-SHELVES = (COMPLETE, TODO)
+PLANS = p4conf.PLANS.split("/", 1)[-1]  # the plan files under temportal/, where plansDirectory points Claude Code
+# the categories of plan-planner under that folder: a finished plan, a parked one and a dropped one, which no age
+# clears and no session reads unless ezexe names the file
+COMPLETE, TODO, UNPLANNED = "complete", "todo", "unplanned"
+SHELVES = (COMPLETE, TODO, UNPLANNED)
 # the notebook, saved code, plans, the finished and parked plans and the cookies, which no cookie clears whole
 WHOLE = (NOTEBOOK, "src", PLANS, *(f"{PLANS}/{shelf}" for shelf in SHELVES), EXPIRES)
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
@@ -229,8 +230,8 @@ def refusal(p4, path):
     if rel.split("/")[0].lower() == "tmp":
         return rel, f"{rel} takes no cookie: tmp/ holds the folders an earlier version kept for each session's scratchpad"
     if rel.lower() in WHOLE:
-        return rel, (f"{rel} takes no cookie: {NOTEBOOK}/, src/, {PLANS}/, {PLANS}/{COMPLETE}/, {PLANS}/{TODO}/ "
-                     f"and {EXPIRES} are never cleared whole")
+        return rel, (f"{rel} takes no cookie: {NOTEBOOK}/, src/, {PLANS}/, "
+                     + "".join(f"{PLANS}/{shelf}/, " for shelf in SHELVES)[:-2] + f" and {EXPIRES} are never cleared whole")
     return rel, None
 
 
@@ -453,8 +454,8 @@ def sweep_plans(p4, days, now=None, removed=None):
 
     Only the files directly in plans/ are cleared by age, which is where plan mode writes them: Claude Code's own
     cleanup clears "Plan files written during plan mode", by claude-directory.md, "Cleaned up automatically". A plan
-    plan-planner closed into plans/complete/ or parked into plans/todo/ is kept until ezexe's word moves it, so no
-    age reaches those two folders, nor anything else below plans/."""
+    plan-planner sorted into complete/, todo/ or unplanned/ is kept until ezexe's word moves it, so no age reaches
+    those folders, nor anything else below plans/."""
     if days is None or own_rule(p4) or rel_in(p4, PLANS) != PLANS:
         return 0
     gone = _clear(os.path.join(home(p4), PLANS), {"max_age_days": days}, time.time() if now is None else now,
@@ -608,8 +609,8 @@ def keep_plans(root, made, edited=()):
     created is copied where the store holds none of its name, and any of the two kinds is copied over the store's
     file of its name where it is the newer, so a resumed session's edit reaches the copy. A file that was only
     edited and that the store holds no copy of is left alone: another project's session may have made it. A plan
-    whose name plans/complete/ or plans/todo/ holds is never copied, since plan-planner closed or parked it and
-    only ezexe's word revives it."""
+    whose name complete/, todo/ or unplanned/ holds is never copied, since plan-planner sorted it there and only
+    ezexe's word revives it."""
     p4 = store_of(root)
     target = p4conf.settings_file(root)
     want = p4conf.plans_dir(p4, target)
@@ -664,9 +665,9 @@ def carry_over(root):
     folder's own git are left where they are. Nothing is carried where the main checkout has no store. The cookie
     of a carried file goes with it, by carry_cookies.
 
-    A plan has three places by plan-planner: plans/ while it is worked, plans/complete/ once finished and
-    plans/todo/ once parked. A plan the worktree closed, parked or revived is carried into its new place only where
-    it is newer than every copy of its name the main checkout's store holds in the other two, and those older
+    A plan has four places by plan-planner: the plans folder while it is worked, and its complete/, todo/ and
+    unplanned/ once sorted. A plan the worktree moved is carried into its new place only where it is newer than
+    every copy of its name the main checkout's store holds in the other three, and those older
     copies are then removed there, their removal staged where that store is a git repository of its own. So a
     close in a worktree does not leave the plan worked in the main checkout too, and a plan the main checkout
     closed is not brought back by an older copy a worktree still holds."""
@@ -711,7 +712,7 @@ def carry_over(root):
         if _own_repo(store_of(main)):
             _stage_removals(store_of(main), moved)
         said.append(f"moved {len(moved)} plan{'s' if len(moved) > 1 else ''} of the main checkout's store to the "
-                    "place this worktree closed, parked or revived it in, from "
+                    "place this worktree moved it to, from "
                     + ", ".join(os.path.relpath(p, there).replace("\\", "/") for p in moved) + ".")
     cookies = carry_cookies(store_of(root), store_of(main), root)
     if cookies:
@@ -722,8 +723,8 @@ def carry_over(root):
 
 def _other_places(there, rel):
     """For `rel`, a path under temportal/ with the platform's separator, that is a plan in one of plan-planner's
-    three places, plans/, plans/complete/ or plans/todo/ -> the files of the same name the store under `there`
-    holds in the other two places. [] for any other path. A plan is in one place at a time, so the place of its
+    places, the plans folder or one of SHELVES under it -> the files of the same name the store under `there`
+    holds in the other places. [] for any other path. A plan is in one place at a time, so the place of its
     newest copy is where it is."""
     parts = rel.replace("\\", "/").split("/")
     if parts[0] != PLANS or not parts[-1].lower().endswith(".md"):

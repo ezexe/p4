@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""test_plan_planner.py: p4-temportal's skill plan-planner, its rules for a plan's sections and its three places.
+"""test_plan_planner.py: p4-temportal's skill plan-planner, its rules for a plan's sections and its places.
 
 The rules of a section are the source skill's word for word, but that ezexe is named where the source says the boss.
-A plan is worked in the store's temportal/plans, finished in temportal/plans/complete and parked in
-temportal/plans/todo, and the retention sweep, the copy out of Claude Code's own plans folder and the carry out of a
-worktree each keep to those places.
+A plan is the one plan mode writes into the plugin's plans folder, and it is sorted into complete/, todo/ or
+unplanned/ under it, which no session reads unless ezexe names the file. The retention sweep, the copy out of Claude
+Code's own plans folder and the carry out of a worktree each keep to those places.
 
     python -m pytest tests/p4-temportal/test_plan_planner.py
 """
 
+import json
 import os
 import pathlib
 import re
@@ -81,9 +82,9 @@ class SkillText(unittest.TestCase):
         self.assertIsNotNone(head)
         self.assertIn("name: plan-planner\n", head.group(1) + "\n")
         description = re.search(r"^description: (.+)$", head.group(1), re.M).group(1)
-        for word in ("temportal/plans", "complete/", "todo/", "Invoke BEFORE writing, landing, closing, parking, "
-                     "reviving or reading a plan or design doc", "Never the repo root, the scratchpad or an ad-hoc "
-                     "directory"):
+        for word in ("temportal/plan-planner", "plansDirectory", "complete/, todo/ or unplanned/",
+                     "which no session reads unless ezexe names the file", "Invoke BEFORE writing",
+                     "Never the repo root, the scratchpad or an ad-hoc directory"):
             self.assertIn(word, description, word)
 
     def test_every_section_holds_the_source_skills_rules_word_for_word(self):
@@ -93,26 +94,37 @@ class SkillText(unittest.TestCase):
         body = text()
         self.assertNotRegex(body.lower(), r"\bboss\b")
         self.assertNotRegex(body.lower(), r"\bthe owner\b")
-        self.assertIn("No choices for ezexe", body)
-        self.assertIn("Park** on ezexe's word only", body)
-        self.assertIn("Revive** on ezexe's word only", body)
+        for word in ("No choices for ezexe", "Park** on ezexe's word only", "Drop** on ezexe's word only",
+                     "Revive** on ezexe's word only"):
+            self.assertIn(word, body, word)
 
-    def test_the_three_places_are_folders_of_the_store_and_no_orphan_branch(self):
+    def test_the_plan_is_the_one_plan_mode_writes_into_the_plugins_folder(self):
         body = text()
-        for place in ("`.claude/p4/temportal/plans/<plan>.md`", "`.claude/p4/temportal/plans/complete/<plan>.md`",
-                      "`.claude/p4/temportal/plans/todo/<plan>.md`"):
+        places = ["`.claude/p4/temportal/plan-planner/<plan>.md`"]
+        places += [f"`.claude/p4/temportal/plan-planner/{shelf}/<plan>.md`" for shelf in lifetime.SHELVES]
+        for place in places:
             self.assertIn(place, body, place)
-        self.assertIn("closed plans add nothing to the code branches' history", body)
-        self.assertIn("`plansDirectory`", body)
-        self.assertIn("git -C .claude/p4 mv temportal/plans/<plan>.md", body)
-        self.assertNotIn("orphan", body)
-        self.assertNotIn("git worktree add", body)
-        self.assertNotIn("origin plans", body)
+        for word in ("## Plan mode writes the plan", "A plan is written in plan mode", "`plansDirectory`",
+                     "`Ctrl+G`", "reads the plan in again from disk"):
+            self.assertIn(word, body, word)
 
-    def test_the_skill_says_what_keeps_a_finished_or_parked_plan(self):
+    def test_a_move_makes_no_commit_and_no_orphan_branch(self):
+        body = text()
+        self.assertIn("A move is a plain move of the file into its subfolder", body)
+        for word in ("orphan", "git worktree add", "origin plans", "git -C", "commit -m"):
+            self.assertNotIn(word, body, word)
+
+    def test_a_session_reads_only_the_plans_not_yet_put_into_a_category(self):
+        section = text().split("## What a session reads")[1].split("\n## ")[0]
+        self.assertIn("reads only the plan files directly in `plan-planner/`", section)
+        self.assertIn("never opens, lists, searches or hands to a subagent anything in `complete/`, `todo/` or "
+                      "`unplanned/`, unless ezexe names that file", section)
+        self.assertNotRegex(text(), r"\bls\b", "the skill lists no category itself")
+
+    def test_the_skill_says_what_keeps_a_sorted_plan(self):
         body = text()
         self.assertIn("`cleanupPeriodDays`", body)
-        self.assertIn("Nothing in `complete/` or `todo/` is cleared by age", body)
+        self.assertIn("nothing in it is cleared by age or takes a lifetime as a whole folder", body)
 
     def test_the_prose_writes_no_parenthetical_and_each_list_item_is_one_line(self):
         # the section rules are the source's word for word, its parenthesis round the evidence link with them
@@ -128,19 +140,21 @@ class SkillText(unittest.TestCase):
 
     def test_the_temportal_skill_points_to_it(self):
         body = TEMPORTAL.read_text(encoding="utf-8")
-        self.assertIn("is the skill `plan-planner` of this plugin", body)
-        self.assertIn("`plans/complete/` or `plans/todo/` stays until ezexe's word moves it", body)
+        self.assertIn("are the skill `plan-planner` of this plugin", body)
+        self.assertIn("read nothing in those subfolders unless ezexe names the file", body)
+        self.assertIn("`complete/`, `todo/` or `unplanned/` stays until ezexe's word moves it", body)
 
     def test_the_page_has_its_passage(self):
         page = PAGE.read_text(encoding="utf-8")
         row = re.search(r'<tr id="row-plans">.*?</tr>', page, re.S).group(0)
-        for word in ("<code>plan-planner</code>", "temportal/plans/complete", "temportal/plans/todo",
-                     "orphan branch", "Plan files written during plan mode", "No live session has closed a plan"):
+        for word in ("<code>plan-planner</code>", "<code>.claude/p4/temportal/plan-planner</code>",
+                     "<code>unplanned</code>", "no session reads anything there unless ezexe names the file",
+                     "orphan branch", "Plan files written during plan mode", "No live session has moved a plan"):
             self.assertIn(word, row, word)
 
 
 class Places(unittest.TestCase):
-    """The places on a store on disk."""
+    """The places on a store on disk, under the plans folder as the code names it."""
 
     def setUp(self):
         from unittest import mock
@@ -148,7 +162,7 @@ class Places(unittest.TestCase):
         self.addCleanup(wipe, self.base)
         self.root = os.path.join(self.base, "proj")
         self.p4 = os.path.join(self.root, ".claude", "p4")
-        self.plans = os.path.join(self.p4, "temportal", "plans")
+        self.plans = os.path.join(self.p4, "temportal", lifetime.PLANS)
         os.makedirs(self.plans)
         self.config = os.path.join(self.base, "config")
         self.own = os.path.join(self.config, "plans")
@@ -156,39 +170,43 @@ class Places(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def test_the_age_clears_a_worked_plan_and_keeps_every_finished_and_parked_one(self):
+    def test_the_age_clears_a_worked_plan_and_keeps_every_sorted_one(self):
         worked = put(os.path.join(self.plans, "old-worked.md"), age_days=40)
-        done = put(os.path.join(self.plans, "complete", "old-done.md"), age_days=400)
-        parked = put(os.path.join(self.plans, "todo", "old-parked.md"), age_days=400)
+        sorted_ = [put(os.path.join(self.plans, shelf, f"old-{shelf}.md"), age_days=400)
+                   for shelf in lifetime.SHELVES]
         said = lifetime.sweep(self.p4, days=30.0)
-        self.assertEqual(said, "p4-temportal: cleared plans older than the 30 days of cleanupPeriodDays: 1, in plans/.")
-        self.assertEqual([os.path.exists(p) for p in (worked, done, parked)], [False, True, True])
+        self.assertEqual(said, "p4-temportal: cleared plans older than the 30 days of cleanupPeriodDays: 1, "
+                               f"in {lifetime.PLANS}/.")
+        self.assertFalse(os.path.exists(worked))
+        self.assertEqual([os.path.exists(p) for p in sorted_], [True, True, True])
         self.assertEqual(lifetime.sweep(self.p4, days=1.0), "")
 
-    def test_neither_place_takes_a_cookie_whole_and_a_plan_in_one_takes_its_own(self):
+    def test_no_category_takes_a_cookie_whole_and_a_plan_in_one_takes_its_own(self):
         done = put(os.path.join(self.plans, "complete", "a.md"))
-        put(os.path.join(self.plans, "todo", "b.md"))
-        for folder in ("plans/complete", "plans/todo"):
-            with self.assertRaises(ValueError, msg=folder):
-                lifetime.set_cookie(self.p4, folder, "7d")
-        self.assertEqual(lifetime.set_cookie(self.p4, done, "7d")[0], "plans/complete/a.md")
+        for shelf in lifetime.SHELVES:
+            put(os.path.join(self.plans, shelf, "b.md"))
+            with self.assertRaises(ValueError, msg=shelf):
+                lifetime.set_cookie(self.p4, f"{lifetime.PLANS}/{shelf}", "7d")
+        self.assertEqual(lifetime.set_cookie(self.p4, done, "7d")[0], f"{lifetime.PLANS}/complete/a.md")
 
-    def test_a_closed_or_parked_plan_is_not_copied_back_out_of_claude_codes_own_folder(self):
+    def test_a_sorted_plan_is_not_copied_back_out_of_claude_codes_own_folder(self):
         with open(os.path.join(self.root, ".claude", "settings.local.json"), "w", encoding="utf-8") as f:
-            f.write('{"plansDirectory": ".claude/p4/temportal/plans"}')
-        put(os.path.join(self.plans, "complete", "closed.md"), "STATUS: COMPLETED\n", age_days=1)
-        put(os.path.join(self.plans, "todo", "parked.md"), "STATUS: TODO\n", age_days=1)
-        made = [put(os.path.join(self.own, name), "# again\n") for name in ("closed.md", "parked.md", "new.md")]
+            json.dump({"plansDirectory": ".claude/p4/" + lifetime.p4conf.PLANS}, f)
+        for shelf in lifetime.SHELVES:
+            put(os.path.join(self.plans, shelf, f"{shelf}.md"), f"STATUS: {shelf}\n", age_days=1)
+        names = [f"{shelf}.md" for shelf in lifetime.SHELVES] + ["new.md"]
+        made = [put(os.path.join(self.own, name), "# again\n") for name in names]
         said = lifetime.keep_plans(self.root, made, made)
-        self.assertEqual(sorted(os.listdir(self.plans)), ["complete", "new.md", "todo"])
+        self.assertEqual(sorted(os.listdir(self.plans)), sorted([*lifetime.SHELVES, "new.md"]))
         self.assertIn("new.md", said[0])
-        self.assertNotIn("closed.md", said[0])
-        self.assertEqual(read(os.path.join(self.plans, "complete", "closed.md")), "STATUS: COMPLETED\n")
+        for shelf in lifetime.SHELVES:
+            self.assertNotIn(f"{shelf}.md", said[0])
+            self.assertEqual(read(os.path.join(self.plans, shelf, f"{shelf}.md")), f"STATUS: {shelf}\n")
 
 
 class CarriedPlaces(unittest.TestCase):
-    """A plan a worktree closed, parked or revived leaves its old place in the main checkout's store, and an older
-    copy a worktree still holds brings no plan back that the main checkout closed."""
+    """A plan a worktree moved leaves its old place in the main checkout's store, and an older copy a worktree still
+    holds brings no plan back that the main checkout sorted."""
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="p4-temportal-planner-carry-")
@@ -201,17 +219,19 @@ class CarriedPlaces(unittest.TestCase):
         git(self.main, "commit", "-q", "-m", "start")
         self.tree = os.path.join(self.base, "tree")
         git(self.main, "worktree", "add", "-q", self.tree, "-b", "work")
-        self.here = os.path.join(self.tree, ".claude", "p4", "temportal", "plans")
-        self.there = os.path.join(self.main, ".claude", "p4", "temportal", "plans")
+        self.here = os.path.join(self.tree, ".claude", "p4", "temportal", lifetime.PLANS)
+        self.there = os.path.join(self.main, ".claude", "p4", "temportal", lifetime.PLANS)
 
-    def test_a_plan_closed_in_a_worktree_leaves_the_worked_place_of_the_main_checkout(self):
-        put(os.path.join(self.there, "p.md"), "# worked\n", age_days=1)
-        put(os.path.join(self.here, "complete", "p.md"), "STATUS: COMPLETED\n")
+    def test_a_plan_sorted_in_a_worktree_leaves_the_worked_place_of_the_main_checkout(self):
+        for shelf in lifetime.SHELVES:
+            put(os.path.join(self.there, f"{shelf}.md"), "# worked\n", age_days=1)
+            put(os.path.join(self.here, shelf, f"{shelf}.md"), f"STATUS: {shelf}\n")
         said = lifetime.carry_over(self.tree)
-        self.assertFalse(os.path.exists(os.path.join(self.there, "p.md")))
-        self.assertEqual(read(os.path.join(self.there, "complete", "p.md")), "STATUS: COMPLETED\n")
-        self.assertIn("moved 1 plan of the main checkout's store", said[-1])
-        self.assertIn("plans/p.md", said[-1])
+        for shelf in lifetime.SHELVES:
+            self.assertFalse(os.path.exists(os.path.join(self.there, f"{shelf}.md")), shelf)
+            self.assertEqual(read(os.path.join(self.there, shelf, f"{shelf}.md")), f"STATUS: {shelf}\n")
+        self.assertIn("moved 3 plans of the main checkout's store", said[-1])
+        self.assertIn(f"{lifetime.PLANS}/complete.md", said[-1])
 
     def test_a_plan_revived_in_a_worktree_leaves_the_parked_place(self):
         put(os.path.join(self.there, "todo", "p.md"), "STATUS: TODO\n", age_days=1)
@@ -233,10 +253,10 @@ class CarriedPlaces(unittest.TestCase):
         git(store, "init", "-q")
         git(store, "add", "-A")
         git(store, "commit", "-q", "-m", "the plan")
-        put(os.path.join(self.here, "todo", "p.md"), "STATUS: TODO\n")
+        put(os.path.join(self.here, "unplanned", "p.md"), "STATUS: UNPLANNED\n")
         lifetime.carry_over(self.tree)
         staged = git(store, "diff", "--cached", "--name-status").stdout.decode()
-        self.assertIn("D\ttemportal/plans/p.md", staged)
+        self.assertIn(f"D\ttemportal/{lifetime.PLANS}/p.md", staged)
 
 
 if __name__ == "__main__":
