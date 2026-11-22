@@ -26,12 +26,13 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 
 | What the plugin does | The page | The sentence it rests on |
 | :- | :- | :- |
-| Sends a search or a read across files to the built-in subagent `Explore`, and ships no search agent of its own | `sub-agents.md`, "Built-in subagents" | "A fast, read-only agent optimized for searching and analyzing codebases." and "Claude delegates to Explore when it needs to search or understand a codebase without making changes." |
-| Names `model` `haiku` on that Agent call | `sub-agents.md`, "Built-in subagents" and "Choose a model" | Explore's model is "the parent conversation's model", and the first source in the model order is "The per-invocation `model` parameter, which Claude can pass when it starts the subagent. On an Agent tool call, the parameter takes a model alias, not a full model ID or `inherit`." |
+| Decides whether to delegate, how many agents, and each one's type, model and effort by the skill `sub-agentic` it ships, whose table of roles each agent and each drafted start follows | `plugins/components.md`, "Skills", and `sub-agents.md`, "Choose a model" | A plugin's skill is "One `<name>/SKILL.md` per skill", and the model order puts "The `model` field in the subagent's definition" after the call's own `model` |
+| Sends a search or a read across files to its own read-only subagent `p4-phi:finder`, the skill's evidence finder, with `model: haiku` and `effort: low` in its file | `sub-agents.md`, "Built-in subagents" and "Choose a model" | The built-in Explore's model is "the parent conversation's model", so it runs small only while each call names a model; a definition's `model` field holds with nothing on the call |
+| Ships `p4-phi:writer` on `opus` at `medium` and `p4-phi:integrator` on `sonnet` at `medium`, the skill's writer and integrator | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
 | Sends a review of a code change to the bundled skill `code-review`, run without `--fix` | `code-review-local.md`, "Let Claude start the review" and "What the review reads and edits" | "Claude can start `/code-review` on its own, without you typing the command" and "without `--fix`, the review's instructions ask Claude for a report only." |
 | Keeps a reviewer of its own only for a result that is no code change | `code-review-local.md`, "Choose what to review" and "Change or build on the review" | "A target can be a pull request number, a branch name, a file path, or a Git revision range." and "Build your own reviewer: write a reviewer subagent or a review skill" |
-| Ships that one agent in `agents/`, named `p4-phi:check` | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
-| Sets `model`, `effort`, `maxTurns`, `tools` and `background` on it, and none of `hooks`, `mcpServers` or `permissionMode` | `plugins/components.md`, "Frontmatter fields in plugin agents" | "Supported fields: `name`, `description`, `model`, `effort`, `maxTurns`, ... `tools`, ... `background`" and "Ignored fields: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`" |
+| Ships its reviewer in `agents/`, named `p4-phi:check`, the skill's cross-check for a result that is no code change | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
+| Sets `model` and `effort` on each of its agents, and `maxTurns`, `tools` and `background` where the agent needs them, and none of `hooks`, `mcpServers` or `permissionMode` | `plugins/components.md`, "Frontmatter fields in plugin agents" | "Supported fields: `name`, `description`, `model`, `effort`, `maxTurns`, ... `tools`, ... `background`" and "Ignored fields: `permissionMode`, `hooks`, `mcpServers`, and `initialPrompt`" |
 | Keeps that agent in the background | `sub-agents.md`, "Supported frontmatter fields" | "Set to `true` to keep this subagent in the background even when Claude asks to wait for it." |
 | Runs the readings of an under-determined message as one workflow it ships in `workflows/`, named `p4-phi:readings`, and keeps no explore or merge of its own | `workflows.md`, its opening and "Distribute a workflow in a plugin" | The page names drafting a hard plan from several independent angles as a use of a workflow, and has a script in a `workflows/` folder at the plugin root run as `/<plugin>:<name>`. |
 | Has a reading return its question as data, for the session to ask once after the run | `workflows.md`, "Behavior and limits", and `sub-agents.md`, "Available tools" | A run takes no input from a person while it runs, and `AskUserQuestion` is taken from every subagent. |
@@ -166,14 +167,17 @@ Seen in the desktop app on 2.1.326: a probe mod's registered tool was listed beh
 
 Without a data folder, as when a test runs a hook, the proved python is kept in the plugin's own folder.
 
-A worker starts with a model and an effort that fit its step, and `phi.child_levels` in `p4.json` sets them for each kind of step.
+A worker starts with the model and the effort of its step's role in the skill `sub-agentic`, and `phi.child_levels` in `p4.json` sets them for each kind of step.
+The start tool takes `model` as a model id, "Same family or cheaper than yours; anything higher is ignored", and `effort` "at or below yours", and inherits each it is not given.
 These are the defaults:
 
-| Kind of step | Model | Effort |
-| :- | :- | :- |
-| `static`: docs pages, a rename, a version bump and other mechanical work that names no code | `claude-sonnet-5-5` | `medium` |
-| `build`: every other step, such as a change to behaviour or anything that names code | the parent session's own | `high` |
-| `design`: a design or review step | the parent session's own | `high` |
+| Kind of step | Role | Model | Effort |
+| :- | :- | :- | :- |
+| `static`: docs pages, a rename, a version bump and other mechanical work that names no code | integrator | `claude-sonnet-5-5` | `medium` |
+| `build`: every other step, such as a change to behaviour or anything that names code | writer | `claude-opus-5-5` | `medium` |
+| `design`: a design, a plan or a decision with its sources | writer | `claude-opus-5-5` | `medium` |
+| `review`: a review, an audit or a check of another's work | cross-check | `claude-sonnet-5-5` | `medium` |
+| `top`: a brief that makes a new top session | orchestrator | the parent session's own | the parent session's own |
 
 No start is named above the effort of the session that makes it.
 p4-phi reads that session's level from the hook input's `effort.level`, or from `CLAUDE_EFFORT`, keeps the last level seen on the session's record, and holds each start's `effort` to it.
@@ -185,8 +189,9 @@ p4-phi has no setting for a subagent's model or effort, since Claude Code sets b
 
 | Subagent | What sets its model and effort | How a project or ezexe sets another |
 | :- | :- | :- |
-| `Explore`, Claude Code's own | The `model` `haiku` the delegation rule names on the Agent call, the first source in the order | Another `model` on the call. With no `model` on the call, a file named `Explore` under `.claude/agents/` or `~/.claude/agents/`: "A user or project subagent named `Explore` overrides the built-in and keeps its own `model` field" |
-| `p4-phi:check`, the plugin's own | `model: inherit` and `effort: high` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
+| `p4-phi:finder`, the plugin's own | `model: haiku` and `effort: low` in `agents/finder.md` | A `model` or an `effort` on the Agent call |
+| `p4-phi:writer` and `p4-phi:integrator`, the plugin's own | `model: opus` and `model: sonnet`, each with `effort: medium`, in their files | A `model` or an `effort` on the Agent call |
+| `p4-phi:check`, the plugin's own | `model: sonnet` and `effort: medium` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
 | Every subagent | One model under `env` of a settings file: "set `CLAUDE_CODE_SUBAGENT_MODEL` to that model and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`" | "While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent." |
 
 ### A team in a terminal session
@@ -362,7 +367,7 @@ Every key is optional.
 | Key | Default | What `false` or a value does |
 | :- | :- | :- |
 | `levels` | `true` | `false`: no delegation rule |
-| `child_levels` | the table under Delegation | an object: a kind, `static`, `build` or `design`, with its `model`, an id or `inherit`, and its `effort` |
+| `child_levels` | the table under Delegation | an object: a kind, `static`, `build`, `design`, `review` or `top`, with its `model`, an id or `inherit`, and its `effort`, a level or `inherit` |
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |

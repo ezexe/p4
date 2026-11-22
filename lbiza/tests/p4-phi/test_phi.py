@@ -1610,7 +1610,7 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.t.rules(TOP)
-        for word in ("built-in, levels", "the built-in subagent `Explore`", "`p4-phi:check`",
+        for word in ("built-in, levels", "the plugin's subagent `p4-phi:finder`", "`p4-phi:check`",
                      "`run_in_background: true`"):
             self.assertIn(word, got)
         self.assertNotIn("p4-phi:runner", got)
@@ -1641,7 +1641,7 @@ class Rules(unittest.TestCase):
         model order. So the plugin ships no search agent, and the rule names `Explore` with `model` `haiku` on the
         call."""
         self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
-        self.assertIn("goes to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", phi.LEVELS)
+        self.assertIn("goes to the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says", phi.LEVELS)
         self.assertNotIn("sweep", phi.LEVELS)
         self.assertNotIn("p4-phi:sweep", self.t.rules(TOP))
 
@@ -1660,13 +1660,13 @@ class Rules(unittest.TestCase):
         session's system prompt tells it to name a model for each stage, in the page's words, and the skill quotes
         both sentences with the page."""
         got = self.t.rules(TOP)
-        self.assertIn("A Workflow script names a model for each stage", got)
+        self.assertIn("A Workflow script names a `model` and an `effort` for each stage", got)
         for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
                       "\"runs on your session's model\""):
             self.assertIn(quote, phi.LEVELS)
         with open(os.path.join(ROOT, "skills", "phi", "SKILL.md"), encoding="utf-8") as f:
             skill = f.read()
-        self.assertIn("A Workflow script names a model for each stage: https://code.claude.com/docs/en/workflows.md "
+        self.assertIn("A Workflow script names a model and an effort for each stage, `agent(prompt, {model, effort})`: https://code.claude.com/docs/en/workflows.md "
                       "says \"A model the script names for a stage counts as the per-invocation model in that order.\" "
                       "and \"When nothing else assigns one, the agent runs on your session's model.\"", skill)
 
@@ -1713,7 +1713,7 @@ class Rules(unittest.TestCase):
         plans = phi.plans
         for key in p4conf.DEFAULTS["phi"]:
             self.assertNotIn("agent", key, "no key of p4.json's phi section names a subagent")
-        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "static"])
+        self.assertEqual(sorted(plans.CHILD_LEVELS_DEFAULT), ["build", "design", "review", "static", "top"])
         given = plans.child_levels({"check": {"model": "claude-haiku-5-5", "effort": "low"},
                                     "Explore": {"model": "opus"}})
         self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
@@ -1723,7 +1723,7 @@ class Rules(unittest.TestCase):
             readme = f.read()
         for page in (skill, readme):
             for word in ("sub-agents.md", "\"Choose a model\"", "`CLAUDE_CODE_SUBAGENT_MODEL`",
-                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`Explore`", "`p4-phi:check`"):
+                         "`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`", "`p4-phi:finder`", "`p4-phi:check`"):
                 self.assertIn(word, page, word)
         self.assertIn("No p4 setting names a subagent's model or effort, since Claude Code sets both", skill)
         self.assertIn("p4-phi has no setting for a subagent's model or effort, since Claude Code sets both.", readme)
@@ -1745,7 +1745,8 @@ class Rules(unittest.TestCase):
         self.assertIn("A code change goes to the bundled skill `code-review` instead.", said)
         self.assertNotIn("diff", said)
         self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
-        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md"], "the plugin's one agent")
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "agents"))), ["check.md", "finder.md", "integrator.md", "writer.md"],
+                         "the agents of the skill sub-agentic's table")
 
 
 class Ids(unittest.TestCase):

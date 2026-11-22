@@ -508,7 +508,7 @@ def split_advice(home, s, plan, owner_turn, cap):
     """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
     subs = [st for st in free if LEVELS and level_of(st.get("content")) != "session"]
-    free = [st for st in free if st not in subs]   # a read goes to Explore and a run to the background, never a session
+    free = [st for st in free if st not in subs]   # a read goes to p4-phi:finder and a run to the background, never a session
     if len(free) < 2:
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -638,11 +638,10 @@ def top_groups(plan, cwd):
 
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
-# A step that only reads or searches is the built-in Explore subagent's; one that only runs a command is a background
-# command of the session's own; the rest is a worker's. sub-agents.md says of Explore "A fast, read-only agent
-# optimized for searching and analyzing codebases." and gives its model as "the parent conversation's model", so the
-# call names a small one: "The per-invocation `model` parameter" is the first source in the page's model order, and
-# "On an Agent tool call, the parameter takes a model alias". The page also says "With nothing configured, a subagent
+# A step that only reads or searches is the subagent p4-phi:finder's, the skill sub-agentic's evidence finder; one
+# that only runs a command is a background command of the session's own; the rest is a worker's. sub-agents.md gives
+# the built-in Explore "the parent conversation's model", and puts "The `model` field in the subagent's definition"
+# in its model order, so agents/finder.md carries `model: haiku` and `effort: low` and no call has to. The page also says "With nothing configured, a subagent
 # that Claude spawns from your main conversation starts in the background." tools-reference.md, "Background
 # commands", says "Claude can set `run_in_background: true` to start the command as a background task and continue
 # working while it runs.", and interactive-mode.md says "Output is written to a file and Claude can retrieve it using
@@ -656,7 +655,7 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
 LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command"}
-EXPLORE = "the built-in subagent `Explore`, with `model` `haiku` on the Agent call"
+EXPLORE = "the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says"
 BACKGROUND = "a Bash or PowerShell call of its own with `run_in_background: true`"
 LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND}                # where each such step goes
 
@@ -675,8 +674,13 @@ def level_of(text):
 
 # --- the model and effort a worker is started with ---------------------------------------------------------
 #
-# A plugin agent carries a model and an effort in its file, and every start call p4-phi hands out
-# carries an `effort`, and a `model` unless it keeps the parent session's. `mcp__ccd_session__start_session` takes
+# The skill sub-agentic, rule 5: "Set model and effort on every agent by its role; nothing inherits by default." Each
+# kind of step is a role of that skill's table: static or mechanical work lands what is written, its integrator, on
+# Sonnet at medium; a build or a design writes what the tree does not hold yet, its writer, on Opus at medium; a
+# review re-reads another's work, its cross-check, on Sonnet at medium; and a new top session is an orchestrator, on
+# the session's own model and effort, which the start tool gives a call that names neither. A plugin agent carries a
+# model and an effort in its file, and every start call p4-phi hands out carries an `effort`, and a `model` unless
+# it keeps the parent session's, but for an orchestrator's, which carries neither. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
 # start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
 # phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call. The caller's own effort is
@@ -684,14 +688,24 @@ def level_of(text):
 # where "`$CLAUDE_EFFORT` holds the same level.": phi.own_effort reads it into PARENT_EFFORT, and child_level names
 # no effort above it.
 
+# start_session's `model` takes a model id, "Same family or cheaper than yours; anything higher is ignored", where an
+# Agent call takes an alias: so each entry names the id of the newest model of its family
 CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
-                "build": {"model": "inherit", "effort": "high"},
-                "design": {"model": "inherit", "effort": "high"}}      # p4.json phi.child_levels sets each kind
-CHILD_KINDS = {"static": "static or mechanical work", "build": "a build that changes behaviour",
-               "design": "a design or review step"}
+                "build": {"model": "claude-opus-5-5", "effort": "medium"},
+                "design": {"model": "claude-opus-5-5", "effort": "medium"},
+                "review": {"model": "claude-sonnet-5-5", "effort": "medium"},
+                "top": {"model": "inherit", "effort": "inherit"}}      # p4.json phi.child_levels sets each kind
+CHILD_KINDS = {"static": "static or mechanical work, an integrator's",
+               "build": "a build that changes behaviour, a writer's",
+               "design": "a design or a decision with its sources, a writer's",
+               "review": "a review or check of another's work, a cross-check's",
+               "top": "a new top session, an orchestrator's"}
+ROLES = {"static": "integrator", "build": "writer", "design": "writer", "review": "cross-check", "top": "orchestrator"}
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|review|architect|audit|specif|spec\b|propos|investigat|decid|"
-                     r"evaluat|assess|analy[sz]|research|plan\b)\w*", re.I)
+DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|investigat|decid|analy[sz]|research|"
+                     r"plan\b)\w*", re.I)
+REVIEWS = re.compile(r"^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*", re.I)
+TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)    # starts.NEW_TOP, a new orchestrator
 CODE = re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
                   r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
                   r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)
@@ -718,7 +732,7 @@ def child_levels(conf):
         if kind in out and isinstance(given, dict):
             if isinstance(given.get("model"), str) and given["model"].strip():
                 out[kind]["model"] = given["model"].strip()
-            if given.get("effort") in EFFORTS:
+            if given.get("effort") in EFFORTS + ("inherit",):
                 out[kind]["effort"] = given["effort"]
     return out
 
@@ -727,9 +741,14 @@ CHILD_LEVELS_DEFAULT = {k: dict(v) for k, v in CHILD_LEVELS.items()}
 
 
 def child_kind(text):
-    """'design' for a step that designs or reviews, 'static' for docs pages, a rename, a version bump or other
-    mechanical work that names no code, else 'build'."""
+    """'top' for a new orchestrator's brief, 'review' for a step that reviews or checks, 'design' for one that
+    designs or decides, 'static' for docs pages, a rename, a version bump or other mechanical work that names no
+    code, else 'build'."""
     text = str(text or "")
+    if TOP.search(text):
+        return "top"
+    if REVIEWS.search(text):
+        return "review"
     if DESIGNS.search(text):
         return "design"
     if STATIC.search(text) and not CODE.search(text):
@@ -769,7 +788,7 @@ def child_level(text, brief=""):
     """{"model", "effort", "kind"} a worker is started with for a step or a brief: its kind's entry of
     CHILD_LEVELS, with what the brief itself names laid over it, and the effort held to PARENT_EFFORT. `model` is
     'inherit' for the parent session's own."""
-    kind = child_kind(text if str(text or "").strip() else brief)
+    kind = "top" if TOP.search(str(brief or "")) else child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
     said = said_level(brief or text)
     if said:
@@ -780,9 +799,9 @@ def child_level(text, brief=""):
 
 
 def level_keys(level):
-    """The `model` and `effort` keys of a start call: `model` is left out to inherit the parent session's, which is
-    how the app's tool takes it, so a call always carries `effort` and never neither."""
-    out = {"effort": level["effort"]}
+    """The `model` and `effort` keys of a start call: each is left out to inherit the parent session's, which is
+    how the app's tool takes it, "Omit to inherit"; only an orchestrator's start carries neither."""
+    out = {} if str(level.get("effort") or "").lower() == "inherit" else {"effort": level["effort"]}
     if str(level.get("model") or "inherit").lower() != "inherit":
         out["model"] = level["model"]
     return out
@@ -792,10 +811,12 @@ def level_line(level):
     """The one line a brief says its model and effort in, so the choice is visible to the child and its reader."""
     model = ("the parent session's own model" if str(level.get("model") or "inherit").lower() == "inherit"
              else level["model"])
-    why = "named by the parent session" if level.get("said") else f"since this is {CHILD_KINDS[level['kind']]}"
+    why = ("named by the parent session" if level.get("said") else
+           f"since this is {CHILD_KINDS[level['kind']]}, as the skill sub-agentic gives it")
     if level.get("capped"):
         why += ", held to the parent session's own effort"
-    return f"Model and effort: {model} at {level['effort']} effort, {why}."
+    effort = "its own" if str(level["effort"]).lower() == "inherit" else level["effort"]
+    return f"Model and effort: {model} at {effort} effort, {why}."
 
 
 def with_level(call, text=""):
@@ -827,6 +848,8 @@ def level_words(text):
     level = child_level(text)
     model = ("no `model`, so it inherits this session's" if str(level["model"]).lower() == "inherit"
              else f"`model` `{level['model']}`")
+    if str(level["effort"]).lower() == "inherit":
+        return f"{model}, and no `effort`, so it inherits this session's"
     return f"{model}, `effort` `{level['effort']}`"
 
 
@@ -834,9 +857,11 @@ LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work c
               "`Model and effort: <model> at <effort> effort`.")
 # No line tells a session to read the plan limits before a start or an Agent call: how much of the plan a piece of
 # work spends is ezexe's, and a session neither weighs it nor stops for it.
-LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the kind of work decides: by "
-             "default static or mechanical work runs on a cheaper model at medium effort, and a build that changes "
-             "behaviour or a design or review step on this session's own model at high effort. An effort above this "
+LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the role of its work in the "
+             "skill `p4-phi:sub-agentic` decides: a build or a design is a writer's, on Opus at medium effort; a "
+             "review is a cross-check's and static or mechanical work an integrator's, each on Sonnet at medium "
+             "effort; a new top session is an orchestrator's, on this session's own. Read that skill before the "
+             "first start, and say the shape in the reply's first line ahead of the calls. An effort above this "
              "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
              "`Model and effort: <model> at <effort> effort`; to choose otherwise, pass another `model` or `effort` "
              "and say so in that line.")
@@ -844,7 +869,7 @@ LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps,
 
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
-    step that only reads to the built-in Explore subagent and each that only runs a command to a background
+    step that only reads to the subagent p4-phi:finder and each that only runs a command to a background
     command; said once per set. '' when no work step is new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -867,7 +892,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
                     f"it goes to {LEVEL_WHERE[level(g)]}, not a session")
         kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
-        hardest = next(st for k in ("design", "build", "static") for st, kd in zip(g, kinds) if kd == k)
+        hardest = next(st for k in ("top", "design", "build", "review", "static") for st, kd in zip(g, kinds) if kd == k)
         how = level_words(hardest.get("content"))
         if len(g) == 1:
             return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", with {how}"

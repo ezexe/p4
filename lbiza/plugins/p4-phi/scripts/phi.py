@@ -1346,10 +1346,11 @@ ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this bui
 # - The rule says nothing of waiting, sleeping or polling: the Agent tool's and the shell tools' own descriptions
 #   tell a session that a background subagent or command notifies it when it ends, and sub-agents.md says "A
 #   background subagent's results reach Claude as a completion notification in a later turn."
-# - sub-agents.md, "Built-in subagents", Explore: "A fast, read-only agent optimized for searching and analyzing
-#   codebases." Its model is "the parent conversation's model", so the rule names a small one on the call: "The
-#   per-invocation `model` parameter" is first in the page's model order, and "On an Agent tool call, the parameter
-#   takes a model alias, not a full model ID or `inherit`."
+# - sub-agents.md, "Built-in subagents", Explore: its model is "the parent conversation's model", so it ran small only
+#   while each call named `haiku`. "The `model` field in the subagent's definition" is second in the page's model
+#   order, so agents/finder.md, the skill sub-agentic's evidence finder, carries `model: haiku` and `effort: low`,
+#   and agents/writer.md and agents/integrator.md carry that table's writer and integrator: the right model runs
+#   with nothing a call or a project has to name.
 # - code-review-local.md: "`/code-review` is a bundled skill", "Claude can start `/code-review` on its own, without
 #   you typing the command", "In a terminal session, the review runs as a background subagent with its own context
 #   window", and "without `--fix`, the review's instructions ask Claude for a report only." The page calls that run
@@ -1369,17 +1370,28 @@ REVIEW = ("the bundled skill `code-review`, run with the Skill tool on that chan
           "`--fix`, so it reports and changes no file")
 # workflows.md, "Cost": "Claude Code picks each workflow agent's model in the same order it uses for subagents. A
 # model the script names for a stage counts as the per-invocation model in that order. When nothing else assigns one,
-# the agent runs on your session's model." No line of that page gives a workflow agent an effort of its own.
-WORKFLOW = ("A Workflow script names a model for each stage, since by the workflows page of the Claude Code docs \"A "
+# the agent runs on your session's model." No line of that page gives a workflow agent an effort of its own, but the
+# workflow-authoring reference Claude Code 2.1.330 ships gives `agent(prompt, opts)` the options `model?` and
+# `effort?`, where "opts.effort overrides the reasoning effort", so the skill sub-agentic's `agent(prompt, {model,
+# effort})` is a call the runtime takes.
+WORKFLOW = ("A Workflow script names a `model` and an `effort` for each stage, `agent(prompt, {model, effort})`, by "
+            "the role the skill `p4-phi:sub-agentic` gives it, since by the workflows page of the Claude Code docs \"A "
             "model the script names for a stage counts as the per-invocation model\" and an agent with none \"runs "
             "on your session's model\".")
 LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
-          "never held by it. A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
+          "never held by it. Before an Agent call, a fork, a Workflow call or a session start, the skill "
+          "`p4-phi:sub-agentic` decides whether to delegate at all, how many agents, and each one's type, `model` "
+          "and `effort` by its role, and the reply's first line says that shape ahead of the call. "
+          "A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
           "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
           + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
-          "such a read of a result that is no code change goes to the subagent `p4-phi:check`. A worker is "
-          "started with a `model` and an `effort` that fit its step, as the advice that hands out each start call "
-          "names them; an effort above this session's own is not accepted. " + WORKFLOW)
+          "such a read of a result that is no code change goes to the subagent `p4-phi:check`, on `sonnet` at "
+          "`medium` effort as its file says; a subagent that writes new content or changes behaviour is "
+          "`p4-phi:writer`, on `opus` at `medium`, and one that lands written work or verified findings is "
+          "`p4-phi:integrator`, on `sonnet` at `medium`. A worker is started with the `model` and the `effort` of its step's "
+          "role, as the advice that hands out each start call names them; an effort above this session's own is "
+          "not accepted. " + WORKFLOW + " After a run, the report says the agents launched and finished and what "
+          "they spent.")
 plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
@@ -2057,7 +2069,7 @@ TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|d
 def tree_checked(me, s, st):
     """An orchestrator's read-only check of its trees in a work step, such as a session list, `git log`,
     `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
-    step it is told once that the rest is a read for the built-in Explore subagent. None while they are few."""
+    step it is told once that the rest is a read for the subagent `p4-phi:finder`. None while they are few."""
     key = nudge_key(st)
     held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
     n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1

@@ -1046,8 +1046,8 @@ class Levels(unittest.TestCase):
         p = self.t.proj
         ctx = self.plan(TOP, items("Find where the exporter is configured across src/", "Run test_flush.py",
                                    f"Port the exporter in {p}/src/export/flush.py to the new writer"))
-        self.assertIn("which only reads or searches: it goes to the built-in subagent `Explore`, with `model` `haiku` "
-                      "on the Agent call, not a session", ctx)
+        self.assertIn("which only reads or searches: it goes to the plugin's subagent `p4-phi:finder`, which runs on "
+                      "`haiku` at `low` effort as its file says, not a session", ctx)
         self.assertIn("which only runs a command: it goes to a Bash or PowerShell call of its own with "
                       "`run_in_background: true`, not a session", ctx)
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
@@ -1090,8 +1090,8 @@ class Levels(unittest.TestCase):
         self.assertEqual(plans.said_level("Model: sonnet\nEffort: medium"), {"model": "sonnet", "effort": "medium"})
         call = plans.with_level({"context": "fresh", "title": "the ranker",
                                  "prompt": "Rebuild it in train.py.\nModel: ranker.pt is rebuilt"})
-        self.assertNotIn("model", call, "its kind's choice stands: a build inherits")
-        self.assertEqual(call["effort"], "high")
+        self.assertEqual((call["model"], call["effort"]), ("claude-opus-5-5", "medium"),
+                         "its kind's choice stands: a build is a writer's")
 
     def test_the_advice_for_a_batch_of_starts_names_no_read_of_the_plan_limits(self):
         """The advice of plans.top_advice for two work steps tells a session to read no plan limit: how much of the
@@ -1117,8 +1117,8 @@ class Levels(unittest.TestCase):
         import starts
         docs, script = "Write the puppeteer pages under docs/", "Change how plans.py reads the address of a step"
         self.assertEqual(plans.child_level(docs), {"model": "claude-sonnet-5-5", "effort": "medium", "kind": "static"})
-        self.assertEqual(plans.child_level(script), {"model": "inherit", "effort": "high", "kind": "build"})
-        self.assertEqual(plans.child_level("Review the relay's design")["kind"], "design")
+        self.assertEqual(plans.child_level(script), {"model": "claude-opus-5-5", "effort": "medium", "kind": "build"})
+        self.assertEqual(plans.child_level("Review the relay's design")["kind"], "review")
         self.assertEqual(plans.child_kind("Bump the version to 0.10.1"), "static")
         self.assertEqual(plans.child_kind("Rename the README's headings and fix phi.py"), "build", "code decides")
         s = relay._session(self.t.p4, TOP)
@@ -1126,7 +1126,7 @@ class Levels(unittest.TestCase):
             {"addr": "1", "content": docs, "status": "pending"},
             {"addr": "2", "content": script, "status": "pending"}]}, True, "")
         self.assertIn(f"\"{docs}\", with `model` `claude-sonnet-5-5`, `effort` `medium`", said)
-        self.assertIn(f"\"{script}\", with no `model`, so it inherits this session's, `effort` `high`", said)
+        self.assertIn(f"\"{script}\", with `model` `claude-opus-5-5`, `effort` `medium`", said)
         self.assertIn("Each brief says them in one line, `Model and effort: ", said)
         brief = "Write the puppeteer pages. Report when done.\nFiles: docs/puppeteer.html"
 
@@ -1138,14 +1138,13 @@ class Levels(unittest.TestCase):
         rid, call = requested("docs: the puppeteer pages", brief)
         self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
         self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
-                      "work.\n\n" + starts.marker(rid, TOP), call["prompt"])
+                      "work, an integrator's, as the skill sub-agentic gives it.\n\n" + starts.marker(rid, TOP), call["prompt"])
         self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
         brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
         _, call = requested("the relay lock", brief2)
-        self.assertNotIn("model", call, "left out, which is how the app's tool inherits the parent session's model")
-        self.assertEqual(call["effort"], "high")
-        self.assertIn("Model and effort: the parent session's own model at high effort, since this is a build that "
-                      "changes behaviour", call["prompt"])
+        self.assertEqual((call["model"], call["effort"]), ("claude-opus-5-5", "medium"), "a writer's")
+        self.assertIn("Model and effort: claude-opus-5-5 at medium effort, since this is a build that "
+                      "changes behaviour, a writer's", call["prompt"])
         own = brief2 + "\nModel: claude-haiku-5-5\nEffort: low"
         _, call = requested("the relay lock, cheaply", own)
         self.assertEqual((call["model"], call["effort"]), ("claude-haiku-5-5", "low"),
@@ -1161,7 +1160,7 @@ class Levels(unittest.TestCase):
             self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
         self.assertIn("with the `model` and `effort` its kind of work gets", phi.new_top_route())
         self.assertIn("carrying the `model` and `effort` named beside its step", plans.CARD_EACH)
-        self.assertIn("A worker is started with a `model` and an `effort` that fit its step", phi.LEVELS)
+        self.assertIn("A worker is started with the `model` and the `effort` of its step's role", phi.LEVELS)
         old = plans.CHILD_LEVELS
         try:
             relay._write_json(os.path.join(self.t.p4, "p4.json"),
@@ -1169,7 +1168,7 @@ class Levels(unittest.TestCase):
                                                         "build": {"effort": "loud"}}}})
             phi.project_conf(self.t.p4)
             self.assertEqual(plans.child_level(docs), {"model": "claude-haiku-5-5", "effort": "low", "kind": "static"})
-            self.assertEqual(plans.child_level(script)["effort"], "high", "an effort the app does not have is ignored")
+            self.assertEqual(plans.child_level(script)["effort"], "medium", "an effort the app does not have is ignored")
         finally:
             plans.CHILD_LEVELS = old
 
@@ -1244,24 +1243,25 @@ class ParentEffort(unittest.TestCase):
         ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
                                    f"Rewrite the parser in {p}/src/parse.py for the new grammar", "Commit and push"),
                         effort={"level": "medium"})
-        self.assertIn("with no `model`, so it inherits this session's, `effort` `medium`", ctx)
+        self.assertIn("with `model` `claude-opus-5-5`, `effort` `medium`", ctx)
         for above in ("high", "xhigh", "max"):
             self.assertNotIn(f"`effort` `{above}`", ctx, "no start is named above its starter's effort")
         self.assertEqual(relay._session(self.t.p4, TOP).get("effort"), "medium", "the level seen is kept on the record")
-        plans.PARENT_EFFORT = "medium"
+        plans.PARENT_EFFORT = "low"
         self.assertEqual(plans.child_level(self.BUILD),
-                         {"model": "inherit", "effort": "medium", "kind": "build", "capped": True})
+                         {"model": "claude-opus-5-5", "effort": "low", "kind": "build", "capped": True})
         call = plans.with_level({"context": "fresh", "title": "the step address",
                                  "prompt": "Change how plans.py reads the address of a step.\nFiles: scripts/plans.py"})
-        self.assertEqual(call["effort"], "medium")
-        self.assertIn("Model and effort: the parent session's own model at medium effort, since this is a build that "
-                      "changes behaviour, held to the parent session's own effort.", call["prompt"])
+        self.assertEqual(call["effort"], "low")
+        self.assertIn("Model and effort: claude-opus-5-5 at low effort, since this is a build that changes behaviour, "
+                      "a writer's, as the skill sub-agentic gives it, held to the parent session's own effort.", call["prompt"])
         own = plans.with_level({"context": "fresh", "title": "x", "prompt": "Fix relay.py.\nEffort: max"})
-        self.assertEqual(own["effort"], "medium", "an effort the brief names itself is held to the starter's too")
+        self.assertEqual(own["effort"], "low", "an effort the brief names itself is held to the starter's too")
 
     def test_an_effort_at_or_below_the_starters_is_named_as_its_kind_gives_it(self):
-        for mine, docs, build in (("", "medium", "high"), ("low", "low", "low"), ("medium", "medium", "medium"),
-                                  ("high", "medium", "high"), ("xhigh", "medium", "high"), ("max", "medium", "high")):
+        for mine, docs, build in (("", "medium", "medium"), ("low", "low", "low"), ("medium", "medium", "medium"),
+                                  ("high", "medium", "medium"), ("xhigh", "medium", "medium"),
+                                  ("max", "medium", "medium")):
             plans.PARENT_EFFORT = mine
             self.assertEqual((plans.child_level(self.DOCS)["effort"], plans.child_level(self.BUILD)["effort"]),
                              (docs, build), mine or "no level seen")
@@ -2421,8 +2421,7 @@ class WaitsOnReports(unittest.TestCase):
             self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"tu-r{k}"), "", cmd)
         said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
         self.assertIn("has now run 7 read-only checks of its trees here", said)
-        self.assertIn("hand it to the built-in subagent `Explore`, with `model` `haiku` on the Agent call", said)
-        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a read")
+        self.assertIn("hand it to the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says", said)
         self.assertNotIn("worker", said)
         self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
         self.assertIn("is work: hand it to a worker",
