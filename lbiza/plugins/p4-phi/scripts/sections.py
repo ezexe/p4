@@ -31,6 +31,7 @@ def parse(text, base=""):
     top = TITLE.search(bare)
     marks = list(HEAD.finditer(bare))
     out = []
+    taken = {n.group(1) for n in (NUMBER.match(m.group(1)) for m in marks) if n}   # every number a heading opens with
     for k, m in enumerate(marks):
         body = bare[m.end():marks[k + 1].start() if k + 1 < len(marks) else len(bare)]
         files = starts.files_of(body, base)
@@ -38,8 +39,13 @@ def parse(text, base=""):
             continue
         n = NUMBER.match(m.group(1))
         after, checks = DEPENDS.search(body), CHECKS.search(body)
-        said = starts.FILES_LINE.search(body).group(1).strip()   # the plan's own words, for a worker's own worktree
-        out.append({"n": n.group(1) if n else str(len(out) + 1), "head": m.group(1), "files": files, "said": said,
+        said = starts.LIST_END.split(starts.FILES_LINE.search(body).group(1).strip(), 1)[0].strip().rstrip(".")
+        if n:
+            num = n.group(1)
+        else:                                      # the first number no heading opens with and no section took
+            num = next(str(i) for i in range(1, len(marks) + 2) if str(i) not in taken)
+            taken.add(num)
+        out.append({"n": num, "head": m.group(1), "files": files, "said": said,
                     "after": re.findall(r"\d+", after.group(1)) if after else [],
                     "checks": checks.group(1).rstrip(".") if checks else ""})
     return (top.group(1) if top else "plan"), out

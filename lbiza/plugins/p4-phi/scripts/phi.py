@@ -4398,6 +4398,9 @@ def main(argv=None):
                 print(line)
             return 0
         if a.cmd == "sections":                    # an approved plan's runs, each as the start of the worker that lands it
+            if not os.path.isfile(os.path.abspath(a.plan)):
+                print(f"phi: no plan file at {os.path.abspath(a.plan)}", file=sys.stderr)
+                return 2
             out = sections.calls(os.path.abspath(a.plan), os.getcwd())
             if not out:
                 print("phi: no section of that plan names files on a `Files:` line, so it has no run to start",
@@ -4405,6 +4408,9 @@ def main(argv=None):
                 return 2
             for call in out:
                 print("`mcp__ccd_session__start_session` with " + json.dumps(call, ensure_ascii=False))
+            print("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each "
+                  "call there with `initiation` `own_initiative` and without `wake_when_done`, which shows a card "
+                  "ezexe presses.")
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps

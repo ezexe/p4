@@ -97,6 +97,14 @@ class Sections(unittest.TestCase):
         self.assertNotIn("export.md", first["prompt"])
         self.assertIn("Done looks like: every fence of section 3 landed, committed and reported.", second["prompt"])
 
+    def test_a_heading_with_no_number_takes_a_free_one_and_a_files_line_ends_where_its_list_ends(self):
+        text = ("# A plan\n\n## Setup\n\n- **Files:** `a.py`\n\n## 1. The writer\n\n"
+                "- **Files:** `b.py`. The second is new, and so is its test.\n")
+        title, found = sections.parse(text, self.base)
+        self.assertEqual([s["n"] for s in found], ["2", "1"])
+        self.assertEqual([[s["n"] for s in run] for run in sections.runs(found)], [["2"], ["1"]])
+        self.assertIn("\nFiles: `b.py`\n", sections.brief(self.path, title, [found[1]]))
+
     def test_a_plan_with_no_files_line_has_no_run(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")
