@@ -778,11 +778,12 @@
   },
   "$.ui.panes": {
    "kind": "method",
-   "used": [
-    "p4-phi"
-   ],
-   "says": "Lists this plugin's own open panes (UiPane): each one's id and title, and whether it is shown, holds the keyboard, and is placed.",
-   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
+   "declined": {
+    "p4-phi": "its pane's close is told at `ui.close`, so it lists no pane.",
+    "p4-temportal": "it draws nothing.",
+    "p4-native": "it draws no pane."
+   },
+   "says": "Lists this plugin's own open panes (UiPane): each one's id and title, and whether it is shown, holds the keyboard, and is placed."
   },
   "$.ui.place": {
    "kind": "method",
@@ -3735,17 +3736,15 @@
   },
   "ui.close": {
    "kind": "event",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace the read of `$.ui.panes` after each look, which tells whether the person closed its pane, with the pane's own close, once a test can raise that event."
-   },
    "declined": {
     "p4-temportal": "it draws nothing.",
     "p4-native": "it draws no pane."
    },
-   "says": "The pane closing and why (PaneCloseOrigin)."
+   "says": "The pane closing and why (PaneCloseOrigin).",
+   "nowatch": "Only a hooks module hooks it, and at an `unload` a pane's own opener is not told: a session has no call that does this by hand."
   },
   "vcs.detect": {
    "kind": "event",

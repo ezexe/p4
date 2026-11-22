@@ -3,6 +3,8 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, SessionUsage } from 'claude-code'
 
+import { paneAfterClose } from './register'
+
 const DATA = '/home/u/.claude/plugins/data/p4-phi-inline'
 const KEPT = '/opt/python/bin/python3'
 const FOLDER = '/work/project/.claude/p4/phi/sessions/local_top00001'
@@ -124,6 +126,8 @@ type Seen = {
   // How often the module's call of `$.process.hookEnv` came down, which a build with no such method never does.
   envs: number
   panes: { id: string; title?: string }[]
+  // How often the module asked for the list of its panes.
+  listed: number
 }
 
 // What Claude Code answers a call of one of the plugin's tools that came to its run and found no hook there, in
@@ -173,6 +177,7 @@ function machine(on: On, has: Machine): Seen {
     infos: 0,
     envs: 0,
     panes: [],
+    listed: 0,
   }
   on('command.register', (_, e) => {
     seen.commands.push({ name: e.name, description: e.description })
@@ -184,15 +189,19 @@ function machine(on: On, has: Machine): Seen {
 
     return { value: has.unplaced === undefined ? { isPlaced: true } : { isPlaced: false, reason: has.unplaced } }
   })
-  on('ui.panes', () => ({
-    value: seen.panes.map(pane => ({
-      id: pane.id,
-      title: pane.title ?? pane.id,
-      isShown: true,
-      isFocused: false,
-      isPlaced: has.unplaced === undefined,
-    })),
-  }))
+  on('ui.panes', () => {
+    seen.listed += 1
+
+    return {
+      value: seen.panes.map(pane => ({
+        id: pane.id,
+        title: pane.title ?? pane.id,
+        isShown: true,
+        isFocused: false,
+        isPlaced: has.unplaced === undefined,
+      })),
+    }
+  })
   on('command.run', async (_, e) => {
     seen.ran.push({ command: e.command, args: e.args })
     await has.goalWaits?.()
@@ -2315,13 +2324,22 @@ test('while the pane is open each look reads the pages anew, and the open drawin
   expect(seen.wrote.length).toBe(wrote)
   expect(seen.read.filter(path => path.endsWith('/ledger.md')).length).toBeGreaterThan(1)
 
-  // Once the person closed the pane a look reads no page.
-  seen.panes.length = 0
-  await clock.advance(5_000)
-  const read = seen.read.length
-  await clock.advance(60_000)
-  expect(seen.read.length).toBe(read)
+  // The module asks for no list of its panes: a close tells it, at `ui.close`.
+  expect(seen.listed).toBe(0)
   await ui.unmount()
+})
+
+test("a close of p4-phi's pane leaves it closed, whoever closed it, and a close of another pane leaves it as it was", () => {
+  // `claude plugin test` has no call that raises `ui.close`, so the hook's own function is handed the event's
+  // input: the pane's id and who closed it, as the engine stamps it.
+  for (const kind of ['person', 'plugin', 'unload']) {
+    expect(paneAfterClose(true, { id: 'p4-phi', origin: { kind } })).toBe(false)
+    expect(paneAfterClose(false, { id: 'p4-phi', origin: { kind } })).toBe(false)
+    expect(paneAfterClose(true, { id: 'another-pane', origin: { kind } })).toBe(true)
+    expect(paneAfterClose(false, { id: 'another-pane', origin: { kind } })).toBe(false)
+  }
+  // An input that names no origin is read by its pane alone.
+  expect(paneAfterClose(true, { id: 'p4-phi' })).toBe(false)
 })
 
 test('a session with no board and no ledger is told so in the pane, and a long page is cut with its path', async ($, on) => {

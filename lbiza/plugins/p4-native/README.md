@@ -154,8 +154,8 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `command`: 131 rows, 22 used, 0 open, 109 declined, 0 weighed by nobody
 - `tool`: 124 rows, 55 used, 1 open, 68 declined, 0 weighed by nobody
 - `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
-- `event`: 60 rows, 18 used, 1 open, 41 declined, 0 weighed by nobody
-- `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
+- `event`: 60 rows, 19 used, 0 open, 41 declined, 0 weighed by nobody
+- `method`: 100 rows, 36 used, 0 open, 64 declined, 0 weighed by nobody
 - `used`: 147 rows, 54 watched by a row of misses.ts, 93 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
@@ -175,7 +175,12 @@ The event is in the types of Claude Code from 2.1.328 on, the module names it un
 `ExitPlanMode` stays offered, so a plan made where ezexe typed `/plan` in such a session is still put to ezexe.
 Seen in a scripted session on 2.1.328 and on 2.1.330, with a probe plugin that answered so for `Read`: the model replied that it has no such tool.
 Not seen: `EnterPlanMode` withheld in a session, since a scripted run has no such tool and the desktop app's sessions run 2.1.326.
-`ui.close` is open, by which p4-phi would hear its pane close, where it reads `$.ui.panes` after each look.
+`ui.close` is used since p4-phi 0.11.130: its module hears its pane close there, by the person's close or a plugin's, and counts it closed from then, where it asked `$.ui.panes` after each look.
+So `$.ui.panes` is declined by all three now, and no look lists a pane.
+What the event does not tell is an `unload`, at which by the types a pane's own opener is not told: p4-phi's drawing answers for its own faults, so its pane goes that way only with the plugin itself.
+`claude plugin test` has no call that raises the event, so a test hands the hook's own function the event's input.
+Seen in a scripted session on Claude Code 2.1.328 and on 2.1.330, with a probe plugin: a `$.ui.close` raised `ui.close` at a hook of the plugin, with the pane's id and the origin `plugin`.
+Not seen: a person's own close, which takes ezexe's click, and a close in the desktop app's Claude Code 2.1.326.
 `ui.close` is in the types of 2.1.326, 2.1.328 and 2.1.330, and under `claude plugin test` of 2.1.328 and 2.1.330 `$.ui.close` is not a function, so no test can raise it.
 So the record holds 60 module events and 100 module methods, where the paragraphs below count the 51 and the 93 of 2.1.326.
 Nobody had walked them before: 20 of the 33 hook events, 36 of the 51 module events and 50 of the 80 module methods were used by no p4 plugin and weighed by nobody.

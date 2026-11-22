@@ -356,6 +356,23 @@ let shellModel: { at: number; isWeighted: boolean } | undefined
 let isPaneOpen = false
 let paged: string | undefined
 
+// What a close of a pane leaves of that, given how it stood, and it is all the hook at `ui.close` does: a close of
+// p4-phi's own pane leaves it closed, so a look reads its pages no more, and a close of any other pane leaves it
+// as it was. By the
+// types of `claude-code` every close raises `ui.close` with the pane's `id` and an `origin`: `person` for the
+// person's close mark or close key, `plugin` for a plugin's `$.ui.close`, and `unload` for a pane nothing draws any
+// more, "its plugin unloaded, or its drawing threw", at which "its opener's hooks do not run". p4-phi's drawing
+// answers for its own faults, so its pane goes at `unload` only with the plugin itself, and a module that is told
+// of an `unload` of its pane all the same leaves it closed too.
+// Until p4-phi 0.11.130 a look asked `$.ui.panes` whether the pane was still there, once after each look.
+// `claude plugin test` has no call that raises the event, and the module a test file imports is a second copy of
+// the one the kit loads, so the function takes how the pane stood and a test calls it with the event's input. Seen
+// in a scripted session on Claude Code 2.1.328 and on 2.1.330, with a probe plugin: a `$.ui.close` raised
+// `ui.close` with `{ id, origin: { kind: "plugin" } }` at a hook of the plugin.
+export function paneAfterClose(isOpen: boolean, e: { id: string; origin?: { kind?: string } }): boolean {
+  return e.id === PANE ? false : isOpen
+}
+
 // The app's own tools: one of them rejected or refused a call, so none is called again while the module lives.
 // The calls not yet settled, since a call given up on can still be running, and when the last round began. The
 // sidebar's tools are another server's, which a session can lack by itself.
@@ -748,7 +765,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
-    if (isPaneOpen) void repage($)
+    if (isPaneOpen) void page($)
     // One turn at most for one look: a goal to set first, whose command starts its own turn, then the work a wait
     // left unmoved, else the upkeep that is due.
     const prompt = answer?.move || answer?.upkeep
@@ -1326,20 +1343,6 @@ async function page($: EngineInterface): Promise<void> {
   }
 }
 
-// After a look, while the pane is open: the pages read anew. A pane the person closed since is read for no more.
-async function repage($: EngineInterface): Promise<void> {
-  try {
-    if (!(await $.ui.panes()).some(pane => pane.id === PANE)) {
-      isPaneOpen = false
-
-      return
-    }
-  } catch {
-    // an engine that lists no panes: the pages are read all the same
-  }
-  await page($)
-}
-
 // The command `/phi-pane`: the pages as they stand, and then the pane. A pane a command of the person's opens is
 // placed at any width, by the types of `$.ui.open`, and where no surface places one the answer says why.
 async function openPane($: EngineInterface): Promise<string> {
@@ -1640,6 +1643,14 @@ export const register: Register = on => {
   on('command.run', { command: 'phi-pane' }, async $ => ({ text: await openPane($) })).catch(() => ({
     text: 'p4-phi could not open its pane.',
   }))
+
+  // A pane closes: p4-phi's own counts as closed from here, and the close goes on as it came, since a hook that
+  // answers without `next` keeps the pane open.
+  on('ui.close', ($, e, next) => {
+    isPaneOpen = paneAfterClose(isPaneOpen, e)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
 
   // The pane's body, drawn from the pages a look or the command put in `$.state`: the read subscribes the drawing,
   // so a later write draws it again, and a drawing writes nothing. The tree is built with `h`, the factory JSX
