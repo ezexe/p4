@@ -62,8 +62,8 @@ HEADERS = {
                  "Written when a claim is verified; a claim without a source stays out.",
                  "Fields: claim, source, verified, by, time, from, supersedes."),
     VOCABULARY: ("ezexe's words a session misread, what they mean, and the exchange that proves it.",
-                 "Written by migrate.py from corrections, retractions, missed details, repeats and follow-ups; the "
-                 "teacher model fills in meanings, and ezexe edits it freely.",
+                 "Written from corrections, retractions, missed details, repeats and follow-ups; the teacher model "
+                 "fills in meanings, and ezexe edits it freely.",
                  "Fields: term, means, means-by, because, source, points-at, added, status; status is on or off."),
     MESSAGES: ("Every message one session received: when it came, how it arrived, and what was done about it.",
                "Opened by the prompt hook and completed by the close hook from the reply.",
@@ -271,8 +271,7 @@ def mask_hit(value, fields, ms, rule="new"):
     """(retraction id, time, why) for the first retraction that frees an entry, or None.
 
     Under the rule "new", equal owner-words free an entry unless both are dated and the entry is no older than the
-    retraction; under "old" they free it whatever the dates, and migrate.finding17 lists the rulings the two rules
-    part on. Under both, an entry's head and a retraction's `freed:` text free it when one contains the other and
+    retraction; under "old" they free it whatever the dates. Under both, an entry's head and a retraction's `freed:` text free it when one contains the other and
     the shorter is at least MASK_MIN characters long."""
     head, own = norm_text(value), norm_text(fields.get("owner-words", ""))
     stamp = str(fields.get("time", "")).strip()

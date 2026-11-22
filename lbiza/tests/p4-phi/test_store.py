@@ -8,7 +8,7 @@ It is a stdlib unittest file, and pytest collects it too.
 FIXTURES is the folder P4_FIXTURES names, or a default path without it. Every test builds its own small store in a
 temp directory; the case on the ap-p4_mac store's six rulings lives in the experiments repository ezexe/p4-phi, at
 experiments/p4-suite/test_store.py. fixture, make_store and write serve the tests of
-test_query.py, test_labels.py, test_train.py, test_hooks.py, test_migrate.py and test_teacher.py too.
+test_query.py, test_labels.py, test_train.py, test_hooks.py and test_teacher.py too.
 """
 
 import os

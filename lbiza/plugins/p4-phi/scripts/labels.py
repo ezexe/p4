@@ -7,8 +7,8 @@ as_label gives each source's weight. Three files under the store's phi/models/ h
 
   labels-raw.tsv  the labels drawn from the store's own records, before any teacher edit
                   columns: task, entry, label, source, weight, time, note
-                  pool          a pick a reader made in a `recall-pool.md` or an audit file of the layout that
-                                `p4.py migrate` converts, which that command imports
+                  pool          a pick a reader made in a `recall-pool.md` or an audit file of the per-session
+                                layout, as an earlier p4's migration imported it
                   store         `p4.py labels --from-history`: the documents that share rare terms with a completed
                                 message's reply, for a message whose session has no pool
                   short         the same command: a short message's prior reading
@@ -29,6 +29,7 @@ as_label gives each source's weight. Three files under the store's phi/models/ h
 training_labels joins labels-raw.tsv and labels.tsv into what a round trains on.
 """
 
+import datetime
 import json
 import os
 import re
@@ -297,13 +298,36 @@ def used(doc, rare_doc, hay_toks, hay_text, prompt_text):
 
 # --- the history labels of `p4.py labels --from-history` -------------------------------------------------
 
+MARKERS = ("no", "not", "i meant", "i mean", "should have", "incorrect", "wrong", "again")   # a correction opens so
+
+
+def fp(e):
+    """A message row's text: its fingerprint, unquoted, or its value."""
+    return st.unquote(e.fields.get("fingerprint", e.value))
+
+
+def turn_rows(rows):
+    """ezexe's own messages: notifications, agent messages and hook injections out."""
+    return [r for r in rows if not re.match(r"(?i)\s*(task notification|agent message|hook injection)",
+                                            r.fields.get("arrival", "")) and not fp(r).lstrip().startswith("<")]
+
+
+def minutes(a, b):
+    """The minutes from the time `a` to the time `b`, each `YYYY-MM-DD HH:MM`, or None where either is no time."""
+    try:
+        x = datetime.datetime.strptime(a[:16], "%Y-%m-%d %H:%M")
+        y = datetime.datetime.strptime(b[:16], "%Y-%m-%d %H:%M")
+        return (y - x).total_seconds() / 60
+    except (ValueError, TypeError):
+        return None
+
+
 def message_rows(files):
-    """`[(s8, rows)]` sorted by session, each session's rows cut to ezexe's own messages by migrate.turn_rows, which
+    """`[(s8, rows)]` sorted by session, each session's rows cut to ezexe's own messages by turn_rows, which
     drops task notifications, agent messages, hook injections and any message that opens with `<`."""
-    import migrate
     out = []
     for rel in sorted(k for k in files if k.startswith(st.MESSAGES + "/")):
-        out.append((rel[len(st.MESSAGES) + 1:-3], migrate.turn_rows(files[rel])))
+        out.append((rel[len(st.MESSAGES) + 1:-3], turn_rows(files[rel])))
     return out
 
 
@@ -480,9 +504,8 @@ def working_texts(p4, limit=200):
 
 
 def followed_up(p4, task):
-    import migrate
     s8 = (task.get("session") or "")[:8]
-    rows = migrate.turn_rows(st.load_file(p4, f"{st.MESSAGES}/{s8}.md")) if s8 else []
+    rows = turn_rows(st.load_file(p4, f"{st.MESSAGES}/{s8}.md")) if s8 else []
     for i, e in enumerate(rows[:-1]):
         if e.id == task["id"]:
             return is_follow_up(e, rows[i + 1])
@@ -490,15 +513,14 @@ def followed_up(p4, task):
 
 
 def is_follow_up(prev, cur):
-    """The follow-up detector: `cur` starts with one of the correction markers migrate.MARKERS, or it resembles
+    """The follow-up detector: `cur` starts with one of the correction markers MARKERS, or it resembles
     `prev` by st.resembles and was sent no more than 10 minutes after it. No test measures its precision."""
-    import migrate
-    text = st.norm_token(migrate.fp(cur))
-    if any(text == m or text.startswith(m + " ") for m in migrate.MARKERS):
+    text = st.norm_token(fp(cur))
+    if any(text == m or text.startswith(m + " ") for m in MARKERS):
         return True
-    close = migrate.minutes(prev.time, cur.time)
+    close = minutes(prev.time, cur.time)
     return close is not None and close <= 10 and st.resembles(set(text.split()),
-                                                               set(st.norm_token(migrate.fp(prev)).split()))
+                                                               set(st.norm_token(fp(prev)).split()))
 
 
 # --- repo labels: what a turn did with the repository's files --------------------------------------------

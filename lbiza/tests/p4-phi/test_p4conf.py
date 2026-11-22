@@ -98,18 +98,6 @@ class P4Conf(unittest.TestCase):
         for key, const in names.items():
             self.assertEqual(query[key], ast.literal_eval(consts[const]), key)
 
-    def test_a_migration_archives_under_phi_and_nothing_stays_flat(self):
-        """migrate --apply writes archive/ by its LAYOUT key, so after it and the layout move the top of .claude/p4
-        holds no archive/."""
-        import migrate
-        from test_migrate import old_tree
-        from test_store import NOW
-        p4 = old_tree(self.p4)
-        migrate.run(p4, None, apply=True, now=NOW)
-        p4conf.migrate_layout(p4, commit=False)
-        self.assertNotIn("archive", os.listdir(p4))
-        self.assertTrue(os.path.isdir(p4conf.sub(p4, "archive")))
-
     def test_an_archive_at_the_top_moves_under_phi_at_a_start(self):
         """A store with archive/ at the top, one of its files differing from phi/archive/'s, is moved by a start:
         the older copy is set aside in phi/.layout-conflicts/archive/ and the move is committed."""

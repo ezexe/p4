@@ -35,18 +35,15 @@
       Print the store's health: the corpus files' entries by state, the message rows, the vocabulary, the labels
       that name no indexed document, the counts of repo.py, deps.py, view.py and said.py, and the jargon rate of
       what retrieval would print.
-  migrate --p4 TREE [--out DIR] [--apply] [--now T] [--project D] [--report F]
-      Convert a store in the vlds plugin's layout into the store's files through migrate.py; without --apply it
-      writes only its report.
   teacher edit-labels|dictionary|facts [--limit N] [--re-edit] [--second-opinion N] [--max-usd X] [--estimate]
           [--fake]
       Run a paid batch of teacher.py, which no hook runs. edit-labels has the teacher model keep, drop or add the
       labels of each task; dictionary writes the meaning of each pending vocabulary entry; facts answers ezexe's
       recommendation questions from the current documentation, found by web search, into phi/store/facts.md.
 
-Every subcommand but migrate takes `--p4 <dir>`, the store's directory `.claude/p4` or the project that holds it,
+Every subcommand takes `--p4 <dir>`, the store's directory `.claude/p4` or the project that holds it,
 and without it finds the store from CLAUDE_PROJECT_DIR or the working directory; p4conf.migrate_layout first moves
-a store an older plugin wrote flat into the layout. migrate's --p4 is the tree it converts.
+a store an older plugin wrote flat into the layout.
 """
 
 import argparse
@@ -713,21 +710,8 @@ def cmd_train_eval(args, which):
     return train.cmd_train(args) if which == "train" else train.cmd_eval(args)
 
 
-def cmd_migrate(args, rest):
-    import migrate
-    argv = list(rest)
-    if args.p4 and "--p4" not in argv:
-        argv = ["--p4", args.p4] + argv
-    return migrate.main(argv)
-
-
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "migrate":
-        ap = argparse.ArgumentParser(prog="p4.py migrate", add_help=False)
-        ap.add_argument("--p4", default=None)
-        args, rest = ap.parse_known_args(argv[1:])
-        return cmd_migrate(args, rest)
     if argv and argv[0] == "teacher":
         import teacher
         return teacher.main(argv[1:])
@@ -782,7 +766,6 @@ def main(argv=None):
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("check")
     p.add_argument("--p4")
-    sub.add_parser("migrate", help="convert a store in the per-session layout: p4.py migrate --p4 <tree> [--out DIR] [--apply]")
     sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
     args = ap.parse_args(argv)
     if args.cmd == "index":

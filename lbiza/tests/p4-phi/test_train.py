@@ -192,8 +192,8 @@ class Rounds(unittest.TestCase):
         self.assertIn("train: round 1 ", r.stdout, "five new labels reach the store's three, and it waits no time")
 
     def test_pool_candidates_keep_held_entries(self):
-        """A pool label can name an entry picked while it was FREED or SPENT, and migrate.import_pools keeps the label
-        on that entry: its document is among the pool task's candidates, though the index never holds it."""
+        """A pool label can name an entry picked while it was FREED or SPENT, as an earlier p4's migration wrote it, keeps
+        the label on that entry: its document is among the pool task's candidates, though the index never holds it."""
         path = p4conf.sub(self.p4, "store", "rules.md")
         rules = [list(e.pairs) for e in st.load_file(self.p4, "rules.md")]
         rules.append([("ruling", "the axolotl relay once kept the bandicoot gauge by hand"), ("status", "FREED"),

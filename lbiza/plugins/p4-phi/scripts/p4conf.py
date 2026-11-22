@@ -178,7 +178,7 @@ LAYOUT = {
     "src": "temportal/src",
     "store": "phi/store",
     "models": "phi/models",
-    "archive": "phi/archive",      # what migrate.py keeps verbatim from a per-session tree, and its report
+    "archive": "phi/archive",      # what an earlier p4's migration kept verbatim from a per-session tree
     "plans": "temportal/plan-planner",   # the plan files, where plansDirectory points Claude Code, by plan-planner
 }
 # Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for the corpus
