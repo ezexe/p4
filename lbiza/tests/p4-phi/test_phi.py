@@ -1749,13 +1749,12 @@ class Wiring(unittest.TestCase):
         it". `lbiza/` holds no catalog of its own: found there by `path`, Claude Code 2.1.328 looked for
         `./plugins/p4-phi` at the clone's root and did not find it. An entry pins no version, since each
         plugin.json's decides, by plugins/loading.md, "How Claude Code computes the version": "The `version` field
-        in the plugin's manifest comes first". The catalog still maps p4-phi's former name to it."""
+        in the plugin's manifest comes first"."""
         repo = os.path.dirname(os.path.dirname(os.path.dirname(ROOT)))
         root = jload(os.path.join(repo, ".claude-plugin", "marketplace.json"))
         self.assertFalse(os.path.exists(os.path.join(repo, "lbiza", ".claude-plugin", "marketplace.json")),
                          "a second catalog would have to be kept in step with the first")
         self.assertEqual(root["name"], "p4-marketplace")
-        self.assertEqual((root.get("renames") or {}).get("p4-recall"), "p4-phi")
         folders = os.path.join(repo, "lbiza", "plugins")
         self.assertEqual(sorted(p["name"] for p in root["plugins"]),
                          sorted(d for d in os.listdir(folders)

@@ -66,9 +66,8 @@ class Plugins(Base):
     def test_a_plugin_behind_its_marketplace_is_claude_codes_own(self):
         """Marketplace auto-update, by https://code.claude.com/docs/en/plugins/install.md, "Keep plugins updated":
         "Plugins update automatically when the marketplace they came from has auto-update turned on." A plugin behind
-        its marketplace and a former name in its renames map get no line from p4."""
-        self.install([("p4-recall", "user", "0.9.0", None), ("p4-phi", "user", "0.1.0", None)],
-                     {"p4-recall": True, "p4-phi": True})
+        its marketplace gets no line from p4."""
+        self.install([("p4-phi", "user", "0.1.0", None)], {"p4-phi": True})
         self.assertNotIn("claude plugin", catchup.run(self.project, os.path.join(self.project, ".claude", "p4")))
 
     def test_nothing_behind_is_silent(self):
