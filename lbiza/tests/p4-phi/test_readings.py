@@ -210,6 +210,7 @@ class Run(unittest.TestCase):
             self.assertEqual(schema["required"], ["result", "question"])
             self.assertLessEqual({"result", "question", "wrote", "branch", "worktree"}, set(schema["properties"]))
             self.assertEqual(c["opts"]["phase"], "Readings")
+            self.assertEqual((c["opts"]["model"], c["opts"]["effort"]), ("opus", "medium"), "the writer's level")
         self.assertEqual(self.got["fork"]["phases"], ["Readings"])
         self.assertIn(f"The message: {WORDS}", calls[0]["prompt"], "the message's words reach each reading")
         self.assertIn("Your reading of it: a CSV file", calls[0]["prompt"])

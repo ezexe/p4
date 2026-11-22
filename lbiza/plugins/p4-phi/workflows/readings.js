@@ -2,7 +2,7 @@ export const meta = {
   name: 'readings',
   description: 'Work each distinct reading of an unclear message in an agent of its own, then compare what they came to',
   whenToUse: 'A message leaves two or more distinct readings open, and one start would have to guess between them',
-  phases: [{ title: 'Readings', detail: 'one agent for each reading, a reading that writes files in a git worktree of its own' }],
+  phases: [{ title: 'Readings', detail: 'one agent for each reading, a reading that writes files in a git worktree of its own', model: 'opus' }],
 }
 
 // args: {"words": "<the message>", "readings": ["<a reading>", {"text": "<a reading>", "writes": true}, ...]}
@@ -164,6 +164,9 @@ const got = await parallel(
         label: `reading ${r.k}`,
         phase: 'Readings',
         schema: RESULT,
+        // the writer's level of the skill sub-agentic's table: a reading is worked through to what it comes to
+        model: 'opus',
+        effort: 'medium',
         ...(r.writes ? { isolation: 'worktree' } : {}),
       })
       return { out, why: out ? '' : 'its agent was stopped or failed' }
