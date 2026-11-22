@@ -1737,6 +1737,72 @@ test('what a check says beside a call reaches the model with the result, once, a
   ).toEqual({})
 })
 
+// What the desktop app's send tool answered a message to a session whose turn was running, and one that session
+// began a turn on, each as seen on Claude Code 2.1.326.
+const TOLD_QUEUED =
+  '{"success":true,"message":"Forwarded to Claude Desktop\'s session messaging: Message queued for session ' +
+  'local_kid00001 (\\"port the flush\\"): that session is holding it (a turn is in progress there, or its host or ' +
+  "process is away) and runs it when that clears. Don't wait on it; check back with list_events if the outcome " +
+  'matters. (delivery: queued; message_id: bb2fd1a2-0847-47e4-8f37-8e788219a530); not confirmed read"}'
+const TOLD_DELIVERED =
+  '{"success":true,"message":"Forwarded to Claude Desktop\'s session messaging: Message delivered to session ' +
+  'local_kid00001 (\\"port the flush\\"); its turn has started on it. (delivery: delivered; message_id: ' +
+  '5bebaf6f-fc60-4c30-b68d-4de03db4dbf0); not confirmed read — that session may hold it"}'
+
+test('a sender whose message was queued is told what that means, and one whose message was delivered is told nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('classic.PostToolUse', () => ({ additionalContext: ['a row was written'] }))
+  on('classic.PostToolUseFailure', () => ({}))
+  const sent = { tool_input: { to: 'local_kid00001', message: 'the answer you wait on' }, tool_use_id: 'toolu_s1' }
+
+  for (const tool_name of ['SendMessage', 'mcp__ccd_session_mgmt__send_message']) {
+    const out = await $.classic.PostToolUse({ ...sent, tool_name, tool_response: TOLD_QUEUED })
+    const words = out.additionalContext ?? []
+    expect(words.length).toBe(2)
+    expect(words[0]).toBe('a row was written')
+    expect(words[1]).toContain("it waits for that session's turn to end")
+    expect(words[1]).toContain('`mcp__ccd_session_mgmt__stop_session` with its session id ends that turn')
+    expect(words[1]).toContain('this session started it')
+    expect(words[1]?.includes('\n')).toBe(false)
+  }
+  // The answer as an object, as a tool's structured result reaches a hook.
+  const whole = { success: true, message: 'Message queued for session local_kid00001. (delivery: queued; message_id: m1)' }
+  const again = await $.classic.PostToolUse({ ...sent, tool_name: 'SendMessage', tool_response: whole })
+  expect((again.additionalContext ?? []).length).toBe(2)
+
+  // A message the session began a turn on, another tool that prints the same words, and a send that failed.
+  expect(await $.classic.PostToolUse({ ...sent, tool_name: 'SendMessage', tool_response: TOLD_DELIVERED })).toEqual({
+    additionalContext: ['a row was written'],
+  })
+  expect(await $.classic.PostToolUse({ ...sent, tool_name: 'Bash', tool_response: TOLD_QUEUED })).toEqual({
+    additionalContext: ['a row was written'],
+  })
+  expect(
+    await $.classic.PostToolUseFailure({ ...sent, tool_name: 'SendMessage', error: '(delivery: undelivered; message_id: m2)' }),
+  ).toEqual({})
+  // The line starts no process: nothing ran but what a session's start runs.
+  expect(seen.checks).toEqual([])
+  expect(seen.asked).toEqual([])
+})
+
+test('with P4_PHI=0 a queued message is told nothing', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  mock.clock(on)
+  machine(on, {})
+  on('classic.PostToolUse', () => ({}))
+
+  expect(
+    await $.classic.PostToolUse({
+      tool_name: 'SendMessage',
+      tool_input: { to: 'local_kid00001', message: 'x' },
+      tool_use_id: 'toolu_s2',
+      tool_response: TOLD_QUEUED,
+    }),
+  ).toEqual({})
+})
+
 test('a question about a call nobody made, a call already refused and a check that fails judge nothing', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   mock.clock(on)

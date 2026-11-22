@@ -92,6 +92,25 @@ const CHECKED_TOOLS = new Set([
   'mcp__ccd_session_mgmt__archive_session',
   'mcp__ccd_session__start_session',
 ])
+// The tools that send a message to another session, and how the desktop app's answer names a message that waits.
+// The older tool's own text: "queued" means it is waiting behind that session's current work and runs when that
+// finishes, and every result ends with "(delivery: ...; message_id: ...)". Seen in the desktop app on Claude Code
+// 2.1.326: "Message queued for session ...: that session is holding it (a turn is in progress there, or its host
+// or process is away) and runs it when that clears."
+const SEND_TOOLS = new Set(['SendMessage', 'mcp__ccd_session_mgmt__send_message'])
+const QUEUED = /\(delivery: queued\b/
+// The desktop app's tool that ends another session's turn, by its own text "the same as the user pressing Stop
+// there. The session stays open and idle afterwards; a message already queued in it runs next", and "Usually no
+// prompt when the target is a session this session started". p4-phi calls it nowhere: it names it to a sender.
+const APP_STOP = 'mcp__ccd_session_mgmt__stop_session'
+// What a sender is told beside a queued answer, once for each such send. Seen on 2026-11-19 and again on
+// 2026-11-22: a worker waited inside its turn for an answer, the answer sat queued behind that wait, and it ran
+// only once the worker's starter stopped the turn.
+const QUEUED_LINE =
+  'phi (p4-phi): this message is queued and not read yet: it waits for that session\'s turn to end and begins ' +
+  'its next turn then, so no answer comes sooner. Where that session waits only on this message, and this session ' +
+  `started it, \`${APP_STOP}\` with its session id ends that turn and the queued message runs next.`
+
 // A shell call phi.py's branch guard reads: `git` as a word of the call's JSON text, where a newline, tab or
 // return beside it is the escape \n, \t or \r, so `cd a && git push` and `cd repo\ngit push` count, a `.` or `-`
 // after it counts, as in git.exe and git-lfs, and so does git after a path separator, as in /usr/bin/git and in
@@ -956,6 +975,21 @@ function toldOf(toolUseId: string): string[] {
   return words === undefined ? [] : [words]
 }
 
+// What a sender is told of a message that was queued: the line, where the call is one of the send tools and its
+// answer says the message waits. No process starts for it, and a session with P4_PHI=0 is told nothing.
+async function queued($: EngineInterface, tool: unknown, response: unknown): Promise<string[]> {
+  try {
+    if (!SEND_TOOLS.has(String(tool))) return []
+    const answer = typeof response === 'string' ? response : (JSON.stringify(response) ?? '')
+    if (!QUEUED.test(answer)) return []
+    switches ??= readSwitches($)
+
+    return (await switches).isPhiOff ? [] : [QUEUED_LINE]
+  } catch {
+    return []
+  }
+}
+
 // Declares the four tools, at a session's start and at each reload of the module. A session with P4_PHI=0 gets
 // none, since phi.py keeps nothing for it.
 async function offer($: EngineInterface): Promise<void> {
@@ -1354,10 +1388,11 @@ export const register: Register = on => {
   on('tool.check', async ($, e, next) => judged($, e, await next(e))).catch(($, e, next) => next(e))
 
   // What a check said beside a call that ran, handed to the model with the call's result as a PreToolUse command
-  // hook's context is. The PostToolUse command hooks run beneath, and their own context comes first.
+  // hook's context is. The PostToolUse command hooks run beneath, and their own context comes first. A send whose
+  // answer says the message was queued gets the line that says what that means.
   on('classic.PostToolUse', async ($, e, next) => {
     const out = await next(e)
-    const words = toldOf(e.tool_use_id)
+    const words = [...toldOf(e.tool_use_id), ...(await queued($, e.tool_name, e.tool_response))]
 
     return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
   }).catch(($, e, next) => next(e))

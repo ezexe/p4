@@ -2682,9 +2682,9 @@
   },
   "mcp__ccd_session_mgmt__stop_session": {
    "kind": "tool",
-   "declined": {
-    "p4-phi": "p4-phi stops no session."
-   }
+   "used": [
+    "p4-phi"
+   ]
   },
   "mcp__ccd_session_mgmt__unarchive_session": {
    "kind": "tool",

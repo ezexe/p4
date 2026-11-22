@@ -127,6 +127,7 @@ The book is whole on `book.md` in the session's folder, and a later line names o
 A message about a file, an issue or a piece of work goes straight to the session that holds that file, owns that issue or started that work.
 Before a `SendMessage` or `send_message` goes, p4-phi reads the paths and issue numbers it names against the book: one sent to neither the holder nor the session that started the holder is held with the holder named, and so is one to the puppeteer that names no matter of ezexe's.
 Each hold is said once for one message and recipient, so sending it again as it is goes through.
+Where the send tool answers that the message is queued, p4-phi says beside that answer what it means: the message waits for that session's turn to end, so no answer comes sooner. Where that session waits only on the message and this session started it, `mcp__ccd_session_mgmt__stop_session` with its session id ends that turn and the queued message runs next.
 A `Finding:` on a held file or an owned issue goes straight to its holder, named under the reports that carry it; only one no live session covers goes up for an issue.
 
 ## A puppeteer

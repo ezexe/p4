@@ -85,6 +85,12 @@ A turn that Claude Code's own `[Cross-session delivery notice]` began sends none
 By `cross-session-messaging.md`, "Control inbound messages", a session that bypasses permission prompts holds each message of one that does not, and the other way round, so a worker in another class of permission mode than its starter reaches it only once ezexe approves each message or `crossSessionInbound` is `accept`.
 p4-phi still keeps each report for the starter's next message, and names one that the message already holds without repeating it.
 It keeps them because a send is only queued: `plugins/mods/api.md` says the call "resolves once the message is queued", and `cross-session-messaging.md` says the receiving session may hold or refuse it and that a message reaches only a running session.
+A session's own send is told the same where it matters.
+In the desktop app a message to a session whose turn is running waits for that turn to end: the send tool's own text gives "queued" as "waiting behind that session's current work", and its answer then ends with `(delivery: queued; ...)`.
+At such an answer the module hands the sender one line beside the result, with no process started: the message waits for that session's turn to end, and where that session waits only on the message and the sender started it, `mcp__ccd_session_mgmt__stop_session` ends that turn and the queued message runs next.
+That is the stop tool's own text, "a message already queued in it runs next", and "Usually no prompt when the target is a session this session started".
+p4-phi calls that tool nowhere, and an answer that says `delivered` is told nothing.
+Seen on 2026-11-19 and on 2026-11-22: a worker waited inside its turn for an answer that sat queued behind that wait, fifteen minutes the first time, until its starter stopped the turn.
 
 A turn that ends on a step waiting on other sessions is let end, since a Stop hook can send back only the turn that is ending.
 The look that follows answers what does not depend on that wait: a child that reported done with a commit that closes an issue and is on no branch of origin, and an open step that is plain work no live child holds.
