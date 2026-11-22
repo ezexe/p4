@@ -1283,7 +1283,7 @@ NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arr
 # supported for Claude sessions on this machine in this release", with success false, and with a message attached
 # "no idle subscription was made", both seen for a session of the desktop app on Claude Code 2.1.326
 NOT_MADE = ("nothing was subscribed", "no idle subscription", '"success":false', '"success": false')
-OPENS = "Sweep the sessions this one started, as p4-phi's upkeep has it."
+OPENS = plans.SWEEP_MARK         # the sweep's opening words, which tell its prompt from a message of ezexe's
 SWEEP = (OPENS + " Read each live session with "
          "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
          + "mcp__terminal__list_terminal_tabs" + "`. Send on one that stopped with work left, by SendMessage to its "

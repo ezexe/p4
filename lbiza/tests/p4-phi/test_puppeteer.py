@@ -301,6 +301,41 @@ class Linear(Base):
         self.assertEqual(after, before, "no draft is kept for it")
         self.assertIn("routing read this message", context(t.say(TOP, RETRY)))
 
+    def test_the_sweeps_own_prompt_and_a_prompt_a_schedule_fired_draft_no_start(self):
+        """Seen in an orchestrator on p4-phi 0.11.137 when the job upkeep had handed it fired for the first time:
+        beside the prompt that opens "Sweep the sessions this one started, as p4-phi's upkeep has it." the hook
+        handed "routing read this message of ezexe's as work for a session of its own" with a start draft titled
+        by the sweep's words. The prompt is p4-phi's own, upkeep.SWEEP, and no person typed it. Seen in the
+        desktop app on Claude Code 2.1.326, for a one-shot `CronCreate`: the hooks module is handed the origin
+        kind `scheduled-trigger` for such a prompt. So a prompt with that origin holds no request of ezexe's,
+        whatever its words, and where no origin was kept the sweep's prompt is told by its opening words."""
+        import upkeep
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        drafts = os.path.join(t.dir(TOP), "drafts")
+
+        def kept():
+            return set(os.listdir(drafts)) if os.path.isdir(drafts) else set()
+
+        def said(prompt, prompt_id="", kind=""):
+            if kind:                                   # what the hooks module keeps for the prompt
+                write(os.path.join(t.dir(TOP), "origin.json"), json.dumps({"promptId": prompt_id, "kind": kind}))
+            return context(t.hook(PROMPT, TOP, {"hook_event_name": "UserPromptSubmit", "prompt": prompt,
+                                                "prompt_id": prompt_id}))
+        before = kept()
+        # the sweep's prompt with no origin kept, as on a build that loads no hooks module, and with its origin
+        for ctx in (said(upkeep.SWEEP), said(upkeep.SWEEP, "p-1", "scheduled-trigger")):
+            self.assertNotIn("routing read this message", ctx)
+            self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx)
+        # words a person stored for a schedule, which read as work: the origin says a schedule fired them
+        self.assertNotIn("routing read this message", said(RETRY, "p-2", "scheduled-trigger"))
+        self.assertEqual(kept(), before, "no draft is kept for any of the three")
+        self.assertEqual(t.session(TOP).get("turnBy"), "event", "and no person began that turn")
+        # the same words as ezexe's own message are drafted as before
+        self.assertIn("routing read this message", said(RETRY, "p-3", "composer"))
+        self.assertEqual(t.session(TOP).get("turnBy"), "user")
+
     def test_a_python_files_tests_are_found_in_the_tests_folders_above_it_too(self):
         """A project that keeps its tests in a `tests` folder, at its top or beside the code, as pytest's good
         practices lay a project out, has them named too: the folder nearest the file first, in each the file named

@@ -2309,8 +2309,9 @@ class Origins(unittest.TestCase):
         self.assertEqual(rows.whose({"kind": "plugin", "name": "p4-phi"}), "plugin")
         self.assertEqual(rows.whose({"kind": "plugin", "name": "notes", "asUser": True}), "user")
         self.assertEqual(rows.whose({"kind": "task-notification"}), "event")
+        self.assertEqual(rows.whose({"kind": "scheduled-trigger"}), "schedule")
         # the kinds that do not say whose words they carry are left to the head of the text
-        for kind in ("sdk", "unclassified", "scheduled-trigger", "auto-continuation", "channel", "observer",
+        for kind in ("sdk", "unclassified", "auto-continuation", "channel", "observer",
                      "observer-activity", "a-kind-of-a-later-release"):
             self.assertEqual(rows.whose({"kind": kind}), "", kind)
         self.assertEqual(rows.whose({}), "")
@@ -2333,6 +2334,38 @@ class Origins(unittest.TestCase):
                      "lib/goal is where the retry goes", "Give the exporter a /goal of its own",
                      "/ is the root, list what is in it", "/goal.md is the file to fix"):
             self.assertEqual(phi.request_of(said, "user"), said, said)
+
+    def test_every_reader_tells_a_scheduled_prompt_and_the_sweeps_own_from_ezexes_words(self):
+        """The types of `claude-code` give `scheduled-trigger` as "A scheduled task or /loop firing its stored
+        prompt": nobody typed it when it came. It holds no request, a puppeteer reads it as no message of
+        ezexe's, and its message row is answered like a turn and is not ezexe's. The sweep's prompt, which p4-phi
+        hands a session to schedule, is told the same way by its opening words where no origin was kept, and a
+        message that only quotes those words is still ezexe's."""
+        import plans
+        import puppeteer
+        import rows
+        import store as st
+        import upkeep
+        stored = "Port the flush to the new hook in hooks/flush.py"
+        self.assertEqual(phi.request_of(stored, "schedule"), "")
+        self.assertTrue(puppeteer.from_session(stored, "schedule"))
+        self.assertTrue(upkeep.SWEEP.startswith(plans.SWEEP_MARK))
+        for sweep in (upkeep.SWEEP, "<system-reminder>x</system-reminder>\n" + upkeep.SWEEP):
+            self.assertEqual(phi.request_of(sweep), "")
+            self.assertTrue(puppeteer.from_session(sweep))
+        self.assertTrue(rows.WAKE_RE.match(upkeep.SWEEP), "rows.py spells the sweep's opening as plans.py does")
+        self.assertFalse(plans.woken(upkeep.SWEEP), "the module submitted no prompt, so no wake is counted for it")
+        asked = "why did the hook draft a session for this: " + plans.SWEEP_MARK
+        self.assertEqual(phi.request_of(asked), asked)
+        self.assertFalse(puppeteer.from_session(asked))
+        p4 = os.path.join(self._tmp.name, "rows", ".claude", "p4")
+        os.makedirs(p4)
+        for k, (prompt, by) in enumerate(((stored, "schedule"), (upkeep.SWEEP, ""))):
+            rows.row_open(p4, f"s{k}", prompt, "2026-11-22 14:58", by=by)
+            e = st.parse(st.read_text(rows.session_file(p4, f"s{k}")), "messages/x.md")[-1]
+            self.assertEqual(e.fields["arrival"], "agent message", prompt[:30])
+            self.assertFalse(st.owner_message(e))
+            self.assertFalse(st.completed(e), "answered at the turn's end, like a turn")
 
     def test_the_origin_settles_what_the_head_of_a_text_can_only_suggest(self):
         import puppeteer

@@ -1415,6 +1415,10 @@ WAKE_MARK = "phi (p4-phi): the turn before this one ended on"
 # The prompt of a turn the module starts for upkeep, upkeep.wake, opens with this one. No prompt opens with it while
 # `phi.upkeep` is off.
 UPKEEP_MARK = "phi (p4-phi): upkeep is due"
+# The sweep's prompt, upkeep.SWEEP, opens with this one. The module submits no such prompt: p4-phi hands a session
+# one `CronCreate` with it, and Claude Code's schedule fires it, so no wake is counted for it. Its words are
+# p4-phi's own all the same, and no message of ezexe's to route.
+SWEEP_MARK = "Sweep the sessions this one started, as p4-phi's upkeep has it."
 
 
 def woken(prompt):

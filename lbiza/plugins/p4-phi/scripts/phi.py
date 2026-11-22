@@ -881,9 +881,10 @@ def request_of(prompt, by=""):
     `Background ... Task:` wrapper, and a forked one under the app's line `Task (from the session that started this
     one):`; this takes those off. A `<pasted_content id="..">` block is what a person pasted, so its inner text is
     the request, also when the message is nothing but the block. '' when nothing is left or what is left is Claude
-    Code speaking. `by` is whose words the prompt is by its origin, rows.whose: a background task's notification
-    and a plugin's prompt hold no request, ezexe's own message is one whatever it opens with, and where the origin
-    does not say, the opening of the text tells. A message that opens with a slash command holds none whoever sent
+    Code speaking. `by` is whose words the prompt is by its origin, rows.whose: a background task's notification,
+    a plugin's prompt and a prompt a schedule fired hold no request, ezexe's own message is one whatever it opens
+    with, and where the origin does not say, the opening of the text tells, the sweep's own prompt by
+    plans.SWEEP_MARK among them. A message that opens with a slash command holds none whoever sent
     it, relay.command_word: `/goal <condition>` reaches the prompt hooks as typed, Claude Code runs it, and routing
     drafted a session from its condition, titled `/goal For each of the three sessions`."""
     text = prompt if isinstance(prompt, str) else ""
@@ -897,13 +898,15 @@ def request_of(prompt, by=""):
     first = text.split(None, 1)[0] if text else ""
     if relay.command_word(first, relay.norm(first)):
         return ""                                  # a slash command, whoever typed or ran it: Claude Code runs it
-    if by in ("event", "plugin"):
-        return ""                                  # Claude Code or a plugin's hooks module speaking, by the origin
+    if by in ("event", "plugin", "schedule"):
+        return ""                                  # Claude Code, a plugin's module or a schedule, by the origin
     if by != "user":
         if text.startswith("<") and not PASTED.match(text):
             return ""                              # Claude Code speaking, whatever its body quotes
         if plans.woken(text):
             return ""                              # the plugin's hooks module speaking: the prompt of a turn it started
+        if text.startswith(plans.SWEEP_MARK):
+            return ""                              # p4-phi's own sweep, which a schedule fires: nobody typed it
         if plans.app_notice(text):
             return ""                              # the app speaking: its notice about a message this session sent
     # A paste is the person's message whatever it holds, but only where the message itself begins with the block or

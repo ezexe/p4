@@ -8,7 +8,8 @@ open   the UserPromptSubmit hook `recall` stamps a row: `fingerprint:`, the mess
        plugin's hooks module kept and origin_of reads, and from how the text opens where the origin does not say:
        HARNESS_RE, PEER_RE and WAKE_RE. A row of ezexe's also gets `resembles:`, naming the newest completed row
        of ezexe's in the session that resembles it by store.resembles. A notification is complete on arrival: `state: FRESH` and an
-       `addressed:` saying so. Another session's message is answered like a turn: its row stays open to the turn end.
+       `addressed:` saying so. Another session's message is answered like a turn: its row stays open to the turn end,
+       and so does the row of a prompt a schedule fired, which is `agent message` too since nobody typed it.
 close  at the turn end, the Stop hook `close` completes the session's last open row from the reply: `state:`,
        `addressed:`, the reply's first paragraph cut to 300 characters, `recommended:`, the reply's first sentence
        that recommends something, cut to 300 characters and empty when none, and `match:` when the row's
@@ -41,8 +42,10 @@ HARNESS_RE = re.compile(r"^\s*(?:<(task-notification|system-reminder|local-comma
                         r"(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?\[Cross-session (?:delivery|idle) notice\])",
                         re.I)
 PEER_RE = re.compile(r"^\s*(Another Claude session sent a message:\s*)?<cross-session-message\b", re.I)
-# the prompt of a turn p4-phi's hooks module started: it opens with plans.WAKE_MARK, and its words are not ezexe's
-WAKE_RE = re.compile(r"^\s*phi \(p4-phi\): the turn before this one ended on\b")
+# the prompt of a turn p4-phi's hooks module started: it opens with plans.WAKE_MARK, and its words are not ezexe's.
+# Nor are those of the sweep's own prompt, which a schedule fires and which opens with plans.SWEEP_MARK.
+WAKE_RE = re.compile(r"^\s*(?:phi \(p4-phi\): the turn before this one ended on\b"
+                     r"|Sweep the sessions this one started, as p4-phi's upkeep has it\.)")
 # a sentence that hands ezexe a recommendation: recommendation phrasing only, not every `should`
 RECOMMEND_RE = re.compile(r"(?i)\b(recommend|suggest|better to|prefer(red|able)?|the right way|instead of|rather than|"
                           r"go with|best (way|option|practice)|i'?d (use|go|pick|keep|pin|set)|the fix is|"
@@ -69,8 +72,14 @@ SESSION_KINDS = frozenset(("peer", "peer-send-message", "coordinator", "projects
 # the desktop app is such a host: its unstamped deliveries, as a handed-over brief, a `<side-sessions-event>` and a
 # Stop hook's feedback, share the kind with a scripted run's prompt. `unclassified` is "A turn with no provenance
 # the engine can name", which the app's own notice about a sent message is. `scheduled-trigger` fires ezexe's
-# stored prompt, `auto-continuation` follows ezexe's click, and `channel`, `observer` and `observer-activity` carry
-# words of a third party: none of them was told from ezexe's words by a mark before, and none is now.
+# `auto-continuation` follows ezexe's click, and `channel`, `observer` and `observer-activity` carry words of a
+# third party: none of them was told from ezexe's words by a mark before, and none is now.
+# `scheduled-trigger` is named: the types give it as "A scheduled task or /loop firing its stored prompt", so
+# nobody typed it when it came, whoever stored it. Seen in the desktop app on Claude Code 2.1.326, for a one-shot
+# `CronCreate` of a session's own: the module was handed the kind `scheduled-trigger`, and the transcript's row of
+# the prompt reads `promptSource` "system", `turnOrigin` "scheduled" and `wakeupSource` "schedule_wakeup". Left to
+# the marks, that prompt read as ezexe's own, and the sweep's prompt, which p4-phi hands a session to schedule,
+# was routed as a message of ezexe's and drafted a session of its own.
 REMINDER = re.compile(r"\A\s*<system-reminder>.*?</system-reminder>\s*", re.S)
 SESSION_ATTR = re.compile(r"\A\s*(?:Another Claude session sent a message:\s*)?<cross-session-message\b([^>]*)>", re.I)
 
@@ -111,7 +120,8 @@ def origin_of(payload, folder=""):
 def whose(origin):
     """Whose words a prompt is, by its origin: `user` for ezexe's own, `session` for another session's, `plugin`
     for a prompt a plugin's hooks module submitted, p4-phi's own wake among them, `event` for a background task's
-    notification, and '' for a kind that does not say, which the marks at the head of the text tell."""
+    notification, `schedule` for a prompt a scheduled task or a `/loop` fired, and '' for a kind that does not
+    say, which the marks at the head of the text tell."""
     kind = (origin or {}).get("kind")
     if kind in OWN_KINDS:
         return "user"
@@ -119,6 +129,8 @@ def whose(origin):
         return "session"
     if kind == "plugin":
         return "user" if origin.get("asUser") is True else "plugin"
+    if kind == "scheduled-trigger":
+        return "schedule"
     return "event" if kind == "task-notification" else ""
 
 
@@ -182,8 +194,9 @@ def row_open(p4, session, prompt, now=None, arrival=None, by=""):
     rel = f"{st.MESSAGES}/{os.path.basename(path)}"
     is_harness = harness(prompt, by)
     # another session's message arrives as a turn and is answered like one, but its words are not ezexe's, and
-    # neither are those of a turn a plugin's hooks module started, p4-phi's own among them
-    is_peer = by in ("session", "plugin") or (not by and bool(PEER_RE.match(prompt or "") or WAKE_RE.match(prompt or "")))
+    # neither are those of a turn a plugin's hooks module started, p4-phi's own among them, or a schedule fired
+    is_peer = by in ("session", "plugin", "schedule") or (
+        not by and bool(PEER_RE.match(prompt or "") or WAKE_RE.match(prompt or "")))
     arrival = arrival or ("notification" if is_harness else "agent message" if is_peer else "turn")
     pairs = [("fingerprint", quote(prompt, FP_CHARS)), ("time", now), ("arrival", arrival)]
     old = st.parse(st.read_text(path), rel) if os.path.exists(path) else []
