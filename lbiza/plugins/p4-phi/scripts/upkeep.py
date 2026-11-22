@@ -214,6 +214,10 @@ def trees_of(home, sid, s):
     out = []
     for key, t in seen.items():
         there = os.path.isdir(t["path"])
+        if there and not os.path.exists(os.path.join(t["path"], ".git")) and linked(t["path"]):
+            # a folder inside another checkout with no `.git` entry of its own is what a removed worktree leaves
+            # where Windows kept the emptied folder: git lists no worktree there, so it is read as one that is gone
+            there = False
         # a folder that is gone is read as a worktree that was removed: `lost` then asks git which repository, if
         # any, still holds its branch
         t.update(there=there, own=key == own, linked=linked(t["path"]) if there else True)

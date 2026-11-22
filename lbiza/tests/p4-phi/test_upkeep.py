@@ -860,6 +860,30 @@ class Leftovers(Base):
         self.assertEqual(git(self.repo, "branch", "--list", "worktree-kid").stdout.strip(), "")
         self.assertEqual(self.lines(self.said(), "leftovers of"), [])
 
+    def test_an_emptied_folder_git_no_longer_lists_leaves_only_its_merged_branch_to_delete(self):
+        """A removal on Windows can leave the worktree's emptied folder on disk. git lists no worktree there, so
+        `git worktree remove` is refused for it, and until 0.11.146 upkeep handed that command at every message."""
+        inner = os.path.join(self.repo, ".claude", "worktrees", "kid").replace("\\", "/")
+        os.makedirs(os.path.dirname(inner))
+        with open(os.path.join(self.repo, ".git", "info", "exclude"), "a", encoding="utf-8") as f:
+            f.write(".claude/\n")
+        self.assertEqual(git(self.repo, "worktree", "move", self.wt, inner).returncode, 0)
+        self.wt = inner
+        self.t.record(KID, TOP, KID_TITLE, cwd=self.wt)
+        phi.RECORDS.clear()
+        self.archived_kid()
+        self.assertEqual(git(self.repo, "worktree", "remove", "--force", self.wt).returncode, 0)
+        os.makedirs(self.wt)                                    # the emptied folder Windows left
+        left = self.lines(self.said(), "leftovers of")
+        self.assertEqual(len(left), 1, left)
+        cmds = re.findall(r"`(git [^`]+)`", left[0])
+        self.assertEqual([c.split('" ', 1)[1] for c in cmds], ["branch -d worktree-kid"])
+        for c in cmds:
+            r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 0, c + "\n" + r.stderr)
+        self.assertEqual(self.lines(self.said(), "leftovers of"), [], "nothing is asked for again")
+        self.assertTrue(os.path.isdir(self.wt), "the folder is left as it is")
+
     def test_a_worktree_on_a_detached_head_goes_and_its_unmerged_branch_stays(self):
         self.archived_kid()
         self.commit("rows = [1, 2, 3]\n", "one more row", push=False)     # the branch moves on, unmerged
