@@ -78,8 +78,57 @@ class TableTest(unittest.TestCase):
             self.assertNotIn(word, MISSES)
 
 
+class RefusalTest(unittest.TestCase):
+    MANIFEST = json.loads((PLUGIN / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))["userConfig"]
+    REFUSES = README.split("## A row's option refuses the by-hand call\n", 1)[1].split("\n## ", 1)[0]
+
+    def test_each_row_checked_at_a_call_has_an_option_that_is_off_by_default(self):
+        """https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration": a key takes letters,
+        digits and underscores, `options` "applies to a `string` field that isn't `multiple`", and a `multiple` list
+        is no row of `/config`, so each row has one boolean of its own. A row checked at a turn's end has none,
+        since an answer already written is no call to refuse."""
+        at_a_call = ["refuse_" + name.replace("-", "_") for name, _, _, _, at in ROWS if at == "call"]
+        self.assertEqual(len(at_a_call), 35)
+        self.assertEqual(sorted(name for name in self.MANIFEST if name.startswith("refuse_")), sorted(at_a_call))
+        for name in at_a_call:
+            option = self.MANIFEST[name]
+            self.assertRegex(name, r"^[a-z][a-z0-9_]*$")
+            self.assertEqual(option["type"], "boolean", name)
+            self.assertIs(option["default"], False, name)
+            self.assertTrue(option["title"].startswith("Refuse: "), name)
+            self.assertIn("With this on, the call is refused before it runs and the refusal names ", option["description"], name)
+            self.assertNotIn("required", option, name)
+        self.assertIn("return `refuse_${id.replaceAll('-', '_')}`", MISSES)
+        self.assertIn(f"{len(at_a_call)} in all", self.REFUSES)
+        self.assertIn("The eight rows checked at a turn's end have no option", self.REFUSES)
+        self.assertEqual(sum(1 for *_, at in ROWS if at == "end"), 8)
+
+    def test_the_module_refuses_before_the_call_runs_and_only_where_an_option_is_on(self):
+        """With no such option on the module hooks no call of another tool. With one on, the call is refused at
+        `tool.call`, which comes before the permission check and the run, and every other call goes on."""
+        self.assertIn("refused = new Set(MISSES.filter(miss => miss.at === 'call' && options[optionOf(miss.id)] === true)"
+                      ".map(miss => miss.id))", MODULE)
+        gate = MODULE.split("  if (refused.size > 0) {\n", 1)[1].split("\n  }\n", 1)[0]
+        self.assertIn("on('tool.call', async ($, e, next) => {", gate)
+        self.assertIn("return line === undefined ? next(e) : { deny: line }", gate)
+        self.assertIn(".catch(($, e, next) => next(e))", gate)
+        self.assertEqual(MODULE.count("on('tool.call', async ($, e, next) => {"), 1, "the one hook with no tool named")
+        refusal = MODULE.split("async function refusal(", 1)[1].split("\n}\n", 1)[0]
+        for part in ("!READ_OFF.has(tool)", "startsWith('toolu_plugin_')", "if (miss === undefined || !refused.has(id)) continue",
+                     "if (miss.names.length > 0 && here.length === 0) continue", "optionOf(id)"):
+            self.assertIn(part, refusal)
+        self.assertNotIn("hints", refusal, "a refusal is no line, so the switch for the lines does not turn it off")
+
+    def test_a_tool_a_refusal_can_stop_is_one_the_table_reads(self):
+        read_off = set(re.findall(r"'(\w+)'", MISSES.split("export const READ_OFF = new Set([", 1)[1].split("])", 1)[0]))
+        watched = set(re.findall(r"'(\w+)'", MISSES.split("export const WATCHED = new Set([", 1)[1].split("])", 1)[0]))
+        self.assertTrue(read_off <= watched, read_off - watched)
+        self.assertEqual(len(read_off), 11)
+
+
 class HookTest(unittest.TestCase):
-    HOOK = MODULE.split("on('classic.PostToolUse'", 1)[1].split("\n\n  on(", 1)[0]
+    CAUGHT = ".catch(($, e, next) => next(e))"
+    HOOK = MODULE.split("on('classic.PostToolUse'", 1)[1].split(CAUGHT, 1)[0] + CAUGHT
 
     def test_the_hook_passes_on_what_the_hooks_beneath_answered_and_only_adds_context(self):
         """A function at `classic.PostToolUse` that answers without `next` skips every other plugin's hooks. This
@@ -90,7 +139,7 @@ class HookTest(unittest.TestCase):
                       self.HOOK)
         self.assertIn(".catch(($, e, next) => next(e))", self.HOOK)
 
-    def test_it_refuses_no_call_and_starts_no_process(self):
+    def test_a_line_refuses_no_call_and_the_module_starts_no_process(self):
         for word in ("deny", "block", "preventContinuation"):
             self.assertNotIn(word, self.HOOK)
         self.assertNotIn("$.process.", MODULE)

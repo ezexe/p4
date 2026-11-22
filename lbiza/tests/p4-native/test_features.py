@@ -18,7 +18,7 @@ class OptionsTest(unittest.TestCase):
         """https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration": each value is a
         strict object whose `type` is one of `string`, `number`, `boolean`, `directory` or `file`, with a `title` and
         a `description`, and `default` is the "value used when the user provides nothing"."""
-        options = MANIFEST["userConfig"]
+        options = {name: option for name, option in MANIFEST["userConfig"].items() if not name.startswith("refuse_")}
         self.assertEqual(sorted(options), ["hints", "push", "status"])
         self.assertIs(options.pop("hints")["default"], True, "the one option that is on: it turns the lines at a miss off")
         for name, option in options.items():

@@ -1385,3 +1385,63 @@ test('a row written from the record hands its line beside the call, and only whe
   expect(seen.shown.length).toBe(1)
   expect(seen.shown[0]).toContain('put to ezexe as buttons by `AskUserQuestion`.')
 })
+
+const REFUSING = { refuse_text_searched_by_a_shell: true, refuse_files_found_by_a_shell: true, refuse_backup_copy_made_by_hand: true }
+
+test('with a row\'s option on, its by-hand call is refused before it runs, with the line that names the native tool', { options: REFUSING }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, tool('Grep')],
+    app: () => 'ran',
+    files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') },
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const out = (await $.tool.call({ tool: 'Bash', command: 'grep -rn "TODO" src' } as never)) as { deny?: string }
+  expect(out.deny).toContain('`Grep` is the same search with ripgrep')
+  expect(out.deny).toContain('p4-native refused this call before it ran, since ezexe turned the option `refuse_text_searched_by_a_shell` on.')
+  expect(seen.calls).toEqual([])
+
+  // A call that shows no miss, one whose row's option is off, and one whose tool, `Glob`, does not answer here go on.
+  for (const command of ['npm test', 'cat a.txt', 'find . -name "*.ts"']) {
+    const ran = (await $.tool.call({ tool: 'Bash', command } as never)) as { deny?: string; text?: string }
+    expect([command, ran.deny, ran.text]).toEqual([command, undefined, 'ran'])
+  }
+  expect(seen.calls).toEqual(['Bash', 'Bash', 'Bash'])
+
+  // A row that names a slash command alone needs no tool, and a call a hooks module made itself is never refused.
+  const kept = (await $.tool.call({ tool: 'Bash', command: 'cp a.json a.json.bak' } as never)) as { deny?: string }
+  expect(kept.deny).toContain('`/rewind` brings one back')
+  const own = (await $.tool.call({ tool: 'Bash', tool_use_id: 'toolu_plugin_1', command: 'grep -rn "TODO" src' } as never)) as { deny?: string }
+  expect(own.deny).toBeUndefined()
+  expect(seen.calls.length).toBe(4)
+})
+
+test('with no such option on, a by-hand call goes on and gets its line, and with hints off it is refused all the same', async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    tools: () => [...OWN, tool('Grep')],
+    app: () => 'ran',
+    files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') },
+  })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const out = (await $.tool.call({ tool: 'Bash', command: 'grep -rn "TODO" src' } as never)) as { deny?: string; text?: string }
+  expect([out.deny, out.text]).toEqual([undefined, 'ran'])
+  expect(seen.calls).toEqual(['Bash'])
+  const after_ = await $.classic.PostToolUse(after('Bash', { command: 'grep -rn "TODO" src' }) as never)
+  expect(after_.additionalContext?.[1]).toContain('`Grep` is the same search with ripgrep')
+})
+
+test('a refusal needs no line: with hints off and a row\'s option on the call is still refused', { options: { hints: false, refuse_text_searched_by_a_shell: true } }, async ($, on) => {
+  const clock = mock.clock(on)
+  const seen = machine(on, { tools: () => [...OWN, tool('Grep')], app: () => 'ran', files: { [BOOK]: ranOn('terminal/scripted', '2.1.326') } })
+  await $.session.start(HOSTED)
+  await clock.settle()
+
+  const out = (await $.tool.call({ tool: 'Bash', command: 'grep -rn "TODO" src' } as never)) as { deny?: string }
+  expect(out.deny).toContain('refuse_text_searched_by_a_shell')
+  expect(seen.calls).toEqual([])
+})

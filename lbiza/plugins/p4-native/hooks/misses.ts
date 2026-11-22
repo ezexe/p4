@@ -3,8 +3,9 @@
 // written from the record `weighed.json`: one for each slash command and tool a p4 plugin uses that a session can
 // also do by hand, with the by-hand way under `hand`. A used row of the record names the rows that watch it, or
 // says in one line why none does. register.ts checks the rows where a tool call has run and where a turn ends, and
-// hands one line of context that names the feature, once for each situation in a session. Nothing here refuses a
-// call, starts a process or asks a model: a row is a pattern over a call's own input or a turn's own answer.
+// hands one line of context that names the feature, once for each situation in a session. Nothing here starts a
+// process or asks a model: a row is a pattern over a call's own input or a turn's own answer. A row checked at a
+// call has an option of the plugin, off by default, with which register.ts refuses the by-hand call before it runs.
 
 // One situation. `seen` is the miss as it was seen live, and `hand` the by-hand way of a row written from the
 // record, so a row has one of the two. `native` holds the keys of the record the row watches, `names` the tools the
@@ -42,6 +43,15 @@ export const PLAN = 'mcp__ccd_turn__update_plan'
 export const WRAP_UP = 'mcp__ccd_turn__wrap_up'
 // The tools that read another session, of which a line names those that answer here.
 export const READERS = [EVENTS, SEARCH, EXPORT, STATE, USAGE] as const
+// The tools `atCall` reads a miss off, which are the ones a refusal can stop.
+export const READ_OFF = new Set(['Bash', 'PowerShell', 'Read', 'Grep', 'Glob', 'Edit', 'Write', 'WebFetch', 'Agent', 'TaskCreate', 'TodoWrite'])
+
+// The option of the plugin's `userConfig` that refuses a row's by-hand call: `refuse_` and the row's id, spelled
+// with underscores, since a key of `userConfig` takes letters, digits and underscores.
+export function optionOf(id: string): string {
+  return `refuse_${id.replaceAll('-', '_')}`
+}
+
 // The tools whose call can show a miss, or tells the module what the session has already done.
 export const WATCHED = new Set([
   'Bash',

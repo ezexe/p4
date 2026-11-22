@@ -36,8 +36,11 @@
 // And it hands one line at the moment of a miss, a situation of misses.ts in which a session does by hand what a
 // native feature of this host does: after the tool call that shows it, as context beside that call's result, or
 // with the next prompt for a miss a turn's end shows. Each situation is told once in a session, a line names only
-// a tool the map says answers here, no call is refused, and the option `hints` turns it off. Every row of the
-// record that a p4 plugin uses names the rows of misses.ts that watch it, or says why none does.
+// a tool the map says answers here, and the option `hints` turns it off. Every row of the record that a p4 plugin
+// uses names the rows of misses.ts that watch it, or says why none does. A line refuses nothing. A row checked at a
+// call also has an option of its own, `refuse_` and its id, off unless ezexe turns it on: with it on, the by-hand
+// call is refused at `tool.call`, before it runs, with the row's line as the refusal, and only where a tool the
+// line names answers here. With no such option on, the module hooks no call of another tool.
 
 import type { EngineInterface, Register, ToolCallResult } from 'claude-code'
 
@@ -58,7 +61,7 @@ import {
 } from './probes'
 import type { Answer, Called, Host, Probe, Said } from './probes'
 import { counted, recordOf, unweighed, watched } from './inventory'
-import { MISSES, TERMINAL, WATCHED, WRAP_UP, atCall, atEnd, isNotice, isWake, isWorker, scriptOf } from './misses'
+import { MISSES, READ_OFF, TERMINAL, WATCHED, WRAP_UP, atCall, atEnd, isNotice, isWake, isWorker, optionOf, scriptOf } from './misses'
 import type { Record_ } from './inventory'
 
 // The project's store, and the map's file inside it.
@@ -171,6 +174,8 @@ let turnOf: string | undefined
 
 // The options ezexe turned on, read at each load of the module. Each is off by default.
 let wants = { push: false, status: false, hints: true }
+// The rows whose by-hand call ezexe chose to have refused, by id.
+let refused = new Set<string>()
 // In the desktop app: the session id this was asked for, whether that session was started by another, and its
 // title.
 let askedFor: string | undefined
@@ -660,6 +665,28 @@ function hints(ids: readonly string[]): string[] {
   return lines
 }
 
+// The refusal of a call about to run, or nothing for a call that goes on: the line of the first row the call
+// sets off whose option is on, where a tool the line names answers here, so a session is never refused the
+// by-hand way on a host that has no other. A call a hooks module made itself is never refused.
+async function refusal($: EngineInterface, e: unknown): Promise<string | undefined> {
+  const { tool, tool_use_id: use, ...input } = e as Record<string, unknown>
+  if (typeof tool !== 'string' || !READ_OFF.has(tool) || String(use ?? '').startsWith('toolu_plugin_')) return undefined
+  await starting?.catch(() => undefined)
+  const host = kept
+  if (host === undefined) return undefined
+  for (const id of atCall(tool, input, keptFor ?? '')) {
+    const miss = MISSES.find(one => one.id === id)
+    if (miss === undefined || !refused.has(id)) continue
+    const here = miss.names.filter(name => answersHere(host, name))
+    if (miss.names.length > 0 && here.length === 0) continue
+    const line = miss.line.replace('{names}', here.map(name => `\`${name}\``).join(', '))
+
+    return `${line} p4-native refused this call before it ran, since ezexe turned the option \`${optionOf(id)}\` on.`
+  }
+
+  return undefined
+}
+
 // What one call of this session showed: what it set for later, and the lines for the misses it shows. A command
 // typed into a Terminal tab is read for a scripted run, in its own line or in the one script file it runs.
 async function called($: EngineInterface, tool: string, input: unknown): Promise<string[]> {
@@ -813,6 +840,7 @@ function field(e: unknown, name: string): string {
 
 export const register: Register = (on, options) => {
   wants = { push: options.push === true, status: options.status === true, hints: options.hints !== false }
+  refused = new Set(MISSES.filter(miss => miss.at === 'call' && options[optionOf(miss.id)] === true).map(miss => miss.id))
 
   // The session does not wait for the map, and it does wait for the command and the tool, which are then listed
   // from the first prompt.
@@ -910,6 +938,16 @@ export const register: Register = (on, options) => {
 
     return lines.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...lines] }
   }).catch(($, e, next) => next(e))
+
+  // Before a tool call of the session, and only where ezexe turned a row's option on: a call that does by hand
+  // what a native feature does is refused with the line that names the feature, and every other call goes on.
+  if (refused.size > 0) {
+    on('tool.call', async ($, e, next) => {
+      const line = await refusal($, e)
+
+      return line === undefined ? next(e) : { deny: line }
+    }).catch(($, e, next) => next(e))
+  }
 
   on('command.run', { command: 'native' }, async ($, e) => {
     hasAsked = true

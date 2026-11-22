@@ -197,7 +197,7 @@ Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows
 Of the 131 used rows, 53 are watched by a row of the table and 78 say why none watches them: the 62 hook events, module events and module methods, which only a hooks module hooks or calls, and 16 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
-- It refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
+- A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.
 - A situation is told once in a session.
 - A line names only a tool the capability map says answers in this session, and a row whose tools are all missing here hands nothing.
 - A row that stands for a slash command names the command alone, which is ezexe's to type.
@@ -262,6 +262,29 @@ A line is context for the model and no verdict, and each is handed once in a ses
 Seen in the desktop app on Claude Code 2.1.326, with a development copy: a Bash call of `gh run list --commit` with a hash of seven characters came back with its result and the line of `gh-run-list-short-commit` as `PostToolUse:Bash hook additional context`.
 Not seen live: the other five of the six rows, any row written from the record, and a line carried by a next prompt.
 
+## A row's option refuses the by-hand call
+
+Each row checked at a call has an option of its own in the plugin's `userConfig`, `refuse_` and the row's id spelled with underscores, 35 in all.
+Each is off unless ezexe turns it on, and each is a row of `/config` in a terminal session, kept under `pluginConfigs` like the three options below.
+The manifest reference gives no grouped form for this.
+By https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration", `options` "applies to a `string` field that isn't `multiple`", and a `multiple` list is no row of `/config`, so one boolean for each row is the declared way.
+
+```json
+{"pluginConfigs": {"p4-native@p4-marketplace": {"options": {"refuse_text_searched_by_a_shell": true}}}}
+```
+
+- With a row's option on, the module refuses the by-hand call at `tool.call`, before the call runs and before its permission check, and the refusal is the row's line, which names the native feature, and the option that refused it.
+- A call is refused only where a tool the line names answers in this session, so no session is refused the by-hand way on a host that has no other.
+- A call a hooks module made itself is never refused.
+- With no such option on, the module hooks no call of another tool.
+- `hints` stays the one switch for the lines, and a refusal is no line: with `hints` off and a row's option on, the call is still refused.
+- The eight rows checked at a turn's end have no option, since an answer already written is no call to refuse.
+
+A pattern can fire on a call that is right, and a refused call has no way through but the option, so each is ezexe's to turn on where the by-hand way is never wanted.
+
+Seen in a scripted run on Claude Code 2.1.328 and again on 2.1.330, with the plugin loaded by `--plugin-dir` and `refuse_text_searched_by_a_shell` on under `pluginConfigs`, `p4-native@inline`, in a `--settings` file: the session's Bash call of `grep -rn TODO src` came back as a tool error that held the row's line and the option's name, and no permission was asked for it.
+Not seen live: a refusal in the desktop app, any other row's refusal, and the 35 rows in `/config`.
+
 ## What ezexe chose, and what sessions decided
 
 Two things here are ezexe's own word.
@@ -283,7 +306,7 @@ Three that sessions had called declined are reopened on ezexe's word, as open ro
 
 Two features of Claude Code that fit neither p4-phi nor p4-temportal are here.
 Each is an option of the plugin's `userConfig`, off until ezexe turns it on, and each is one call of Claude Code's own that the module makes and does not wrap.
-The third option, `hints`, is on by default and belongs to the lines at a miss above.
+The third option, `hints`, is on by default and belongs to the lines at a miss above, and the 35 `refuse_` options belong to the rows of that table.
 The options are rows of `/config` in a terminal session, and they are kept under `pluginConfigs` in `~/.claude/settings.json`, by https://code.claude.com/docs/en/plugins/manifest-reference.md, "User configuration".
 
 ```json
