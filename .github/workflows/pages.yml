@@ -20,16 +20,23 @@ concurrency:
   group: pages
   cancel-in-progress: true
 
+# Two jobs, as the README of actions/deploy-pages has it: "We recommend this action to be used in a dedicated job",
+# one that waits for the job that uploads. With both steps in one job the deployment twice found no artifact a second
+# after the upload, "Fetching artifact metadata failed", in run 44600625954 and in run 45001509249.
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/upload-pages-artifact@v5
         with:
           path: docs
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
