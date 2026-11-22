@@ -107,10 +107,10 @@ def calls(path, base=""):
     for run in runs(sections):
         level = {**plans.CHILD_LEVELS["static"], "kind": "static"}      # written fences are an integrator's to land
         level["effort"] = plans.capped(level["effort"])
-        call = {"initiation": "user_asked", "title": name(title, run), "context": "fresh",
-                "prompt": plans.level_said(brief(path, title, run), level), "wake_when_done": True,
-                "use_worktree": True,
-                "background": f"ezexe approved the plan `{path}`, and this start lands {name(title, run)}, whose "
-                              "every edit is a fence there with its source."}
-        out.append({**call, **plans.level_keys(level)})
+        # the brief names its own level, which plans.child_level lays over the kind call_of would read from its words
+        out.append(puppeteer.call_of({
+            "title": name(title, run), "context": "fresh", "parent": "plan",
+            "brief": plans.level_said(brief(path, title, run), level),
+            "background": f"ezexe approved the plan `{path}`, and this start lands {name(title, run)}, whose "
+                          "every edit is a fence there with its source."}))
     return out
