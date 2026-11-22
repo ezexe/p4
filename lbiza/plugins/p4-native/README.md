@@ -319,6 +319,14 @@ A line is context for the model and no verdict, and each is handed once in a ses
 Seen in the desktop app on Claude Code 2.1.326, with a development copy: a Bash call of `gh run list --commit` with a hash of seven characters came back with its result and the line of `gh-run-list-short-commit` as `PostToolUse:Bash hook additional context`.
 Not seen live: the other five of the six rows, any row written from the record, and a line carried by a next prompt.
 
+Five rows misfired and are narrowed since p4-native 0.5.47.
+`gh-run-polled-in-a-loop`, `loop-with-a-sleep-in-a-shell` and `long-sleep-in-a-shell` say nothing of a command run with `run_in_background`, which by the `Monitor` tool's own description is the way to wait for one thing, and the first fires on a loop alone, since one `sleep` before one `gh run list` waits once and polls nothing.
+A loop is read off its own words, a `do` after `while`, `until` or `for`, or a PowerShell loop's bracket, with the sleep inside it, since the word `for` in an `echo` before a `sleep` is no loop.
+`skill-read-as-a-file` fires only for a `SKILL.md` under a `.claude/skills` folder or the installed plugins of `.claude/plugins`, since a session that plans or changes a skill reads its source as a file.
+Seen in the desktop app on 2026-11-22, in two sessions: a Read of the source copy of p4-temportal's `plan-planner` skill in a checkout got that line.
+`worktree-removed-in-a-shell` no longer fires on `git worktree prune`, which removes no folder, and its line names the archive of a session as what removes that session's worktree, since by their own descriptions neither of the app's two worktree tools removes the worktree of a live session or a clean one.
+Not seen live: any of the five rows after the change.
+
 ## A row's option refuses the by-hand call
 
 Each row checked at a call has an option of its own in the plugin's `userConfig`, `refuse_` and the row's id spelled with underscores, 35 in all.
