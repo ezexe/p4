@@ -1303,15 +1303,53 @@ class TopOrchestrates(unittest.TestCase):
 
     plan = TreeOfPlans.plan
 
-    def check(self, host, tool, inp, tid):
+    def check(self, host, tool, inp, tid, **more):
         """A tool call's check through `lookup-check`, which the hooks module runs for a checked call."""
         root = os.path.dirname(SRC)
         body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
-                "tool_input": inp, "tool_use_id": tid}
+                "tool_input": inp, "tool_use_id": tid, **more}
         r = inproc.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), "lookup-check"],
                        input=json.dumps(body), capture_output=True, text=True, timeout=60, env=self.t.env(host))
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"].get("additionalContext", "") if r.stdout.strip() else ""
+
+    def test_a_step_that_plans_stays_and_a_step_that_builds_code_about_plans_is_work(self):
+        """The advice's own head keeps planning with the orchestrator, and a plan file has one writer."""
+        for stays in ("Enter plan mode", "Research how plans are built and distributed",
+                      "Write plan sections with fences and edits", "Put the plan to ezexe for approval",
+                      "Plan the exporter's move"):
+            self.assertEqual(plans.top_stays(stays), plans.PLANNING_WHY, stays)
+        for work in ("Write the plan parser in src/plan.py", "Write the plan-file reader",
+                     "Port the exporter to the new writer"):
+            self.assertEqual(plans.top_stays(work), "", work)
+        self.assertEqual(plans.top_stays("Land section 2 of the plan"), "checks or lands the work")
+
+    def test_in_plan_mode_a_task_list_is_answered_with_no_start(self):
+        """hooks.md, "Common input fields": `permission_mode` is the current permission mode, `"plan"` among its
+        values. A session in plan mode edits nothing but its plan, so its task list hands out no start."""
+        body = {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                "tool_input": items(f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer"),
+                "tool_response": "Plan updated."}
+        r = self.t.hook("plan", TOP, {**body, "permission_mode": "plan"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("orchestrator of its tree", r.stdout)
+        r = self.t.hook("plan", TOP, {**body, "permission_mode": "default"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("orchestrator of its tree", r.stdout, "the same list out of plan mode is advised as before")
+
+    def test_in_plan_mode_a_feature_step_gets_no_new_orchestrator_and_a_work_step_no_nudge(self):
+        p = self.t.proj
+        body = {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                "tool_input": items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                                    "Add a new feature: an importer for the old format"),
+                "tool_response": "Plan updated.", "permission_mode": "plan"}
+        r = self.t.hook("plan", TOP, body)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("a new orchestrator of its own", r.stdout)
+        edit = {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"}
+        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_pm1", permission_mode="plan"), "")
+        self.assertTrue(self.check(TOP, "Edit", edit, "toolu_pm2", permission_mode="default"),
+                        "the step is nudged once the session is out of plan mode")
 
     def test_a_top_sessions_work_step_is_advised_to_a_child_and_landing_stays(self):
         p = self.t.proj

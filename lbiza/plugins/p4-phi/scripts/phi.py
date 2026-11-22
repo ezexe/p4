@@ -2010,9 +2010,14 @@ def h_plan(payload):
         if advise is plans.top_advice and controls.is_puppeteer(s, me.store):
             advise = None                          # a puppeteer's steps are its own; it hands none out
             RAN["pair"] = "puppeteer"
+        planning = mode_now(me, s, payload) == "plan"
+        if advise and planning:
+            advise = None                          # a plan is being written: nothing is handed out before its approval
+            RAN["pair"] = "planning"
         advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the orchestrator does its own steps
         RAN["split"] = "advised" if advice else ""
-        feat = feature_steps_text(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user")
+        feat = "" if planning else feature_steps_text(me.home, s, plans.load(me.home, me.id),
+                                                      s.get("turnBy", "user") == "user")
         research = research_step_text(me.home, s, plans.load(me.home, me.id))
         text = "\n\n".join(p for p in (feat, research, advice, text) if p)
     if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
@@ -2224,6 +2229,8 @@ def h_nudge(payload):
             os.remove(nudge_marker(me))
         except OSError:
             pass
+        return None
+    if mode_now(me, s, payload) == "plan":         # a plan is being written: the step is nudged once it is approved
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     if not work_call(s, str(payload.get("tool_name") or ""), inp):

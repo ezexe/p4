@@ -597,6 +597,17 @@ OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
 BUILDS = re.compile(r"^\W*(?:fix|writ|add|chang|edit|implement|updat|remov|renam|creat|mak|refactor|port|rewrit|"
                     r"replac|patch|build|migrat|delet)\w*\b", re.I)
 AWAITS_WHY = "waits on or checks other sessions' reports, which only this session receives"
+# Planning is the orchestrator's own: top_advice's head names it first of what the session keeps itself for, and a
+# plan file has one writer, the session that holds it. Seen in an orchestrator on p4-phi 0.11.143: for its steps
+# "Enter plan mode", "Research how plans are built and distributed", "Write plan sections with fences and edits"
+# and "Put the plan to ezexe for approval" the advice named a new session in a worktree for each, and the nudge a
+# worker for the second. The opening verb decides, and a step that builds code about plans is work, which the noun
+# after the plan or a file named plan tells: "Write the plan parser in src/plan.py".
+PLANNING = re.compile(r"^\W*(?:enter\s+plan\s+mode\b|plan\b"
+                      r"|(?:research|write|draft|loop|revise|refine|put|present|submit)\b[^.;]*?\bplans?\b)", re.I)
+PLAN_CODE = re.compile(r"\bplans?[\s-]+(?:file\s+)?(?:parser|reader|module|code|command|script|tests?)\b"
+                       r"|\bplans?\.\w+", re.I)
+PLANNING_WHY = "plans, which stays with the session that holds the plan until ezexe approves it"
 
 
 def awaits_sessions(text):
@@ -613,6 +624,8 @@ def top_stays(text):
     text = str(text or "")
     if awaits_sessions(text):                      # waiting on other sessions' results wins over the check rule
         return AWAITS_WHY
+    if PLANNING.search(text) and not PLAN_CODE.search(text):   # one writer, and nothing built before the approval
+        return PLANNING_WHY
     if LANDS.search(text) or SYNCS.search(text) or WATCHES_RUN.search(text) or INSTALLS.search(text):
         return "checks or lands the work"
     if ORCHESTRATES.search(text):
