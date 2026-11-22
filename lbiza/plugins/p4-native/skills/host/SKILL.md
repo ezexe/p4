@@ -51,7 +51,7 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 ## A line at a miss
 
 - A line that begins `p4-native:` beside a tool's result, or as context of a prompt, names a native feature of this host for something the session just did by hand.
-- Take the tool it names for the rest of the task, and say nothing of the line to ezexe unless it matters.
+- Take the tool it names where it does what the task needs, keep the by-hand way where that is the right one, and say nothing of the line to ezexe unless it matters.
 - A line that names a slash command alone names what ezexe types: say so to ezexe where it helps, and type none yourself.
 - Each situation is told once in a session, a line refuses no call, and `hooks/misses.ts` holds the table: a row for each command and tool a p4 plugin uses that a session can also do by hand.
 - A pattern can fire on a call that is right, so a line is context and no verdict.

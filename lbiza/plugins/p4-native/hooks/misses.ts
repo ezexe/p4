@@ -275,7 +275,9 @@ export const MISSES: readonly Miss[] = [
     hand: 'A shell command opens an HTML file in a browser with `start`, `open`, `xdg-open` or `Invoke-Item`.',
     native: ['Artifact'],
     names: ['Artifact'],
-    line: 'p4-native: this shell command opens an HTML file for ezexe. `Artifact` publishes a page ezexe opens, keeps and shares.',
+    line:
+      'p4-native: this shell command opens an HTML file for ezexe. `Artifact` publishes a page to claude.ai, private ' +
+      'by default, that ezexe opens, keeps and shares, where the page is one to keep.',
     at: 'call',
   },
   {
