@@ -951,6 +951,109 @@ class TerminalWorker(Base):
         self.assertNotIn("worktree unlock", got)
         self.assertEqual(self.lines(self.said(), "left on disk, of the terminal worker"), [], "it is named once")
 
+    def test_a_live_terminal_worker_gets_the_sweep_on_a_fixed_schedule_and_no_self_paced_loop(self):
+        """The app sends no note when a worker in the Terminal panel ends, so no notice ends that wait. There the
+        sweep is Claude Code's own `/loop` with an interval: scheduled-tasks.md, "Run on a fixed interval", "When you
+        supply an interval, Claude converts it to a cron expression, schedules the job, and confirms the cadence and
+        job ID". The session is handed that line once: a read of `CronList`, then the Skill tool with the skill
+        `loop`, the interval upkeep.EVERY and the words upkeep.SWEEP_FIXED. Whether the schedule runs is read off
+        the session's own `CronCreate` call, with the task's id from its answer."""
+        self.seat()
+        self.left_item()
+        got = self.said()
+        line = self.lines(got, "schedule:")
+        self.assertEqual(len(line), 1, got)
+        self.assertIn("2 live workers in the Terminal panel, whose end the app sends no note of", line[0])
+        self.assertIn("Read the tasks with `CronList` first, and where one holds the words below, start none", line[0])
+        self.assertIn("the Skill tool with `skill` `loop` and, as `args`, `10m` and then these words", line[0])
+        self.assertIn("on a fixed schedule by `CronCreate`", line[0])
+        self.assertIn(upkeep.SWEEP_FIXED, line[0], "the schedule's words come from one place")
+        self.assertNotIn("end the self-paced loop", line[0], "none runs")
+        self.assertEqual(self.lines(got, "loop:"), [], "one sweep, and it is the schedule")
+        self.assertEqual(self.lines(self.said(), "schedule:"), [], "handed once")
+        calls = [("CronList", {}, "No scheduled jobs."),
+                 ("Skill", {"skill": "loop", "args": f"{upkeep.EVERY} {upkeep.SWEEP_FIXED}"}, "Launching skill: loop"),
+                 ("CronCreate", {"cron": "*/10 * * * *", "prompt": upkeep.SWEEP_FIXED, "recurring": True},
+                  "Scheduled recurring job f5726d66 (Every 10 minutes). Next run: Nov 22 11:05am. Session-only (not "
+                  "written to disk, dies when Claude exits). Auto-expires after 7 days. Use CronDelete to cancel sooner.")]
+        self.t.stop(TOP, TASK, calls, report="The sweep's schedule is started.", uuid="c1")
+        kept = self.t.session(TOP)
+        self.assertEqual((kept.get("schedule") or {}).get("id"), "f5726d66")
+        self.assertAlmostEqual(kept["schedule"]["until"] - time.time(), upkeep.EXPIRY_S, delta=60)
+        self.assertNotIn("loop", kept, "a `/loop` an interval leads is a schedule and no self-paced loop")
+        self.assertTrue(upkeep.schedule_runs(kept))
+        self.assertFalse(upkeep.schedule_runs(kept, at=time.time() + upkeep.EXPIRY_S + 5), "Claude Code ends it then")
+        again = self.said()
+        self.assertEqual(self.lines(again, "schedule:"), [], "its schedule runs")
+        self.assertEqual(self.lines(again, "end the schedule:"), [], "and its workers are live")
+
+    def test_the_schedule_is_ended_once_no_terminal_worker_is_live_by_the_id_its_own_call_gave(self):
+        """scheduled-tasks.md, "Stop a loop": "to stop a loop such as `/loop 5m`, ask Claude to cancel it", which is
+        `CronDelete` with the task's id. With the schedule running and no terminal worker live, the session is
+        handed that end once. A delete of another task leaves the schedule kept, and a delete of its own ends it."""
+        self.seat()
+        self.left_item()
+        self.said()
+        made = ("CronCreate", {"cron": "*/10 * * * *", "prompt": upkeep.SWEEP_FIXED},
+                "Scheduled recurring job f5726d66 (Every 10 minutes). Next run: Nov 22 11:05am.")
+        self.t.stop(TOP, TASK, [made], report="The sweep's schedule is started.", uuid="c1")
+        d = upkeep.load(self.t.p4, TOP)
+        self.assertEqual(len(d["terminals"]), 2)
+        for t in d["terminals"]:
+            t["removed"] = upkeep.now()                 # as terminal_acts marks one whose worktree is gone
+        upkeep.save(self.t.p4, TOP, d)
+        got = self.said()
+        end = self.lines(got, "end the schedule:")
+        self.assertEqual(len(end), 1, got)
+        self.assertIn("Read the tasks with `CronList` and call `CronDelete` with the id of the task whose prompt "
+                      f"opens \"{upkeep.OPENS}\"", end[0])
+        self.assertIn("gave as `f5726d66`", end[0])
+        self.assertEqual(self.lines(got, "schedule:"), [])
+        self.assertEqual(self.lines(self.said(), "end the schedule:"), [], "handed once")
+        self.t.stop(TOP, TASK, [("CronDelete", {"id": "0a1b2c3d"}, "Cancelled job 0a1b2c3d.")],
+                    report="Another task is cancelled.", uuid="c2")
+        self.assertTrue(upkeep.schedule_runs(self.t.session(TOP)), "another task's delete ends nothing of the sweep")
+        self.t.stop(TOP, TASK, [("CronList", {}, "f5726d66"), ("CronDelete", {"id": "f5726d66"}, "Cancelled job f5726d66.")],
+                    report="The schedule is ended.", uuid="c3")
+        self.assertNotIn("schedule", self.t.session(TOP))
+        self.assertEqual(self.lines(self.said(), "end the schedule:"), [])
+
+    def test_a_self_paced_loop_that_runs_is_ended_where_the_schedule_takes_the_sweep(self):
+        """A session has one sweep and never both: the schedule sweeps the started sessions too, so its line ends a
+        self-paced loop that runs, and no line starts one while a terminal worker is live."""
+        self.seat()
+        self.left_item()
+        self.t.stop(TOP, TASK, [("ScheduleWakeup", {"delaySeconds": 1800, "prompt": "/loop " + upkeep.SWEEP}, "ok")],
+                    report="Waiting on the worker.", uuid="s1")
+        self.assertTrue(upkeep.loop_runs(self.t.session(TOP)))
+        got = self.said()
+        line = self.lines(got, "schedule:")
+        self.assertEqual(len(line), 1, got)
+        self.assertIn("so end the self-paced loop: call `ScheduleWakeup` with `stop` true.", line[0])
+        self.assertEqual(self.lines(got, "loop:"), [])
+        self.assertEqual(self.lines(got, "end the loop:"), [], "the schedule's line ends it")
+
+    def test_the_schedules_interval_and_words_put_no_question_to_ezexe(self):
+        """Read in the `/loop` skill of Claude Code 2.1.326: before it schedules, it asks the person whether to
+        make a cloud schedule in its place where the interval is sixty minutes or more or the words read like a
+        daily cadence. The interval is under the hour and the words name no day. `CronList` shows a task's first
+        eighty characters, which hold the words the end is told by."""
+        minutes = re.fullmatch(r"(\d+)m", upkeep.EVERY)
+        self.assertTrue(minutes and 0 < int(minutes.group(1)) < 60, upkeep.EVERY)
+        self.assertEqual(60 % int(minutes.group(1)), 0, "an interval that divides the hour is not rounded")
+        for phrase in ("every morning", "daily", "every day", "each night", "every weekday"):
+            self.assertNotIn(phrase, upkeep.SWEEP_FIXED.lower())
+        self.assertNotRegex(upkeep.SWEEP_FIXED, r"every \d+ ?\w+$", "no trailing clause reads as a second interval")
+        for words in (upkeep.SWEEP, upkeep.SWEEP_FIXED):
+            self.assertTrue(words.startswith(upkeep.OPENS))
+        self.assertLessEqual(len(upkeep.OPENS), 80)
+        self.assertTrue(upkeep.LEADS.match(f"{upkeep.EVERY} {upkeep.SWEEP_FIXED}"))
+        self.assertIsNone(upkeep.LEADS.match(upkeep.SWEEP))
+        for words in ("`mcp__terminal__list_terminal_tabs`", "Do each act p4-phi hands beside this prompt",
+                      "this prompt comes on a fixed schedule", "`CronList`", "`CronDelete`"):
+            self.assertIn(words, upkeep.SWEEP_FIXED)
+        self.assertNotIn("ScheduleWakeup", upkeep.SWEEP_FIXED, "the self-paced loop's end is no end of a schedule")
+
     def test_an_item_handed_to_a_terminal_worker_is_listed_after_with_no_card(self):
         name = self.started()
         again = self.said()

@@ -2010,12 +2010,9 @@
   },
   "CronCreate": {
    "kind": "tool",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "replace a sweep that waits on a notice that never comes with a prompt on a fixed schedule, for a wait that no notice of the app ends, a worker in the Terminal panel or a run outside the app."
-   },
    "declined": {
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    },
@@ -2025,27 +2022,23 @@
   },
   "CronDelete": {
    "kind": "tool",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "add the end of that schedule once nothing is waited on, so no prompt fires for a wait that is over."
-   },
    "declined": {
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
-   }
+   },
+   "nowatch": "It ends a schedule Claude Code holds for the session alone, and no file or command a session reaches does that."
   },
   "CronList": {
    "kind": "tool",
-   "open": [
+   "used": [
     "p4-phi"
    ],
-   "would": {
-    "p4-phi": "read which schedules a session holds before it hands another, so no wait is given two of them."
-   },
    "declined": {
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
-   }
+   },
+   "nowatch": "It lists the schedules Claude Code holds for the session alone, which no file or command a session reaches lists."
   },
   "CwdChanged": {
    "kind": "hook",
