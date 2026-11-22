@@ -1594,6 +1594,16 @@ class Rules(unittest.TestCase):
         self.assertEqual(kid.count("built-in, plan-mode: "), 1)
         self.assertIn("plan-mode", phi.plans.BUILT_INS)
 
+    def test_the_plan_rule_names_the_loop_the_wait_for_the_approval_and_the_handing(self):
+        """workflows.md, "Find issues until the list stops growing": "stop once two rounds in a row find nothing
+        new". The rule is in every system prompt, so what holds before any skill is loaded is said there."""
+        for word in ("each round researches a section and then writes its fences",
+                     "two dry rounds in a row, or after five rounds",
+                     "no session that writes is started and no file but the plan is edited",
+                     "`phi.py sections <the plan file>`"):
+            self.assertIn(word, phi.PLAN_AT, word)
+            self.assertNotIn(word, phi.PLAN_STARTED, word)
+
     def test_the_plan_rule_reads_the_plans_folder_from_the_keeper_and_spells_none_itself(self):
         """The folder plan mode writes into is the one p4conf.PLANS names, where the settings keeper points
         `plansDirectory`. The rule takes it from there, so a folder that moves is named right with no edit here."""
