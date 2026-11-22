@@ -1620,13 +1620,16 @@ RESEARCHES = re.compile(r"\b(?:find|research|look\s+up|read|survey)\b[^.;]*\b(?:
 
 def research_text(home, s):
     """A writing worker's or coworker's first message: the line to find the documented terms and an
-    implementation guide before it creates anything. '' for an orchestrator, a later message, and a session that
-    writes nothing."""
+    implementation guide before it creates anything, said once. '' for an orchestrator, a later message, the prompt
+    of an event such as a background report, and a session that writes nothing."""
     if not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
+        return ""
+    if s.get("researchSaid") or s.get("turnBy") == "event":
         return ""
     files = s.get("fileSet")
     if not (files if isinstance(files, list) else issues.writing(s.get("task"))):
         return ""
+    s["researchSaid"] = True
     RAN["research"] = True
     return "phi (p4-phi): " + RESEARCH
 
@@ -1653,11 +1656,16 @@ def research_step_text(home, s, plan):
 
 def first_split_text(home, s):
     """A worker's or a coworker's first message: the line to plan its split while the app still lets it start
-    sessions. '' for an orchestrator, a later message, a session with no task, and one a cap holds."""
+    sessions, said once. '' for an orchestrator, a later message, the prompt of an event such as a background
+    report, a session in plan mode, which starts nothing that writes, a session with no task, and one a cap
+    holds."""
     if not LEVELS_ON or not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
+        return ""
+    if s.get("firstSplitSaid") or s.get("turnBy") == "event" or s.get("planMode") is True:
         return ""
     if caps_text(home, s):
         return ""
+    s["firstSplitSaid"] = True
     RAN["first_split"] = True
     return FIRST_SPLIT
 

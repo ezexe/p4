@@ -1419,6 +1419,23 @@ class Rules(unittest.TestCase):
         self.assertIn("(40) warning 39 of forty", ctx, "every warning whole")
         self.assertNotIn("did not fit", ctx)
 
+    def test_the_split_line_is_said_once_and_not_in_plan_mode_or_beside_a_report(self):
+        """A turn is kept only at Stop, and hooks.md, "UserPromptSubmit", has the hooks run on "A background subagent
+        reporting back to the session that started it", so until 0.11.146 a worker was told to plan its split again
+        beside each report that came before its first turn ended, and was told so in plan mode, where it starts
+        nothing that writes."""
+        line = "phi (p4-phi): this is this session's first message"
+        self.t.say(TOP, TASK)
+        body = {"hook_event_name": "UserPromptSubmit", "prompt": HANDED}
+        planning = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "plan"}))
+        self.assertNotIn(line, planning, "a session in plan mode starts nothing that writes")
+        first = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "default"}))
+        self.assertIn(line, first, "out of plan mode before its first turn ended: said")
+        report = context(self.t.say(KID, "<task-notification>done</task-notification>"))
+        self.assertNotIn(line, report, "an event's prompt carries no such line")
+        again = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "default"}))
+        self.assertNotIn(line, again, "said once")
+
     def test_a_fresh_childs_background_comes_with_its_first_message_and_its_start_hands_no_rule(self):
         self.t.say(TOP, TASK)
         text = self.start(KID)
