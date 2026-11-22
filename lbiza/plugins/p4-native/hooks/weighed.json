@@ -1277,8 +1277,13 @@
   },
   "/plan": {
    "kind": "command",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the plan a line of p4-phi asks a session to write itself with Claude Code's own plan mode, where a message of ezexe's asks for a change whose approach is open, so the plan is written by Claude Code and approved by ezexe."
+   },
    "declined": {
-    "p4-phi": "permission modes are ezexe's.",
     "p4-temportal": "permission modes."
    }
   },
@@ -1441,8 +1446,13 @@
   },
   "/schedule": {
    "kind": "command",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace a step that waits for the next session with a scheduled run, for a step that falls due when no session is open, which ezexe then makes in Claude Code's own flow."
+   },
    "declined": {
-    "p4-phi": "cloud tasks.",
     "p4-temportal": "cloud tasks have no local files."
    }
   },
@@ -1758,22 +1768,37 @@
   },
   "CronCreate": {
    "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace a sweep that waits on a notice that never comes with a prompt on a fixed schedule, for a wait that no notice of the app ends, a worker in the Terminal panel or a run outside the app."
+   },
    "declined": {
-    "p4-phi": "an orchestrator's sweep runs by `/loop` with no interval, which paces itself by `ScheduleWakeup`, so p4-phi asks for no job on a fixed schedule, and the watcher is the module's timer.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    }
   },
   "CronDelete": {
    "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "add the end of that schedule once nothing is waited on, so no prompt fires for a wait that is over."
+   },
    "declined": {
-    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    }
   },
   "CronList": {
    "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "read which schedules a session holds before it hands another, so no wait is given two of them."
+   },
    "declined": {
-    "p4-phi": "prompts on a schedule inside one session, and the watcher is the module's timer.",
     "p4-temportal": "each fires a prompt in a session, and the sweep is no turn."
    }
   },
@@ -1825,8 +1850,13 @@
   },
   "EnterPlanMode": {
    "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "replace the plan a line of p4-phi asks a session to write itself with Claude Code's own plan mode, where a message of ezexe's asks for a change whose approach is open, so the plan is written by Claude Code and approved by ezexe."
+   },
    "declined": {
-    "p4-phi": "permission modes are ezexe's.",
     "p4-temportal": "permission modes."
    }
   },
@@ -1839,8 +1869,13 @@
   },
   "ExitPlanMode": {
    "kind": "tool",
+   "open": [
+    "p4-phi"
+   ],
+   "would": {
+    "p4-phi": "add what settles a plan's approval with no person in a session another session started, where today it is an approval card that ezexe answers and the session comes out in `auto`, and leave the approval to Claude Code's own call in a session ezexe is at."
+   },
    "declined": {
-    "p4-phi": "permission modes are ezexe's: a started session's call is an approval card that ezexe answers, and the session comes out in `auto` whatever its starter's mode is, so no worker is started in plan mode.",
     "p4-temportal": "permission modes."
    }
   },

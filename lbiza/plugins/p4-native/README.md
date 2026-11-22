@@ -147,8 +147,8 @@ A key that ends in `__` stands for every tool of that server, and one that ends 
 
 What the record comes to, by kind, as `/native weighed` prints it.
 
-- `command`: 131 rows, 20 used, 0 open, 111 declined, 0 weighed by nobody
-- `tool`: 122 rows, 48 used, 1 open, 73 declined, 0 weighed by nobody
+- `command`: 131 rows, 20 used, 2 open, 109 declined, 0 weighed by nobody
+- `tool`: 122 rows, 48 used, 6 open, 68 declined, 0 weighed by nobody
 - `hook`: 33 rows, 13 used, 2 open, 18 declined, 0 weighed by nobody
 - `event`: 51 rows, 15 used, 2 open, 34 declined, 0 weighed by nobody
 - `method`: 93 rows, 34 used, 2 open, 57 declined, 0 weighed by nobody
@@ -214,15 +214,22 @@ The last row reads the answer for a sentence that says the desktop app, Claude C
 Seen in the desktop app on Claude Code 2.1.326, with a development copy: a Bash call of `gh run list --commit` with a hash of seven characters came back with its result and the line of `gh-run-list-short-commit` as `PostToolUse:Bash hook additional context`.
 Not seen live: the other five rows, and a line carried by a next prompt.
 
-## ezexe's own choices
+## What ezexe chose, and what sessions decided
 
-These were declined by choice and not by a block, so each stays a setting of Claude Code or of the desktop app, and p4-native writes none of them and probes none.
+Two things here are ezexe's own word.
 
-- The pull request flow: `mcp__ccd_pr__`, `/autofix-pr` and auto-merge, where ezexe lands by a local gate and a push to `main`.
-- Scheduled runs: `/schedule` and the desktop app's scheduled tasks, where each run is a new session that spends usage.
-- Models, effort, fast mode and the advisor: `/model`, `/effort`, `/fast` and `/advisor`.
-- Permission modes, plan mode, auto mode and the sandbox: `/permissions`, `/plan`, `/auto-mode-setup` and `/sandbox`.
-- `autoCompactWindow`, `idleCompaction`, the memory toggle `/memory`, and `cleanupPeriodDays` for how long transcripts stay.
+- No pull requests: work lands by its checks passing on the commit and a push to `main`, so the pull request flow, `mcp__ccd_pr__`, `/autofix-pr` and auto-merge, is not taken up.
+- Planning and delegation follow two skills, `plan-planner` and `sub-agentic`: a plan is shaped and tracked as the first says, and every subagent, fork, workflow and started session gets its model and its effort by its role, as the second says. No p4 plugin sets a session's own model, so `/model` and `/effort` stay ezexe's to change.
+
+The rest were verdicts of the sessions that weighed the rows, and ezexe gave none of them.
+Each stays a setting of Claude Code or of the desktop app that p4-native neither writes nor probes, and each is ezexe's to reopen.
+
+- Fast mode and the advisor: `/fast` and `/advisor`.
+- Permission modes, auto mode and the sandbox: `/permissions`, `/auto-mode-setup` and `/sandbox`.
+- `autoCompactWindow`, `idleCompaction` and the memory toggle `/memory`.
+- The desktop app's scheduled tasks.
+
+Three that sessions had called declined are reopened on ezexe's word, as open rows of `weighed.json` for p4-phi to take up the way it took up `/goal` and `/loop`: plan mode, with `/plan`, `EnterPlanMode` and `ExitPlanMode`, the prompts on a schedule inside a session, with `CronCreate`, `CronDelete` and `CronList`, and the scheduled runs of `/schedule`.
 
 ## Native features behind an option
 

@@ -1,5 +1,6 @@
 """Deciding tests for p4-native's watched conditions: that each fault of the host has a probe which names its
 decision, that no probe runs at a session's start, that no probe changes a session, and that the README lists them."""
+import json
 import re
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ PROBES = (PLUGIN / "hooks" / "probes.ts").read_text(encoding="utf-8")
 MODULE = (PLUGIN / "hooks" / "register.ts").read_text(encoding="utf-8")
 README = (PLUGIN / "README.md").read_text(encoding="utf-8")
 SKILL = (PLUGIN / "skills" / "host" / "SKILL.md").read_text(encoding="utf-8")
+WEIGHED = json.loads((PLUGIN / "hooks" / "weighed.json").read_text(encoding="utf-8"))
 
 # Each probe of probes.ts as its fields read: one `{ ... }` of the list PROBES.
 LIST = PROBES.split("export const PROBES: readonly Probe[] = [", 1)[1].split("\n]\n", 1)[0]
@@ -200,16 +202,31 @@ class ToldOnceTest(unittest.TestCase):
 
 
 class ChoicesTest(unittest.TestCase):
-    def test_ezexes_own_choices_are_named_as_settings_and_get_no_probe(self):
-        section = README.split("## ezexe's own choices\n", 1)[1].split("\n## ", 1)[0]
-        rows = [line for line in section.splitlines() if line.startswith("- ")]
-        self.assertEqual(len(rows), 5)
-        for word in ("pull request", "Scheduled runs", "Models", "Permission modes", "autoCompactWindow"):
-            self.assertIn(word, section)
+    def test_only_what_ezexe_said_is_called_ezexes_choice_and_the_rest_a_sessions_verdict(self):
+        """ezexe chose two things, no pull requests and the two skills that shape a plan and set an agent's model and
+        effort by its role. The section called a session's verdicts ezexe's own until 2026-11-22, when ezexe said
+        which were which and reopened three of them, plan mode, the prompts on a schedule and `/schedule`."""
+        section = README.split("## What ezexe chose, and what sessions decided\n", 1)[1].split("\n## ", 1)[0]
+        own, rest = section.split("The rest were verdicts of the sessions that weighed the rows", 1)
+        self.assertEqual(len([line for line in own.splitlines() if line.startswith("- ")]), 2)
+        for word in ("No pull requests", "`plan-planner` and `sub-agentic`", "by its role"):
+            self.assertIn(word, own)
+        self.assertNotIn("Fable", section)
+        verdicts, reopened = rest.split("Three that sessions had called declined are reopened on ezexe's word", 1)
+        self.assertEqual(len([line for line in verdicts.splitlines() if line.startswith("- ")]), 4)
+        for word in ("/fast", "/permissions", "/sandbox", "autoCompactWindow", "scheduled tasks"):
+            self.assertIn(word, verdicts)
+        for word in ("/plan", "EnterPlanMode", "ExitPlanMode", "CronCreate", "CronDelete", "CronList", "/schedule"):
+            self.assertIn(word, reopened)
+            self.assertNotIn(word, verdicts, "a reopened row is no verdict that stands")
         for name in BY_ID:
             self.assertNotIn(name, section)
-        for word in ("autofix", "/schedule", "CronCreate", "/loop", "/model", "/fast", "/permissions", "/sandbox"):
-            self.assertFalse(word in LIST, f"no probe watches a choice of ezexe's: {word}")
+        for word in ("autofix", "/model", "/fast", "/permissions", "/sandbox"):
+            self.assertFalse(word in LIST, f"no probe watches a choice of ezexe's or a verdict that stands: {word}")
+        for row in ("/plan", "EnterPlanMode", "ExitPlanMode", "CronCreate", "CronDelete", "CronList", "/schedule"):
+            held = WEIGHED["rows"][row]
+            self.assertIn("p4-phi", held.get("open") or held.get("used") or [], row)
+            self.assertNotIn("p4-phi", held.get("declined") or {}, f"{row} is open or used, and no longer declined")
 
 
 if __name__ == "__main__":
