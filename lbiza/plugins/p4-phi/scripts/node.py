@@ -34,6 +34,12 @@ import glob
 import json
 import os
 import re
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402  the reader that waits out another process's replace of a file
 
 CHAIN_MAX = 8            # sessions followed upward
 SIDE_MAX = 5             # sibling sessions read
@@ -86,12 +92,10 @@ class Node:
 
 
 def _read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """The JSON object at `path`, {} where there is none. A session's record and the app's are replaced by other
+    processes while this reads, which p4conf.load_json waits out."""
+    d, _ = p4conf.load_json(path)
+    return d if isinstance(d, dict) else {}
 
 
 def _parent(rec):

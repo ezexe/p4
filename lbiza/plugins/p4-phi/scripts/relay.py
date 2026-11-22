@@ -43,6 +43,11 @@ import sys
 import threading
 import time
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+if HERE not in sys.path:                   # run by itself with -I, as for the tree's first commit, it finds its own
+    sys.path.insert(0, HERE)
+import p4conf  # noqa: E402  the reader that waits out another process's replace of a file
+
 MARKS = ("deprecates:", "replaces:")
 PATH_RE = re.compile(r"`([^`\s]+)`|((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/*~-]+)")
 GIT_S = 5                        # what one git call may take inside a hook
@@ -55,12 +60,10 @@ TRACK_S = 300                    # one git call of the tree's first commit, run 
 # --- files ---------------------------------------------------------------------------------------------------------
 
 def _read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """The JSON object at `path`, {} where there is none. A file another process is replacing is waited out, by
+    p4conf.load_json, so a record that is there never reads as no record for the length of a move."""
+    d, _ = p4conf.load_json(path)
+    return d if isinstance(d, dict) else {}
 
 
 _HOLDS = threading.local()     # the paths whose lock this thread holds

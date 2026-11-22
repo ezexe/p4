@@ -1269,15 +1269,46 @@ def record_path(p4):
     return os.path.join(p4, RECORD)
 
 
+# How long a read waits out another process's replace of the file. A file p4 keeps is written whole to a temp file
+# and moved over the old one with os.replace, so a reader never meets half a file. On Windows it can meet the move
+# itself: open then fails with PermissionError, errno 13, for as long as the move takes. Measured on Windows 11 with
+# one process replacing a file in a loop and another reading it: 1250 of 4922 reads failed so, and none with any
+# other error. A read taken for "no record" there ran a proof's test a second time and failed a test of the suite
+# on GitHub, and one taken for "no JSON object" left p4's settings out of a settings file. The move is over in far
+# less than this wait, which is a small part of what a hook has, and relay._write_raw waits out a reader the same
+# way from the other side.
+READ_WAIT_S = 0.25
+READ_AGAIN_S = 0.005
+
+
+def load_json(p):
+    """The JSON value at `p`, as (the value, how the read went): "" where it was read, "missing" where no file is
+    there, which is answered at once, and "unreadable" where a file is there and gave no JSON. A read that meets
+    PermissionError is made again until READ_WAIT_S has passed, since on Windows that is what a read meets while
+    another process's os.replace of the file is under way."""
+    end = None
+    while True:
+        try:
+            with open(p, encoding="utf-8") as f:
+                return json.load(f), ""
+        except FileNotFoundError:
+            return None, "missing"
+        except PermissionError:
+            now = time.monotonic()
+            end = now + READ_WAIT_S if end is None else end
+            if now >= end:
+                return None, "unreadable"
+            time.sleep(READ_AGAIN_S)
+        except (OSError, ValueError):
+            return None, "unreadable"
+
+
 def read_json(p):
-    """The JSON object at `p`; {} when it is missing; None when it is there and is not a JSON object."""
-    try:
-        with open(p, encoding="utf-8") as f:
-            d = json.load(f)
-    except FileNotFoundError:
+    """The JSON object at `p`; {} when it is missing; None when it is there and is not a JSON object. A replace of
+    the file by another process is waited out, by load_json."""
+    d, how = load_json(p)
+    if how == "missing":
         return {}
-    except (OSError, ValueError):
-        return None
     return d if isinstance(d, dict) else None
 
 

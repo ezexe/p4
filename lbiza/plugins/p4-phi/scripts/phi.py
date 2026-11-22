@@ -158,12 +158,9 @@ def cut(s, n):
 # --- files ---------------------------------------------------------------------------------------------------
 
 def read_json(path):
-    try:
-        with open(path, encoding="utf-8") as f:
-            d = json.load(f)
-        return d if isinstance(d, dict) else {}
-    except (OSError, ValueError):
-        return {}
+    """The JSON object at `path`, {} where there is none, with another process's replace of the file waited out."""
+    d, _ = p4conf.load_json(path)
+    return d if isinstance(d, dict) else {}
 
 
 def write_atomic(path, text):

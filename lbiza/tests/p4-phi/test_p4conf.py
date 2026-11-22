@@ -2319,5 +2319,92 @@ class SettingsVariables(unittest.TestCase):
             self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"}, "none added")
 
 
+class ReadDuringAReplace(unittest.TestCase):
+    """A file p4 keeps is written whole to a temp file and moved over the old one with os.replace. On Windows a read
+    that meets the move fails with PermissionError, errno 13, for as long as the move takes. Measured on Windows 11
+    with one process replacing a file in a loop and another reading it: 1250 of 4922 reads failed so, and none with
+    any other error. p4conf.load_json waits the move out, and each reader of such a file reads through it:
+    p4conf.read_json, relay._read_json, phi.read_json and node._read_json."""
+
+    RECORD = {"state": "passed", "code": 0}
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.path = os.path.join(self._tmp.name, "proof.json")
+        with open(self.path, "w", encoding="utf-8") as f:
+            json.dump(self.RECORD, f)
+
+    def refused(self, times):
+        """`open` as a reader meets it while a move is under way: refused `times` times, and then as it is. Returns
+        the paths it was asked for and the patch that puts it in p4conf's place."""
+        from unittest import mock
+        asked = []
+
+        def opened(path, *args, **kw):
+            asked.append(path)
+            if len(asked) <= times:
+                raise PermissionError(13, "Permission denied", path)
+            return open(path, *args, **kw)
+        return asked, mock.patch.object(p4conf, "open", opened, create=True)
+
+    def test_a_read_that_meets_a_replace_and_then_succeeds_answers_the_record(self):
+        import node
+        import phi
+        import relay
+        for read in (p4conf.read_json, relay._read_json, phi.read_json, node._read_json):
+            asked, patch = self.refused(3)
+            with patch:
+                self.assertEqual(read(self.path), self.RECORD, read.__module__)
+            self.assertEqual(len(asked), 4, f"{read.__module__}: refused three times and read at the fourth")
+
+    def test_a_missing_file_answers_at_once_and_one_that_stays_refused_answers_once_the_wait_is_over(self):
+        import time
+        from unittest import mock
+        import relay
+        asked, patch = self.refused(0)
+        with patch:
+            self.assertEqual(p4conf.read_json(os.path.join(self._tmp.name, "none.json")), {})
+            self.assertEqual(relay._read_json(os.path.join(self._tmp.name, "none.json")), {})
+        self.assertEqual(len(asked), 2, "no file is no move under way: each read tried once")
+        asked, patch = self.refused(10 ** 9)
+        with patch, mock.patch.object(p4conf, "READ_WAIT_S", 0.05):
+            began = time.monotonic()
+            self.assertIsNone(p4conf.read_json(self.path), "there, and no JSON object was read")
+            self.assertEqual(relay._read_json(self.path), {})
+            took = time.monotonic() - began
+        self.assertGreaterEqual(took, 0.09, "each read waited its wait out")
+        self.assertLess(took, 5)
+        self.assertGreater(len(asked), 2, "and tried again meanwhile")
+
+    @unittest.skipUnless(os.name == "nt", "a read meets a move as PermissionError on Windows")
+    def test_no_read_takes_another_processs_replace_for_no_record(self):
+        """The race itself, for a second: a process replaces the file in a loop, as a run in the background does
+        with its proof.json, and every read here answers a record."""
+        import subprocess
+        import relay
+        writer = ("import json, os, sys, time\n"
+                  "path, n, end = sys.argv[1], 0, time.time() + 1.0\n"
+                  "while time.time() < end:\n"
+                  "    with open(path + '.tmp', 'w', encoding='utf-8') as f:\n"
+                  "        json.dump({'state': 'running', 'n': n}, f)\n"
+                  "    while True:\n"
+                  "        try:\n"
+                  "            os.replace(path + '.tmp', path)\n"
+                  "            break\n"
+                  "        except PermissionError:\n"
+                  "            pass\n"
+                  "    n += 1\n")
+        process = subprocess.Popen([sys.executable, "-I", "-c", writer, self.path])
+        self.addCleanup(process.wait)               # before the folder goes, whatever the test met
+        reads = lost = 0
+        while process.poll() is None:
+            reads += 1
+            lost += not relay._read_json(self.path)
+        self.assertEqual(process.returncode, 0)
+        self.assertGreater(reads, 50)
+        self.assertEqual(lost, 0, f"{lost} of {reads} reads took a move under way for no record")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
