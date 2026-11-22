@@ -871,8 +871,7 @@ class AtArchive(Base):
 
 
 class Scorers(Base):
-    """Routing's route and code owner picks go through the trained ranker when the store keeps a model, and through
-    shared content words, at the measured threshold, when it keeps none."""
+    """Routing's route and code owner picks go by shared content words, at the measured threshold."""
 
     def routes(self):
         rows = [{"kind": "route", "id": "rt-right", "session": KID, "issue": "ezexe/demo#7", "context": "fresh",
@@ -892,23 +891,16 @@ class Scorers(Base):
     MESSAGE = ("Run the exporter flush suite on the store after the ports table writer moves, then quarantine the "
                "narwhal ledger")
 
-    def test_with_no_model_shared_content_words_are_the_fallback_at_the_measured_threshold(self):
+    def test_shared_content_words_pick_the_route_at_the_measured_threshold(self):
         t = self.t
         t.say(TOP, TASK)
         self.routes()
-        self.assertEqual(puppeteer.prompty_model(t.p4), {})
-        self.assertIsNone(puppeteer.rank_texts(t.p4, "owners", self.MESSAGE, ["a task", "another task"]))
-        self.assertIsNone(puppeteer.rank_texts(t.p4, "routes", self.MESSAGE, ["a route"]))
         got = puppeteer.score_routes(t.p4, self.MESSAGE)
         n, part = puppeteer.share(self.MESSAGE, "port the exporter flush to the new writer and run the ports table "
                                                 "suite on the store Port the exporter flush")
         self.assertEqual((got[0][2]["id"], got[0][1], got[0][0]), ("rt-wrong", n, round(part, 2)), "its own score")
-        self.assertEqual(puppeteer.OWNER_WORDS, 8, "the code owner threshold with no trained model")
-        self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "the route thresholds with no "
-                         "trained model")
-        write(puppeteer.scorer_path(t.p4), "not json")
-        self.assertEqual(puppeteer.prompty_model(t.p4), {}, "an unreadable model is no model")
-        self.assertEqual(puppeteer.score_routes(t.p4, self.MESSAGE)[0][2]["id"], "rt-wrong")
+        self.assertEqual(puppeteer.OWNER_WORDS, 8, "the code owner threshold")
+        self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "the route thresholds")
 
 
 class Parallel(Base):

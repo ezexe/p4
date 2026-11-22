@@ -62,7 +62,6 @@ if HERE not in sys.path:
 import relay  # noqa: E402
 import p4conf  # noqa: E402
 import plans  # noqa: E402
-import ranker  # noqa: E402
 import starts  # noqa: E402
 import issues  # noqa: E402
 
@@ -77,7 +76,6 @@ ROUTE_MIN = 4                    # content words a message shares with a route b
 ROUTE_CLOSE = 0.6                # of the smaller side's content words
 OWNER_WORDS = 8                  # content words a message shares with a live session's task before that session is
 #                                  named the area's code owner
-MODEL_FILE = "prompty.json"      # <store>/phi/models/prompty.json: the trained code owner and route scorers, if any
 TOPIC_WORDS = 3                  # content words a message shares with this session's task to be part of its topic
 QUICK_WORDS = 6                  # a message of fewer content words is a quick thing, never drafted
 STALE_S = 24 * 3600.0            # an orchestrator with open work and no turn this long is stale
@@ -993,80 +991,15 @@ def check_routes(home, net=False, force=False):
     return out
 
 
-# --- the trained scorers ----------------------------------------------------------------------------------------------
-#
-# Routing picks a route and a code owner through the ranker when a model trained for them is in the store:
-# ranker.candidate_features over the candidates' words, scored by the weights kept in phi/models/prompty.json.
-# A code owner or a route model is used when one is kept there. With no model, as on a store with too little
-# history or a machine that never trained one, shared content words decide, at OWNER_WORDS for a code owner and at
-# ROUTE_MIN and ROUTE_CLOSE for a route.
-
-MODEL_KIND = "p4 prompty model"
-_MODEL = {}                      # each model path to its mtime_ns and model
-
-
-def scorer_path(home):
-    return p4conf.sub(home, "models", MODEL_FILE)
-
-
-def prompty_model(home):
-    """The code owner and route scorers trained for this store, under the keys owners and routes, each with its
-    weights `w` and its `threshold`; an empty dict when none is kept."""
-    path = scorer_path(home)
-    try:
-        stamp = os.stat(path).st_mtime_ns
-    except OSError:
-        return {}
-    if _MODEL.get(path, (None,))[0] != stamp:
-        m = relay._read_json(path)
-        out = {}
-        if isinstance(m, dict) and m.get("kind") == MODEL_KIND:
-            for k in ("owners", "routes"):
-                d = m.get(k)
-                if isinstance(d, dict) and isinstance(d.get("w"), dict):
-                    try:
-                        out[k] = {"w": {int(i): float(v) for i, v in d["w"].items()},
-                                  "threshold": float(d.get("threshold", 0.5))}
-                    except (TypeError, ValueError):
-                        continue
-        _MODEL[path] = (stamp, out)
-    return _MODEL[path][1]
-
-
-def pair_features(req, texts, when=""):
-    """One ranker feature dict for each candidate text of a message, and the candidates' BM25: the ranker's own
-    reading of a candidate, with the candidates as the collection the idf is taken over."""
-    docs = [ranker.tokens(t) for t in texts]
-    idf, _ = ranker.idf_table(docs)
-    avgdl = sum(len(d) for d in docs) / max(1, len(docs))
-    cds = [{"file": "session", "kind": "task", "state": "LIVE", "time": "", "toks": d, "head": d[:24]} for d in docs]
-    xs, bm, _ = ranker.candidate_features(ranker.tokens(req), cds, idf, avgdl, when)
-    return xs, bm
-
-
-def rank_texts(home, kind, req, texts, when=""):
-    """A score for each text and the threshold, by the store's trained model of `kind`, owners or routes. None when
-    no such model is kept, and the caller falls back to shared content words."""
-    m = prompty_model(home).get(kind)
-    if not m or not texts:
-        return None
-    xs, _ = pair_features(req, texts, when)
-    return [ranker.score(m["w"], x) for x in xs], m["threshold"]
-
-
 def score_routes(home, req):
     """The score, the count of shared words and the route of each registered route a message matches closely, the
-    best first: by the trained route model when the store keeps one, else by shared content words."""
+    best first, by shared content words at ROUTE_MIN and ROUTE_CLOSE."""
     out = []
     rows = list(all_routes(home).values())
     texts = [f"{r.get('words', '')} {r.get('topic', '')}" for r in rows]
-    ranked = rank_texts(home, "routes", req, texts)
     for k, r in enumerate(rows):
         n, part = share(req, texts[k])
-        if ranked is not None:
-            if ranked[0][k] >= ranked[1]:
-                out.append((round(ranked[0][k], 2), n, r))
-        elif n >= ROUTE_MIN and part >= ROUTE_CLOSE:
+        if n >= ROUTE_MIN and part >= ROUTE_CLOSE:
             out.append((round(part, 2), n, r))
     return sorted(out, key=lambda x: (-x[0], -x[1], str(x[2].get("id"))))
 
@@ -1172,7 +1105,6 @@ def prompty(home, s, req, base):
                                                          for x in plans.open_steps(home, oid)))
               for oid, o in every.items()
               if not (oid == sid or oid in above or closed(o) or relay.gone(home, o))]
-    ranked = rank_texts(home, "owners", req, [text for _, _, text in others])       # None: shared words decide
     try:                                            # it reads the app's records: a failure costs the path arm alone
         import book
         owned = {e["id"]: what for e, what in book.holders(home, s if s.get("cwd") else {**s, "cwd": base}, req,
@@ -1184,9 +1116,6 @@ def prompty(home, s, req, base):
         n, _ = share(req, text)
         if hit:
             cand = (2, len(hit), oid, f"its owned paths hold {hit}")
-        elif ranked is not None:
-            cand = (1, ranked[0][k], oid, f"the trained owner model scores its task {ranked[0][k]:.2f} for the "
-                                         f"message") if ranked[0][k] >= ranked[1] else None
         elif n >= OWNER_WORDS:
             cand = (1, n, oid, f"its task shares {n} content words with the message")
         else:
