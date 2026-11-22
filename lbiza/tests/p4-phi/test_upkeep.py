@@ -902,6 +902,45 @@ class Leftovers(Base):
         git(self.repo, "worktree", "lock", tree)       # an agent that still runs holds its worktree locked
         self.assertEqual(self.lines(self.said(), "leftovers of a subagent"), [])
 
+    def test_the_sessions_own_worktree_a_subagent_wrote_in_is_no_leftover_of_it(self):
+        """A subagent with no isolation writes in the session's own folder, which can be a worktree under
+        `.claude/worktrees`. The app's record keeps the folder the session began in, so p4-phi's record of its cwd
+        names the checkout, and the worktree it moved to is held by its own turns' heads, as a live session's
+        record held it. That folder is the session's own and never the subagent's leftover: it is named in
+        neither line, dirty or clean, while a true subagent's worktree still goes."""
+        mine = os.path.join(self.repo, ".claude", "worktrees", "rebase")
+        self.assertEqual(git(self.repo, "worktree", "add", "-q", mine, "-b", "worktree-rebase",
+                             "origin/main").returncode, 0)
+        theirs = os.path.join(self.repo, ".claude", "worktrees", "agent-a1")
+        self.assertEqual(git(self.repo, "worktree", "add", "-q", theirs, "-b", "worktree-agent-a1",
+                             "origin/main").returncode, 0)
+        self.reader_in(self.repo)
+        head = git(mine, "rev-parse", "--short=8", "HEAD").stdout.strip()
+        spelled = os.path.realpath(mine).replace("\\", "/")
+        with open(os.path.join(self.t.dir(TOP), "turns.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"delta": {"heads": [f"{spelled}@worktree-rebase {head}"],
+                                          "files": [f"{spelled}/exporter.py"]}}) + "\n")
+        self.turn_on()
+        plan = os.path.join(self.t.dir(TOP), "plan.json")
+        write(plan, json.dumps({"steps": [], "loose": [
+            {"id": "a0", "agent": "a0", "status": "completed", "wrote": [os.path.join(mine, "exporter.py")]},
+            {"id": "a1", "agent": "a1", "status": "completed", "wrote": [os.path.join(theirs, "exporter.py")]}]}))
+        agent = os.path.realpath(theirs).replace("\\", "/")
+
+        def removed(text):
+            left = " ".join(self.lines(text, "leftovers of"))
+            return (re.findall(r"worktree remove \"([^\"]+)\"", left), re.findall(r"branch -d (\S+?)`", left))
+
+        write(os.path.join(mine, "notes.txt"), "half a thought\n")
+        got = self.said()
+        self.assertEqual(removed(got), ([agent], ["worktree-agent-a1"]), got)
+        self.assertEqual(self.lines(got, "left on disk"), [], "its own dirty folder is named to nobody")
+        os.remove(os.path.join(mine, "notes.txt"))
+        again = self.said()
+        self.assertEqual(removed(again), ([agent], ["worktree-agent-a1"]), again)
+        self.assertEqual(self.lines(again, "left on disk"), [], again)
+        self.assertTrue(os.path.isdir(mine))
+
 
 class TerminalWorker(Base):
     """With `phi.upkeep` on, work the app refuses a start for goes to a scripted run in the Terminal panel, in

@@ -1493,8 +1493,8 @@ class TopOrchestrates(unittest.TestCase):
                      "Update the installed plugin loader code",
                      "Update installed plugins loader to read manifest"):
             self.assertEqual(plans.top_stays(work), "", work)
-        # a pipeline that passes is code of the repository, no run, though LANDS keeps a check that names a test
-        self.assertIsNone(plans.WATCHES_RUN.search("Check the data pipeline passes the schema test"))
+        # a pipeline that passes its schema test is code of the repository, and none of the session's own work
+        self.assertEqual(plans.top_stays("Check the data pipeline passes the schema test"), "")
         # the advice gives a child only the watch that is work, and the split advice keeps an update that names a path
         steps = [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
             "Watch GitHub's run on piece D", "Update the installed plugins from lbiza/plugins/p4-phi",

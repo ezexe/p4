@@ -1172,16 +1172,30 @@ def wait_acts(home, s, d, by, store, hand=False):
 AGENT_TREE = re.compile(r"^(.*[/\\]\.claude[/\\]worktrees[/\\][^/\\]+)(?:[/\\]|$)")
 
 
-def agent_trees(home, sid):
+def own_folders(home, sid, s):
+    """The folders a session itself stands or worked in: its recorded cwd, the app's cwd and worktree for it, and
+    each checkout its own turns' heads name. The app's record keeps the folder a session began in, so a session
+    that moved into a worktree is held there only by its turns' heads."""
+    rec = PHI.app_record(sid) if str(sid).startswith("local_") else {}
+    out = {relay.norm(str(p)) for p in (s.get("cwd"), rec.get("cwd"), rec.get("worktreePath")) if p}
+    return out | {relay.norm(t["path"]) for t in trees_of(home, sid, s)}
+
+
+def agent_trees(home, s):
     """The git worktrees the subagents of a session wrote in, by the files p4-phi's records hold each one wrote, as
-    trees_of gives a tree. One whose agent still runs is left out."""
-    seen = {}
+    trees_of gives a tree. One whose agent still runs is left out. So is the session's own worktree and any that
+    holds a folder of its own: a subagent with no isolation writes there, and it is never that subagent's."""
+    sid, seen = s["sessionId"], {}
+    mine = own_folders(home, sid, s)
     for _, t in plans._tasks(plans.load(home, sid)):
         if not t.get("agent") or t.get("status") == "open":
             continue
         for p in t.get("wrote") or []:
             m = AGENT_TREE.match(str(p))
-            if m and relay.norm(m.group(1)) not in seen and os.path.isdir(m.group(1)) and linked(m.group(1)):
+            key = relay.norm(m.group(1)) if m else ""
+            if key and any(o == key or o.startswith(key + "/") for o in mine):
+                continue
+            if m and key not in seen and os.path.isdir(m.group(1)) and linked(m.group(1)):
                 r = _out(m.group(1), "rev-parse", "--abbrev-ref", "HEAD") or ""
                 seen[relay.norm(m.group(1))] = {"path": m.group(1), "first": "", "last": "", "there": True,
                                                 "own": False, "linked": True, "branch": r}
@@ -1206,7 +1220,7 @@ def leftover_acts(home, s, d, hand):
     out, sid = [], s["sessionId"]
     groups = [(f"\"{title(k, ks)}\" `{k}`, which is archived", k, trees_of(home, k, ks))
               for k, ks in archived(home, sid).items() if k not in d["swept"]]
-    groups.append(("a subagent of this session whose work is merged", "", agent_trees(home, sid)))
+    groups.append(("a subagent of this session whose work is merged", "", agent_trees(home, s)))
     seen = set()
     for whose, k, trees in groups:
         trees = [t for t in trees if relay.norm(t["path"]) not in seen]     # a folder two sessions shared, once

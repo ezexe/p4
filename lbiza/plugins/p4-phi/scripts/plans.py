@@ -403,11 +403,13 @@ WAITS = re.compile(r"\b(wait(?:s|ing)?|until|confirm\w*|verif\w*|can go|when\b[^
                    r"send|ask|hand (?:off|over)|report back)\b", re.I)   # a step that waits on or passes on work
 QUICK_WORDS = 4               # a step of fewer content words is a quick thing, done here
 LANDS = re.compile(r"^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b"
-                   r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=[^.;:]*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|"
+                   r"|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=(?:(?!\bpass(?:es|ed)?\b)[^.;:])*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|"
                    r"pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)"
                    r"|\b(?:commit|merge|push|ship|release|land|fast-forward)\b", re.I)
 # checks or lands the session's own work. A check of anything else is work, such as "Check 1: nothing hidden in
-# AppData", one of the checks an orchestrator's children are for
+# AppData", one of the checks an orchestrator's children are for. The checked thing is named before any "pass":
+# in "Check the data pipeline passes the schema test" the test is the measure, and the pipeline is code of the
+# repository, which is work for a child
 ORCHESTRATES = re.compile(r"^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)"
                           r"(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?)\b"
                           r"|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b", re.I)
