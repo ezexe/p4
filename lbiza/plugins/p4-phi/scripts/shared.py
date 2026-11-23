@@ -2,7 +2,8 @@
 
 A fresh worktree holds nothing git ignores, so the project's environment is absent there. Two keys of p4.json's `phi`
 section, read when a project sets them, name what its worktrees share:
-- `worktree_python`: the project's interpreter, a path from the main checkout's root, which a worktree's session runs
+- `worktree_python`: the project's interpreter, a path from the root of the project whose store names it, which is
+  the main checkout's own or, for a repository cloned inside a project, that project's, and which a worktree's session runs
   by its full path. https://docs.python.org/3/library/venv.html: "you can just specify the full path to that
   environment's Python interpreter."
 - `worktree_lines`: the project's own sentences for its other tools, with `{main}` for the main checkout's root.
@@ -36,9 +37,22 @@ def tree_of(base):
     return (d, str(main)) if found else ("", "")
 
 
+def project_of(main):
+    """The folder whose store names what the worktrees of the main checkout `main` share: `main` itself where it
+    holds a `.claude/p4/p4.json`, else the nearest folder above it that does, as a repository cloned inside a
+    project has no store of its own and works by that project's. `main` where none is found."""
+    d = os.path.abspath(main)
+    while not os.path.isfile(os.path.join(d, ".claude", "p4", "p4.json")):
+        up = os.path.dirname(d)
+        if up == d:
+            return main
+        d = up
+    return d
+
+
 def conf(main):
     """(the interpreter's path as p4.json gives it, the project's own lines), each empty where its key is unset or
-    of another type."""
+    of another type. `main` is the folder whose store is read, as project_of gives it."""
     try:
         d = p4conf.section(os.path.join(main, ".claude", "p4"), "phi", write=False)
     except Exception:  # noqa: BLE001
@@ -55,10 +69,11 @@ def lines(base):
     main = tree_of(base)[1] if base else ""
     if not main:
         return []
-    py, more = conf(main)
+    project = project_of(main)
+    py, more = conf(project)
     root, out = main.replace("\\", "/"), []
     if py:
-        full = os.path.normpath(os.path.join(main, py))
+        full = os.path.normpath(os.path.join(project, py))     # a path from the root of the project whose store it is
         if os.path.isfile(full):
             out.append(PYTHON.format(python=full.replace("\\", "/")))
     return out + [x.replace("{main}", root) for x in more]

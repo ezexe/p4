@@ -60,6 +60,23 @@ class Shared(unittest.TestCase):
         self.assertEqual(shared.start_text(self.main), "", "a main checkout's session is told nothing")
         self.assertEqual(shared.lines(self.main), got, "a brief drafted in the main checkout carries them")
 
+    def test_a_repository_cloned_inside_a_project_works_by_that_projects_store(self):
+        """A repository with no store of its own, cloned inside a project that has one: its worktrees are handed the
+        interpreter the project's store names, read as a path from the project's root."""
+        project = os.path.dirname(self.main)
+        os.rename(self.p4, os.path.join(project, "moved-p4"))
+        os.makedirs(os.path.join(project, ".claude"))
+        os.rename(os.path.join(project, "moved-p4"), os.path.join(project, ".claude", "p4"))
+        self.p4 = os.path.join(project, ".claude", "p4")
+        py = os.path.join(project, "env", "python.exe")
+        os.makedirs(os.path.dirname(py))
+        open(py, "w").close()
+        self.conf(worktree_python="env/python.exe", worktree_lines=["Caches are under {main}/cache."])
+        got = shared.lines(self.tree)
+        self.assertEqual(len(got), 2, got)
+        self.assertIn("`" + py.replace("\\", "/") + "`", got[0])
+        self.assertEqual(got[1], "Caches are under " + self.main.replace("\\", "/") + "/cache.")
+
     def test_an_interpreter_that_is_not_on_disk_is_never_named(self):
         self.conf(worktree_python=".venv/absent.exe", worktree_lines="not a list")
         self.assertEqual(shared.lines(self.tree), [])
