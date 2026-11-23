@@ -1,7 +1,7 @@
 #!/bin/sh
 # p4-temportal's hook runner: it finds a working python, runs hooks/<part>.py <subcommand> isolated with -I, passing
 # Claude Code's stdin through, and exits 0 whatever happens, so a broken hook never blocks a call. <part> is `memory`
-# for p4_memory.py, `scratchpad` for scratchpad.py, `lifetime` for lifetime.py or `compact` for compact.py.
+# for p4_memory.py, `scratchpad` for scratchpad.py, `lifetime` for lifetime.py or `compact` for compact.py or `store` for store.py.
 # find-python.sh finds the python.
 # A runner that never starts cannot exit 0, as on Windows without Git Bash, where Claude Code runs the command in
 # PowerShell and finds no `sh`, so each entry of hooks.json sets onFailure to continue and such a failure blocks no call.
@@ -28,6 +28,7 @@ case "$part" in
   scratchpad) script=scratchpad.py ;;
   lifetime) script=lifetime.py ;;
   compact) script=compact.py ;;
+  store) script=store.py ;;
   *) notice "p4-temportal: unknown part '$part'; nothing was done"; exit 0 ;;
 esac
 

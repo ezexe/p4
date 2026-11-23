@@ -40,6 +40,12 @@ class RunHookTest(unittest.TestCase):
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn("no working python found", json.loads(out.stdout)["systemMessage"])
 
+    def test_the_part_store_runs_store_py(self):
+        (self.root / "hooks" / "store.py").write_text("print('made')\n")
+        out = self.run_hook("store", "make")
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("made", out.stdout)
+
     def test_an_unknown_part_prints_a_system_message(self):
         out = self.run_hook("nosuch", "sweep")
         self.assertEqual(out.returncode, 0, out.stderr)

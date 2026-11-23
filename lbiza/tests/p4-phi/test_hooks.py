@@ -6,9 +6,8 @@ Run: python -m pytest tests/p4-phi/test_hooks.py
 It needs only the standard library's unittest and no network. Each hook runs as Claude Code runs it,
 `sh hooks/recall-hook.sh <name>` with the JSON payload on stdin and CLAUDE_PLUGIN_ROOT and CLAUDE_PROJECT_DIR set, on
 a small git project holding a store, a folder `.claude/p4` with a p4.json. Checked: the hooks.json events, matchers,
-timeouts and the commands recall-hook.sh runs; silence where a hook has nothing to add; the store made by the layout
-hook with no `phi/store` and no `phi/models`; the `.git/info/exclude` line never added twice; the store's .gitignore
-seeded under its marker; the text of an Agent call handed to its subagent's start, in process with phi.py's text
+timeouts and the commands recall-hook.sh runs; silence where a hook has nothing to add; the layout hook finding the store and making none
+where there is none; the text of an Agent call handed to its subagent's start, in process with phi.py's text
 patched; the one folder, `phi/served`, that hook.pending_dir and rows.origin_dir name; every handler in a project with
 no store.
 """
@@ -172,32 +171,18 @@ class Ready(Base):
 
 
 class Layout(Base):
-    def test_silent_and_idempotent(self):
-        shutil.rmtree(self.p4)
-        r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "", "SessionStart prints nothing")
-        self.assertTrue(os.path.exists(os.path.join(self.p4, ".git")))
-        self.assertTrue(os.path.exists(os.path.join(self.p4, ".gitignore")))
-        self.assertTrue(os.path.exists(os.path.join(self.p4, "p4.json")))
-        run_hook("layout", {"source": "resume", "cwd": self.proj}, self.proj)
-        with open(os.path.join(self.proj, ".git", "info", "exclude"), encoding="utf-8") as f:
-            self.assertEqual(f.read().count(".claude/p4/"), 1, "the exclude line added once")
-        status = subprocess.run(["git", "-C", self.proj, "status", "--porcelain"], capture_output=True, text=True)
-        self.assertNotIn(".claude", status.stdout,
-                         "the store, a git repository of its own, stays out of the project's git status")
-
-    def test_init_layout_makes_no_phi_store_and_no_phi_models(self):
+    def test_h_layout_makes_no_folder_where_there_is_no_store(self):
+        """p4-temportal's `store make` is the maker, so the layout hook finds no store and does nothing, and makes
+        no folder."""
         import hook
-        shutil.rmtree(self.p4)
-        self.assertEqual(hook.init_layout(self.proj), [], "nothing to move in a store made now")
-        self.assertTrue(os.path.isfile(os.path.join(self.p4, "p4.json")))
-        for sub in ("store", "models"):
-            self.assertFalse(os.path.exists(p4conf.sub(self.p4, sub)), sub)
-        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
-        self.assertFalse(os.path.exists(p4conf.sub(self.p4, "store")), "the hook makes none either")
-        self.assertFalse(os.path.exists(p4conf.sub(self.p4, "models")))
-        self.assertFalse(os.path.exists(os.path.join(self.p4, ".github")), "no sync workflow is seeded")
+        shutil.rmtree(os.path.join(self.proj, ".claude"))
+        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.proj}):
+            self.assertIsNone(hook.h_layout({"cwd": self.proj}))
+        r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
+        self.assertEqual((r.returncode, r.stdout), (0, ""))
+        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "no .claude folder was made")
+        for name in ("init_layout", "seed_gitignore", "exclude_line", "GITIGNORE"):
+            self.assertFalse(hasattr(hook, name), f"{name} moved to p4-temportal's store.py")
 
     def test_a_served_record_older_than_a_day_is_swept(self):
         """A served record whose session never got to take it, as a session ended by a crash, is swept by the next
@@ -212,50 +197,6 @@ class Layout(Base):
         run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
         self.assertFalse(os.path.exists(old), "two days old: swept")
         self.assertTrue(os.path.exists(fresh), "fresh: a live session's record stays")
-
-    def gitignore(self, text=None):
-        gi = os.path.join(self.p4, ".gitignore")
-        if text is not None:
-            write(gi, text)
-        run_hook("layout", {"source": "startup", "cwd": self.proj}, self.proj)
-        with open(gi, encoding="utf-8") as f:
-            return f.read()
-
-    def test_gitignore_missing_seeded_lines_are_appended_under_a_marker(self):
-        import hook
-        old = "# seeded once by p4-recall; your edits win\ntemportal/scratchpad/.out/\n__pycache__/\n*.png\n*.jpg\n" \
-              "*.zip\n*.gz\n# mine\nbuild/\n"
-        got = self.gitignore(old)
-        self.assertTrue(got.startswith(old), "what was there is untouched and in its order")
-        tail = got[len(old):].splitlines()
-        self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
-        self.assertEqual(tail[1:], ["temportal/notebook/.out/", "phi/served/", ".layout.lock",
-                                    ".settings.lock", "claude-settings.json", "phi/claude-code-watch.pending.json*",
-                                    "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
-                                    "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",
-                                    "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", ".venv/", "*.pyc"])
-        self.assertNotIn("phi/models", got, "no line of the removed models folder is seeded")
-        self.assertEqual(self.gitignore(), got, "a second run adds nothing")
-        self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
-
-    def test_gitignore_vlds_header_counts_as_a_marker(self):
-        got = self.gitignore("# Seeded by the vlds plugin (hooks/p4-layout.sh) when the repository has no .gitignore; "
-                             "ezexe's edits win.\n*.wav\nphi/served/\n")
-        self.assertIn("\n# seeded by p4-recall ", got)
-        self.assertTrue(got.endswith("*.gz\n"))
-        self.assertIn("temportal/notebook/.out/\n", got)
-        self.assertEqual(got.count("phi/served/\n"), 1, "a line the file already holds is never appended again")
-
-    def test_gitignore_without_marker_is_ezexes(self):
-        theirs = "*.wav\nphi/served/\nbuild/\n"
-        self.assertEqual(self.gitignore(theirs), theirs, "a seeded line present and no marker: ezexe's edits win")
-        own = "# my rules\nbuild/\n*.log\n"
-        got = self.gitignore(own)
-        self.assertTrue(got.startswith(own) and "# seeded by p4-recall " in got and got.endswith("*.gz\n"),
-                        "no seeded line at all: the whole block, under the marker")
-        # ezexe deletes the marker block: nothing comes back
-        cut = got[:got.index("# seeded by p4-recall")] + "*.gz\n"
-        self.assertEqual(self.gitignore(cut), cut)
 
     def test_a_start_hands_no_pinned_rule_and_the_rules_files_are_claude_codes_to_load(self):
         """memory.md, "Organize rules with `.claude/rules/`": "Rules without `paths` frontmatter are loaded at launch
@@ -449,11 +390,24 @@ class AgentPre(unittest.TestCase):
         self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": self.NEWS}})
 
 
+TEMPORTAL_HOOKS = os.path.join(os.path.dirname(ROOT), "p4-temportal", "hooks")
+
+
+def seed_by_temportal(proj):
+    """The store a new project gets from p4-temportal's store.init_layout, run from that plugin's folder, so a test of
+    what follows the maker starts where a session start leaves a new project."""
+    made = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c",
+                           "import os, sys; sys.path.insert(0, os.getcwd()); import store; "
+                           "store.init_layout(sys.argv[1])", proj],
+                          cwd=TEMPORTAL_HOOKS, capture_output=True, text=True, timeout=60)
+    assert made.returncode == 0, made.stderr
+    assert os.path.isfile(os.path.join(proj, ".claude", "p4", "p4.json")), "store.init_layout made no store"
+
+
 class ZeroConfiguration(unittest.TestCase):
     """The plugin works in a project nobody set up. An empty folder with no `.claude`, no P4_* variable and no
     settings file: every handler runs clean, the delegation rule is given, a top-level session's long command is
-    moved to a background task, and the store is made by the plugin's own SessionStart hook, with no step from
-    ezexe."""
+    moved to a background task, and, once p4-temportal's maker has made the store, the rest follows with no step from ezexe."""
 
     LONG = {"command": "python -m pytest -q", "description": "Run the tests"}
 
@@ -504,10 +458,11 @@ class ZeroConfiguration(unittest.TestCase):
         self.assertEqual((said, plain, stop), ({}, {}, {}))
         self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude")), "phi.py's own handlers write nothing")
 
-    def test_the_first_session_start_makes_the_store_and_the_rest_follows(self):
+    def test_p4_temportals_maker_comes_first_and_the_rest_follows(self):
+        seed_by_temportal(self.proj)
         self.run_hook("recall-hook.sh", "layout", hook_event_name="SessionStart", source="startup")
         p4 = os.path.join(self.proj, ".claude", "p4")
-        self.assertTrue(os.path.isfile(os.path.join(p4, "p4.json")), "made by the plugin's own SessionStart hook")
+        self.assertTrue(os.path.isfile(os.path.join(p4, "p4.json")), "made by p4-temportal's store.init_layout")
         self.assertFalse(os.path.exists(p4conf.sub(p4, "store")), "with no phi/store")
         self.assertFalse(os.path.exists(p4conf.sub(p4, "models")), "and no phi/models")
         conf = p4conf.load(p4, write=False)["phi"]

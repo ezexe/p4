@@ -31,6 +31,36 @@ class SessionStartTest(unittest.TestCase):
         self.assertEqual(counts, {"startup": 1, "clear": 1, "compact": 1, "resume": 0, "fork": 0})
 
 
+class StoreMakerTest(unittest.TestCase):
+    def test_the_store_is_made_once_at_every_start_source_and_the_entry_makes_it(self):
+        """The store's one maker, `store make`, runs at each of the five start sources p4-phi's layout entry runs at."""
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        counts = {s: sum("store make" in c for c in runs("SessionStart", s))
+                  for s in ("startup", "resume", "clear", "compact", "fork")}
+        self.assertEqual(counts, {"startup": 1, "resume": 1, "clear": 1, "compact": 1, "fork": 1})
+        group = [g for g in HOOKS["SessionStart"] if any("store make" in h["command"] for h in g["hooks"])][0]
+        self.assertEqual((group["matcher"], group["hooks"][0]["timeout"], group["hooks"][0]["onFailure"]),
+                         ("startup|resume|clear|compact|fork", 15, "continue"))
+        tmp = tempfile.mkdtemp()
+        try:
+            proj = os.path.join(tmp, "empty")
+            os.makedirs(proj)
+            subprocess.run(["git", "init", "-q"], cwd=proj, check=True, capture_output=True)
+            command = group["hooks"][0]["command"].replace("${CLAUDE_PLUGIN_ROOT}", SRC.parent.as_posix())
+            env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
+            env.update(CLAUDE_PLUGIN_ROOT=SRC.parent.as_posix(), CLAUDE_PROJECT_DIR=proj)
+            r = subprocess.run(["sh", "-c", command], input=json.dumps({"source": "startup", "cwd": proj}),
+                               capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertTrue(os.path.isfile(os.path.join(proj, ".claude", "p4", "p4.json")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class NativeMemoryTest(unittest.TestCase):
     def test_no_event_moves_memory(self):
         """ezexe/p4#92: Claude Code writes the auto memory itself, so no hook mirrors a write or sweeps at Stop."""

@@ -551,6 +551,15 @@ def _git(cwd, *args):
     return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=60)
 
 
+def _make_store(project):
+    """A store as a test of the keeper needs it: the folder `.claude/p4` and its p4.json, by p4conf.load. These tests
+    check the keeper and not the maker, which is p4-temportal's store.py."""
+    p4 = os.path.join(project, ".claude", "p4")
+    os.makedirs(p4, exist_ok=True)
+    p4conf.migrate_layout(p4)
+    p4conf.load(p4)
+
+
 class ClaudeSettings(unittest.TestCase):
     """ezexe/p4#246: the store keeps the Claude Code settings it relies on in the project's local settings file."""
 
@@ -584,12 +593,11 @@ class ClaudeSettings(unittest.TestCase):
         """A fresh git repository whose local file holds only a key of the user's: the layout hook's first start
         adds autoMemoryDirectory naming the store's memory folder after it, and plansDirectory naming the store's
         plans folder, keeps the user's key, and records only its own keys in the store's ignored record."""
-        import hook
         _git(self.project, "init", "-q")
         os.makedirs(os.path.dirname(self.local()))
         with open(self.local(), "w", encoding="utf-8") as f:
             json.dump({"spinnerTipsEnabled": False}, f)
-        hook.init_layout(self.project)
+        _make_store(self.project)
         got = self.read(self.local())
         self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory")},
                          {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory(),
@@ -600,16 +608,13 @@ class ClaudeSettings(unittest.TestCase):
         rec = Path(self.record()).read_text(encoding="utf-8")
         self.assertIn("autoMemoryDirectory", rec)
         self.assertNotIn("spinnerTipsEnabled", rec)
-        gi = Path(self.project, ".claude", "p4", ".gitignore").read_text(encoding="utf-8").splitlines()
-        self.assertIn("claude-settings.json", gi, "the record stays on this machine")
         before = (Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns)
         p4conf.keep_settings(self.project)
         self.assertEqual((Path(self.local()).read_bytes(), os.stat(self.local()).st_mtime_ns), before,
                          "a check that changes nothing writes nothing")
 
     def test_a_key_changed_by_hand_leaves_the_record_and_is_never_written_again(self):
-        import hook
-        hook.init_layout(self.project)
+        _make_store(self.project)
         self.assertEqual(self.read(self.local())["autoMemoryDirectory"], self.memory())
         d = self.read(self.local())
         d["autoMemoryDirectory"] = "D:/elsewhere/memory"

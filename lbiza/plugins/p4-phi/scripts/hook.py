@@ -7,16 +7,15 @@ it with a PreToolUse hook's payload. Every handler resolves `.claude/p4/` from C
 context for the model. Each row gives the handler's name, the event and matcher hooks/hooks.json runs it on, and what
 it does.
 
-  layout         SessionStart, matcher `startup|resume|clear|compact|fork`. Moves a store of an older layout through
-                 p4conf.migrate_layout; makes `.claude/p4/` with its .gitignore, p4.json and its git repository
-                 where they are missing; adds the `.git/info/exclude` line; sweeps the served folder; runs
-                 p4conf.watch, the cheap comparison of the running Claude Code binary, the p4 plugins' versions, the
-                 store's `claude` section and the P4_* variables its p4.json asks for with p4conf's record, which on
-                 any change runs p4conf.keep_settings; and runs p4conf.read_changelog, which reads the versions a
-                 newer Claude Code left owed from Claude Code's own cached changelog.
-                 It prints a `systemMessage` only with the layout move's lines and a key a store wants that p4 never
-                 writes, and never `additionalContext`: a rule every session holds is a rules file, which Claude Code
-                 loads itself.
+  layout         SessionStart, matcher `startup|resume|clear|compact|fork`. p4-temportal's `store make` makes the
+                 store, `.claude/p4/` with its .gitignore, p4.json and its git repository, and moves a store of an
+                 older layout; this hook only finds it. Where ready() gives a store it sweeps the served folder and
+                 runs p4conf.watch, the cheap comparison of the running Claude Code binary, the p4 plugins' versions,
+                 the store's `claude` section and the P4_* variables its p4.json asks for with p4conf's record, which
+                 on any change runs p4conf.keep_settings, and p4conf.read_changelog, which reads the versions a newer
+                 Claude Code left owed from Claude Code's own cached changelog. Where it gives none it does nothing.
+                 It prints a `systemMessage` only with a key a store wants that p4 never writes, and never
+                 `additionalContext`: a rule every session holds is a rules file, which Claude Code loads itself.
   settings       ConfigChange, matcher `local_settings|project_settings|user_settings`. p4conf.watch checks the
                  keys the record owns, never a block, and prints nothing.
   watch          UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, as
@@ -79,38 +78,6 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402
 
-SEED_MARKER = "# seeded by p4-recall"
-# a seed marker: the GITIGNORE header, SEED_MARKER, or the header that the vlds plugin's layout hook wrote in the
-# stores this plugin inherits
-SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
-GITIGNORE = """# seeded once by p4-recall; your edits win
-temportal/notebook/.out/
-phi/served/
-.layout.lock
-.settings.lock
-claude-settings.json
-phi/claude-code-watch.pending.json*
-phi/sessions/*/log.jsonl
-phi/sessions/*/session.md
-phi/sessions.md
-phi/rules.md
-phi/catchup.json
-phi/**/*.tmp
-phi/**/*.lock
-phi/sessions/*/.calls/
-phi/.agents/
-phi/.nudge/
-.venv/
-__pycache__/
-*.pyc
-*.png
-*.jpg
-*.zip
-*.gz
-"""
-# .venv/ is a Python environment of the store's, which git never tracks: Python's venv page says an environment is
-# "Not checked into source control systems such as Git".
-
 
 def project_of(payload):
     return os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
@@ -134,89 +101,6 @@ def now():
 def sha8(s):
     import hashlib
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()[:8]
-
-
-def git(*args, cwd, timeout=10):
-    import subprocess
-    return subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True, timeout=timeout)
-
-
-# --- `layout`, on SessionStart ---------------------------------------------------------------------------
-
-def init_layout(project):
-    """Make .claude/p4/ with its .gitignore, p4.json and its git repository where they are missing, and add its
-    line to the project's .git/info/exclude. Returns the lines p4conf.migrate_layout printed for a store of an older
-    layout, none where there was nothing to move: the layout hook shows them."""
-    import subprocess
-    p4 = os.path.join(project, ".claude", "p4")
-    os.makedirs(p4, exist_ok=True)
-    moved = p4conf.migrate_layout(p4)     # a store in an older layout is moved first
-    seed_gitignore(os.path.join(p4, ".gitignore"))
-    p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
-    if not os.path.exists(os.path.join(p4, ".git")):
-        try:
-            git("init", "-q", cwd=p4)
-        except (OSError, subprocess.SubprocessError):
-            pass
-    exclude_line(project)
-    return list(moved or [])
-
-
-def seeded_lines():
-    return [l for l in GITIGNORE.splitlines() if l and not l.startswith("#")]
-
-
-def seed_gitignore(gi, today=None):
-    """The store's .gitignore: written whole when there is none. Otherwise each seeded line the file lacks is appended
-    under a marker line, `# seeded by p4-recall <date>`, and nothing else is touched or reordered. A line ezexe
-    deleted on purpose cannot be told from one a newer plugin added, so the marker decides. A file with a seed marker
-    gets the lines it lacks. A file with no marker and some seeded line is one where ezexe deleted the marker block,
-    and gets nothing. A file with no marker and no seeded line is ezexe's own, and gets the whole block. Returns the
-    lines added."""
-    if not os.path.exists(gi):
-        with open(gi, "w", encoding="utf-8", newline="\n") as f:
-            f.write(GITIGNORE)
-        return seeded_lines()
-    try:
-        text = open(gi, encoding="utf-8").read()
-    except OSError:
-        return []
-    have = {l.strip() for l in text.splitlines()}
-    missing = [l for l in seeded_lines() if l not in have]
-    if not missing:
-        return []
-    marked = any(SEED_MARKER_RE.match(l.strip()) for l in text.splitlines())
-    if not marked and len(missing) < len(seeded_lines()):
-        return []                          # ezexe removed the marker block: their edits win
-    today = today or time.strftime("%Y-%m-%d")
-    with open(gi, "a", encoding="utf-8", newline="\n") as f:
-        f.write(("" if not text or text.endswith("\n") else "\n") + f"{SEED_MARKER} {today}\n"
-                + "".join(l + "\n" for l in missing))
-    return missing
-
-
-def exclude_line(project):
-    """Add the line `.claude/p4/` to the project's info/exclude unless a line there already names `.claude/p4`. In a
-    worktree, `git rev-parse --git-path` names the common git dir's file. Returns whether the line was added."""
-    import subprocess
-    try:
-        r = git("rev-parse", "--git-path", "info/exclude", cwd=project)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    if r.returncode != 0 or not r.stdout.strip():
-        return False
-    path = r.stdout.strip()
-    path = path if os.path.isabs(path) else os.path.join(project, path)
-    try:
-        text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
-    except OSError:
-        return False
-    if any(l.strip() in (".claude/p4/", ".claude/p4", "/.claude/p4/", "/.claude/p4") for l in text.splitlines()):
-        return False
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8", newline="\n") as f:
-        f.write(("" if not text or text.endswith("\n") else "\n") + ".claude/p4/\n")
-    return True
 
 
 def served_dir(p4):
@@ -259,8 +143,12 @@ def sweep_served(p4, now_s=None):
 
 
 def h_layout(payload):
+    """p4-temportal's `store make` makes the store, so this runs the settings watch and the served sweep where
+    ready() gives a store, and does nothing where it gives none."""
+    if not ready(payload):
+        return None
     project = project_of(payload)
-    asks = init_layout(project) + settings_watch(project, payload)
+    asks = settings_watch(project, payload)
     sweep_served(os.path.join(project, ".claude", "p4"))
     return {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else None
 

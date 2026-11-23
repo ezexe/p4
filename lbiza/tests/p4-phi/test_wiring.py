@@ -3,7 +3,8 @@
 
 Each command is run the way Claude Code runs a shell-form command hook: `sh -c` with `${CLAUDE_PLUGIN_ROOT}` put in
 with forward slashes, the event's input as one JSON object on stdin, and the plugin's variables in the environment.
-Every entry runs twice, in a project with no store and in a project whose store the layout entry has just made.
+Every entry runs twice, in a project with no store, where p4-phi's layout entry leaves none since p4-temportal's
+`store make` is the maker, and in a project whose store that plugin's store.init_layout has just made.
 Each run must exit 0, write nothing on stderr, and print nothing or one JSON object whose `hookSpecificOutput` names
 the entry's own event.
 The gate of recall-hook.sh runs against a stand-in python that only says it ran, and each runner runs with no python
@@ -28,6 +29,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                     "plugins", "p4-phi", "hooks"))
 ROOT = os.path.dirname(SRC)
 SCRIPTS = os.path.join(ROOT, "scripts")
+TEMPORTAL_HOOKS = os.path.join(os.path.dirname(ROOT), "p4-temportal", "hooks")
 HOOKS_JSON = os.path.join(ROOT, "hooks", "hooks.json")
 RECALL = os.path.join(ROOT, "hooks", "recall-hook.sh")
 PHI_RUN = os.path.join(ROOT, "hooks", "run-hook.sh")
@@ -63,6 +65,17 @@ def handlers():
         return {"run-hook.sh": set(phi.HOOKS), "recall-hook.sh": set(hook.HANDLERS)}
     finally:
         sys.path.remove(SCRIPTS)
+
+
+def seed_by_temportal(proj):
+    """The store a new project gets from p4-temportal's store.init_layout, run from that plugin's folder, so a test of
+    what follows the maker starts where a session start leaves a new project."""
+    made = subprocess.run([sys.executable, "-I", "-X", "utf8", "-c",
+                           "import os, sys; sys.path.insert(0, os.getcwd()); import store; "
+                           "store.init_layout(sys.argv[1])", proj],
+                          cwd=TEMPORTAL_HOOKS, capture_output=True, text=True, timeout=60)
+    assert made.returncode == 0, made.stderr
+    assert os.path.isfile(os.path.join(proj, ".claude", "p4", "p4.json")), "store.init_layout made no store"
 
 
 def tool_for(matcher):
@@ -239,14 +252,20 @@ class Wiring(unittest.TestCase):
             return proj
         self.run_all("no store", make)
 
+    def test_the_layout_entry_in_a_project_with_no_store_leaves_none(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as base:
+            proj = os.path.join(base, "a new project")
+            os.makedirs(proj)
+            layout = [e for e in entries() if e[2]["command"].endswith(" layout")][0]
+            r = run_entry(*layout, proj, base)
+            self.check("layout", layout[0], layout[2], r)
+            self.assertFalse(os.path.exists(os.path.join(proj, ".claude")), "p4-temportal's `store make` is the maker")
+
     def test_every_entry_runs_in_a_project_whose_store_was_just_made(self):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as base:
             seed = os.path.join(base, "a new project")
             os.makedirs(seed)
-            layout = [e for e in entries() if e[2]["command"].endswith(" layout")][0]
-            r = run_entry(*layout, seed, base)
-            self.check("layout", layout[0], layout[2], r)
-            self.assertTrue(os.path.isfile(os.path.join(seed, ".claude", "p4", "p4.json")), "the layout entry made no store")
+            seed_by_temportal(seed)
 
             def make(tmp):
                 proj = os.path.join(tmp, "a new project")
@@ -323,6 +342,7 @@ class SessionEndBudget(unittest.TestCase):
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
             proj = os.path.join(tmp, "a new project")
             os.makedirs(proj)
+            seed_by_temportal(proj)
             for ev in ("SessionStart", "UserPromptSubmit"):
                 r = run_entry(*e[ev], proj, tmp)
                 self.assertEqual((r.returncode, r.stderr.strip()), (0, ""), ev)
