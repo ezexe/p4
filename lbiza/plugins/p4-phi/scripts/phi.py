@@ -1411,7 +1411,10 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
           "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
           + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
           "such a read of a result that is no code change goes to the subagent `p4-phi:check`, on `sonnet` at "
-          "`medium` effort as its file says; a subagent that writes new content or changes behaviour is "
+          "`medium` effort as its file says; one question whose step asks in its own words for several sides at "
+          "once, where the readers must challenge each other, goes to " + plans.TEAM + ", and every other review "
+          "or read stays with `code-review` or `p4-phi:check` as said; a subagent that writes new content or "
+          "changes behaviour is "
           "`p4-phi:writer`, on `opus` at `medium`, and one that lands written work or verified findings is "
           "`p4-phi:integrator`, on `sonnet` at `medium`. " + ROUND + " "
           "A worker is started with the `model` and the `effort` of its step's "
@@ -2338,7 +2341,7 @@ def h_nudge(payload):
     save_session(me.home, s)
     nudge_arm(me, s)
     RAN["nudge"] = st.get("addr")
-    if level != "session":                         # a step that only reads or only runs a command needs no session
+    if level != "session":                         # a read, a run and a team's question each need no worker
         return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
                 f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
                 f"{plans.LEVEL_WHERE[level]}. "
