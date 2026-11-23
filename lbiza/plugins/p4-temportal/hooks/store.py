@@ -8,6 +8,11 @@ moved from p4-phi's scripts/hook.py as they were, so the store a new project get
           `.git/info/exclude` line. It prints one systemMessage that opens "p4-temportal: " with the lines
           p4conf.migrate_layout returned, and nothing where there were none.
 
+  unkeep  takes out everything the settings keeper wrote, the keys and rules of a settings file and the import line of
+          CLAUDE.local.md, deletes a file the keeper made and emptied, and sets `claude.keep` false in p4.json, so no
+          later start writes them again. It prints one line for each thing taken out and each thing left.
+  keep    sets `claude.keep` true and runs the keeper once, which writes them again.
+
 Every failure exits 0, so a broken maker blocks no session.
 """
 
@@ -71,6 +76,7 @@ def init_layout(project):
     moved = p4conf.migrate_layout(p4)     # a store in an older layout is moved first
     seed_gitignore(os.path.join(p4, ".gitignore"))
     p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
+    seed_claude_md(os.path.join(p4, "CLAUDE.md"))
     if not os.path.exists(os.path.join(p4, ".git")):
         try:
             git("init", "-q", cwd=p4)
@@ -78,6 +84,24 @@ def init_layout(project):
             pass
     exclude_line(project)
     return list(moved or [])
+
+
+CLAUDE_MD = """# p4
+
+This is the p4 plugins' text for this project. It holds no ruling yet.
+
+See more: https://code.claude.com/docs/en/memory.md
+"""
+
+
+def seed_claude_md(path):
+    """The store's CLAUDE.md, which the line in the project's CLAUDE.local.md imports: written where it is missing, and a
+    file that is there is never touched."""
+    if os.path.exists(path):
+        return False
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(CLAUDE_MD)
+    return True
 
 
 def seeded_lines():
@@ -145,7 +169,33 @@ def cmd_make():
     return 0
 
 
-COMMANDS = {"make": cmd_make}
+def _project_and_store():
+    payload = {} if sys.stdin is None or sys.stdin.isatty() else hookio.payload_from_stdin()
+    project = hookio.project_root(payload)
+    return project, os.path.join(p4conf.main_root(project)[0], ".claude", "p4")
+
+
+def cmd_unkeep():
+    project, p4 = _project_and_store()
+    lines = p4conf.unkeep(project, p4=p4)
+    for line in lines or ["nothing to take out"]:
+        print("p4-temportal: " + line)
+    print("p4-temportal: the keeper stays out until `store.py keep` turns it on")
+    return 0
+
+
+def cmd_keep():
+    project, p4 = _project_and_store()
+    if not os.path.isdir(p4):
+        print("p4-temportal: no store at " + p4 + "; `store.py make` makes one")
+        return 0
+    p4conf.set_key(p4, "claude.keep", True)
+    got = p4conf.keep_settings(project, p4=p4)
+    print("p4-temportal: the keeper is on" + (f"; wrote {got['file']}" if got.get("wrote") else ""))
+    return 0
+
+
+COMMANDS = {"make": cmd_make, "unkeep": cmd_unkeep, "keep": cmd_keep}
 
 
 def main(argv=None):

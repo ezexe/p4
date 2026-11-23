@@ -2544,5 +2544,228 @@ class WriteDuringARead(unittest.TestCase):
         self.assertEqual(self.temps(), [])
 
 
+
+class ImportLine(unittest.TestCase):
+    """Fences 4.3 and 4.4 of the store plan: the keeper's import line in the project's CLAUDE.local.md, the record of
+    what it made, and `unkeep` with its switch, `claude.keep`. A new project's store is made as the keeper's tests make
+    it, by a folder and p4conf.load, since these tests check the keeper and not the maker."""
+
+    def setUp(self):
+        from unittest import mock
+        self.tmp = tempfile.mkdtemp(prefix="p4-import-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.project = os.path.join(self.tmp, "proj")
+        os.makedirs(self.project)
+        _git(self.project, "init", "-q")
+        env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": os.path.join(self.tmp, "config")})
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_PROJECT_DIR", None)
+        os.environ.pop("CLAUDE_PID", None)
+        binary = mock.patch.object(p4conf, "claude_binary", lambda: (None, False))
+        binary.start()
+        self.addCleanup(binary.stop)
+        self.p4 = os.path.join(self.project, ".claude", "p4")
+        self.md = os.path.join(self.project, "CLAUDE.local.md")
+        self.local = os.path.join(self.project, ".claude", "settings.local.json")
+        self.start = {"source": "startup", "hook_event_name": "SessionStart"}
+
+    def make(self):
+        _make_store(self.project)
+
+    def rec(self):
+        return p4conf.read_record(self.p4)
+
+    def text(self, p):
+        return Path(p).read_text(encoding="utf-8")
+
+    def exclude(self):
+        return self.text(os.path.join(self.project, ".git", "info", "exclude")).splitlines()
+
+    def fwd(self, p):
+        return os.path.abspath(p).replace("\\", "/")
+
+    def test_these_tests_run_the_copy_of_this_checkout(self):
+        self.assertEqual(Path(p4conf.__file__).resolve(), (SRC / "p4conf.py").resolve())
+        self.assertGreaterEqual(p4conf.KEEPER, 16)
+
+    def test_the_line_is_written_once_and_the_two_files_the_keeper_made_are_each_in_made_and_in_exclude(self):
+        self.make()
+        self.assertEqual(self.text(self.md), p4conf.LINE + "\n")
+        p4conf.keep_settings(self.project)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.text(self.md), p4conf.LINE + "\n", "written once")
+        rec = self.rec()
+        self.assertEqual(rec["lines"][self.fwd(self.md)], {"entries": [p4conf.LINE], "hand": [], "gen": p4conf.GEN})
+        self.assertEqual(rec["made"], {self.fwd(self.local): {"file": True, "exclude": ".claude/settings.local.json"},
+                                       self.fwd(self.md): {"file": True, "exclude": "CLAUDE.local.md"}})
+        ex = self.exclude()
+        self.assertEqual((ex.count("CLAUDE.local.md"), ex.count(".claude/settings.local.json")), (1, 1))
+
+    def test_a_claude_local_md_that_was_there_gets_the_line_appended_and_no_exclude_line(self):
+        Path(self.md).write_text("mine", encoding="utf-8")
+        self.make()
+        self.assertEqual(self.text(self.md), "mine\n" + p4conf.LINE + "\n")
+        self.assertEqual(self.rec()["made"][self.fwd(self.md)], {"file": False, "exclude": ""})
+        self.assertNotIn("CLAUDE.local.md", self.exclude(), "a file that was there is not excluded by the keeper")
+
+    def test_a_line_taken_out_by_hand_is_not_written_back(self):
+        self.make()
+        Path(self.md).write_text("mine\n", encoding="utf-8")
+        p4conf.keep_settings(self.project)
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.text(self.md), "mine\n")
+        self.assertEqual(self.rec()["lines"][self.fwd(self.md)]["hand"], [p4conf.LINE])
+        self.assertEqual(self.rec()["lines"][self.fwd(self.md)]["entries"], [])
+
+    def test_with_owned_only_no_line_is_written_and_one_taken_out_by_hand_is_noted(self):
+        self.make()
+        Path(self.md).write_text("mine\n", encoding="utf-8")
+        p4conf.keep_settings(self.project, owned_only=True)
+        self.assertEqual(self.text(self.md), "mine\n")
+        self.assertEqual(self.rec()["lines"][self.fwd(self.md)]["hand"], [p4conf.LINE], "noted, as a key is")
+
+    def test_importLine_false_takes_the_line_out_and_true_writes_it_again(self):
+        self.make()
+        p4conf.set_key(self.p4, "claude.importLine", False)
+        p4conf.keep_settings(self.project)
+        self.assertNotIn(p4conf.LINE, self.text(self.md))
+        self.assertNotIn("lines", self.rec())
+        p4conf.set_key(self.p4, "claude.importLine", True)
+        p4conf.keep_settings(self.project)
+        self.assertIn(p4conf.LINE, self.text(self.md))
+
+    def test_the_two_new_keys_are_not_keys_of_a_settings_file_and_change_no_default(self):
+        self.make()
+        p4conf.set_key(self.p4, "claude.keep", True)
+        p4conf.set_key(self.p4, "claude.importLine", True)
+        want, others, conf, _other = p4conf.wants(self.p4, self.local)
+        self.assertEqual(others, {}, "neither key is one the keeper leaves unwritten and asks about")
+        self.assertNotIn("keep", [k for k, _v in p4conf._leaves(p4conf.DEFAULTS)])
+
+    def test_unkeep_takes_out_every_key_rule_and_line_leaves_a_key_changed_by_hand_and_names_it(self):
+        _write(self.local, {"spinnerTipsEnabled": False, "permissions": {"allow": ["Bash(ls *)"]}})
+        self.make()
+        got = self.read_json(self.local)
+        self.assertIn("autoMemoryDirectory", got)
+        got["plansDirectory"] = "elsewhere/plans"
+        _write(self.local, got)
+        lines = p4conf.unkeep(self.project)
+        after = self.read_json(self.local)
+        self.assertNotIn("autoMemoryDirectory", after)
+        self.assertEqual(after["plansDirectory"], "elsewhere/plans", "a key changed by hand is left")
+        self.assertTrue(any("plansDirectory" in l and "by hand" in l for l in lines), lines)
+        self.assertEqual(after["spinnerTipsEnabled"], False)
+        self.assertEqual(after["permissions"]["allow"], ["Bash(ls *)"], "the person's rule stays, p4's go")
+        self.assertFalse(os.path.exists(self.md), "the file the keeper made and emptied is deleted")
+        self.assertNotIn("CLAUDE.local.md", self.exclude())
+        self.assertIs(p4conf.load(self.p4, write=False)["claude"]["keep"], False)
+
+    def read_json(self, p):
+        return json.loads(self.text(p))
+
+    def test_unkeep_deletes_the_settings_file_and_the_md_the_keeper_made_and_both_exclude_lines(self):
+        self.make()
+        self.assertTrue(os.path.exists(self.local) and os.path.exists(self.md))
+        lines = p4conf.unkeep(self.project)
+        self.assertFalse(os.path.exists(self.local))
+        self.assertFalse(os.path.exists(self.md))
+        self.assertEqual([l for l in self.exclude() if l in ("CLAUDE.local.md", ".claude/settings.local.json")], [])
+        self.assertTrue(any("deleted" in l for l in lines), lines)
+        for part in ("files", "made", "lines", "rules", "toolRules", "generalRules", "askRules", "denyRules"):
+            self.assertNotIn(part, self.rec(), part)
+
+    def test_a_claude_local_md_left_with_a_newline_alone_counts_as_empty(self):
+        self.make()
+        Path(self.md).write_text(p4conf.LINE + "\n\n", encoding="utf-8")
+        p4conf.unkeep(self.project)
+        self.assertFalse(os.path.exists(self.md))
+
+    def test_after_unkeep_no_start_writes_a_file_but_the_versions_still_go_into_the_record_and_keep_writes_them_again(self):
+        self.make()
+        p4conf.unkeep(self.project)
+        before = os.path.exists(self.local), os.path.exists(self.md)
+        p4conf.keep_settings(self.project, note={"plugins": {"p4-phi@p4-marketplace": "9.9.9"}})
+        self.assertEqual((os.path.exists(self.local), os.path.exists(self.md)), (False, False))
+        self.assertEqual(before, (False, False))
+        self.assertEqual(self.rec()["plugins"], {"p4-phi@p4-marketplace": "9.9.9"})
+        p4conf.set_key(self.p4, "claude.keep", True)
+        p4conf.keep_settings(self.project)
+        self.assertIn("autoMemoryDirectory", self.read_json(self.local))
+        self.assertEqual(self.text(self.md), p4conf.LINE + "\n")
+
+    def test_with_keep_false_a_rule_of_p4s_shape_that_a_person_wrote_stays(self):
+        self.make()
+        p4conf.unkeep(self.project)
+        rule = f'Bash(python -I -X utf8 "{self.fwd(self.tmp)}/gone/phi.py" *)'
+        _write(self.local, {"permissions": {"allow": [rule]}})
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read_json(self.local)["permissions"]["allow"], [rule])
+
+    def test_watch_runs_the_keeper_once_after_the_switch_and_not_again(self):
+        from unittest import mock
+        self.make()
+        p4conf.watch(self.project, self.start)        # settles the record's versions and section
+        p4conf.unkeep(self.project)
+        with mock.patch.object(p4conf, "keep_settings", wraps=p4conf.keep_settings) as keeper:
+            p4conf.watch(self.project, self.start)
+            self.assertEqual(keeper.call_count, 1, "once after the switch is set")
+            p4conf.watch(self.project, self.start)
+            p4conf.watch(self.project, self.start)
+            self.assertEqual(keeper.call_count, 1, "and not again at every start")
+            # a P4_* setting changed, a record with no p4-phi part, another file naming autoMemoryDirectory
+            p4conf.set_key(self.p4, "phi.levels", False)
+            rec = self.rec()
+            rec.pop("phi", None)
+            _write(os.path.join(self.p4, "claude-settings.json"), rec)
+            _write(os.path.join(self.tmp, "config", "settings.json"), {"autoMemoryDirectory": "D:/elsewhere"})
+            p4conf.watch(self.project, self.start)
+            p4conf.watch(self.project, self.start)
+            self.assertEqual(keeper.call_count, 1, "none of the three runs the keeper again while keep is false")
+        self.assertFalse(os.path.exists(self.local))
+
+    def test_read_record_checks_the_shapes_of_lines_and_made(self):
+        f = self.fwd(self.md)
+        os.makedirs(self.p4)
+        _write(os.path.join(self.p4, "claude-settings.json"),
+               {"lines": {f: 5, "ok": {"entries": [p4conf.LINE], "hand": [], "gen": 1}, "x": {"entries": 5}},
+                "made": {f: 5, "ok": {"file": True, "exclude": ""}, "y": {"file": "no"}, "z": {"file": True,
+                                                                                               "exclude": 3}}})
+        rec = p4conf.read_record(self.p4)
+        self.assertEqual(list(rec["lines"]), ["ok"])
+        self.assertEqual(list(rec["made"]), ["ok"])
+
+    def test_a_store_whose_record_holds_keeper_15_gets_the_line_at_its_next_watch(self):
+        self.make()
+        p4conf.watch(self.project, self.start)
+        os.remove(self.md)
+        rec = self.rec()
+        rec.pop("lines")
+        rec.pop("made")
+        for v in rec["kept"].values():
+            v["keeper"] = 15
+        _write(os.path.join(self.p4, "claude-settings.json"), rec)
+        p4conf.watch(self.project, self.start)
+        self.assertEqual(self.text(self.md), p4conf.LINE + "\n")
+
+    def test_exclude_local_adds_each_of_the_two_lines_once(self):
+        for line in ("CLAUDE.local.md", ".claude/settings.local.json"):
+            self.assertTrue(p4conf.exclude_local(self.project, line), line)
+            self.assertFalse(p4conf.exclude_local(self.project, line), "once")
+        ex = self.exclude()
+        self.assertEqual((ex.count("CLAUDE.local.md"), ex.count(".claude/settings.local.json")), (1, 1))
+
+    def test_unkeep_on_a_record_with_no_made_part_leaves_the_file_and_names_it(self):
+        self.make()
+        rec = self.rec()
+        rec.pop("made")
+        _write(os.path.join(self.p4, "claude-settings.json"), rec)
+        lines = p4conf.unkeep(self.project)
+        self.assertTrue(os.path.exists(self.local) and os.path.exists(self.md), "both files are left")
+        self.assertTrue(any(self.fwd(self.local) in l and "left" in l for l in lines), lines)
+        self.assertTrue(any(self.fwd(self.md) in l and "left" in l for l in lines), lines)
+        self.assertIn("CLAUDE.local.md", self.exclude(), "an exclude line of a store kept before is left")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

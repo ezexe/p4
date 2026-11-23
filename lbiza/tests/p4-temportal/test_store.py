@@ -73,6 +73,62 @@ class Make(Base):
         self.assertNotIn(".claude", status.stdout,
                          "the store, a git repository of its own, stays out of the project's git status")
 
+    def snapshot(self):
+        out = {}
+        for base, dirs, files in os.walk(self.proj):
+            dirs[:] = [d for d in dirs if d != ".git"]
+            for f in files:
+                p = os.path.join(base, f)
+                with open(p, "rb") as h:
+                    out[os.path.relpath(p, self.proj)] = (h.read(), os.stat(p).st_mtime_ns)
+        with open(os.path.join(self.proj, ".git", "info", "exclude"), "rb") as h:
+            out["exclude"] = h.read()
+        return out
+
+    def test_make_leaves_the_store_its_text_and_the_one_import_line_and_a_second_make_changes_no_file(self):
+        r = run_make(self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in ("p4.json", ".gitignore", ".git", "CLAUDE.md"):
+            self.assertTrue(os.path.exists(os.path.join(self.p4, name)), name)
+        with open(os.path.join(self.p4, "CLAUDE.md"), encoding="utf-8") as f:
+            text = f.read()
+        self.assertIn("p4 plugins' text for this project", text)
+        self.assertIn("See more: https://code.claude.com/docs/en/memory.md", text)
+        with open(os.path.join(self.proj, "CLAUDE.local.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "@.claude/p4/CLAUDE.md\n")
+        before = self.snapshot()
+        run_make(self.proj)
+        self.assertEqual(self.snapshot(), before, "a second make changes no file")
+
+    def test_a_store_text_that_is_there_is_never_touched(self):
+        os.makedirs(self.p4)
+        write(os.path.join(self.p4, "CLAUDE.md"), "# mine\n")
+        run_make(self.proj)
+        with open(os.path.join(self.p4, "CLAUDE.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "# mine\n")
+
+    def test_unkeep_leaves_no_settings_file_no_claude_local_md_and_no_exclude_line_of_the_keepers_and_make_writes_none_again(self):
+        run_make(self.proj)
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
+        env["CLAUDE_PROJECT_DIR"] = self.proj
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", STORE, "unkeep"], input="{}", capture_output=True,
+                           text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("p4-temportal: ", r.stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude", "settings.local.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.proj, "CLAUDE.local.md")))
+        with open(os.path.join(self.proj, ".git", "info", "exclude"), encoding="utf-8") as f:
+            rows = [l.strip() for l in f.read().splitlines() if l.strip() and not l.startswith("#")]
+        self.assertEqual(rows, [".claude/p4/"])
+        run_make(self.proj)
+        self.assertFalse(os.path.exists(os.path.join(self.proj, ".claude", "settings.local.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.proj, "CLAUDE.local.md")))
+        r = subprocess.run([sys.executable, "-I", "-X", "utf8", STORE, "keep"], input="{}", capture_output=True,
+                           text=True, env=env, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.proj, ".claude", "settings.local.json")))
+        self.assertTrue(os.path.exists(os.path.join(self.proj, "CLAUDE.local.md")))
+
     def test_the_project_is_the_inputs_cwd_where_no_variable_is_set(self):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}
         r = subprocess.run([sys.executable, "-I", "-X", "utf8", STORE, "make"], input=json.dumps({"cwd": self.proj}),

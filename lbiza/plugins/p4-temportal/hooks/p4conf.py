@@ -1187,7 +1187,7 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # 14 came with the general part of CARD_SET, so its rules are written at a store's next start where the set is in
 # force, and 15 with ASK_RULES emptied, so the ask rule on the archive tool an earlier keeper wrote goes at the next
 # start.
-KEEPER = 15
+KEEPER = 16
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1358,6 +1358,9 @@ _PER_FILE = {
                            and _int(v.get("gen", 0))),
     "denyRules": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
                             and _int(v.get("gen", 0))),
+    "lines": lambda v: (isinstance(v, dict) and _strs(v.get("entries", [])) and _strs(v.get("hand", []))
+                        and _int(v.get("gen", 0))),
+    "made": lambda v: isinstance(v, dict) and isinstance(v.get("file"), bool) and isinstance(v.get("exclude", ""), str),
     "phi": lambda v: isinstance(v, bool),
     "lists": lambda v: isinstance(v, dict) and all(isinstance(x, bool) for x in v.values()),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
@@ -1482,6 +1485,70 @@ def settings_file(project, platform=None):
     if not all(_mine(os.path.join(root, *p)) for p in ((), (".git",), (".claude",))):
         return here
     return os.path.join(root, ".claude", LOCAL)
+
+
+def lines_file(project, platform=None):
+    """The CLAUDE.local.md beside the .claude folder that holds settings_file(project): the file whose import line gives
+    a session started at that folder the text `.claude/p4/CLAUDE.md`."""
+    return os.path.join(os.path.dirname(os.path.dirname(settings_file(project, platform))), LINES_FILE)
+
+
+def keep_lines(project, rec, owned_only, p4=None, platform=None):
+    """The import line LINE in the project's CLAUDE.local.md brought to what the section's `importLine` wants, on the
+    record `rec` _keep holds, which _keep writes once. The record part is lines[<path>] = {"entries", "hand", "gen"}, the
+    shape of a rules part. A line in the file: nothing. A line not in it that is in "hand" or was in "entries" at the
+    last run was taken out by hand: it goes to "hand" and is not written. Otherwise it is appended on a line of its own,
+    the file made where missing. With `owned_only`, as at a ConfigChange, a line taken out by hand is noted and nothing
+    is written. `importLine` false takes the line out, as a key's none does."""
+    p4 = p4 or os.path.join(main_root(project)[0], ".claude", "p4")
+    target = lines_file(project, platform)
+    name = fwd(target)
+    parts = rec.setdefault("lines", {})
+    mine = dict(parts.get(name) or {})
+    entries, hand = list(mine.get("entries") or []), list(mine.get("hand") or [])
+    gen = mine.get("gen", 0) if isinstance(mine.get("gen", 0), int) else 0
+    try:
+        existed = os.path.exists(target)
+        text = open(target, encoding="utf-8").read() if existed else ""
+    except (OSError, UnicodeDecodeError):
+        if not parts:
+            rec.pop("lines", None)
+        return                                          # a file that cannot be read is left as it is
+    have = LINE in [l.strip() for l in text.splitlines()]
+    if gen > GEN:
+        pass                                            # a newer copy wrote it: left to that copy
+    elif not own_switch(p4, "importLine"):
+        if LINE in entries:
+            entries.remove(LINE)
+            if have and not owned_only:
+                _write_text(target, "".join(l for l in text.splitlines(keepends=True) if l.strip() != LINE))
+    elif have:
+        pass
+    elif LINE in hand or LINE in entries:
+        if LINE in entries:
+            entries.remove(LINE)
+        hand.append(LINE)                               # taken out by hand: never written back
+    elif not owned_only:
+        _write_text(target, text + ("" if not text or text.endswith("\n") else "\n") + LINE + "\n")
+        entries.append(LINE)
+        made = rec.setdefault("made", {})
+        if not existed:
+            line = LINES_FILE if exclude_local(os.path.dirname(target), LINES_FILE) else ""
+            made[name] = {"file": True, "exclude": line}
+        elif name not in made and not mine:
+            made[name] = {"file": False, "exclude": ""}
+    if entries or hand:
+        parts[name] = {"entries": entries, "hand": list(dict.fromkeys(hand)), "gen": max(gen, GEN)}
+    else:
+        parts.pop(name, None)
+    if not parts:
+        rec.pop("lines", None)
+
+
+def _write_text(p, text):
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
 
 
 def session_project(p4):
@@ -1680,7 +1747,21 @@ def carry_memory(src, dst):
 # `*` in place of the version would allow more than this script, and a rule wider than the one ezexe approved is
 # ezexe's to write.
 ALLOW_KEY = "permissions.allow"
-OWN_KEYS = ("allowRules",)
+# `keep` and `importLine` are keys of the store's `claude` section the keeper reads and never writes into a settings file.
+# They are not in DEFAULTS: `claude` is in READ_WHEN_SET, so a key set there is read where set, and a default would make
+# _merge report every other `claude.*` key a store sets, raise GEN, and make two P4_* variables.
+OWN_KEYS = ("allowRules", "keep", "importLine")
+LINE = "@.claude/p4/CLAUDE.md"
+LINES_FILE = "CLAUDE.local.md"
+
+
+def own_switch(p4, key):
+    """The `claude` section's switch `key`, true where it is not set, and no write of p4.json. section() is not used,
+    since it raises for a store with no "claude" key."""
+    try:
+        return (load(p4, write=False, warn=False).get(SECTION) or {}).get(key, True) is not False
+    except Exception:  # noqa: BLE001 — a store that cannot be read keeps what it kept
+        return True
 PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: this file's own folder, when phi.py is there
 _RULE = re.compile(r'^(\w+)\(python -I -X utf8 "(?:.*/)?([^/"]+)"(.*)\)$')
 
@@ -2227,6 +2308,15 @@ def _mtime(p):
 def _keep(p4, project, target, platform, owned_only, out, note, tell):
     rec = read_record(p4)
     before = json.dumps(rec, sort_keys=True)
+    if not own_switch(p4, "keep"):
+        # `unkeep` took out what the keeper wrote and set the switch: no file moves but the record, which gets the
+        # watcher's note and the section, so the versions and the changelog watch go on
+        rec.update(note)
+        if not owned_only:
+            rec["section"] = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
+        if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
+            write_record(p4, rec)
+        return
     if not owned_only and CARRIED not in rec:
         _carry_yes(p4, rec)                             # a yes from before YES
         write_record(p4, rec)                           # in the file, carried or not, before cards_on reads it
@@ -2249,6 +2339,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     if not rec.get("unreadable"):
         rec.pop("unreadable", None)
     existed = os.path.exists(target)
+    kept_before = bool((rec.get("files") or {}).get(name)) or any(
+        (rec.get(p) or {}).get(name) for p in ("rules", "toolRules", "generalRules", "askRules", "denyRules"))
     files = rec.setdefault("files", {})
     owned = dict(files.get(name) or {})
     hand = dict(rec.get("hand") or {})
@@ -2301,12 +2393,18 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     if new != data:
         replace_text(target, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
         out["wrote"] = True
+        made = rec.setdefault("made", {})
         if not existed:
-            exclude_local(target)
+            line = ".claude/settings.local.json"
+            made[name] = {"file": True, "exclude": line if exclude_local(os.path.dirname(os.path.dirname(target)), line)
+                          else ""}
+        elif name not in made and not kept_before:
+            made[name] = {"file": False, "exclude": ""}
         back = read_json(target) or {}
         for k, e in owned.items():
             if _get(back, k) != e.get("v"):
                 print(f"p4: {target} lost {k} after p4 wrote it", file=sys.stderr)
+    keep_lines(project, rec, owned_only, p4, platform)
     if owned:
         files[name] = owned
     else:
@@ -2345,6 +2443,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
             rec.pop("otherMemory", None)
     if not files:
         rec.pop("files", None)
+    if not rec.get("made"):
+        rec.pop("made", None)
     if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
         write_record(p4, rec)
 
@@ -2385,18 +2485,16 @@ def _keep_key(p4, project, new, k, d, owned, gone, owned_only, past=None):
             owned[k] = {"v": cur, "gen": GEN}          # the value p4 would write: p4's from now
 
 
-def exclude_local(target):
-    """Add `.claude/settings.local.json` to the repository's info/exclude when git does not already ignore the file
-    p4 created, as settings.md asks of a file made by hand."""
-    root = os.path.dirname(os.path.dirname(target))
+def exclude_local(root, line):
+    """Add `line`, a path under the repository folder `root`, to the repository's info/exclude when git does not already
+    ignore that file, as settings.md asks of a file made by hand. Returns whether the line was added."""
+    target = os.path.join(root, *line.split("/"))
     r = _git(root, "check-ignore", "-q", target)
     if r is None or r.returncode != 1:
         return False                                    # ignored already, or not in a repository
-    r = _git(root, "rev-parse", "--git-path", "info/exclude")
-    if not (r and r.returncode == 0 and r.stdout.strip()):
+    path = _exclude_path(root)
+    if not path:
         return False
-    path = r.stdout.decode("utf-8", "replace").strip()
-    path = path if os.path.isabs(path) else os.path.join(root, path)
     try:
         text = ""
         if os.path.exists(path):
@@ -2404,10 +2502,162 @@ def exclude_local(target):
                 text = f.read()
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8", newline="\n") as f:
-            f.write(("" if not text or text.endswith("\n") else "\n") + ".claude/settings.local.json\n")
+            f.write(("" if not text or text.endswith("\n") else "\n") + line + "\n")
     except OSError:
         return False
     return True
+
+
+def _exclude_path(root):
+    r = _git(root, "rev-parse", "--git-path", "info/exclude")
+    if not (r and r.returncode == 0 and r.stdout.strip()):
+        return None
+    path = r.stdout.decode("utf-8", "replace").strip()
+    return path if os.path.isabs(path) else os.path.join(root, path)
+
+
+def _unexclude(root, line):
+    """Take the line `line` out of the repository's info/exclude. Returns whether one was taken out."""
+    path = _exclude_path(root)
+    try:
+        with open(path, encoding="utf-8") as f:
+            rows = f.read().splitlines(keepends=True)
+        left = [l for l in rows if l.strip() != line]
+        if len(left) == len(rows):
+            return False
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write("".join(left))
+    except (OSError, TypeError):
+        return False
+    return True
+
+
+RULE_PARTS = (("rules", ALLOW_KEY), ("toolRules", ALLOW_KEY), ("generalRules", ALLOW_KEY), ("askRules", ASK_KEY),
+              ("denyRules", DENY_KEY))
+
+
+def unkeep(project, p4=None):
+    """Take out everything the keeper wrote, under the settings lock, and set `claude.keep` false so no later start writes
+    it again. For every target the record names: each key of files[<target>] whose value in the file is still the recorded
+    one; each entry of the rules parts out of its list, and the list where it is then empty and the record says p4 made it;
+    each line of each lines part. Then, for each entry of "made" where the keeper made the file and the file is empty, the
+    file and its recorded exclude line. A file or an exclude line of a store kept before "made" is left and named, and
+    so is anything a person changed. The record's parts are emptied but for every hand list. Returns one line for each thing
+    taken out and each thing left."""
+    project = os.path.abspath(project)
+    p4 = p4 or os.path.join(main_root(project)[0], ".claude", "p4")
+    if not os.path.isdir(p4):
+        return []
+    lock = os.path.join(p4, SETTINGS_LOCK)
+    if not _take_lock(lock):
+        return ["the settings lock is held by another process; nothing was taken out"]
+    try:
+        out = _unkeep(p4)
+        set_key(p4, "claude.keep", False)
+    finally:
+        try:
+            os.remove(lock)
+        except OSError:
+            pass
+    return out
+
+
+def _unkeep(p4):
+    rec = read_record(p4)
+    out = []
+    made = rec.get("made") or {}
+    lists = rec.get(LISTS) or {}
+    names = []
+    for part in ("files", "rules", "toolRules", "generalRules", "askRules", "denyRules", "lines", "made"):
+        names += [n for n in rec.get(part) or {} if n not in names]
+    for name in names:
+        m = made.get(name)
+        if os.path.basename(name) == LINES_FILE:
+            gone = _unkeep_lines(name, rec, out)
+        else:
+            gone = _unkeep_settings(name, rec, lists, out)
+        if gone is None:
+            continue                                    # a file that is not there, or cannot be read
+        root = os.path.dirname(name) if os.path.basename(name) == LINES_FILE else os.path.dirname(os.path.dirname(name))
+        if gone and m and m.get("file"):
+            os.remove(name)
+            out.append(f"deleted {name}, which p4 made")
+            if m.get("exclude") and _unexclude(root, m["exclude"]):
+                out.append(f"took `{m['exclude']}` out of the repository's info/exclude")
+        elif gone and not m:
+            out.append(f"left {name}, which is empty: the record does not say p4 made it, nor its exclude line")
+    for k in ("files", "made", LISTS):
+        rec.pop(k, None)
+    for part in [p for p, _ in RULE_PARTS] + ["lines"]:
+        for n, v in list((rec.get(part) or {}).items()):
+            if v.get("hand"):
+                rec[part][n] = {"entries": [], "hand": v["hand"], "gen": v.get("gen", 0)}    # a hand list stays
+            else:
+                rec[part].pop(n)
+        if not rec.get(part):
+            rec.pop(part, None)
+    write_record(p4, rec)
+    return out
+
+
+def _unkeep_settings(name, rec, lists, out):
+    """The keys and rules of p4's out of the settings file `name`. -> whether the file is then empty, None where it is
+    not there or cannot be read."""
+    if not os.path.exists(name):
+        return None
+    data = read_json(name)
+    if data is None:
+        out.append(f"left {name}: it is not a JSON object")
+        return None
+    new = copy.deepcopy(data)
+    for k, e in ((rec.get("files") or {}).get(name) or {}).items():
+        ent, cur = _entry(e), _get(new, k)
+        if cur is _NONE:
+            continue
+        if ent and cur == ent[0]:
+            _del(new, k)
+            out.append(f"took `{k}` out of {name}")
+        else:
+            out.append(f"left `{k}` in {name}: it was changed by hand")
+    keys = {}
+    for part, key in RULE_PARTS:
+        keys.setdefault(key, []).extend(((rec.get(part) or {}).get(name) or {}).get("entries") or [])
+    for key, entries in keys.items():
+        cur = _get(new, key)
+        took = [r for r in cur if r in entries] if isinstance(cur, list) else []
+        if not took:
+            continue
+        left = [r for r in cur if r not in entries]
+        out.append(f"took {len(took)} rule{'s' if len(took) != 1 else ''} of p4's out of `{key}` in {name}")
+        if left:
+            _put(new, key, left)
+        elif (lists.get(name) or {}).get(key) is True:
+            _del(new, key)                              # a list p4 made and p4 emptied goes with its key
+        else:
+            _put(new, key, [])
+    if new != data:
+        replace_text(name, json.dumps(new, indent=2, ensure_ascii=False) + "\n")
+    return new == {}
+
+
+def _unkeep_lines(name, rec, out):
+    """The lines of p4's out of the CLAUDE.local.md `name`. -> whether the file is then empty, None where it is not
+    there or cannot be read."""
+    if not os.path.exists(name):
+        return None
+    try:
+        text = open(name, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        out.append(f"left {name}: it cannot be read")
+        return None
+    entries = ((rec.get("lines") or {}).get(name) or {}).get("entries") or []
+    rows = text.splitlines(keepends=True)
+    left = [l for l in rows if l.strip() not in entries]
+    if len(left) != len(rows):
+        text = "".join(left)
+        _write_text(name, text)
+        out.append(f"took the line `{LINE}` out of {name}")
+    return text.strip() == ""
 
 
 # --- The watcher, ezexe/p4#246 -------------------------------------------------------------------------------------
@@ -2588,6 +2838,8 @@ def watch(project, payload):
     other = [[_named(f), v] for f, v in _elsewhere("autoMemoryDirectory", target, sys.platform)
              if not _same_value("autoMemoryDirectory", v, fwd(sub(p4, "memory")))]
     phi = (rec.get(PHI_PART) or {}).get(fwd(target))    # whether p4-phi ran at the last whole check of this file
+    if (not note and section_of(p4).get("keep") is False and (rec.get("section") or {}).get("keep") is False):
+        return out                                      # switched off, and the record has the section: nothing to keep
     if (not note and section_of(p4) == rec.get("section") and unread in ("none", _mtime(target))
             and other == (rec.get("otherMemory") or [])
             and ((rec.get("kept") or {}).get(fwd(target)) or {})
