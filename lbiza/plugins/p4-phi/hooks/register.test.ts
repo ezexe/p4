@@ -4,6 +4,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On, SessionUsage } from 'claude-code'
 
 import { bar, paneAfterClose, treeGlance, treeLines } from './register'
+import type { PhiNode } from '../types'
 
 const DATA = '/home/u/.claude/plugins/data/p4-phi-inline'
 const KEPT = '/opt/python/bin/python3'
@@ -2589,8 +2590,8 @@ test('a lead keeps its teammates in team.json at a turn end, and a session with 
 })
 
 test('a terminal worker and a teammate are lines under their session, and a lead apart says so', () => {
-  const lead = {
-    ...NODES[0],
+  const lead: PhiNode = {
+    ...(NODES[0] as PhiNode),
     apart: true,
     steps: [],
     goal: null,
