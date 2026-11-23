@@ -396,6 +396,9 @@ let paneTimer: Timer | undefined
 // The teammates last written to team.json, as its text: none written yet where this session has led no team.
 const TEAM_FILE = 'team.json'
 let teamed: string | undefined
+// One read of the team is in flight at most, and one more is owed where an event came meanwhile.
+let isTeaming = false
+let isTeamOwed = false
 
 // One line of the Progress view: a session's title, the step in progress, a plain or a dim line, or a count of a
 // whole, which a surface with a `Progress` element draws as one and any other as `bar` draws it.
@@ -474,7 +477,7 @@ export function treeGlance(nodes: readonly PhiNode[]): string {
   return `${nodes.length} ${nodes.length === 1 ? 'session' : 'sessions'}, ${working} working, ${done} of ${steps.length} steps`
 }
 
-// What a close of a pane leaves of that, given how it stood,and it is all the hook at `ui.close` does: a close of
+// What a close of a pane leaves of that, given how it stood, and it is all the hook at `ui.close` does: a close of
 // p4-phi's own pane leaves it closed, so a look reads its pages no more, and a close of any other pane leaves it
 // as it was. By the
 // types of `claude-code` every close raises `ui.close` with the pane's `id` and an `origin`: `person` for the
@@ -1480,6 +1483,12 @@ async function page($: EngineInterface): Promise<void> {
 // session's folder for scripts/progress.py: each one's name, the task its lead gave it, its state and what it is
 // doing. A session with no teammate writes nothing, and `isOver` writes an empty list at the session's end.
 async function team($: EngineInterface, isOver = false): Promise<void> {
+  if (isTeaming && !isOver) {
+    isTeamOwed = true
+
+    return
+  }
+  isTeaming = true
   try {
     const agents = isOver ? [] : await $.agent.list()
     const mates = agents
@@ -1498,6 +1507,12 @@ async function team($: EngineInterface, isOver = false): Promise<void> {
     teamed = now
   } catch {
     // a Claude Code with no `$.agent.list`, or a folder that cannot be written: no team is shown
+  } finally {
+    isTeaming = false
+    if (isTeamOwed && !isOver) {
+      isTeamOwed = false
+      void team($)
+    }
   }
 }
 
@@ -1601,9 +1616,10 @@ function watchPane($: EngineInterface): void {
 async function openPane($: EngineInterface): Promise<string> {
   isPaneOpen = true
   await page($)
-  await progress($)
   watchPane($)
   const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
+  // The pane is up with its pages, and the tree joins it once python has answered.
+  await progress($)
 
   return opened.isPlaced ? "p4-phi's pane is open." : `p4-phi's pane is open and not drawn: ${opened.reason}`
 }
@@ -1939,7 +1955,7 @@ export const register: Register = on => {
             line.kind === 'bar'
               ? Progress === undefined
                 ? h(Text, {}, `${line.label} ${bar(line.value, line.max)} ${line.text}`)
-                : h(Progress, { label: line.label.trim(), value: line.value, max: line.max, valueText: line.text } as never)
+                : h(Progress, { label: line.label, value: line.value, max: line.max, valueText: line.text } as never)
               : h(
                   Text,
                   {

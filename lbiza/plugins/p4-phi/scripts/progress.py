@@ -23,6 +23,7 @@ NODES = 64                       # the most sessions one file holds
 STEPS = 24                       # the most steps of one session, and the most sections of one plan
 SOURCES = 400                    # the most files the module watches
 CONDITION = 400                  # the most of a goal's condition that is drawn
+GOAL_TAIL = 256 * 1024           # the most of a transcript's end read for a typed goal's row, at every run
 # The files of a session's folder a node is read from: its record, its task list, the hooks' log that
 # puppeteer.working reads, and its turns, which phi.load_turns reads.
 WATCHED = ("session.json", "plan.json", "log.jsonl", "turns.jsonl", "upkeep.json", "team.json")
@@ -56,7 +57,7 @@ def goal_of(s):
         why = g.get("reason") if g.get("over") else "" if g.get("set") else g.get("failed")
         out = {"state": state, "condition": relay._short(g["condition"], CONDITION)}
         return dict(out, reason=relay._short(why, 300)) if why else out
-    row = plans.goal_row(s.get("transcript") or "")
+    row = plans.goal_row(s.get("transcript") or "", GOAL_TAIL)
     if row.get("condition"):
         out = {"state": plans.goal_over(row) or "set", "condition": relay._short(row["condition"], CONDITION)}
         return dict(out, reason=relay._short(row["reason"], 300)) if row.get("reason") else out
