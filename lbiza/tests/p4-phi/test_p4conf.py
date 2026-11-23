@@ -844,49 +844,47 @@ class ClaudeSettings(unittest.TestCase):
 
     ARCHIVE_ASK = "mcp__ccd_session_mgmt__archive_session"
 
-    def test_the_ask_rule_on_archive_session_is_p4s_own_entry_once_beside_the_users(self):
-        """ezexe approved an ask rule on the archive tool, so the app shows its approval card before every archive in
-        every permission mode: after two checks it is in permissions.ask once, after the user's own ask rules, which
-        stay as they were and in order, and the record owns it."""
-        self.assertEqual(p4conf.ASK_RULES, (self.ARCHIVE_ASK,))
-        os.makedirs(os.path.join(self.project, ".claude", "p4"))
-        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session", "Edit(./secrets/**)"]
-        with open(self.local(), "w", encoding="utf-8") as f:
-            json.dump({"permissions": {"ask": list(mine)}}, f)
-        for _ in range(2):
-            p4conf.keep_settings(self.project, platform="win32")
-        ask = self.read(self.local())["permissions"]["ask"]
-        self.assertEqual(ask, mine + [self.ARCHIVE_ASK], "the user's own first and untouched, p4's once")
-        self.assertEqual(ask.count(self.ARCHIVE_ASK), 1)
-        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
-        self.assertEqual(list(rec["askRules"].values())[0]["entries"], [self.ARCHIVE_ASK])
-        p4conf.keep_settings(self.project, platform="linux")
-        self.assertEqual(self.read(self.local())["permissions"]["ask"].count(self.ARCHIVE_ASK), 1, "on every platform")
-
-    def test_a_store_that_turns_upkeep_on_gets_no_ask_rule_and_p4s_own_entry_goes(self):
-        """`phi.upkeep` true: a session archives the finished, landed sessions it started by itself, so the keeper
-        writes no ask rule on the archive tool and takes out the entry it wrote. The user's own ask rules stay as
-        they were, and with the setting off again the entry comes back."""
+    def test_the_keeper_writes_no_ask_rule_with_upkeep_on_or_off(self):
+        """Until KEEPER 15 the keeper wrote an ask rule on the archive tool where `phi.upkeep` was off. The rule is
+        retired: p4 writes no ask rule with the setting off or on, on every platform, the user's own ask rules stay
+        as they were and in order, and the record owns no ask rule."""
+        self.assertEqual(p4conf.ASK_RULES, ())
+        self.assertEqual(p4conf.ASK_RETIRED, (self.ARCHIVE_ASK,))
+        self.assertGreaterEqual(p4conf.KEEPER, 15)
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
-        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session"]
-        with open(self.local(), "w", encoding="utf-8") as f:
-            json.dump({"permissions": {"ask": list(mine)}}, f)
-        p4conf.keep_settings(self.project, platform="win32")
-        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine + [self.ARCHIVE_ASK], "off: as today")
-        self.assertFalse(p4conf.upkeep_on(p4), "off by default")
-        p4conf.set_key(p4, "phi.upkeep", True)
-        self.assertTrue(p4conf.upkeep_on(p4))
-        for _ in range(2):
-            p4conf.keep_settings(self.project, platform="win32")
-        got = self.read(self.local())
-        self.assertEqual(got["permissions"]["ask"], mine, "p4's own entry is gone, the user's rules are untouched")
+        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session", "Edit(./secrets/**)"]
+        _write(self.local(), {"permissions": {"ask": list(mine)}})
+        for upkeep in (False, True):
+            p4conf.set_key(p4, "phi.upkeep", upkeep)
+            for platform in ("win32", "linux"):
+                p4conf.keep_settings(self.project, platform=platform)
+                self.assertEqual(self.read(self.local())["permissions"]["ask"], mine, (upkeep, platform))
         self.assertNotIn("askRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
-        self.assertNotIn("deny", got["permissions"], "p4 writes no deny rule")
-        self.assertEqual(got["env"].get("P4_PHI_UPKEEP"), "1", "the changed setting shows in the local file")
-        p4conf.set_key(p4, "phi.upkeep", False)
-        p4conf.keep_settings(self.project, platform="win32")
-        self.assertEqual(self.read(self.local())["permissions"]["ask"], mine + [self.ARCHIVE_ASK], "off: it is back")
+
+    def test_the_entry_an_earlier_keeper_wrote_goes_at_the_next_whole_check_with_upkeep_on_or_off(self):
+        """The ask rule a keeper before KEEPER 15 wrote and its record holds is taken out at the next whole check,
+        with `phi.upkeep` off and with it on. The user's own ask rules stay as they were and in order, and the entry
+        is not written back."""
+        from unittest import mock
+        mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session"]
+        for upkeep in (False, True):
+            project = os.path.join(self.tmp, f"upkeep{int(upkeep)}")
+            p4 = os.path.join(project, ".claude", "p4")
+            os.makedirs(p4)
+            _write(self.local(project), {"permissions": {"ask": list(mine)}})
+            # as a keeper before KEEPER 15 wrote it
+            with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):
+                p4conf.keep_settings(project, platform="win32")
+            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], mine + [self.ARCHIVE_ASK])
+            p4conf.set_key(p4, "phi.upkeep", upkeep)
+            for _ in range(2):
+                p4conf.keep_settings(project, platform="win32")
+            got = self.read(self.local(project))
+            self.assertEqual(got["permissions"]["ask"], mine, "p4's own entry is gone, the user's rules are untouched")
+            self.assertNotIn("askRules", json.loads(Path(self.record(project)).read_text(encoding="utf-8")))
+            self.assertNotIn("deny", got["permissions"], "p4 writes no deny rule")
+            self.assertEqual(got.get("env", {}).get("P4_PHI_UPKEEP"), "1" if upkeep else None)
 
     def test_upkeep_on_leaves_an_archive_ask_rule_the_user_wrote(self):
         """An ask rule on the archive tool that ezexe wrote is no entry of p4's: it stays with the setting on."""
@@ -908,49 +906,48 @@ class ClaudeSettings(unittest.TestCase):
         there when p4 wrote its first entry under its key is p4's making, by the record's `lists`, and goes with
         its key when p4 takes its own last entry out. p4-phi's copy and p4-temportal's do the same, and a section
         that still holds another key stays."""
+        from unittest import mock
         self.install_phi(enabled=True)
         for n, copy in enumerate((p4conf, self.temportal())):
             project = os.path.join(self.tmp, f"made{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
             _write(self.local(project), {"permissions": {"deny": ["Read(./.env)"]}})
-            copy.keep_settings(project, platform="linux")
+            with mock.patch.object(copy, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+                copy.keep_settings(project, platform="linux")
             self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK])
             self.assertIs(self.lists(project)["permissions.ask"], True, "the key was not there: p4 made the list")
-            copy.set_key(p4, "phi.upkeep", True)
             for _ in range(2):
                 copy.keep_settings(project, platform="linux")
             got = self.read(self.local(project))["permissions"]
             self.assertNotIn("ask", got, "the list p4 made and emptied is gone with its key")
             self.assertEqual(got["deny"], ["Read(./.env)"], "the section keeps its other key")
             self.assertNotIn("permissions.ask", self.lists(project))
-            copy.set_key(p4, "phi.upkeep", False)
-            copy.keep_settings(project, platform="linux")
-            self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK], "and it is back")
 
     def test_a_list_a_person_made_stays_when_p4_takes_its_entry_out(self):
         """A list that was in the file before p4's first entry is a person's, empty or not: p4 takes its own entry
         out and leaves the list, in both copies. So is a list a person emptied by hand, which p4 did not empty."""
+        from unittest import mock
         self.install_phi(enabled=True)
         for n, copy in enumerate((p4conf, self.temportal())):
             project = os.path.join(self.tmp, f"theirs{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
             _write(self.local(project), {"permissions": {"ask": []}})
-            copy.keep_settings(project, platform="linux")
+            with mock.patch.object(copy, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+                copy.keep_settings(project, platform="linux")
             self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [self.ARCHIVE_ASK])
             self.assertIs(self.lists(project)["permissions.ask"], False, "the list was there first")
-            copy.set_key(p4, "phi.upkeep", True)
             copy.keep_settings(project, platform="linux")
             self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [], "a person's list stays")
         project = os.path.join(self.tmp, "by-hand")
         p4 = os.path.join(project, ".claude", "p4")
         os.makedirs(p4)
-        p4conf.keep_settings(project, platform="linux")
+        with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):
+            p4conf.keep_settings(project, platform="linux")
         d = self.read(self.local(project))
         d["permissions"]["ask"] = []
         _write(self.local(project), d)
-        p4conf.set_key(p4, "phi.upkeep", True)
         for _ in range(2):
             p4conf.keep_settings(project, platform="linux")
         self.assertEqual(self.read(self.local(project))["permissions"]["ask"], [], "emptied by hand: not p4's to drop")
@@ -959,12 +956,14 @@ class ClaudeSettings(unittest.TestCase):
         """A store an earlier keeper kept has no `lists` in its record. At the first whole check a list that holds
         nothing but p4's own entries is p4's making, as a key that already holds p4's value is p4's, and a list
         that holds a person's rule beside them is the person's."""
+        from unittest import mock
         for n, (mine, left) in enumerate((([], None), (["Bash(git push *)"], ["Bash(git push *)"]))):
             project = os.path.join(self.tmp, f"before{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
             _write(self.local(project), {"permissions": {"ask": list(mine)}} if mine else {})
-            p4conf.keep_settings(project, platform="linux")
+            with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+                p4conf.keep_settings(project, platform="linux")
             rec = json.loads(Path(self.record(project)).read_text(encoding="utf-8"))
             rec.pop("lists", None)                              # as a keeper from before the part left it
             _write(self.record(project), rec)
@@ -1000,18 +999,6 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(got["phi"]["max_depth"], 5)
         self.assertEqual(got["recall"], p4conf.DEFAULTS["recall"])
 
-    def test_a_fresh_project_gets_the_ask_rule_and_one_deleted_by_hand_stays_gone(self):
-        os.makedirs(os.path.join(self.project, ".claude", "p4"))
-        p4conf.keep_settings(self.project, platform="linux")
-        d = self.read(self.local())
-        self.assertEqual(d["permissions"]["ask"], [self.ARCHIVE_ASK])
-        d["permissions"]["ask"].remove(self.ARCHIVE_ASK)
-        _write(self.local(), d)
-        for _ in range(2):
-            p4conf.keep_settings(self.project, platform="linux")
-        self.assertNotIn(self.ARCHIVE_ASK, self.read(self.local())["permissions"].get("ask", []),
-                         "deleted by hand: ezexe's choice, not written back")
-
     def test_the_keeper_never_removes_an_ask_rule_it_did_not_write(self):
         """A user who wrote the same rule first owns it: the keeper takes it over neither while it wants the rule nor
         when a later copy wants it gone, and it removes only an entry it wrote itself."""
@@ -1019,18 +1006,18 @@ class ClaudeSettings(unittest.TestCase):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         mine = [self.ARCHIVE_ASK, "Bash(git push *)"]
         _write(self.local(), {"permissions": {"ask": list(mine)}})
-        p4conf.keep_settings(self.project, platform="linux")
+        with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+            p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["ask"], mine, "the user's own, left as it is")
         self.assertNotIn("askRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
-        with mock.patch.object(p4conf, "ASK_RULES", ()):
-            p4conf.keep_settings(self.project, platform="linux")
+        p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["ask"], mine, "never removed: p4 did not write it")
         other = os.path.join(self.tmp, "other")
         os.makedirs(os.path.join(other, ".claude", "p4"))
         _write(os.path.join(other, ".claude", "settings.local.json"), {"permissions": {"ask": ["Bash(git push *)"]}})
-        p4conf.keep_settings(other, platform="linux")
-        with mock.patch.object(p4conf, "ASK_RULES", ()):
+        with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):
             p4conf.keep_settings(other, platform="linux")
+        p4conf.keep_settings(other, platform="linux")
         got = json.loads(Path(other, ".claude", "settings.local.json").read_text(encoding="utf-8"))
         self.assertEqual(got["permissions"]["ask"], ["Bash(git push *)"], "p4's own goes, the user's stays")
 
@@ -1056,7 +1043,7 @@ class ClaudeSettings(unittest.TestCase):
             p4conf.keep_settings(self.project, platform="linux")
         got = self.read(self.local())["permissions"]
         self.assertNotIn("deny", got, "p4's own entry is gone, and so is the list p4 made for it")
-        self.assertEqual(got["ask"], [self.ARCHIVE_ASK], "the ask rule stays")
+        self.assertNotIn("ask", got, "and p4 writes no ask rule")
         self.assertNotIn("denyRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
         other = os.path.join(self.tmp, "beside")
         os.makedirs(os.path.join(other, ".claude", "p4"))
@@ -1092,7 +1079,7 @@ class ClaudeSettings(unittest.TestCase):
             p4conf.keep_settings(other, platform="linux")
         got = json.loads(Path(other, ".claude", "settings.local.json").read_text(encoding="utf-8"))
         self.assertEqual(got["permissions"]["deny"], ["Bash(rm *)"], "p4's own goes, the user's stays")
-        self.assertEqual(got["permissions"]["ask"], [self.ARCHIVE_ASK], "and only that entry")
+        self.assertNotIn("ask", got["permissions"], "and p4 writes no ask rule")
 
     def temportal(self):
         """p4-temportal's copy of p4conf.py, which sits beside no phi.py."""
@@ -1117,13 +1104,16 @@ class ClaudeSettings(unittest.TestCase):
         got = self.read(self.local()).get("permissions") or {}
         return got.get("ask"), got.get("deny")
 
-    def test_the_temportal_copy_writes_the_ask_and_deny_rules_where_p4_phi_is_installed_and_enabled(self):
-        """The two rules serve p4-phi's session tree alone and name no plugin folder, so p4-temportal's copy writes
-        them where Claude Code's own files say p4-phi is installed for the project and not switched off."""
+    def test_the_temportal_copy_writes_p4_phis_rules_where_p4_phi_is_installed_and_enabled(self):
+        """The rules p4 keeps for p4-phi's session tree name no plugin folder, so p4-temportal's copy writes them
+        where Claude Code's own files say p4-phi is installed for the project and not switched off. The ask rule a
+        keeper before KEEPER 15 wrote stands for them here."""
+        from unittest import mock
         other = self.temportal()
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         self.install_phi(enabled=True)
-        other.keep_settings(self.project, platform="linux")
+        with mock.patch.object(other, "ASK_RULES", (self.ARCHIVE_ASK,)):
+            other.keep_settings(self.project, platform="linux")
         self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
         self.assertNotIn("allow", self.read(self.local())["permissions"], "the allow rules are p4-phi's copy's alone")
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
@@ -1164,7 +1154,12 @@ class ClaudeSettings(unittest.TestCase):
         """migrate_layout, which every plugin calls at its start, runs the keeper when p4-phi was removed, switched
         off or installed since the record was written. The keeper then takes out its own two entries and no rule
         of the user's, and a start with nothing changed writes nothing."""
+        from unittest import mock
         other = self.temportal()
+        with mock.patch.object(other, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+            self.both_rules_follow_p4_phi(other)
+
+    def both_rules_follow_p4_phi(self, other):
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
         _write(self.local(), {"permissions": {"ask": ["Bash(git push *)"], "deny": ["Read(./.env)"]}})
@@ -1197,7 +1192,8 @@ class ClaudeSettings(unittest.TestCase):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         other.keep_settings(self.project, platform="linux")
         self.assertEqual(self.two_rules(), (None, None))
-        with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)):
+        with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)), \
+                mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
         self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
 
@@ -1205,10 +1201,12 @@ class ClaudeSettings(unittest.TestCase):
         """A checkout of p4-phi loaded by `--plugin-dir` is in no file of Claude Code's, so p4-temportal's copy
         cannot tell whether a session loaded it. The record names the checkout that kept the store, and while that
         folder holds phi.py the copy neither writes the two rules nor takes them out."""
+        from unittest import mock
         other = self.temportal()
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
-        p4conf.keep_settings(self.project, platform="linux")
+        with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+            p4conf.keep_settings(self.project, platform="linux")
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(rec["phiCopy"], SRC.as_posix())
         self.assertIsNone(other.phi_on(self.project, self.local(), "linux", rec))
@@ -1896,8 +1894,7 @@ REFERENCE = {
         'Bash(python -I -X utf8 "<scripts>/phi.py" *)',
         'Bash(python -I -X utf8 "<scripts>/p4.py" sync *)',
         'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)',
-        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)'],
-        "ask": ["mcp__ccd_session_mgmt__archive_session"]},
+        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)']},
     "disableAllHooks": False,
     "disableSkillShellExecution": False,
 }

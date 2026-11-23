@@ -29,10 +29,11 @@ KINDS = (
      "session to push, and every other such call is refused with the session to ask."),
     ("the ask rule on the archive tool",
      "`mcp__ccd_session_mgmt__archive_session` under `permissions.ask` of the project's local settings file, which "
-     "prompts in every mode. p4's keeper writes it where `phi.upkeep` is off.",
-     "Settled by `phi.upkeep`: with it on the keeper writes none, and by the set it also takes out an entry of that "
-     "exact text which its record no longer holds. With `phi.upkeep` off the card stays, as ezexe's check on an "
-     "archive."),
+     "prompts in every mode. p4's keeper wrote it until KEEPER 15 where `phi.upkeep` was off, and an ask rule names "
+     "a tool, never one call, so the card came before every archive.",
+     "Settled by the keeper: it writes none, with `phi.upkeep` on or off, and takes its own entry out. By the set it "
+     "also takes out, where `phi.upkeep` is on, an entry of that exact text which its record no longer holds. An ask "
+     "rule a person wrote stays, and so does the app's own card outside Auto mode and Bypass permissions mode."),
     ("a tool a p4 hooks module declares",
      "Claude Code asks about the first call of an MCP tool that no rule allows, in a mode that asks. The tools are "
      "those of p4conf.CARD_TOOLS. A session that bypasses permission prompts is asked nothing.",
@@ -223,8 +224,8 @@ def text(store):
 
 def held_line(store):
     """One line on what the local settings file of the store's project holds of the set, after the keeper ran for
-    it: how many of the allow rules for p4's tools, and whether the ask rule on the archive tool. '' for a store
-    that sits in no project's `.claude`."""
+    it: how many of the allow rules for p4's tools, and whether an ask rule on the archive tool, which the keeper
+    writes no more. '' for a store that sits in no project's `.claude`."""
     import os
     project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
     if os.path.basename(os.path.dirname(os.path.abspath(store))) != ".claude":
@@ -235,8 +236,8 @@ def held_line(store):
     ask = p4conf._get(data, p4conf.ASK_KEY)
     have = [t for t in p4conf.CARD_TOOLS if isinstance(allow, list) and t in allow]
     return (f"{p4conf.fwd(kept['file'])} holds {len(have)} of the {len(p4conf.CARD_TOOLS)} allow rules for p4's "
-            f"tools and " + ("an" if isinstance(ask, list) and p4conf.ASK_RULES[0] in ask else "no")
-            + f" ask rule on `{p4conf.ASK_RULES[0]}`.")
+            f"tools and " + ("an" if isinstance(ask, list) and p4conf.ASK_RETIRED[0] in ask else "no")
+            + f" ask rule on `{p4conf.ASK_RETIRED[0]}`.")
 
 
 def switch(store, on, given=""):

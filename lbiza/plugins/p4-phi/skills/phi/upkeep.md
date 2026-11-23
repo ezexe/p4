@@ -4,7 +4,7 @@
 
 `phi.upkeep` in the store's `p4.json` turns upkeep on for a project, and it is off by default.
 `upkeep on` and `upkeep off` set it, since a session writes nothing under `.claude` with its own tools.
-With it off, p4-phi hands none of the lines below, keeps no `upkeep.json`, and the settings keeper writes its ask rule on `mcp__ccd_session_mgmt__archive_session`.
+With it off, p4-phi hands none of the lines below and keeps no `upkeep.json`.
 With it on, a session that started others is handed every act that is due for them beside each message it gets, and the setting is ezexe's standing word for each act, so none waits on ezexe.
 The session does each act in that turn and says in one line what was done.
 
@@ -54,7 +54,7 @@ What upkeep cannot do:
 - It cannot archive without the app's approval card in a session that runs in neither auto nor bypass permissions mode: that card is the app's own rule and a permission mode is ezexe's to set.
 - It cannot archive a session the app refuses, and it does not say why the app refused: it passes the app's answer on as it stands, hands the call once more after the session has been idle, and then tells ezexe once. Each refusal seen on 2026-11-23 fell while the session's own records showed a turn open or a background task running.
 - It cannot close a terminal tab ezexe typed in, which the app refuses.
-- It removes nothing by force and deletes no unmerged branch, and it sets no permission but p4's own ask rule on the archive tool: a force, a deletion of unmerged work, a credential and a permission setting stay ezexe's.
+- It removes nothing by force and deletes no unmerged branch, and it sets no permission: a force, a deletion of unmerged work, a credential and a permission setting stay ezexe's.
 - It reads the remote's default branch as the clone last saw it and runs no fetch in a hook, so a commit that reached the remote from another clone counts as landed only after a fetch or a push in this one.
 - It knows a subagent's worktree only by the files the subagent's own transcript shows it wrote with an edit tool, and it leaves one whose path is not under `.claude/worktrees/`.
 - It keeps no item for a finding a report tells in prose with no heading or label of its own, and it reads a step's wait only where the step names the session.

@@ -295,13 +295,13 @@ class TheSet(unittest.TestCase):
     def test_the_keeper_writes_the_tool_rules_only_while_the_set_is_in_force(self):
         """The `tools` part of the set: an allow rule for each tool a p4 hooks module declares, as entries of
         `permissions.allow` p4 owns under the record's `toolRules`. They come with the yes and go with it, a rule a
-        person already wrote stays theirs, and p4's rules for phi.py and its deny rule are as before."""
+        person already wrote stays theirs, p4's rules for phi.py are as before, and no ask or deny rule is written."""
         mine = "mcp__p4-phi__done"
         write(self.local, json.dumps({"permissions": {"allow": [mine, "Bash(ls *)"]}}))
         p4conf.keep_settings(self.proj)
         before = self.rules(p4conf.ALLOW_KEY)
         self.assertEqual([r for r in before if r.startswith("mcp__")], [mine], "set off: no rule of the set")
-        self.assertEqual(self.rules(p4conf.ASK_KEY), [ARCHIVE], "the ask rule stands while phi.upkeep is off")
+        self.assertEqual(self.rules(p4conf.ASK_KEY), [], "no ask rule, with phi.upkeep off")
         say_yes(self.p4)
         p4conf.keep_settings(self.proj)
         allow = self.rules(p4conf.ALLOW_KEY)
@@ -310,7 +310,7 @@ class TheSet(unittest.TestCase):
         rec = p4conf.read_record(self.p4)
         owned = rec["toolRules"][p4conf.fwd(self.local)]["entries"]
         self.assertEqual(sorted(owned), sorted(t for t in p4conf.CARD_TOOLS if t != mine), "the person's own stays theirs")
-        self.assertEqual(self.rules(p4conf.ASK_KEY), [ARCHIVE], "the set alone moves no ask rule")
+        self.assertEqual(self.rules(p4conf.ASK_KEY), [], "nor with the set in force")
         self.assertEqual(self.rules(p4conf.DENY_KEY), list(p4conf.DENY_RULES), "and no deny rule")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
         p4conf.keep_settings(self.proj)
@@ -337,7 +337,7 @@ class TheSet(unittest.TestCase):
         """The `archive` part: a store started anew lost the record of the ask rule p4 wrote, so with `phi.upkeep`
         on the keeper left the entry as a person's and the card came before every archive, 32 times on 2026-11-19.
         With the set in force the entry of p4's exact text is taken out. Another ask rule is never touched, and
-        with `phi.upkeep` off the rule stays, set or no set."""
+        with `phi.upkeep` off the keeper writes none back."""
         other = "Bash(git push --force *)"
         write(self.local, json.dumps({"permissions": {"ask": [ARCHIVE, other]}}))
         p4conf.set_key(self.p4, "phi.upkeep", True)
@@ -349,7 +349,7 @@ class TheSet(unittest.TestCase):
         self.assertNotIn("askRules", p4conf.read_record(self.p4))
         p4conf.set_key(self.p4, "phi.upkeep", False)
         p4conf.keep_settings(self.proj)
-        self.assertEqual(self.rules(p4conf.ASK_KEY), [other, ARCHIVE], "upkeep off: p4 writes its ask rule again")
+        self.assertEqual(self.rules(p4conf.ASK_KEY), [other], "upkeep off: p4 writes no ask rule back")
 
     def test_a_brief_tells_its_session_to_push_by_a_clause_that_says_so(self):
         """The `push` part reads the brief: a clause with the word, no refusal beside it and no other session named

@@ -2429,8 +2429,8 @@ def h_issue_tie(payload):
 
 
 def h_self_archive(payload):
-    """PreToolUse on mcp__ccd_session_mgmt__archive_session. Whether the call runs is ezexe's: the settings keeper
-    writes an ask rule on the tool, which the app asks about in every permission mode, and the tool itself refuses a
+    """PreToolUse on mcp__ccd_session_mgmt__archive_session. Whether the call runs is the app's: it shows ezexe its
+    approval card before an archive, except in Auto mode and Bypass permissions mode, and the tool itself refuses a
     session with live background work. What no native step does: a child that archives itself may never reach its Stop
     hook, so its turn and its last report are kept now, read from the transcript, it is counted as archived as at
     Stop, and an unproven or open issue keeps it from archiving."""

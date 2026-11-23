@@ -11,8 +11,8 @@ for it, p4-phi hands the exact acts that are due for those sessions, and the set
                whole title with the exact archive call. One whose work is not landed gets the landing line first.
                The archive is the app's own tool: desktop.md, "Work across sessions", has Claude "archive a session",
                and says "You get an approval card before Claude archives a session, except in Auto mode and Bypass
-               permissions mode". So nothing archives here: the line names the call, and the settings keeper takes
-               its own ask rule on the tool out, which made the app ask in those two modes as well.
+               permissions mode". So nothing archives here: the line names the call, and the settings keeper writes
+               no ask rule on the tool, with the setting on or off.
   follow       what a finished worker's report lists as found and not fixed, or as left, is kept as open items in
                upkeep.json in the orchestrator's folder. Each goes back to that worker by message while it is live
                and its context is short, and otherwise to a successor, and it closes only on a commit on the default
@@ -122,7 +122,8 @@ def save(home, sid, d):
 
 def set_on(store, flag):
     """`phi.upkeep` written to the store's p4.json, and the settings keeper run for the project the store sits in, so
-    its ask rule on the archive tool goes or comes back at once. Returns the lines to print."""
+    the local file holds the changed setting at once. The keeper writes no ask rule on the archive tool, with the
+    setting on or off. Returns the lines to print."""
     was = p4conf.upkeep_on(store)
     p4conf.set_key(store, "phi.upkeep", bool(flag))
     out = [f"phi.upkeep is {'on' if flag else 'off'} in {p4conf.fwd(p4conf.path(store))}"
@@ -133,12 +134,12 @@ def set_on(store, flag):
         asks = p4conf._get(p4conf.read_json(kept["file"]) or {}, p4conf.ASK_KEY)
         held = isinstance(asks, list) and ARCHIVE in asks
         out.append(f"{p4conf.fwd(kept['file'])} holds "
-                   + (f"an ask rule on `{ARCHIVE}`" + ("" if not flag else ", which is not p4's own: p4 takes out "
-                                                       "only the entry it wrote") if held
+                   + (f"an ask rule on `{ARCHIVE}`, which is not p4's own: p4 writes none and takes out only the "
+                      f"entry it wrote" if held
                       else f"no ask rule on `{ARCHIVE}`"))
     out.append("With it on, a session that started others is handed the archive call of each finished, landed "
                "session, its open follow-through items, the steps whose wait is over and the leftovers on disk."
-               if flag else "With it off, p4-phi hands none of the upkeep acts and keeps the archive ask rule.")
+               if flag else "With it off, p4-phi hands none of the upkeep acts.")
     return out
 
 

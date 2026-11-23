@@ -46,12 +46,12 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
                ones no live session holds, each once, beside the running orchestrator whose topic covers it or as
                the start of a new orchestrator, and none as a choice of ezexe's. Its own watcher lists them from
                GitHub at its slow looks, so no hook reads GitHub for the line.
-  archiving    the app asks ezexe before every archive call, by the ask rule the settings keeper writes on the
-               archive tool, and the tool refuses a session with live background work. p4-phi only names the
-               controlled sessions its records hold complete, which no tool of the app tells: no open plan step
-               and no closing commit unpushed. Where a project turns `phi.upkeep` on, the keeper writes no such
-               rule, the line that names a complete session holds its archive call, and no line leaves the
-               archive to ezexe.
+  archiving    the app asks ezexe before it archives a session, except in Auto mode and Bypass permissions mode,
+               desktop.md, "Work across sessions", and the tool refuses a session with live background work. The
+               settings keeper writes no ask rule on the archive tool. p4-phi only names the controlled sessions
+               its records hold complete, which no tool of the app tells: no open plan step and no closing commit
+               unpushed. Where a project turns `phi.upkeep` on, the line that names a complete session holds its
+               archive call, and no line leaves the archive to ezexe.
   requests    a controlled session that would start a new orchestrator writes `request ... --to-puppeteer`
                into its own store; the puppeteer's hooks read it there, and what became of it is kept on
                the puppeteer's record, where the hook of the session that filed it reads it.
@@ -348,10 +348,12 @@ RULE = (
     "unless ezexe asks.{asks}")
 # The two places of RULE that word the archive: who answers for the call, and the sentence that ends the rule. With
 # `phi.upkeep` on, the call is the upkeep line's and no sentence leaves it to ezexe.
-ARCHIVES = ("which the app puts to ezexe on its approval card",
-            " The app asks ezexe on its approval card before each archive call it makes.")
+ARCHIVES = ("which the app puts to ezexe on its approval card outside Auto mode and Bypass permissions mode",
+            " The app asks ezexe on its approval card before each archive call it makes, except in Auto mode and "
+            "Bypass permissions mode.")
 ARCHIVES_UPKEEP = ("which its upkeep line names for each finished, landed session it started", "")
-PAIR_ASKS = " The app asks ezexe on its approval card before any archive call on its tree."
+PAIR_ASKS = (" The app asks ezexe on its approval card before any archive call on its tree, except in Auto mode and "
+             "Bypass permissions mode.")
 PAIR = (
     "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
     "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
@@ -1181,8 +1183,8 @@ def complete_text(ready):
         return (head + "archive each with `mcp__ccd_session_mgmt__archive_session` and its `session_id`, in this "
                        "turn: `phi.upkeep` is on in this project, which is ezexe's standing word for it, so the call "
                        "waits on nobody. Say in one line which were archived.")
-    return (head + "tell ezexe. Archiving one is "
-                   "`mcp__ccd_session_mgmt__archive_session`, which the app puts to ezexe on its approval card.")
+    return (head + "tell ezexe. Archiving one is `mcp__ccd_session_mgmt__archive_session`, which the app puts to "
+                   "ezexe on its approval card outside Auto mode and Bypass permissions mode.")
 
 
 def compacted(home, s):
@@ -1205,7 +1207,8 @@ def hand(home, s, new):
     return (f"handed over to \"{full_title(new)}\" `{new}`: it runs `controls --from {s['sessionId']}`, then keeps "
             f"this session's outcome with `note`, and "
             + ("its upkeep line names this session's archive call once it is finished and landed" if UPKEEP else
-               "the app asks ezexe on its approval card before it archives this session"))
+               "the app asks ezexe on its approval card before it archives this session, except in Auto mode and "
+               "Bypass permissions mode"))
 
 
 def take(home, s, old):

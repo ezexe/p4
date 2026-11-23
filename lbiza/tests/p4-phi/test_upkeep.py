@@ -146,7 +146,8 @@ class Setting(Base):
         self.assertIn("phi.upkeep is off", r.stdout)
         self.assertIs(jload(os.path.join(self.t.p4, "p4.json"))["phi"]["upkeep"], False)
         local = jload(os.path.join(self.t.proj, ".claude", "settings.local.json"))
-        self.assertIn(ARCHIVE, local["permissions"]["ask"], "off: the ask rule is p4's again, as today")
+        self.assertNotIn(ARCHIVE, local.get("permissions", {}).get("ask", []), "off: the keeper writes none either")
+        self.assertIn(f"no ask rule on `{ARCHIVE}`", r.stdout)
 
     def test_with_it_off_nothing_is_handed_and_nothing_is_kept(self):
         self.commit()

@@ -79,8 +79,7 @@ DEFAULTS = {
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
         "upkeep": False,                 # true: a session that started others is handed their upkeep as acts that
-                                         # wait on nobody, and the keeper writes no ask rule on the archive tool;
-                                         # `phi.py upkeep on` and `off` set it
+                                         # wait on nobody; `phi.py upkeep on` and `off` set it
     },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
@@ -913,7 +912,7 @@ def upkeep_on(p4):
     """True when the store turns p4-phi's upkeep of a session tree on, by `phi.upkeep` or its variable."""
     try:
         return _get(load(p4, write=False, warn=False), "phi.upkeep") is True
-    except Exception:  # noqa: BLE001 — a store that cannot be read keeps the ask rule
+    except Exception:  # noqa: BLE001 — a store that cannot be read has upkeep off
         return False
 
 
@@ -1246,8 +1245,9 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # start, and one a person set stays as it is, and 13 with DENY_RULES emptied, so the deny rule on the model tool an
 # earlier keeper wrote goes at the next start.
 # 14 came with the general part of CARD_SET, so its rules are written at a store's next start where the set is in
-# force.
-KEEPER = 14
+# force, and 15 with ASK_RULES emptied, so the ask rule on the archive tool an earlier keeper wrote goes at the next
+# start.
+KEEPER = 15
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1779,17 +1779,18 @@ def version_folders(here):
             if n != m.group(2) and os.path.isfile(os.path.join(m.group(1), n, "scripts", "phi.py"))]
 
 
-# The ask rule ezexe approved for p4 to keep in the local file of every project where p4-phi runs: an explicit ask rule
-# prompts in every permission mode, bypassPermissions included, so the app shows its approval card before every
-# archive_session call, which replaced p4-phi's own archive guard. permission-modes.md, "Actions no mode
-# auto-approves". It is one entry of `permissions.ask` that p4 owns, kept by the same rule as the allow rules under
-# RECORD's `askRules`: an entry the user wrote is never taken over or removed, and one deleted by hand stays gone.
-# Both copies write it, since its text names no plugin folder, and only where p4-phi runs, by phi_on. A store that turns `phi.upkeep` on wants none: ezexe
-# decided that a session archives the finished, landed sessions it started by itself, so the keeper writes no ask
-# rule there and takes its own entry out, and the app's own rule holds, desktop.md, "Work across sessions": "You get
-# an approval card before Claude archives a session, except in Auto mode and Bypass permissions mode".
+# The ask rules p4 keeps, under RECORD's `askRules`: none. Until KEEPER 15 the keeper wrote one on
+# mcp__ccd_session_mgmt__archive_session where `phi.upkeep` was off, in place of p4-phi's own archive guard. An ask
+# rule names a tool, never one call, so the app raised its approval card before every archive, 32 times on
+# 2026-11-19. ezexe decided that the archive is the last act of a closing ceremony and that a plan moved into
+# `complete` is the record ezexe goes back to, so the rule is retired with `phi.upkeep` on or off: with the tuple
+# empty _keep_rules takes the entry a copy wrote out of each local file at the store's next whole check, with the
+# list p4 made for it, and leaves every ask rule a person wrote. The app's own rule holds, desktop.md, "Work across
+# sessions": "You get an approval card before Claude archives a session, except in Auto mode and Bypass permissions
+# mode". ASK_RETIRED holds the retired rule's text, which CARD_SET's `archive` and _adopt_ask read.
 ASK_KEY = "permissions.ask"
-ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
+ASK_RULES = ()
+ASK_RETIRED = ("mcp__ccd_session_mgmt__archive_session",)
 # The deny rules p4 keeps, the same way under RECORD's `denyRules`: none. Until KEEPER 13 the keeper wrote one on
 # mcp__ccd_session_mgmt__set_session_model, so that no session changed a running session's model. The app has that
 # tool and its own gate, in the words of its sibling set_session_effort: "Same gate as set_session_model: usually no
@@ -1799,8 +1800,9 @@ ASK_RULES = ("mcp__ccd_session_mgmt__archive_session",)
 # with the list p4 made for it, and leaves every deny rule a person wrote.
 DENY_KEY = "permissions.deny"
 DENY_RULES = ()
-# Both rules serve p4-phi's session tree alone, so the keeper writes them only where p4-phi is installed and enabled,
-# and takes its own entries out where it is not, as it takes out any key it no longer writes. p4-phi's own copy sits
+# The allow rules of CARD_SET serve p4-phi's session tree alone, so the keeper writes them only where p4-phi is
+# installed and enabled, and takes its own entries out where it is not, as it takes out the entries of the retired
+# ask and deny rules and any key it no longer writes. p4-phi's own copy sits
 # beside phi.py and runs only where p4-phi is loaded. The copy in p4-temportal reads Claude Code's own files:
 # installed_plugins.json for the install, and `enabledPlugins` in the settings files for a plugin switched off.
 # RECORD's part PHI_PART holds, by settings file, whether p4-phi ran at the last whole check of that file, apart from
@@ -1858,7 +1860,7 @@ CARD_SET = (
     ("tools", "The project's local settings file holds an allow rule for each tool a p4 hooks module declares: "
               + ", ".join(f"`{t}`" for t in CARD_TOOLS) + "."),
     ("archive", "Where `phi.upkeep` is on, an entry of `permissions.ask` in that file that is exactly `"
-                + ASK_RULES[0] + "` is taken out, also where p4's record no longer holds it as p4's own."),
+                + ASK_RETIRED[0] + "` is taken out, also where p4's record no longer holds it as p4's own."),
     ("own-branch", "In a session another session started that works in a git worktree of its own, p4-phi's branch "
                    "guard asks nothing before `git rebase`, `git merge` and `git pull`, which move that worktree's "
                    "own branch and nothing else."),
@@ -2030,8 +2032,8 @@ def general_rules(p4, phi, platform=None):
 
 
 def _adopt_ask(new, rec, name):
-    """CARD_SET's `archive`: an entry of `permissions.ask` that is exactly a rule of ASK_RULES and that the record
-    does not hold becomes p4's own entry, so the keeper, which wants none where `phi.upkeep` is on, takes it out. A
+    """CARD_SET's `archive`: an entry of `permissions.ask` that is exactly a rule of ASK_RETIRED and that the record
+    does not hold becomes p4's own entry, so the keeper, which wants none, takes it out. A
     store started anew loses the record of the entry p4 wrote, and the entry then stood as a person's. A keeper from
     before LISTS took such an entry out and left the list empty: an empty list the record holds nothing of is what
     is left of that entry, and it goes with its key."""
@@ -2045,7 +2047,7 @@ def _adopt_ask(new, rec, name):
     part = rec.setdefault("askRules", {})
     mine = dict(part.get(name) or {})
     entries = list(mine.get("entries") or [])
-    found = [r for r in ASK_RULES if r in cur and r not in entries]
+    found = [r for r in ASK_RETIRED if r in cur and r not in entries]
     if found:
         hand = [h for h in (mine.get("hand") or []) if h not in found]
         part[name] = {"entries": entries + found, "hand": hand, "gen": mine.get("gen", 0)}
@@ -2333,9 +2335,9 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         if YES in rec and rec[YES].get("set") != cards_asked(p4):
             rec.pop(YES)                                # the key no longer names the set the yes was for
     _keep_rules(new, rec, name, allow, owned_only)
-    phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves both rules
-    ask = list(ASK_RULES) if phi and not upkeep_on(p4) else []
-    if phi and not ask and not owned_only and cards_on(p4):
+    phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves p4's entries
+    ask = list(ASK_RULES) if phi else []
+    if phi and not owned_only and upkeep_on(p4) and cards_on(p4):
         _adopt_ask(new, rec, name)                      # a leftover entry of p4's own text, taken out below
     _keep_rules(new, rec, name, card_tool_rules(p4, phi), owned_only, ALLOW_KEY, "toolRules")
     _keep_rules(new, rec, name, general_rules(p4, phi, platform), owned_only, ALLOW_KEY, "generalRules")

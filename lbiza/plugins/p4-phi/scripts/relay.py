@@ -2165,14 +2165,14 @@ def stale_text(pend):
 # A finished or superseded session is counted as archived by p4-phi at once: the replaces: note on its parent,
 # `doneRetired` or `stale` in its session.json, and `gone` true for routing, owned paths, the tree and what relay.py
 # hands other sessions from that moment. Its parent is told once, and the sessions the app has not archived yet are
-# listed on <home>/phi/ready-to-archive.md. Archiving one in the app is ezexe's: the settings keeper writes an ask
-# rule on the archive tool, so the app asks ezexe before every archive call in any permission mode. Where a project
-# turns `phi.upkeep` on, those words go: the keeper writes no such rule, and upkeep.py hands the session that started
-# a finished, landed session its archive call.
+# listed on <home>/phi/ready-to-archive.md. Archiving one in the app is ezexe's: the app asks ezexe on its approval
+# card before it archives a session, except in Auto mode and Bypass permissions mode, desktop.md, "Work across
+# sessions", and the settings keeper writes no ask rule on the archive tool. Where a project turns `phi.upkeep` on,
+# those words go, and upkeep.py hands the session that started a finished, landed session its archive call.
 
 UPKEEP = False                   # phi.project_conf sets it from p4.json phi.upkeep
 READY = ("p4-phi counts them as archived from now. Archiving one in the app is ezexe's: the archive tool asks "
-         "ezexe on the app's approval card before it runs.")
+         "ezexe on the app's approval card before it runs, except in Auto mode and Bypass permissions mode.")
 READY_UPKEEP = ("p4-phi counts them as archived from now, and its upkeep line names the archive call of each once "
                 "it is finished and landed.")
 BUTTON = ("This session is at the top level of its tree and it is done, so end this turn with `mcp__ccd_turn__wrap_up` "
