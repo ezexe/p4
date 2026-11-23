@@ -4510,7 +4510,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
                  "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "conf", "sections",
-                 "progress", "spend"):
+                 "coworkers", "progress", "spend"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -4526,6 +4526,21 @@ def main(argv=None):
             p.add_argument("which", nargs="?", default="")
         if name == "sections":
             p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed as starts")
+        if name == "coworkers":
+            p.add_argument("plan", help="the plan file whose groups of sections are printed, each with its coworker")
+            p.add_argument("--for", dest="planner", default="",
+                           help="the session id of the planner the coworkers send their lists to, this session's "
+                                "when left out")
+            p.add_argument("--checkout", default="", help="the repository the coworkers' worktrees are made in, "
+                                                          "the folder this is run from when left out")
+            p.add_argument("--write", default="", metavar="FOLDER",
+                           help="write the settings file and each coworker's start file into this folder, and "
+                                "print the terminal call that starts each")
+            p.add_argument("--land", action="store_true",
+                           help="print the message that has each coworker land its group, for after the approval")
+            p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
+                           help="wait until no coworker wrote a line for a while, then name each one an error of "
+                                "the API stopped: the coworkers named, or the plan's own where none is named")
         if name == "spend":
             p.add_argument("who", nargs="?", default="",
                            help="a session id of the store or the name a terminal session was started under, this "
@@ -4711,6 +4726,62 @@ def main(argv=None):
             for call in out:
                 print("`mcp__ccd_session__start_session` with " + json.dumps(call, ensure_ascii=False))
             print(sections.CARD)
+            return 0
+        if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
+            import coworker
+            plan = os.path.abspath(a.plan)
+            if not os.path.isfile(plan):
+                print(f"phi: no plan file at {plan}", file=sys.stderr)
+                return 2
+            checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
+            who = safe_id(a.planner or me.id)
+            who = str((load_session(me.home, who) or {}).get("title") or who) if who else ""
+            if a.land:
+                for name, text in coworker.land(plan, checkout, who):
+                    print(f"to `{name}`:\n{text}\n")
+                return 0
+            if a.wait is not None:                 # a round's wait, which only reads
+                # the names the starter answered with, since a mend can move a section into another group
+                names = a.wait or [one["name"] for one in coworker.drafts(plan, checkout, who) if one["team"]]
+                how, waited = coworker.watch(names)
+                print({"quiet": f"phi: no coworker wrote a line for {coworker.QUIET} seconds, after {waited} seconds",
+                       "silent": f"phi: no coworker wrote a line in {waited} seconds, so the round did not begin: "
+                                 "ask each coworker once for its list",
+                       "long": f"phi: a coworker still writes after {waited} seconds, so the watch ends"}[how])
+                for name in names:
+                    if coworker.stopped(name):
+                        print(f"phi: an error of the API stopped `{name}`: send it one message to carry on with "
+                              "its round from where it stopped")
+                return 0
+            mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
+            found = coworker.drafts(plan, checkout, who, mode,
+                                    os.path.abspath(a.write).replace("\\", "/") if a.write else "<folder>")
+            if not found:
+                print("phi: no section of that plan names files on a `Files:` line, so it has no group to read",
+                      file=sys.stderr)
+                return 2
+            if a.write:
+                there = [one["name"] for one in found if one["team"]
+                         and os.path.isdir(os.path.join(checkout, ".claude", "worktrees", one["name"]))]
+                if there:                          # worktrees.md: a name that is there is opened, with what it holds
+                    print(f"phi: a worktree named {', '.join(there)} is already in {checkout}/.claude/worktrees, so "
+                          "nothing is written: a plan's coworkers are started once", file=sys.stderr)
+                    return 2
+                coworker.write(os.path.abspath(a.write), found)
+                if mode not in upkeep.NO_ASK:      # a mode that asks, or none the app's record names
+                    print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so each "
+                          "coworker may ask in its tab before an edit or a command: these coworkers only read, so "
+                          "say so to the planner, which lands their groups by integrator subagents")
+            for one in found:
+                nums = ", ".join(one["sections"])
+                if not one["team"]:
+                    print(f"sections {nums}, {one['fences']} fences and no check: one `p4-phi:check` reads them, "
+                          "which the planner starts")
+                    continue
+                print(f"coworker `{one['name']}`: sections {nums}, {one['fences']} fences, a team of three")
+                if a.write:
+                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
+                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps
