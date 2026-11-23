@@ -1055,6 +1055,34 @@ class Levels(unittest.TestCase):
             True, "", levels=False)
         self.assertNotIn("`Explore`", plain, "with delegation off every work step is a child's")
 
+    def test_a_step_argued_from_several_sides_is_named_for_an_agent_team_and_one_that_writes_is_not(self):
+        """agent-teams.md, "Compare with subagents": "Use agent teams when teammates need to share findings,
+        challenge each other, and coordinate on their own." A step asks for that by its words, and one that writes
+        stays a session's."""
+        for text, level in (("Review the exporter's retry design from several angles", "team"),
+                            ("Research why the flush stalls, with competing hypotheses", "team"),
+                            ("Argue the store layout from opposing sides", "team"),
+                            ("Check the plan with an agent team", "team"),
+                            ("Review the agent team rows of progress.py", "session"),
+                            ("Find where p4-phi sends a step to an agent team", "read"),
+                            ("Fix the flush from several angles", "session"),
+                            ("Build the exporter with an agent team", "session"),
+                            ("Read the hooks docs and list what PreToolUse may return", "read")):
+            self.assertEqual(plans.level_of(text), level, text)
+        p = self.t.proj
+        ctx = self.plan(TOP, items("Review the exporter's retry design from several angles",
+                                   f"Port the exporter in {p}/src/export/flush.py to the new writer"))
+        self.assertIn(f"it goes to {plans.LEVEL_WHERE['team']}, {plans.LEVEL_NOT['team']}", ctx)
+        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
+        s = relay._session(self.t.p4, A)
+        worker = {"steps": [{"addr": str(n), "content": c, "status": "pending"} for n, c in enumerate((
+            f"Review the retry design of {p}/src/export/retry.py from several angles",
+            f"Port the exporter in {p}/src/export/flush.py to the new writer, with its tests",
+            f"Port the importer in {p}/src/import/read.py to the new reader, with its tests"), 1)]}
+        said = plans.split_advice(self.t.p4, {**s, "splitAdvised": []}, worker, True, "")
+        self.assertNotIn(plans.LEVEL_WHERE["team"], said, "a worker is named no team")
+        self.assertIn(f"1, {plans.TEAM_KEPT}", said, "and the step stays with its reason")
+
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
         """A child's card advice carries the `model` and `effort` keys, the plugin-gap line hands no start call at
         all, and a sentence beginning "Model:" is no choice of the parent session's."""

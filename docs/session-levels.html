@@ -391,7 +391,9 @@ function steps(kind,ask){
 var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep|research)\b/i;
 var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
 var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
-function levelOf(t){if(WRITES.test(t))return "session";if(READS.test(t))return "read";if(RUNS.test(t))return "run";return "session"}
+var TEAMS=/\b(?:with|by) an? agent[- ]team\b|\bfrom (?:several|multiple|many|different|opposing|competing|two|three|four|all) (?:sides|angles|perspectives|viewpoints|lenses)\b|\b(?:with|by) competing (?:hypothes[ie]s|theories|explanations)\b/i;
+var TEAM_NOT=/^\W*(?:build|draft|develop|generat|convert|extract|document)\w*\b/i;
+function levelOf(t){if(WRITES.test(t))return "session";if(TEAMS.test(t)&&!TEAM_NOT.test(t))return "team";if(READS.test(t))return "read";if(RUNS.test(t))return "run";return "session"}
 var DESIGNS=/^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|investigat|decid|analy[sz]|research|plan\b)\w*/i;
 var REVIEWS=/^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*/i;
 var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
@@ -563,6 +565,7 @@ $("plan").addEventListener("input",function(){
   var lv=levelOf(t);
   if(lv==="read"){out.innerHTML="This step only reads or searches, so p4-phi names it for <code>p4-phi:finder</code>, the plugin's evidence finder on <code>haiku</code> at <code>low</code> effort, not a session.";pick("read")}
   else if(lv==="run"){out.innerHTML="This step only runs a command, so p4-phi names it for a Bash or PowerShell call of its own with <code>run_in_background: true</code>, not a session.";pick("bg")}
+  else if(lv==="team"){out.innerHTML="This step asks for one question from several sides, so p4-phi names it for an agent team led from a terminal session, not a worker.";S.ask="top";pick("work")}
   else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
 });
 

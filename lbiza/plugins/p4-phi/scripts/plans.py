@@ -20,8 +20,9 @@ advice and checks that ride on them.
              in progress shares its words, across, and to the parent, up. A child whose parent step is removed is
              told so.
   advice     the open steps that can each run on their own are named for children of their own; an orchestrator
-             hands each work step out, a step that only reads or only runs a command to a background subagent, and
-             keeps orchestration and landing; each start names the model and effort its kind of work gets.
+             hands each work step out, a step that only reads or only runs a command to a background subagent and one
+             that asks for several sides to an agent team, and keeps orchestration and landing; each start names the
+             model and effort its kind of work gets.
   subagents  a subagent the Agent tool starts is a task of the step in progress, told what changed beside it.
   turns      at Stop, a turn's report is matched against the open steps of the session's children and siblings and
              delivered to those it bears on, and a turn that ends with open steps the session tree can settle is
@@ -509,8 +510,12 @@ def judge(plan, cwd):
 def split_advice(home, s, plan, owner_turn, cap):
     """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
     free, kept = judge(plan, s.get("cwd") or "")
-    subs = [st for st in free if LEVELS and level_of(st.get("content")) != "session"]
-    free = [st for st in free if st not in subs]   # a read goes to p4-phi:finder and a run to the background, never a session
+    # a read goes to p4-phi:finder and a run to the background, never a session. A team's question stays: a worker
+    # works in a worktree, where no lead starts, so the session that started it takes the question.
+    teams = [st for st in free if LEVELS and level_of(st.get("content")) == "team"]
+    kept += [(st["addr"], TEAM_KEPT) for st in teams]
+    subs = [st for st in free if LEVELS and level_of(st.get("content")) in ("read", "run")]
+    free = [st for st in free if st not in subs and st not in teams]
     if len(free) < 2:
         return ""
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
@@ -550,7 +555,8 @@ def split_advice(home, s, plan, owner_turn, cap):
 # with ezexe, and landing work. Each work step of its task list goes to a fresh child, not only the independent ones,
 # and a serial run, work steps that lean on the step before them or share a path with it, goes to one child that does
 # them in order. With delegation on, a step that only reads or only runs a command goes to a background subagent
-# instead. A step that checks or lands work, such as a test-and-commit, merge, push, release or sync, or the watch
+# instead, and one that asks for one question from several sides to an agent team. A step that checks or lands
+# work, such as a test-and-commit, merge, push, release or sync, or the watch
 # of the run on what was pushed, waits on or passes on work, starts a check or session, manages a worker, compiles
 # results or tracks what another does stays; top_stays gives the reason for each.
 
@@ -680,7 +686,8 @@ def top_groups(plan, cwd):
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
 # A step that only reads or searches is the subagent p4-phi:finder's, the skill sub-agentic's evidence finder; one
-# that only runs a command is a background command of the session's own; the rest is a worker's. sub-agents.md gives
+# that only runs a command is a background command of the session's own; one that asks for one question from several
+# sides is an agent team's; the rest is a worker's. sub-agents.md gives
 # the built-in Explore "the parent conversation's model", and puts "The `model` field in the subagent's definition"
 # in its model order, so agents/finder.md carries `model: haiku` and `effort: low` and no call has to. The page also says "With nothing configured, a subagent
 # that Claude spawns from your main conversation starts in the background." tools-reference.md, "Background
@@ -695,17 +702,38 @@ WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|u
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
 LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
-LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command"}
+# agent-teams.md, "Compare with subagents": "Use agent teams when teammates need to share findings, challenge each
+# other, and coordinate on their own." A step asks for one by its own words: several sides or lenses, competing
+# hypotheses, or a team named as the means. One that only names agent teams as its subject asks for none.
+TEAMS = re.compile(r"\b(?:with|by) an? agent[- ]team\b"
+                   r"|\bfrom (?:several|multiple|many|different|opposing|competing|two|three|four|all) "
+                   r"(?:sides|angles|perspectives|viewpoints|lenses)\b"
+                   r"|\b(?:with|by) competing (?:hypothes[ie]s|theories|explanations)\b", re.I)
+# A step that opens on a word of making is a writer's, whatever sides it names: WRITES holds no such word of its own.
+TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|document)\w*\b", re.I)
+LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command",
+              "team": "is one question to read, review or argue from several sides at once"}
 EXPLORE = "the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says"
 BACKGROUND = "a Bash or PowerShell call of its own with `run_in_background: true`"
-LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND}                # where each such step goes
+TEAM = ("an agent team, led from a terminal session as the skill `p4-phi:phi` says under `A team in a terminal "
+        "session`")
+LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND, "team": TEAM}  # where each such step goes
+# How each such line closes. A read and a run need no session at all. A team has a lead, which is a terminal
+# session, so its step is spared a worker and no more.
+LEVEL_NOT = {"read": "not a session", "run": "not a session", "team": "not a worker"}
+# Why a worker keeps a team's question: it works in a worktree, where no lead starts.
+TEAM_KEPT = ("asks for an agent team, which the session that started this one leads or starts, so the question goes "
+             "to it by message")
 
 
 def level_of(text):
-    """'read' for a step that only reads or searches, 'run' for one that only runs a command, else 'session'."""
+    """'team' for a step that asks for one question from several sides, 'read' for one that only reads or searches,
+    'run' for one that only runs a command, else 'session'. A step that writes is a session's whatever else it says."""
     text = str(text or "")
     if WRITES.search(text):
         return "session"
+    if TEAMS.search(text) and not TEAM_NOT.match(text):
+        return "team"
     if READS.search(text):
         return "read"
     if RUNS.search(text):
@@ -921,7 +949,8 @@ LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps,
 def top_advice(home, s, plan, owner_turn, cap, levels=None):
     """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
     step that only reads to the subagent p4-phi:finder and each that only runs a command to a background
-    command; said once per set. '' when no work step is new."""
+    command, and each that asks for several sides to an agent team; said once per set. '' when no work step is
+    new."""
     groups, kept = top_groups(plan, s.get("cwd") or "")
     path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
     disk = relay._read_json(path)
@@ -941,7 +970,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
     def child(g):
         if level(g) != "session":
             return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
-                    f"it goes to {LEVEL_WHERE[level(g)]}, not a session")
+                    f"it goes to {LEVEL_WHERE[level(g)]}, {LEVEL_NOT[level(g)]}")
         kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
         hardest = next(st for k in ("top", "plan", "design", "build", "review", "static")
                        for st, kd in zip(g, kinds) if kd == k)
@@ -961,7 +990,7 @@ def top_advice(home, s, plan, owner_turn, cap, levels=None):
         return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
                 f"Staying here meanwhile: every step.{agents}")
     if subs and len(subs) == len(new[:26]):
-        return f"{head} Its work steps need no session: {named}.{agents} Staying here: {stay}."
+        return f"{head} Its work steps need no worker: {named}.{agents} Staying here: {stay}."
     route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
              + OWN_TREE if owner_turn else CARD_EACH)
     return (f"{head} Hand its work steps to workers, split by the files they write: steps that share a file go "
