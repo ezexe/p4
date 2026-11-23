@@ -38,13 +38,25 @@ def plain(text):
     return PLAIN.sub(" ", str(text).replace("\\", "/"))
 
 
+def _named(prefix, title, numbers, path):
+    stem = re.sub(r"[^a-z0-9]+", "-", str(title).lower()).strip("-")[:16].strip("-") or "plan"
+    mark = hashlib.sha1(os.path.abspath(path).replace("\\", "/").lower().encode("utf-8")).hexdigest()[:4]
+    return f"{prefix}-{stem}-" + "-".join(numbers) + f"-{mark}"
+
+
 def name_of(title, group, path):
     """A coworker's name, which names its session, its worktree and its branch: lower-case letters, digits and
     hyphens, made of the plan's title, its sections' numbers and four characters of a hash of the plan's path, so
     two plans of one title make two names."""
-    stem = re.sub(r"[^a-z0-9]+", "-", str(title).lower()).strip("-")[:16].strip("-") or "plan"
-    mark = hashlib.sha1(os.path.abspath(path).replace("\\", "/").lower().encode("utf-8")).hexdigest()[:4]
-    return f"cw-{stem}-" + "-".join(s["n"] for s in group) + f"-{mark}"
+    return _named("cw", title, [s["n"] for s in group], path)
+
+
+def worker_name(plan, numbers):
+    """A terminal worker's name, which names its session and its files: `tw-` and the rest as name_of builds it,
+    from the title of the plan file `plan` and the section numbers `numbers`."""
+    with open(plan, encoding="utf-8") as f:
+        title = sections.parse(f.read())[0]
+    return _named("tw", title, list(numbers), plan)
 
 
 def level():
@@ -80,27 +92,31 @@ def task(path, group, who):
             f"teammate down, since later rounds and the word to land come by message from that session.")
 
 
-def script(name, checkout, mode, said, folder, windows=None):
+def script(name, checkout, mode, said, folder, windows=None, worktree=True, team=True, extra=()):
     """A coworker's start script, as (its file's name, its lines, the line typed into the tab): what a desktop
     session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout with a
-    worktree of the coworker's name and the settings file of `folder`."""
+    worktree of the coworker's name and the settings file of `folder`. A terminal worker's has `worktree` and `team`
+    off and its `extra` flags, each a word spelled as the shell reads it, right after the name. A quote in the
+    prompt `said` is refused as one in a path is, since the prompt stands between quotes."""
     windows = upkeep.WINDOWS if windows is None else windows
     sep = "\\" if windows else "/"
     here, at = checkout.replace("\\", "/").replace("/", sep), folder.replace("\\", "/").replace("/", sep)
-    for path in (here, at):
+    for path in (here, at, said):
         if re.search(r"['\"`]", path):
             raise ValueError(f"a start file's paths hold no quote: {path}")
     lv = level()
     flags = "".join(f" --{k} {lv[k]}" for k in ("model", "effort") if str(lv.get(k) or "inherit") != "inherit")
-    run = (f"claude --name {name} --worktree {name}{flags}" + (f" --permission-mode {mode}" if mode else "")
+    run = (f"claude --name {name}" + (f" --worktree {name}" if worktree else "") + "".join(f" {x}" for x in extra)
+           + flags + (f" --permission-mode {mode}" if mode else "")
            + f" --settings '{at}{sep}{SETTINGS_FILE}' '{said}'")
     if windows:
         names = ", ".join(f"'{n}'" for n in upkeep.CARRIED)
         return (f"start-{name}.ps1",
                 [f"foreach ($n in {names}) {{ Remove-Item -Path ('Env:' + $n) -ErrorAction SilentlyContinue }}",
-                 f"$env:{TEAMS} = '1'", f"Set-Location '{here}'", run], f"& '{at}\\start-{name}.ps1'")
-    return (f"start-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", f"export {TEAMS}=1", f"cd '{here}'", run],
-            f"sh '{at}/start-{name}.sh'")
+                 *([f"$env:{TEAMS} = '1'"] if team else []), f"Set-Location '{here}'", run],
+                f"& '{at}\\start-{name}.ps1'")
+    return (f"start-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", *([f"export {TEAMS}=1"] if team else []),
+                                 f"cd '{here}'", run], f"sh '{at}/start-{name}.sh'")
 
 
 def drafts(path, checkout, who, mode="", folder="<folder>", windows=None):
@@ -121,11 +137,15 @@ def drafts(path, checkout, who, mode="", folder="<folder>", windows=None):
 
 
 def write(folder, found):
-    """The settings file and each coworker's start file, written into `folder`, which is made where it is not
-    there. The paths written."""
+    """The settings file, each coworker's or worker's start file and each worker's brief, written into `folder`, which
+    is made where it is not there. The paths written."""
     os.makedirs(folder, exist_ok=True)
     files = {SETTINGS_FILE: SETTINGS}
-    files.update({one["file"]: "\n".join(one["lines"]) for one in found if one.get("team")})
+    for one in found:
+        if one.get("file"):
+            files[one["file"]] = "\n".join(one["lines"])
+        if one.get("brief"):
+            files[os.path.basename(one["brief_file"])] = one["brief"]
     for name, text in files.items():
         with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(text + "\n")
@@ -176,25 +196,77 @@ def stopped(name):
     return bool(rows) and bool(rows[-1].get("isApiErrorMessage"))
 
 
-def land(path, checkout, who):
-    """For each coworker of the plan at `path`, (its name, the message that has it land its group): sent once ezexe
-    approved the plan, to a coworker that still runs."""
+PHI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phi.py").replace("\\", "/")
+TEAMMATES = ("fences", "sources", "checks")
+AGENT_ID = re.compile(r"a[0-9a-f]{6,}(?:-[0-9a-z]+)*|local_[0-9a-f-]+")
+TURNS = 60                                     # the goal page: a goal with no turn or time clause has no cap
+
+
+def land(path, checkout, folder, who, mode, windows=None):
+    """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
+    that lands it, started once ezexe approved the plan. `name`, `sections`, the `brief` text and its file, the
+    `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in its tab.
+    The worker has no worktree, no team and no p4 plugin: its goal is its prompt, since no hooks module sets one."""
+    windows = upkeep.WINDOWS if windows is None else windows
+    plan = os.path.abspath(path).replace("\\", "/")
+    checkout = checkout.replace("\\", "/")
+    folder = os.path.abspath(folder).replace("\\", "/")
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
-    ref = upkeep.default_ref(checkout) or "origin/main"
+    sep = "\\" if windows else "/"
     out = []
     for group in sections.groups(found):
-        if not sections.team(group):
-            continue
-        name = name_of(title, group, path)
-        out.append((name, "\n".join([
-            "ezexe approved the plan, so the files of your sections are now yours to change. Shut down every "
-            "teammate first. Then, in this worktree, run `git fetch origin` "
-            f"and `git merge --ff-only {ref}`, so the fences meet the tree as it now is.", "",
-            sections.brief(path, title, group, checkout), "",
-            "One commit for each section, in the order the task above names them, with the trailer this "
-            "repository's recent commits "
-            f"end with. Push nothing, merge nothing else and raise no version. Then send one message with the "
-            f"branch `worktree-{name}`, each commit and each check's output, by SendMessage to the session named "
-            f"{plain(who)}, and stay open until that session says the tab closes."])))
+        nums = [s["n"] for s in group]
+        name = worker_name(path, nums)
+        brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
+        where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
+                 "Commit only with this command, one commit for each section, naming every path the section "
+                 "changed, added or removed and no other:",
+                 f'python -I -X utf8 {PHI} commit --checkout {checkout} -m "<message>" -- <path> ...',
+                 "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+                 f"When every check passes, write your report to {report} and end.", ""]
+        many = "s" if len(group) > 1 else ""
+        goal = (f"/goal Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed as the brief "
+                f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
+                f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
+                "with what is done and what is not.")
+        at = folder.replace("/", sep)
+        file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False,
+                                    extra=(f"--add-dir='{at}'",))
+        out.append({"name": name, "sections": nums, "brief": sections.brief(plan, title, group, checkout, where),
+                    "brief_file": brief_file, "report": report, "goal": goal, "file": file, "lines": lines,
+                    "typed": typed})
     return out
+
+
+def wait_report(report, longest=LONGEST, clock=time.time, sleep=time.sleep):
+    """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there,
+    `long` after `longest` seconds. It reads no transcript, since the worker has no worktree to find one by."""
+    start = clock()
+    while clock() - start < longest:
+        if os.path.isfile(report):
+            return "done", int(clock() - start)
+        sleep(10)
+    return ("done" if os.path.isfile(report) else "long"), int(clock() - start)
+
+
+def last_list(name, who):
+    """The last list the reading team `name` sent, read from the newest transcript `kept` finds for it: the `message`
+    of the lead's last tool call whose name ends `SendMessage` and whose `to` is `who`, the title of the session that
+    holds the plan; where no call names `who`, since the lead may send under the nearest name ListAgents shows, the
+    last such call whose `to` is none of the teammates and no agent's id. The row's time and the `to`, on one line,
+    then the message whole; "" where there is none."""
+    mains = sorted(kept(name), key=os.path.getmtime)
+    sent = []
+    for row in transcript.read_lines(mains[-1]) if mains else []:
+        content = (row.get("message") or {}).get("content") if row.get("type") == "assistant" else None
+        for c in content if isinstance(content, list) else []:
+            inp = c.get("input") if isinstance(c, dict) else None
+            if (isinstance(inp, dict) and c.get("type") == "tool_use"
+                    and str(c.get("name") or "").endswith("SendMessage")
+                    and isinstance(inp.get("message"), str) and inp.get("to")):
+                sent.append((str(row.get("timestamp") or ""), str(inp["to"]), inp["message"]))
+    named = [x for x in sent if who and x[1] == who]
+    outside = [x for x in sent if x[1] not in TEAMMATES and not AGENT_ID.fullmatch(x[1])]
+    found = (named or outside or [None])[-1]
+    return f"{found[0]} to {found[1]}\n{found[2]}" if found else ""

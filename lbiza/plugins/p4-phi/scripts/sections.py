@@ -137,9 +137,10 @@ def name(title, run):
     return f"{title}: section{'s' if len(run) > 1 else ''} " + ", ".join(s["n"] for s in run)
 
 
-def brief(path, title, run, base=""):
+def brief(path, title, run, base="", where=None):
     """A run's brief: the plan by its full path, the sections by number, their files, their checks as what done
-    looks like, and the two boundaries of a worker that lands a plan."""
+    looks like, and the two boundaries of a worker that lands a plan. `where` is the lines on where the session
+    works, which are the worktree's, puppeteer.worktree_lines(base), where it is None."""
     many = len(run) > 1
     nums = ", ".join(s["n"] for s in run)
     files = list(dict.fromkeys(p.strip() for s in run for p in s["said"].split(",") if p.strip()))
@@ -151,7 +152,7 @@ def brief(path, title, run, base=""):
              "edit. ezexe approved the plan, so its fences are the change: where a fence does not fit the tree as "
              "it is, stop and report the fence and why, and write no approach of this session's own.", "",
              "Files: " + ", ".join(files), "",
-             *puppeteer.worktree_lines(base),
+             *(puppeteer.worktree_lines(base) if where is None else where),
              "This session never edits the plan file. Its report holds, for each fence, the path and the lines it "
              "landed at, and each check's output, which the session that holds the plan writes into the section as "
              "its Evidence.", ""]

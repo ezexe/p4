@@ -113,6 +113,15 @@ class Sections(unittest.TestCase):
         self.assertEqual(runs, [["2"], ["3"], ["4"]], "section 2 depends on 1, which is met, and joins nothing")
         self.assertEqual([[s["n"] for s in g] for g in sections.groups(found)], [["2", "3", "4"]])
 
+    def test_a_brief_with_no_where_names_the_worktree_and_one_with_where_holds_those_lines_and_none_of_it(self):
+        title, found = sections.parse(PLAN, self.base)
+        plain = sections.brief(self.path, title, found[:1], self.base)
+        self.assertEqual(plain, sections.brief(self.path, title, found[:1], self.base, where=None))
+        self.assertIn(sections.puppeteer.WORKTREE_LINE, plain)
+        there = sections.brief(self.path, title, found[:1], self.base, where=["Work in E:/repo, no worktree.", ""])
+        self.assertIn("\nWork in E:/repo, no worktree.\n", there)
+        self.assertNotIn(sections.puppeteer.WORKTREE_LINE, there)
+
     def test_a_plan_with_no_files_line_has_no_run(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")

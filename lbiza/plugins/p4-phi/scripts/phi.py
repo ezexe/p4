@@ -4544,7 +4544,11 @@ def main(argv=None):
                            help="write the settings file and each coworker's start file into this folder, and "
                                 "print the terminal call that starts each")
             p.add_argument("--land", action="store_true",
-                           help="print the message that has each coworker land its group, for after the approval")
+                           help="write the start file, the brief and the report's name of the terminal worker that "
+                                "lands each group not landed, with --write, and print the terminal call that starts "
+                                "each: for after the approval, from a session in auto or bypass mode")
+            p.add_argument("--report", default="", metavar="FILE",
+                           help="with --wait: wait for this terminal worker's report file instead of for coworkers")
             p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
                            help="wait until no coworker wrote a line for a while, then name each one an error of "
                                 "the API stopped: the coworkers named, or the plan's own where none is named")
@@ -4748,9 +4752,47 @@ def main(argv=None):
                 print(f"phi: no session {a.planner} with a title is in this store, so the coworkers would have "
                       "nobody to send their lists to", file=sys.stderr)
                 return 2
-            if a.land:
-                for name, text in coworker.land(plan, checkout, who):
-                    print(f"to `{name}`:\n{text}\n")
+            mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
+            if a.land:                             # a terminal worker for each group not landed
+                if not a.write:
+                    print("phi: `--land` needs `--write <folder>`, where each worker's start file, brief and report "
+                          "go", file=sys.stderr)
+                    return 2
+                if mode not in upkeep.NO_ASK:
+                    print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so an "
+                          "unattended tab would stop at its first question, and nothing is written: "
+                          f"`{commands()} sections \"{plan}\"` prints a start for a session in a worktree of its "
+                          "own", file=sys.stderr)
+                    return 2
+                folder = os.path.abspath(a.write).replace("\\", "/")
+                try:
+                    found = coworker.land(plan, checkout, folder, who, mode)
+                except ValueError as e:
+                    print(f"phi: {e}", file=sys.stderr)
+                    return 2
+                if not found:
+                    print("phi: no section of that plan is left to land: each names no files or holds its "
+                          "`Evidence:`", file=sys.stderr)
+                    return 2
+                there = [one["name"] for one in found
+                         if os.path.exists(one["brief_file"]) or os.path.exists(one["report"])]
+                if there:
+                    print(f"phi: a worker for those sections was already started in {folder}: {', '.join(there)} "
+                          "has its brief or its report there, so nothing is written", file=sys.stderr)
+                    return 2
+                coworker.write(folder, found)
+                for one in found:
+                    print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
+                          f"{one['report']}")
+                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
+                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
+                return 0
+            if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
+                report = os.path.abspath(a.report).replace("\\", "/")
+                how, waited = coworker.wait_report(report)
+                tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+                print(f"done: {report} is there, after {waited} seconds" if how == "done" else
+                      f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
                 return 0
             if a.wait is not None:                 # a round's wait, which only reads
                 # the names the starter answered with, since a mend can move a section into another group
@@ -4768,8 +4810,12 @@ def main(argv=None):
                     if coworker.stopped(name):
                         print(f"phi: an error of the API stopped `{name}`: send it one message to carry on with "
                               "its round from where it stopped")
+                for name in names:                 # a message held between two modes loses nothing
+                    said = coworker.last_list(name, who)
+                    if said:
+                        head, _, body = said.partition("\n")
+                        print(f"phi: the last list `{name}` sent, at {head}:\n{body}")
                 return 0
-            mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
             try:
                 found = coworker.drafts(plan, checkout, who, mode,
                                         os.path.abspath(a.write).replace("\\", "/") if a.write else "<folder>")

@@ -87,7 +87,8 @@ class Coworker(unittest.TestCase):
             f.write(SMALL)
         self.assertEqual(coworker.drafts(self.path, "E:/repo", WHO),
                          [{"sections": ["1"], "fences": 1, "team": False}])
-        self.assertEqual(coworker.land(self.path, self.base, WHO), [])
+        self.assertEqual(len(coworker.land(self.path, self.base, self.base + "/w", WHO, "auto", windows=True)), 1,
+                         "a terminal worker lands a group that earns no team")
 
     def test_the_files_are_written_with_p4s_two_plugins_off_and_no_other_setting(self):
         folder = os.path.join(self.base, "notes", "terminal-workers")
@@ -105,12 +106,120 @@ class Coworker(unittest.TestCase):
         with open(os.path.join(folder, found[0]["file"]), encoding="utf-8") as f:
             self.assertEqual(f.read().rstrip("\n").split("\n"), found[0]["lines"])
 
-    def test_the_landing_message_names_the_sections_the_checks_and_the_branch(self):
-        (name, said), second = coworker.land(self.path, self.base, WHO)
-        self.assertEqual([name, second[0]], [one["name"] for one in coworker.drafts(self.path, self.base, WHO)])
-        for word in ("git merge --ff-only origin/main", f"land section 1 of the plan `{self.path}`",
-                     "python -m pytest tests/test_writer.py", f"`worktree-{name}`"):
-            self.assertIn(word, said, word)
+    def land(self, path=None, folder="E:/notes/workers", mode="auto"):
+        return coworker.land(path or self.path, "E:/repo", folder, WHO, mode, windows=True)
+
+    def test_a_terminal_worker_starts_with_no_worktree_the_mode_it_was_given_and_a_goal_as_its_prompt(self):
+        one, second = self.land()
+        name = one["name"]
+        self.assertRegex(name, r"^tw-the-exporter-s-m-1-[0-9a-f]{4}$")
+        self.assertEqual(name, coworker.worker_name(self.path, ["1"]))
+        self.assertEqual(second["name"], name.replace("-m-1-", "-m-2-"))
+        self.assertEqual(one["file"], f"start-{name}.ps1")
+        self.assertEqual(len(one["lines"]), 3, "no team variable")
+        self.assertNotIn(coworker.TEAMS, "\n".join(one["lines"]))
+        run = one["lines"][-1]
+        self.assertNotIn("--worktree", run)
+        self.assertIn("--permission-mode auto ", run)
+        self.assertTrue(run.startswith(f"claude --name {name} --add-dir='E:\\notes\\workers' --model "), run)
+        self.assertIn("--settings 'E:\\notes\\workers\\coworker-settings.json' '/goal ", run)
+        prompt = run.rsplit(" '", 1)[1]
+        self.assertTrue(run.endswith("'") and prompt.startswith("/goal "), "the goal is the last argument")
+        self.assertEqual(prompt[:-1], one["goal"])
+        for word in (f"section 1 of the plan {self.path.replace(chr(92), '/')}", f"the brief {one['brief_file']} says",
+                     f"the report {one['report']} is written", "Stop after 60 turns"):
+            self.assertIn(word, one["goal"], word)
+        self.assertEqual(one["brief_file"], f"E:/notes/workers/brief-{name}.md")
+        self.assertEqual(one["report"], f"E:/notes/workers/report-{name}.md")
+        self.assertEqual(one["typed"], f"& 'E:\\notes\\workers\\start-{name}.ps1'")
+
+    def test_the_brief_names_the_checkout_the_whole_commit_command_and_the_report_file(self):
+        one = self.land()[0]
+        brief = one["brief"]
+        phi = os.path.join(SRC, "phi.py").replace("\\", "/")
+        for word in ("Work in E:/repo, on the branch that is checked out, and make no worktree and no branch.",
+                     f'python -I -X utf8 {phi} commit --checkout E:/repo -m "<message>" -- <path> ...',
+                     "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+                     f"write your report to {one['report']} and end.", f"land section 1 of the plan `"):
+            self.assertIn(word, brief, word)
+        self.assertNotIn("worktree of its own", brief)
+
+    def test_a_landed_section_is_in_no_brief_and_a_landed_plan_has_no_worker(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(PLAN.replace("## 1. The writer\n", "## 1. The writer\n\n**Evidence:** landed as abc1234\n"))
+        (one,) = self.land()
+        self.assertEqual(one["sections"], ["2"])
+        self.assertNotIn("writer.py", one["brief"])
+        self.assertIn("export.md", one["brief"])
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(PLAN.replace("## 1. The writer\n", "## 1. The writer\n\n**Evidence:** x\n")
+                    .replace("## 2. The page\n", "## 2. The page\n\n**Evidence:** y\n"))
+        self.assertEqual(self.land(), [])
+
+    def test_land_refuses_a_quote_in_the_plans_path_and_write_adds_a_brief_for_each(self):
+        quoted = os.path.join(self.base, "it's")
+        os.makedirs(quoted)
+        other = os.path.join(quoted, "plan.md")
+        with open(other, "w", encoding="utf-8") as f:
+            f.write(PLAN)
+        with self.assertRaises(ValueError):
+            self.land(other)
+        folder = os.path.join(self.base, "notes", "workers")
+        found = coworker.land(self.path, self.base, folder, WHO, "auto", windows=True)
+        wrote = coworker.write(folder, found)
+        self.assertEqual(sorted(os.listdir(folder)),
+                         sorted(["coworker-settings.json"] + [o["file"] for o in found]
+                                + [os.path.basename(o["brief_file"]) for o in found]))
+        self.assertEqual(len(wrote), 5)
+        with open(found[0]["brief_file"], encoding="utf-8") as f:
+            self.assertEqual(f.read().rstrip("\n"), found[0]["brief"])
+
+    def test_a_reading_teams_start_lines_are_what_they_were(self):
+        first = coworker.drafts(self.path, "E:/repo", WHO, "auto", "E:/notes", windows=True)[0]
+        name = first["name"]
+        task = coworker.task(self.path, [s for s in coworker.sections.parse(PLAN, "E:/repo")[1] if s["n"] == "1"], WHO)
+        same = coworker.script(name, "E:/repo", "auto", task, "E:/notes", windows=True, worktree=True, team=True,
+                               extra=())
+        self.assertEqual((first["file"], first["lines"], first["typed"]), same)
+        self.assertIn(f" --worktree {name} ", first["lines"][3])
+        self.assertIn(coworker.TEAMS, first["lines"][1])
+
+    def send(self, to, message, at="2026-11-23T10:00:00Z", name="SendMessage"):
+        return {"type": "assistant", "timestamp": at,
+                "message": {"content": [{"type": "text", "text": "ok"},
+                                        {"type": "tool_use", "name": name, "input": {"to": to, "message": message}}]}}
+
+    def lead(self, *rows):
+        from unittest import mock
+        config = os.path.join(self.base, "config")
+        lead = os.path.join(config, "projects", "E--repo--claude-worktrees-cw-a", "cli-1.jsonl")
+        os.makedirs(os.path.dirname(lead), exist_ok=True)
+        with open(lead, "w", encoding="utf-8") as f:
+            f.write("".join(json.dumps(r) + "\n" for r in rows))
+        return mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config})
+
+    def test_last_list_gives_the_last_message_to_the_holders_title(self):
+        title = "Plan: the move"
+        with self.lead(self.send(title, "round 1", "2026-11-23T10:00:00Z"),
+                       self.send(title, "round 2\nline two", "2026-11-23T11:00:00Z"),
+                       self.send("fences", "to a teammate", "2026-11-23T12:00:00Z"),
+                       self.send("main", "after", "2026-11-23T13:00:00Z")):
+            self.assertEqual(coworker.last_list("cw-a", title),
+                             "2026-11-23T11:00:00Z to Plan: the move\nround 2\nline two")
+
+    def test_where_none_names_the_holder_the_last_one_sent_outside_the_team_is_given(self):
+        with self.lead(self.send("main", "the list", "2026-11-23T10:00:00Z"),
+                       self.send("sources", "to a teammate", "2026-11-23T11:00:00Z"),
+                       self.send("checks", "again", "2026-11-23T11:30:00Z"),
+                       self.send("a1b2c3d4e5f6a7b8-0001", "to an agent's id", "2026-11-23T12:00:00Z"),
+                       self.send("main", "not a send", "2026-11-23T13:00:00Z", name="Read")):
+            self.assertEqual(coworker.last_list("cw-a", "Plan: the move"), "2026-11-23T10:00:00Z to main\nthe list")
+
+    def test_last_list_is_empty_where_there_is_none(self):
+        with self.lead(self.send("fences", "x"), self.send("a1b2c3d4e5f6a7b8-0001", "y"), {"type": "user"}):
+            self.assertEqual(coworker.last_list("cw-a", "Plan: the move"), "")
+            self.assertEqual(coworker.last_list("cw-none", "Plan: the move"), "")
+            self.assertEqual(coworker.last_list("../cw-a", "Plan: the move"), "")
 
     def test_the_watch_ends_once_no_coworker_wrote_a_line_and_an_api_error_is_a_stop(self):
         from unittest import mock
@@ -186,7 +295,8 @@ class Coworker(unittest.TestCase):
         with open(os.path.join(folder, start), encoding="utf-8") as f:
             self.assertIn("the session named Plan: the move,", f.read())
         land = subprocess.run(command + ["--for", "cli-0002", "--land"], capture_output=True, text=True, timeout=60)
-        self.assertEqual((land.returncode, land.stdout.count("to `cw-")), (0, 2), land.stderr)
+        self.assertEqual(land.returncode, 2, "no --write")
+        self.assertIn("--write", land.stderr)
         # a name whose worktree is there is opened by Claude Code with what it holds, so nothing is written
         os.makedirs(os.path.join(self.base, ".claude", "worktrees", start[6:].rsplit(".", 1)[0]))
         again = subprocess.run(command + ["--write", folder], capture_output=True, text=True, timeout=60)

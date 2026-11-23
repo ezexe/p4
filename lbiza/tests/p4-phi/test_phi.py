@@ -2682,5 +2682,89 @@ class AppTools(unittest.TestCase):
         self.assertEqual(self.t.session(scripted).get("cliSessionIds"), [scripted])
 
 
+TICKS = chr(96) * 3
+WORKER_PLAN = ("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n"
+               "## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Checks:** `python -m pytest t.py`\n\n"
+               f"{TICKS}python\nx = 1\n{TICKS}\n\n"
+               "## 2. The page\n\n- **Files:** `docs/export.md`\n- **Depends on:** 1\n\n"
+               f"{TICKS}markdown\nA line.\n{TICKS}\n")
+
+
+class TerminalWorker(unittest.TestCase):
+    """`phi.py coworkers --land --write` and `--wait --report`, the terminal worker of a plan's sections."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-worker-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.plan = os.path.join(self.base, "plan.md")
+        with open(self.plan, "w", encoding="utf-8") as f:
+            f.write(WORKER_PLAN)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(self.home)
+        self.app = os.path.join(self.base, "app")
+        self.folder = os.path.join(self.base, "workers")
+
+    def mode(self, name, mode):
+        os.makedirs(os.path.join(self.app, "acct", "org"), exist_ok=True)
+        with open(os.path.join(self.app, "acct", "org", name + ".json"), "w", encoding="utf-8") as f:
+            json.dump({"sessionId": name, "permissionMode": mode}, f)
+
+    def run_phi(self, *args, session="local_plan0001"):
+        env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app}
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers",
+                               self.plan, "--p4", self.home, "--session", session, "--checkout", self.base, *args],
+                              capture_output=True, text=True, timeout=60, env=env)
+
+    def test_land_writes_nothing_without_write_and_from_a_mode_that_asks(self):
+        self.mode("local_plan0001", "auto")
+        self.mode("local_plan0002", "plan")
+        self.mode("local_plan0003", "default")
+        none = self.run_phi("--land")
+        self.assertEqual(none.returncode, 2)
+        self.assertIn("--write", none.stderr)
+        for session, said in (("local_plan0002", "`plan`"), ("local_plan0003", "`default`"),
+                              ("cli-0001", "not known"), ("local_nomode001", "not known")):
+            ran = self.run_phi("--land", "--write", self.folder, session=session)
+            self.assertEqual(ran.returncode, 2, ran.stdout)
+            self.assertIn(said, ran.stderr)
+            self.assertIn("unattended tab would stop at its first question", ran.stderr)
+            self.assertIn("sections", ran.stderr, "the other way is named")
+            self.assertFalse(os.path.exists(self.folder), "nothing is written")
+
+    def test_land_from_auto_writes_one_start_file_and_one_brief_and_a_second_land_writes_nothing(self):
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land", "--write", self.folder)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        files = sorted(os.listdir(self.folder))
+        self.assertEqual([f.split("-")[0] for f in files], ["brief", "coworker", "start"])
+        self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "sections 1 and 2 are one run")
+        start = next(f for f in files if f.startswith("start-"))
+        with open(os.path.join(self.folder, start), encoding="utf-8") as f:
+            text = f.read()
+        self.assertNotIn("--worktree", text)
+        self.assertIn("--permission-mode auto", text)
+        self.assertNotIn("EXPERIMENTAL_AGENT_TEAMS", text)
+        before = {f: os.path.getmtime(os.path.join(self.folder, f)) for f in files}
+        again = self.run_phi("--land", "--write", self.folder)
+        self.assertEqual(again.returncode, 2)
+        self.assertIn("already started", again.stderr)
+        self.assertEqual(sorted(os.listdir(self.folder)), files)
+        self.assertEqual({f: os.path.getmtime(os.path.join(self.folder, f)) for f in files}, before)
+
+    def test_wait_report_returns_done_where_the_file_is_there(self):
+        report = os.path.join(self.base, "report-tw-the-exporter-s-m-1-2-abcd.md")
+        with open(report, "w", encoding="utf-8") as f:
+            f.write("done\n")
+        ran = self.run_phi("--wait", "--report", report)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertTrue(ran.stdout.startswith("done"), ran.stdout)
+        import coworker
+        now = [0.0]
+        how = coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
+                                   sleep=lambda s: now.__setitem__(0, now[0] + s))
+        self.assertEqual(how, ("long", 30))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
