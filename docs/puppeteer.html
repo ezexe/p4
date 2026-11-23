@@ -277,7 +277,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="A start waits on no other session's files">
     <h2>A start waits on no other session's files</h2>
-    <p class="intro">A worker that writes is started with <code>use_worktree: true</code>, so it works in a git worktree and on a branch of its own, and no two sessions share a file on disk. p4-phi keeps no lock on a file: it holds no start while a live session covers one of its files, queues none behind a busy writer, and warns a puppeteer of no go. A brief's <code>Files:</code> line says what its session covers, and the address book routes a message about one of those files by it.</p>
+    <p class="intro">A worker that writes is started with <code>use_worktree: false</code>, so it works in its starter's checkout, on the paths of its <code>Files:</code> line. p4-phi keeps no lock on a file: it refuses a start whose paths overlap those of a running session that is not above the starter, queues none behind a busy writer, and warns a puppeteer of no go. A brief's <code>Files:</code> line says what its session covers, and the address book routes a message about one of those files by it.</p>
   </section>
 
   <section class="block" aria-label="What holds the rule up">
@@ -642,7 +642,7 @@ var EX={
     steps:e.steps.concat([
       {side:"app",by:"The puppeteer sends "+q(e.title)+" one message.",code:call("SendMessage",{to:e.id,message:"<the task restated as your own instruction: what to do and why, from your side>\n\nFiles: <paths>\n\nDone looks like: <what must be true>\n\nBrief and start a worker of your own for it."})},
       {side:"phi",by:"The puppeteer keeps it on the board until the report comes.",code:PHI+' note "Sent the '+e.work+' work to '+e.title+'." --source "ezexe\'s message" --kind waiting',out:"kept"},
-      {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:true,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
+      {side:"app",by:"That message began a turn ezexe did not begin in "+q(e.title)+", so the app refuses its start with user_asked. It shows the worker as a suggested task card.",code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",title:e.work,context:"fresh",use_worktree:false,prompt:"<the task and what done looks like>\n\nFiles: <paths>\n\n"+LEVEL+"\n\nReport when done.",effort:"<effort>"}),
         note:"Select the session, then press its card as ezexe."}]),
     app:"A suggested task card in "+q(e.title)+". No session has started yet.",
     phi:"A note of kind waiting on the puppeteer's record, printed on the board under Waiting on."}},

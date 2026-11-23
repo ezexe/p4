@@ -17,7 +17,7 @@ prompty → prompter → pioneer → puppeteer
 - **prompter** drafts the next session exactly: its topic, its brief, its parent session and the issue it closes.
 - **pioneer** checks the draft and hands the session one thing to do: start it, send it to the session that owns the area, or start nothing.
 - **puppeteer** watches: it keeps a ledger of the sessions that were started and brings it up to date as they work.
-- A worker that writes gets a git worktree and a branch of its own, so no session waits on another's files.
+- A worker that writes works in its starter's checkout on the paths of its `Files:` line, and p4-phi refuses a start, an edit and a commit outside them, so no two sessions change one file.
 - [How it works](https://github.com/ezexe/p4/wiki/How-it-works#linear-progression) has each step in full.
 
 ## Recursive Refinement

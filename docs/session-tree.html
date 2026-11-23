@@ -285,12 +285,12 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
     <h2>Three rules p4-phi holds</h2>
     <p class="intro">The moves above follow these rules, and each card says what p4-phi does.</p>
     <div class="rule">
-      <h3>A worktree for each session that writes</h3>
+      <h3>One checkout, and the paths each session holds</h3>
       <ul>
         <li>A brief names the files its session covers on a line <code>Files: &lt;paths&gt;</code>, or <code>Files: none</code> for a session that writes none. p4-phi keeps the line as <code>fileSet</code> in the worker's <code>session.json</code>, shows it under Files on the worker's page, and names the worker in the address book as the session a message about one of those files goes to.</li>
-        <li>The line holds no start and no edit. p4-phi refuses no start for the files its brief names, holds none while a live session covers one of them and queues none behind a busy writer, and no command narrows or releases the line: each session that writes has a worktree of its own, so no two share a file on disk.</li>
-        <li>A worker that writes works in a git worktree and on a branch of its own: each start p4-phi drafts for one passes <code>use_worktree: true</code>, a start for a session that only reads passes <code>false</code>, and so does a new orchestrator's, since it lands its tree's work in the checkout that holds the default branch. p4-phi asks about no branch or worktree that a session in a worktree of its own makes, moves to or enters. It asks a session that shares its starter's checkout before it moves that checkout to another branch, and every started session before it lands work with a push, merge, rebase or pull, since only the tree's orchestrator lands and pushes.</li>
-        <li>Green work that closes an issue is landed at once, by the tree's orchestrator alone. A worker commits its <code>Closes #N</code> commit on its own branch, in its own worktree. Once its regression test passes, the orchestrator is handed a line that names that branch and tells it to merge the branch into the default branch first, then to push and to sync each store the change touches, without asking ezexe. The line is ezexe's standing word, so it stands in place of the app's default, by which a session merges a branch of a session it started only when ezexe says so.</li>
+        <li>The line is the session's paths. p4-phi refuses a start whose paths overlap those of a running session that is not above the starter, and a brief that writes and names none, and queues none behind a busy writer. A session edits nothing in a checkout while a session it started holds paths there. An edit by Edit, Write or NotebookEdit outside a started session's paths is refused before it runs, a shell command's stray writes are named after it where Claude Code reports what a Bash command changed, and <code>phi.py commit</code> takes no path outside the session's paths, which is what holds a stray write back. <code>phi.py shard</code> claims more paths and refuses one a running session holds.</li>
+        <li>Every start p4-phi drafts passes <code>use_worktree: false</code>, so a worker that writes works in its starter's checkout, on the branch checked out there, and commits only by <code>phi.py commit</code>, which takes the paths it is given. A start that passes <code>use_worktree: true</code> is asked about once. p4-phi asks about no branch or worktree that a session in a worktree of its own makes, moves to or enters. It asks a session that shares its starter's checkout before it moves that checkout to another branch, and every started session before it lands work with a push, merge, rebase or pull, since only the tree's orchestrator lands and pushes. <code>git commit</code>, <code>git add</code>, <code>git stash</code>, <code>git rm</code> and <code>git mv</code> are refused to a started session in a shared checkout, since each takes what a sibling changed too.</li>
+        <li>Green work that closes an issue is landed at once, by the tree's orchestrator alone. A worker commits its <code>Closes #N</code> commit by <code>phi.py commit</code> in the one checkout. Once its regression test passes, the orchestrator is handed a line that tells it to push and to sync each store the change touches, without asking ezexe, and, where the commit is on the branch of a worktree of its own, names that branch and tells it to merge the branch into the default branch first. The line is ezexe's standing word, so it stands in place of the app's default, by which a session merges a branch of a session it started only when ezexe says so.</li>
       </ul>
     </div>
     <div class="rule">
@@ -568,16 +568,16 @@ var EX={
   child:function(e){return{title:e.deep?"A coworker, started the same way":"A worker of "+q(e.parentTitle),
     why:"A session starts another with the app's own tool. The brief names the task, what done looks like and the files the new session may write, because p4-phi gives it the rest."+(e.deep?" A worker starts a coworker with the same call. When the app refuses it, the worker shows a suggested task card, which ezexe starts in that session.":""),
     steps:[
-      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:true,
-        background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
+      {side:"app",by:q(e.parentTitle)+" makes the call.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:e.title,context:"fresh",use_worktree:false,
+        background:"This is one step of the task list of \""+e.parentTitle+"\". It runs in this checkout, on the paths of its Files: line, and it reports to that session when done.",
         prompt:"<the task and what done looks like>\n\nFiles: <each path this session may write, comma separated, or none>\n\nReport when done."}))}],
     app:"The new session nests under its parent session in the sidebar, and the app tells the parent session when its turns end.",
     phi:"spawnedFrom with the parent session's id and the source record. p4-phi keeps the Files line as fileSet, and \"report when done\" marks the session to be counted as archived when its work is over. At its first message it is given the tasks of the sessions above it. Since its brief names the paths it works on, it is also given its parent session's step, the task list around it and what its parent's anchor holds on those paths; a session whose brief names no path gets the notes of the sessions above it and the last turn of each sibling instead. Each finished turn's report reaches the parent session beside that session's next message, cut where the hook's room runs short."}},
   card:function(e){return{title:"A coworker by suggested task card",
     why:"The app refuses a start with user_asked in a turn ezexe did not begin. A worker's turn is usually begun by another session's message, so a worker that wants a coworker shows it as a suggested task card, which ezexe starts in that session. The card holds the start, and p4-phi keeps no request for it.",
     steps:[
-      {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:true,
-        background:"This is one part of the task of \""+e.reqTitle+"\". It runs in a git worktree of its own, on a branch of its own, and it reports to that session when done.",
+      {side:"app",by:q(e.reqTitle)+" shows the coworker as a suggested task card.",code:call("mcp__ccd_session__start_session",withLevel({initiation:"own_initiative",title:e.title,context:"fresh",use_worktree:false,
+        background:"This is one part of the task of \""+e.reqTitle+"\". It runs in this checkout, on the paths of its Files: line, and it reports to that session when done.",
         prompt:"<the whole brief, with its Files line>"})),note:"When ezexe starts the card, the coworker starts. mcp__ccd_session__dismiss_task withdraws a card that went stale."}],
     app:"The coworker nests under the session that showed the card.",
     phi:"spawnedFrom with that session's id and the source record, as for any start. p4-phi keeps a start request only for the one start a card cannot hold, a start addressed to a puppeteer."}},
@@ -602,17 +602,17 @@ var EX={
     e.groups.forEach(function(g){
       if(!first)first=g;
       steps.push({side:"app",by:"One call for "+q(g.title)+(g.tasks.length>1?", a serial run of "+g.tasks.length+" tasks that share a file.":", a task whose files nobody else touches."),
-        code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:true,
-          background:"One part of the queue of \""+e.parentTitle+"\", split by the files each part writes. Each part runs in a git worktree of its own, on a branch of its own, and the parent session merges each branch.",
+        code:call("mcp__ccd_session__start_session",withLevel({initiation:"user_asked",title:g.title,context:"fresh",use_worktree:false,
+          background:"One part of the queue of \""+e.parentTitle+"\", split by the files each part writes. Each part runs in this checkout, on the paths of its Files: line, and the tree's orchestrator pushes what they commit.",
           prompt:(g.tasks.length>1?"Do these in order, one commit each:\n"+g.tasks.map(function(t,i){return (i+1)+". "+t}).join("\n"):g.tasks[0])+"\n\nFiles: "+g.files.join(", ")+"\n\nReport when done."}))});
     });
     if(first)steps.push({side:"phi",by:"A worker can also declare owned paths, so that a message naming one of its paths is sent on to it.",code:PHI+" shard "+first.files.join(" "),
       out:"kept as this session's owned paths: "+first.files.map(function(f){return "<project>/"+f}).join(", ")});
     return{title:"Split by the files each task writes",
-      why:"A session holding a queue splits it by the files its tasks write. Tasks that share a file go to one worker as a serial run, so their changes land in order on one branch. Tasks with disjoint files each get a worker, each in a git worktree and on a branch of its own, and those workers run at the same time. A worker whose task spans more splits it again the same way.",
+      why:"A session holding a queue splits it by the files its tasks write. Tasks that share a file go to one worker as a serial run, so their changes land in order. Tasks with disjoint files each get a worker, each in the one checkout on its own paths, and those workers run at the same time. A worker whose task spans more splits it again the same way.",
       steps:steps,
-      app:"Each worker nests under its parent session, in a git worktree the app makes for it under <project>/.claude/worktrees/, on a branch of its own.",
-      phi:"p4-phi reads the files each worker covers from the Files line of its brief, keeps them as fileSet in the worker's session.json and shows them under Files on the worker's page. It holds no start for them: each worker writes in its own worktree, and the parent session merges each worker's branch."}},
+      app:"Each worker nests under its parent session and works in the checkout its parent works in, with no worktree.",
+      phi:"p4-phi reads the files each worker covers from the Files line of its brief, keeps them as fileSet in the worker's session.json and shows them under Files on the worker's page. It refuses a start whose paths overlap a running session's: each worker writes in the one checkout on its own paths, and the tree's orchestrator pushes what they commit."}},
   done:function(e){
     var steps=[];
     if(e.parentTitle){
@@ -809,12 +809,12 @@ $("qadd").addEventListener("click",function(){S.queue.push({t:"A new task",f:"pa
 $("qclose").addEventListener("click",function(){$("branch").hidden=true});
 $("qgo").addEventListener("click",function(){
   var p=S.sel&&N(S.sel);if(!p)return;var gs=groupsOf();if(!gs.length)return;
-  /* every worker starts: each writes in a git worktree of its own, so no start waits on another's files */
+  /* every worker starts: each writes in the one checkout on its own paths, so no start waits on another's files */
   gs.forEach(function(g){mk(g.title,p.id,p.id,{shard:g.files.slice(),tag:g.tasks.length>1?"serial run of "+g.tasks.length:""})});
   if(p.turns===0){p.turns=1;p.state="not shown done"}
   S.example={kind:"branch",groups:gs,parentTitle:p.title};
   say([["cmd","mcp__ccd_session__start_session × "+gs.length]],
-    gs.length+(gs.length===1?" worker starts":" workers start")+", each in a git worktree and on a branch of its own, so no start waits on another session's files.");
+    gs.length+(gs.length===1?" worker starts":" workers start")+", each in this checkout on its own paths, so no start waits on another session's files.");
   $("branch").hidden=true;S.view="phi";render();
   if(window.innerWidth<=980)wrap.scrollIntoView({behavior:REDUCED?"auto":"smooth",block:"start"});
 });
