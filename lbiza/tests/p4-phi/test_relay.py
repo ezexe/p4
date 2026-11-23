@@ -1959,11 +1959,53 @@ class Nodes(unittest.TestCase):
     def test_stores_finds_the_root_two_children_and_a_grandchild_and_no_folder_named_otherwise(self):
         one, two = relay.store_of(self.home, 1), relay.store_of(self.home, 2)
         grand = relay.store_of(one, 1)
-        for d in (one, two, grand, os.path.join(self.home, ".claude", "worktrees", "x"),
-                  os.path.join(self.home, ".claude", ".claude", "q4"), os.path.join(one, "p4")):
-            os.makedirs(d, exist_ok=True)
+        for k, d in enumerate((one, two, grand)):
+            write(os.path.join(d, "phi", relay.NODE), json.dumps({"id": f"n{k}"}))
+        for d in (os.path.join(self.home, ".claude", "worktrees", "x"), os.path.join(self.home, ".claude", ".claude", "q4"),
+                  os.path.join(one, "p4"), relay.store_of(self.home, 3), relay.store_of(self.home, 4) + ".tmp-1-ab"):
+            os.makedirs(os.path.join(d, "phi"), exist_ok=True)
         relay.forget(self.home)
-        self.assertEqual(relay.stores(self.home), [self.home, one, grand, two], "the root first, depth first")
+        self.assertEqual(relay.stores(self.home), [self.home, one, grand, two],
+                         "the root first, depth first; a `p4` with no node.json is no store")
+        self.assertEqual(relay.claim(self.home, self.home, "c", "session", "top"), relay.store_of(self.home, 4),
+                         "a place whose folder is there is not taken, though it is no store")
+
+    def test_a_claim_whose_write_fails_leaves_no_store_and_the_next_claim_gets_place_1(self):
+        with mock.patch.object(relay, "_write_raw", side_effect=OSError("disk full")):
+            with self.assertRaises(OSError):
+                relay.claim(self.home, self.home, "kid", "session", "top")
+        self.assertFalse(os.path.isdir(os.path.join(self.home, ".claude")) and
+                         os.listdir(os.path.join(self.home, ".claude")), "no store and no temporary folder")
+        self.assertEqual(relay.nodes(self.home), {})
+        self.assertEqual(relay.claim(self.home, self.home, "kid", "session", "top"), relay.store_of(self.home, 1))
+
+    def test_a_claim_another_process_makes_right_after_a_walk_is_seen(self):
+        self.assertEqual(relay.nodes(self.home), {})
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import relay; "
+                "print(relay.claim(sys.argv[2], sys.argv[2], 'kid', 'session', 'top'))")
+        made = subprocess.run([sys.executable, "-I", "-c", code, SRC, self.home], capture_output=True, text=True,
+                              timeout=60).stdout.strip()
+        self.assertEqual(relay.nodes(self.home), {"kid": made}, "no forget() needed")
+        grand = subprocess.run([sys.executable, "-I", "-c", code.replace("sys.argv[2], 'kid'", "sys.argv[3], 'g'"),
+                                SRC, self.home, made], capture_output=True, text=True, timeout=60).stdout.strip()
+        self.assertEqual(relay.nodes(self.home).get("g"), grand, "a claim nested in a node's store too")
+
+    def test_track_stages_a_nodes_phi_and_no_other_file_under_claude(self):
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", self.home, *args], check=True, capture_output=True)
+        write(os.path.join(self.home, "p4.json"), json.dumps({"phi": {"track": True}}))
+        write(os.path.join(self.home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
+        store = relay.claim(self.home, self.home, "kid", "session", "top")
+        write(os.path.join(store, "phi", "sessions", "kid", "session.json"), json.dumps({"sessionId": "kid"}))
+        write(os.path.join(self.home, ".claude", "settings.local.json"), "{}")
+        write(os.path.join(store, "other.txt"), "not the tree's")
+        self.assertTrue(relay.track(self.home, first_only=True, wait=True))
+        shown = subprocess.run(["git", "-C", self.home, "show", "--name-only", "--format=", "HEAD"],
+                               capture_output=True, text=True).stdout.split()
+        self.assertIn(".claude/p4/phi/sessions/kid/session.json", shown)
+        self.assertIn(".claude/p4/phi/node.json", shown)
+        self.assertFalse([x for x in shown if x.endswith(("settings.local.json", "other.txt"))], shown)
 
     def test_claim_gives_1_2_3_to_three_ids_and_the_same_store_to_an_id_asked_twice(self):
         got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]

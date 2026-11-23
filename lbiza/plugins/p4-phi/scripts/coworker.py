@@ -157,16 +157,24 @@ def _quoted(*paths):
             raise ValueError(f"a start file's paths hold no quote: {path}")
 
 
-def _node(home, store, name, kind, starter, nums, session=""):
+def _node(home, store, name, kind, starter, nums, checkout, session=""):
     """(the folder `<node>/phi` of a new node `name`, ""), or (None, its folder) where the name has a node already,
     whose session was started once. Raises ValueError where no store could be made."""
     have = relay.nodes(home).get(name)
     if have:
         return None, os.path.join(have, "phi").replace("\\", "/")
-    made = relay.claim(home, store, name, kind, starter, nums, session=session)
+    made = relay.claim(home, store, name, kind, starter, nums, session=session, checkout=checkout)
     if not made:
         raise ValueError(f"no store could be made for {name} under {store}: its path would be too long")
     return os.path.join(made, "phi").replace("\\", "/"), ""
+
+
+def _undo(home, found):
+    """Removes the nodes this call claimed, which hold only their node.json, so a name is not stranded by a call
+    that failed after its claim."""
+    for one in found:
+        if one.get("folder"):
+            relay.unclaim(home, one["name"])
 
 
 def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=False, windows=None):
@@ -174,8 +182,9 @@ def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=Fa
     earns a team, and for a group that does, the coworker's name. `who` is the planner's title, where the lists go.
     With `claim`, each such group gets a node, relay.claim in the store `store` of its starter `starter`, and its
     entry the node's folder, the session id, the start file's name and lines and the line typed into its tab; a
-    name that has a node already gets `started`, its node's folder, and nothing else. Without it nothing is made."""
-    _quoted(checkout)
+    name that has a node already gets `started`, its node's folder, and nothing else. Every path is checked before
+    the first claim, and the nodes claimed are removed again where anything fails after. Without `claim` nothing is
+    made and nothing is checked."""
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
     out = []
@@ -184,38 +193,60 @@ def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=Fa
         if one["team"]:
             one["name"] = name_of(title, group, path)
             if claim:
-                said = task(path, group, who)
-                folder, there = _node(home, store, one["name"], "reader", starter, one["sections"],
-                                      str(uuid.uuid4()))
-                if there:
-                    one["started"] = there
-                else:
-                    one["folder"] = folder
-                    one["session"] = str(relay.node_record(home, one["name"]).get("session") or "")
-                    one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, said, folder,
-                                                                     windows, worktree=False,
-                                                                     session=one["session"])
+                one["said"] = task(path, group, who)
         out.append(one)
+    if not claim:
+        return out
+    _quoted(checkout, home, store, *[one["said"] for one in out if one.get("said")])
+    try:
+        for one in out:
+            said = one.pop("said", "")
+            if not one["team"]:
+                continue
+            folder, there = _node(home, store, one["name"], "reader", starter, one["sections"], checkout,
+                                  str(uuid.uuid4()))
+            if there:
+                one["started"] = there
+                continue
+            one["folder"] = folder
+            one["session"] = str(relay.node_record(home, one["name"]).get("session") or "")
+            one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, said, folder, windows,
+                                                             worktree=False, session=one["session"])
+    except Exception:
+        _undo(home, out)
+        raise
     return out
 
 
-def write(found, checkout):
+def write(found, checkout, home=""):
     """The settings file, settings(checkout), each coworker's or worker's start file and each worker's brief,
-    written into the node folder of each entry that has one. The paths written."""
+    written into the node folder of each entry that has one. The paths written. Where a write fails, what this call
+    wrote is removed and, with `home`, the nodes of those entries too, and the error goes out."""
     text, wrote = settings(checkout), []
-    for one in found:
-        if not one.get("folder"):
-            continue
-        files = {SETTINGS_FILE: text}
-        if one.get("file"):
-            files[one["file"]] = "\n".join(one["lines"])
-        if one.get("brief"):
-            files[os.path.basename(one["brief_file"])] = one["brief"]
-        os.makedirs(one["folder"], exist_ok=True)
-        for name, body in files.items():
-            with open(os.path.join(one["folder"], name), "w", encoding="utf-8", newline="\n") as f:
-                f.write(body + "\n")
-            wrote.append(os.path.join(one["folder"], name).replace("\\", "/"))
+    try:
+        for one in found:
+            if not one.get("folder"):
+                continue
+            files = {SETTINGS_FILE: text}
+            if one.get("file"):
+                files[one["file"]] = "\n".join(one["lines"])
+            if one.get("brief"):
+                files[os.path.basename(one["brief_file"])] = one["brief"]
+            os.makedirs(one["folder"], exist_ok=True)
+            for name, body in files.items():
+                at = os.path.join(one["folder"], name)
+                with open(at, "w", encoding="utf-8", newline="\n") as f:
+                    wrote.append(at.replace("\\", "/"))
+                    f.write(body + "\n")
+    except Exception:
+        for at in wrote:
+            try:
+                os.remove(at)
+            except OSError:
+                pass
+        if home:
+            _undo(home, found)
+        raise
     return wrote
 
 
@@ -227,11 +258,14 @@ LONGEST = 3600                   # the most one watch waits, in seconds
 def kept(name, home, checkout, deep=False):
     """The transcripts Claude Code keeps for the coworker `name`, its own and with `deep` those of the agents under
     it, by the session id of its node.json: `<session>.jsonl` and the files under the folder `<session>`, in the
-    folder of `projects` Claude Code names after the checkout, with each character that is no letter or digit as
-    "-", or in any folder of `projects` where `checkout` is "". [] where the name has no node or no session id."""
-    session = str(relay.node_record(home, name).get("session") or "") if home else ""
+    folder of `projects` Claude Code names after the checkout its node.json keeps, or `checkout` where it keeps
+    none, with each character that is no letter or digit as "-", or in any folder of `projects` where neither
+    names one. [] where the name has no node or no session id."""
+    n = relay.node_record(home, name) if home else {}
+    session = str(n.get("session") or "")
     if not re.fullmatch(r"[A-Za-z0-9-]+", session):
         return []
+    checkout = str(n.get("checkout") or checkout or "")
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
     folder = os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", checkout) if checkout else "*")
     found = glob.glob(os.path.join(folder, session + ".jsonl"))
@@ -284,48 +318,61 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
-    _quoted(plan, checkout)
+    if claim:                                      # every path before the first claim
+        _quoted(plan, checkout, home, store)
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
     out = []
     for group in sections.groups(found):
         nums = [s["n"] for s in group]
-        one = {"name": worker_name(path, nums), "sections": nums}
-        out.append(one)
-        if not claim:
-            continue
-        name = one["name"]
-        folder, there = _node(home, store, name, "worker", starter, nums)
-        if there:
-            one["started"] = there
-            continue
-        brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
-        where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
-                 "Commit only with this command, one commit for each section, naming every path the section "
-                 "changed, added or removed and no other:",
-                 f'python -I -X utf8 {PHI} commit --checkout {checkout} -m "<message>" -- <path> ...',
-                 "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
-                 f"When every check passes, write your report to {report} and end.", ""]
-        many = "s" if len(group) > 1 else ""
-        goal = (f"/goal Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed as the brief "
-                f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
-                f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
-                "with what is done and what is not.")
-        file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False)
-        one.update(folder=folder, brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
-                   report=report, goal=goal, file=file, lines=lines, typed=typed)
+        out.append({"name": worker_name(path, nums), "sections": nums, "group": group})
+    if not claim:
+        return [{k: v for k, v in one.items() if k != "group"} for one in out]
+    try:
+        for one in out:
+            _worker(one, plan, title, checkout, mode, home, starter, store, windows)
+    except Exception:
+        _undo(home, out)
+        raise
     return out
 
 
-def wait_report(report, longest=LONGEST, clock=time.time, sleep=time.sleep):
+def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
+    """The node of one terminal worker of land(), and its brief, goal and start file in it."""
+    group, nums, name = one.pop("group"), one["sections"], one["name"]
+    folder, there = _node(home, store, name, "worker", starter, nums, checkout)
+    if there:
+        one["started"] = there
+        return
+    one["folder"] = folder                         # set at once, so a failure below removes the node
+    brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
+    where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
+             "Commit only with this command, one commit for each section, naming every path the section "
+             "changed, added or removed and no other:",
+             f'python -I -X utf8 {PHI} commit --checkout {checkout} -m "<message>" -- <path> ...',
+             "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+             f"When every check passes, write your report to {report} and end.", ""]
+    many = "s" if len(group) > 1 else ""
+    goal = (f"/goal Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed as the brief "
+            f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
+            f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
+            "with what is done and what is not.")
+    file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False)
+    one.update(brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
+               report=report, goal=goal, file=file, lines=lines, typed=typed)
+
+
+def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, sleep=time.sleep):
     """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there
-    and was written after the wait began, so a second report of one worker is waited for; `long` after `longest`
-    seconds. It reads no transcript."""
-    began, start = time.time(), clock()
+    and was written at or after the claim of the worker's node `name`, the time of its node.json, so a worker that
+    finished before the wait began is done at once; a report of no node counts from the wait's start. `long` after
+    `longest` seconds. It reads no transcript."""
+    since = (relay.node_time(home, name) if home and name else 0.0) or time.time()
+    start = clock()
 
     def written():
         try:
-            return os.path.getmtime(report) >= began - 1      # a file system's times can be a second coarse
+            return os.path.getmtime(report) >= since - 1      # a file system's times can be a second coarse
         except OSError:
             return False
     while clock() - start < longest:

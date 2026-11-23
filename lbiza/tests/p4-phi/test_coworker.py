@@ -355,12 +355,59 @@ class Coworker(unittest.TestCase):
             self.assertTrue(coworker.stopped("cw-a", home, here), "the last assistant row is the error")
             self.assertFalse(coworker.stopped("cw-none", home, here))
 
-    def test_a_path_that_holds_a_quote_is_refused_and_no_start_file_is_drafted(self):
-        with self.assertRaises(ValueError):
-            coworker.drafts(self.path, "E:/it's/repo", WHO)
+    def test_a_path_that_holds_a_quote_is_refused_before_any_claim_and_a_read_only_draft_raises_nothing(self):
+        self.assertEqual(len(coworker.drafts(self.path, "E:/it's/repo", WHO)), 2, "nothing is made, nothing checked")
         with self.assertRaises(ValueError):
             self.drafts(checkout="E:/it's/repo")
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
+        with self.assertRaises(ValueError):
+            coworker.land(self.path, "E:/it's/repo", WHO, "auto", self.home, PLANNER, self.home, claim=True)
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing claimed")
+
+    def test_a_failure_after_the_claim_removes_the_nodes_of_that_call(self):
+        from unittest import mock
+        with mock.patch.object(coworker, "script", side_effect=ValueError("late")):
+            with self.assertRaises(ValueError):
+                self.land()
+        relay.forget(self.home)
+        self.assertEqual(relay.nodes(self.home), {}, "no name is stranded")
+        found = self.land()
+        found[1]["lines"] = [None]                 # the second entry's start file cannot be made
+        with self.assertRaises(TypeError):
+            coworker.write(found, self.base, self.home)
+        self.assertFalse(os.path.exists(found[0]["folder"]), "what the write made is taken out, and its node")
+        self.assertEqual(relay.nodes(self.home), {}, "and the nodes of that call with it")
+        self.assertEqual([one["folder"] for one in self.land()], [self.node(1), self.node(2)], "free again")
+
+    def test_wait_report_is_done_at_once_for_a_report_written_after_the_claim_and_before_the_wait(self):
+        one = self.land()[0]
+        with open(one["report"], "w", encoding="utf-8") as f:
+            f.write("landed\n")
+        now = [0.0]
+        self.assertEqual(coworker.wait_report(one["report"], self.home, one["name"], longest=60,
+                                              clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
+                         ("done", 0))
+        old = relay.node_time(self.home, one["name"]) - 600
+        os.utime(one["report"], (old, old))
+        self.assertEqual(coworker.wait_report(one["report"], self.home, one["name"], longest=30,
+                                              clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
+                         ("long", 30), "a report from before the node is no report of it")
+
+    def test_kept_takes_the_checkout_from_the_node_so_a_wait_works_from_any_folder(self):
+        from unittest import mock
+        config = os.path.join(self.base, "config")
+        first = self.drafts()[0]
+        lead = os.path.join(config, "projects", "E--repo", first["session"] + ".jsonl")
+        os.makedirs(os.path.dirname(lead))
+        open(lead, "w").close()
+        began = 1_000_000.0
+        os.utime(lead, (began - 500, began - 500))
+        self.assertEqual(relay.node_record(self.home, first["name"])["checkout"], "E:/repo")
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            self.assertEqual(coworker.kept(first["name"], self.home, "E:/elsewhere"), [lead])
+            now = [began]
+            self.assertEqual(coworker.watch([first["name"]], self.home, "E:/elsewhere", first=20,
+                                            clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
+                             ("silent", 20), "a line from before the watch")
 
     def test_the_command_prints_the_groups_and_with_start_writes_each_node_and_the_call_that_starts_it(self):
         command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", self.path,
@@ -396,11 +443,6 @@ class Coworker(unittest.TestCase):
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(none.returncode, 2)
-        quoted = os.path.join(self.base, "it's")
-        os.makedirs(quoted)
-        waiting = subprocess.run(command + ["--wait", "--checkout", quoted], capture_output=True, text=True,
-                                 timeout=60)
-        self.assertEqual(waiting.returncode, 2, waiting.stderr)
         nobody = subprocess.run(command + ["--for", "cli-9999"], capture_output=True, text=True, timeout=60)
         self.assertEqual(nobody.returncode, 2)
         old = subprocess.run(command + ["--write", self.base], capture_output=True, text=True, timeout=60)

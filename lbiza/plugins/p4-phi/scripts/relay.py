@@ -143,8 +143,10 @@ def _key(home):
 
 
 def _walk(home):
-    """[the stores under `home` as paths relative to it, the root as ""], and {id: (relative path, node.json)}."""
-    rels, held, todo = [], {}, [""]
+    """[the stores under `home` as paths relative to it, the root as ""], {id: (relative path, node.json)}, and
+    [the `.claude` folders listed]. A `p4` under a `.claude` is a store only where it holds phi/node.json, so a
+    folder a claim is still making, or one of any other kind, is passed over."""
+    rels, held, listed, todo = [], {}, [], [""]
     while todo:
         rel = todo.pop()
         rels.append(rel)
@@ -153,29 +155,37 @@ def _walk(home):
             at = os.path.join(at, ".claude")
             if not os.path.isdir(at):
                 break
-            if os.path.isdir(os.path.join(at, "p4")):
-                kids.append(os.path.relpath(os.path.join(at, "p4"), home))
-        todo.extend(reversed(kids))           # depth first, each store's children in their order
-        if rel:
-            d = _read_json(os.path.join(home, rel, "phi", NODE))
+            listed.append(at)
+            d = _read_json(os.path.join(at, "p4", "phi", NODE))
             ident = str(d.get("id") or "")
-            if ident and ident not in held:   # an id that stands in two stores is read at the first
-                held[ident] = (rel, d)
-    return rels, held
+            if ident:
+                kid = os.path.relpath(os.path.join(at, "p4"), home)
+                kids.append(kid)
+                if ident not in held:         # an id that stands in two stores is read at the first
+                    held[ident] = (kid, d)
+        todo.extend(reversed(kids))           # depth first, each store's children in their order
+    return rels, held, listed
+
+
+def _stamp(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
 
 
 def _tree(home):
-    """The walk of `home`, kept while <home>/phi is unchanged: a claim in any process makes and removes its lock
-    file there, which changes the folder's time, so a node another process claimed is never missed."""
+    """The walk of `home`, kept while the times of <home>/phi and of every `.claude` folder it listed are unchanged:
+    a claim in any process makes and removes its lock file in <home>/phi and renames its store into a `.claude`
+    folder, and either changes that folder's time, so a node another process claimed is never missed."""
     key = _key(home)
-    try:
-        stamp = os.stat(os.path.join(home, "phi")).st_mtime_ns
-    except OSError:
-        stamp = None
+    head = _stamp(os.path.join(home, "phi"))
     held = _TREE.get(key)
-    if not held or held[0] != stamp:
-        held = _TREE[key] = (stamp, _walk(home))
-    return held[1]
+    if held and held[0] == head and all(_stamp(d) == m for d, m in held[1]):
+        return held[2]
+    walk = _walk(home)
+    _TREE[key] = (head, [(d, _stamp(d)) for d in walk[2]], walk[:2])
+    return walk[:2]
 
 
 def forget(home):
@@ -185,8 +195,8 @@ def forget(home):
 
 def stores(home):
     """Every store of the tree under the root store `home`, the root first and then depth first: from a store each
-    `.claude` chain under it is followed while the folder is there, and each `p4` on it is a store. Kept for the
-    process while <home>/phi is unchanged, and dropped where claim() adds one."""
+    `.claude` chain under it is followed while the folder is there, and each `p4` on it that holds phi/node.json is
+    a store. Kept for the process while the folders it read are unchanged, and dropped where claim() adds one."""
     if not home:
         return []
     return [os.path.join(home, rel) if rel else home for rel in _tree(home)[0]]
@@ -205,17 +215,47 @@ def node_record(home, ident):
     return dict(held[1]) if held else {}
 
 
-def claim(home, parent_store, ident, kind, parent, sections=(), session=""):
+def node_time(home, ident):
+    """When `ident`'s node was claimed: the time of its node.json, 0.0 where it has none."""
+    store = nodes(home).get(str(ident or "")) if home else ""
+    try:
+        return os.path.getmtime(os.path.join(store, "phi", NODE)) if store else 0.0
+    except OSError:
+        return 0.0
+
+
+def unclaim(home, ident):
+    """Removes the node of `ident` where its store holds nothing but phi/node.json, as one claim() made in a call
+    that then failed, so its name is not stranded. True where it was removed."""
+    store = nodes(home).get(str(ident or "")) if home else ""
+    if not store or os.listdir(store) != ["phi"] or os.listdir(os.path.join(store, "phi")) != [NODE]:
+        return False
+    os.remove(os.path.join(store, "phi", NODE))
+    os.rmdir(os.path.join(store, "phi"))
+    os.rmdir(store)
+    forget(home)
+    return True
+
+
+def claim(home, parent_store, ident, kind, parent, sections=(), session="", checkout=""):
     """The store of the node `ident`, made once: kind is "session", "reader" or "worker", and `parent` the id of the
     session that started it. Under a lock on <home>/phi/nodes.lock, the store nodes() holds for the id; else the
-    first i from 1 whose store_of(parent_store, i) os.mkdir makes, which fails where the folder is there and so
-    gives one place to one caller, with node.json written whole into it. A lock given up after three seconds is
+    store is made whole under a temporary name beside the first free place store_of(parent_store, i), i from 1,
+    with phi/node.json in it, and renamed to `p4`, which fails where that folder is there and so gives one place to
+    one caller, which then tries the next i. So no store stands without its node.json, and a failed write leaves
+    no empty place: the temporary folder is removed and the error goes out. A lock given up after three seconds is
     gone on without, so two claims for one id can make two stores: each then reads nodes() again and returns the
     store it names, the first in the walk's order. "" where the store's path would pass NODE_PATH_MAX, and nothing
-    is made."""
+    is made. `session` and `checkout` are kept in node.json where given."""
     ident = str(ident or "")
     if not home or not parent_store or not ident:
         return ""
+    d = {"id": ident, "kind": kind, "parent": str(parent or ""), "sections": list(sections),
+         "time": time.strftime("%Y-%m-%d %H:%M")}
+    if session:
+        d["session"] = session
+    if checkout:
+        d["checkout"] = checkout.replace("\\", "/").rstrip("/")
     with locked(os.path.join(home, "phi", "nodes")):
         have = nodes(home).get(ident)
         if have:
@@ -226,21 +266,29 @@ def claim(home, parent_store, ident, kind, parent, sections=(), session=""):
             store = store_of(parent_store, i)
             if len(os.path.abspath(store)) > NODE_PATH_MAX:
                 return ""
-            try:
-                os.makedirs(os.path.dirname(store), exist_ok=True)
-                os.mkdir(store)
-                break
-            except FileExistsError:
+            if os.path.exists(store):
                 continue
+            os.makedirs(os.path.dirname(store), exist_ok=True)
+            tmp = f"{store}.tmp-{os.getpid()}-{os.urandom(4).hex()}"
+            try:
+                os.makedirs(os.path.join(tmp, "phi"))
+                _write_raw(os.path.join(tmp, "phi", NODE), d)
+                os.rename(tmp, store)
+                break
             except OSError:
-                return ""
-        d = {"id": ident, "kind": kind, "parent": str(parent or ""), "sections": list(sections),
-             "time": time.strftime("%Y-%m-%d %H:%M")}
-        if session:
-            d["session"] = session
-        _write_raw(os.path.join(store, "phi", NODE), d)
+                there = os.path.exists(store)
+                _drop(tmp)
+                if there:
+                    continue
+                raise
         forget(home)
         return nodes(home).get(ident) or store
+
+
+def _drop(folder):
+    """Removes a folder claim() was making, with what is in it."""
+    import shutil
+    shutil.rmtree(folder, ignore_errors=True)
 
 
 def flat(home, sid):
@@ -1468,8 +1516,9 @@ def track(home, first_only=False, wait=False):
 
 
 def _tracked(home):
-    """What the store's git takes of the session tree: phi/, and `.claude` beside it where the store holds nodes."""
-    return ["phi"] + ([".claude"] if os.path.isdir(os.path.join(home, ".claude")) else [])
+    """What the store's git takes of the session tree: the phi/ of each store of the tree, the root's first."""
+    forget(home)
+    return [os.path.relpath(os.path.join(s, "phi"), home).replace("\\", "/") for s in stores(home)]
 
 
 TRACK_ADD_LEFT_S = 2.0           # the least of the hook's budget a staging add starts with

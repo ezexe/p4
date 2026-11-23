@@ -2896,6 +2896,17 @@ class TerminalWorker(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.home, "phi", "sessions", "local_plan0001",
                                                      "terminals.json")))
 
+    def test_a_quote_in_the_homes_path_makes_land_write_nothing_and_claim_nothing_each_time(self):
+        self.mode("local_plan0001", "auto")
+        self.home = os.path.join(self.base, "it's", "proj", ".claude", "p4")
+        os.makedirs(self.home)
+        for _ in range(2):
+            ran = self.run_phi("--land")
+            self.assertEqual(ran.returncode, 2, ran.stdout)
+            self.assertIn("hold no quote", ran.stderr)
+            self.assertNotIn("started already", ran.stderr)
+            self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
+
     def test_wait_report_passes_over_a_report_older_than_the_wait(self):
         import coworker
         report = os.path.join(self.base, "report-tw-the-exporter-s-m-1-2-abcd.md")

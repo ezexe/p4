@@ -790,6 +790,7 @@ def claim_node(home, sid, starter):
     folder this process reads the app's answers from follows the session's, where it named the flat one."""
     if relay.nodes(home).get(sid) or os.path.isdir(relay.flat(home, sid)):
         return ""
+    starter = safe_id(starter)
     store = relay.nodes(home).get(starter) or home
     made = relay.claim(home, store, sid, "session", starter)
     if made and APP_AT.get("folder") == relay.flat(home, sid):
@@ -4870,7 +4871,7 @@ def main(argv=None):
                 """Writes each new node's files and prints the call that starts it, and for a name that has a node
                 already, that its session was started; the entries written."""
                 new = [one for one in found if one.get("folder")]
-                coworker.write(new, checkout)
+                coworker.write(new, checkout, me.home)
                 for one in found:
                     if one.get("started"):
                         print(f"phi: a session named `{one['name']}` was started already, from its node "
@@ -4903,8 +4904,8 @@ def main(argv=None):
                 return 0
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
                 report = os.path.abspath(a.report).replace("\\", "/")
-                how, waited = coworker.wait_report(report)
                 tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+                how, waited = coworker.wait_report(report, me.home, tab)
                 print(f"done: {report} is there, after {waited} seconds" if how == "done" else
                       f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
                 return 0
