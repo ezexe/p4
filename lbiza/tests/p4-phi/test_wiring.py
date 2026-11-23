@@ -569,9 +569,10 @@ class Module(unittest.TestCase):
             contract = f.read()
         self.assertIn("declare module 'claude-code'", contract)
         self.assertIn("interface PluginState", contract)
-        self.assertIn(f"'{self.manifest()['name']}': {{ pages: Shaped<PhiPage[]> }}", contract)
+        self.assertIn(f"'{self.manifest()['name']}': {{ pages: Shaped<PhiPage[]>; tree: Shaped<PhiNode[]> }}", contract)
         self.assertNotRegex(contract, r"(?m)^\s*(import|/// <reference)", "a contract holds no import or reference")
-        self.assertEqual(re.findall(r"\{ plugin: '([^']+)', key: '([^']+)' \}", self.text()), [("p4-phi", "pages")])
+        self.assertEqual(re.findall(r"\{ plugin: '([^']+)', key: '([^']+)' \}", self.text()),
+                         [("p4-phi", "pages"), ("p4-phi", "tree")])
 
     def test_the_panes_pages_are_the_files_python_writes(self):
         """The module holds the three pages' file names as literals, since it reads them with no python: the board
@@ -595,6 +596,12 @@ class Module(unittest.TestCase):
         self.assertEqual(text.count("$.ui.open("), 1, "the command's own open, and none at a session's start")
         self.assertIn("on('command.run', { command: 'phi-pane' }", text)
         self.assertIn("name: 'phi-pane'", text)
+        # the pane's Progress view: the tree's atom, the command that writes it, and the timer over its files
+        for word in ("atom({ plugin: 'p4-phi', key: 'tree' } as const", "ask($, ['progress'], PROGRESS_MS)",
+                     "$.clock.every(PANE_MS", "e.tool_name === STEP_TOOL"):
+            self.assertIn(word, text, word)
+        self.assertNotIn("$.fs.stat(", text, "a file's time is read from its folder's list, which p4-native records")
+        self.assertTrue(os.path.isfile(os.path.join(SCRIPTS, "progress.py")))
         render = text.split("on('ui.render'", 1)[1].split("on('tool.check'", 1)[0]
         for write in ("update(", "$.state.set", "$.fs.write", "$.ui.open"):
             self.assertNotIn(write, render, "a render hook never writes")

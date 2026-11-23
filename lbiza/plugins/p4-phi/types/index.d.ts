@@ -6,8 +6,31 @@
 // it is long, and `path` is the file that holds it whole.
 export type PhiPage = { name: 'board' | 'asks' | 'ledger'; title: string; path: string; text: string }
 
+// One session of the tree as scripts/progress.py writes it into progress.json: its goal as `asked`, `set`, `met`,
+// `failed` or `cleared`, its steps, and the plan it works with that plan's sections and its loop.
+export type PhiGoal = { state: string; condition: string; reason?: string }
+export type PhiStep = { addr: string; content: string; status: string; agents: number }
+export type PhiLoop = { round: number; of: number; last: string; dry: number; ended: boolean }
+export type PhiPlan = {
+  path: string
+  title: string
+  sections: { head: string; lands: boolean; done: boolean }[]
+  loop: PhiLoop | null
+}
+export type PhiNode = {
+  sessionId: string
+  depth: number
+  title: string
+  working: boolean
+  done: boolean
+  goal: PhiGoal | null
+  current: string
+  steps: PhiStep[]
+  plan: PhiPlan | null
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'p4-phi': { pages: Shaped<PhiPage[]> }
+    'p4-phi': { pages: Shaped<PhiPage[]>; tree: Shaped<PhiNode[]> }
   }
 }

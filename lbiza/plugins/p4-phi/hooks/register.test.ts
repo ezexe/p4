@@ -3,7 +3,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On, SessionUsage } from 'claude-code'
 
-import { paneAfterClose } from './register'
+import { bar, paneAfterClose, treeGlance, treeLines } from './register'
 
 const DATA = '/home/u/.claude/plugins/data/p4-phi-inline'
 const KEPT = '/opt/python/bin/python3'
@@ -94,6 +94,9 @@ type Machine = {
   settings?: Record<string, Record<string, unknown>>
   // Why a surface draws no pane it is asked to open, where it draws none.
   unplaced?: string
+  // What `phi.py progress` prints: the file that holds the tree. With none given it prints `{}`, as for a session
+  // with no folder.
+  progress?: () => { path?: string; changed?: boolean }
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -128,6 +131,8 @@ type Seen = {
   panes: { id: string; title?: string }[]
   // How often the module asked for the list of its panes.
   listed: number
+  // Each run of `phi.py progress`, with its whole call.
+  progressed: string[][]
 }
 
 // What Claude Code answers a call of one of the plugin's tools that came to its run and found no hook there, in
@@ -178,6 +183,7 @@ function machine(on: On, has: Machine): Seen {
     envs: 0,
     panes: [],
     listed: 0,
+    progressed: [],
   }
   on('command.register', (_, e) => {
     seen.commands.push({ name: e.name, description: e.description })
@@ -280,7 +286,8 @@ function machine(on: On, has: Machine): Seen {
       value: names.map(name => ({
         name,
         kind: files[`${folder}/${name}`] === undefined ? ('dir' as const) : ('file' as const),
-        size: 0,
+        // a test changes a file's text, so its size tells the change, as its time does on a disk
+        size: (files[`${folder}/${name}`] ?? '').length,
         mtimeMs: 0,
         isLink: false,
       })),
@@ -355,6 +362,9 @@ function machine(on: On, has: Machine): Seen {
         stdout = ended.stdout ?? ''
         stderr = ended.stderr ?? ''
         exitCode = ended.exitCode ?? 0
+      } else if (args[0] === 'progress') {
+        seen.progressed.push([...args])
+        stdout = `${JSON.stringify(has.progress?.() ?? {})}\n`
       } else {
         seen.looks.push([...args])
         stdout = `${JSON.stringify(has.look === undefined ? ORCHESTRATOR : await has.look(args))}\n`
@@ -2274,8 +2284,9 @@ test('the command opens the pane, which shows the board, the requests and the se
 
   expect(ran.text).toBe("p4-phi's pane is open.")
   expect(seen.panes).toEqual([{ id: 'p4-phi', title: 'p4-phi' }])
-  // The pages are files python wrote already, so the command starts no process.
-  expect(seen.calls.length).toBe(looks)
+  // The pages are files python wrote already, and the tree is one run of `phi.py progress`: no other process.
+  expect(seen.calls.length).toBe(looks + 1)
+  expect(seen.progressed).toEqual([['progress']])
   expect(seen.ran).toEqual([])
 
   for (const surface of SURFACES) {
@@ -2386,6 +2397,156 @@ test('where no surface draws a pane the command says why, and a pane nobody open
   await $.session.start(START)
   await clock.settle()
   expect((await $.command.run(TYPED)).text).toBe(`p4-phi's pane is open and not drawn: ${reason}`)
+})
+
+// A tree of two sessions as scripts/progress.py writes it: an orchestrator on its second step with a goal set, and
+// a planner under it whose plan is on round 2 of 5 with one dry round.
+const TREE_FILE = `${FOLDER}/progress.json`
+const KID_PLAN = '/work/project/.claude/p4/phi/sessions/local_kid00001/plan.json'
+const NODES = [
+  {
+    sessionId: 'local_top00001',
+    depth: 0,
+    title: 'Port the flush',
+    working: true,
+    done: false,
+    goal: { state: 'set', condition: 'the suite passes' },
+    current: '2',
+    steps: [
+      { addr: '1', content: 'Read the exporter', status: 'completed', agents: 0 },
+      { addr: '2', content: 'Start the planner', status: 'in_progress', agents: 1 },
+    ],
+    plan: null,
+  },
+  {
+    sessionId: 'local_kid00001',
+    depth: 1,
+    title: 'Plan the flush',
+    working: false,
+    done: false,
+    goal: { state: 'asked', condition: 'the plan is approved', reason: 'the command was dropped' },
+    current: '',
+    steps: [],
+    plan: {
+      path: '/work/project/.claude/p4/temportal/plan-planner/linear-stallman.md',
+      title: "The exporter's move",
+      sections: [
+        { head: 'Context', lands: false, done: false },
+        { head: '1. The writer', lands: true, done: true },
+      ],
+      loop: { round: 2, of: 5, last: 'dry', dry: 1, ended: false },
+    },
+  },
+]
+function treeOf(nodes: unknown): string {
+  return JSON.stringify({ top: 'local_top00001', nodes, sources: [KID_PLAN], folders: ['/work/project/.claude/p4/phi/sessions'] })
+}
+const GROWN = { ...PUPPETEER, [TREE_FILE]: treeOf(NODES), [KID_PLAN]: '{"steps":[]}' }
+
+test('the tree is lines: a session, its goal, its steps with a bar, and its plan with the loop and the sections', () => {
+  expect(treeLines(NODES)).toEqual([
+    { kind: 'title', text: 'Port the flush: working' },
+    { kind: 'text', text: 'goal set: the suite passes' },
+    { kind: 'bar', label: 'steps', value: 1, max: 2, text: '1 of 2 steps' },
+    { kind: 'text', text: '[x] 1 Read the exporter' },
+    { kind: 'now', text: '[>] 2 Start the planner, 1 agent running' },
+    { kind: 'title', text: '  Plan the flush: idle' },
+    { kind: 'text', text: '  goal asked for: the plan is approved', color: 'yellow' },
+    { kind: 'dim', text: '    the command was dropped' },
+    { kind: 'text', text: "  plan: The exporter's move" },
+    { kind: 'dim', text: '    /work/project/.claude/p4/temportal/plan-planner/linear-stallman.md' },
+    { kind: 'bar', label: '  loop', value: 2, max: 5, text: 'round 2 of 5, 1 dry in a row' },
+    { kind: 'dim', text: '    last round: dry' },
+    { kind: 'dim', text: '  [ ] Context' },
+    { kind: 'text', text: '  [x] 1. The writer' },
+  ])
+  expect(treeLines([])).toEqual([])
+  expect(bar(1, 2)).toBe('[#####.....]')
+  expect(bar(0, 0)).toBe('[..........]')
+  expect(bar(9, 5)).toBe('[##########]')
+  expect(treeGlance(NODES)).toBe('2 sessions, 1 working, 1 of 2 steps')
+})
+
+test('the command reads the tree, and the pane draws it above the pages on every surface', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...GROWN }, progress: () => ({ path: TREE_FILE, changed: true }) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+  expect(seen.progressed).toEqual([['progress']])
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const lines = (await ui.findAll({ type: 'Text' })).map(line => line.text)
+
+    for (const line of ['Progress', 'Port the flush: working', '[>] 2 Start the planner, 1 agent running', '  goal asked for: the plan is approved', '  [x] 1. The writer']) {
+      expect(lines).toContain(line)
+    }
+    // The pages stay, under the tree.
+    for (const title of ['Board', 'Requests of ezexe', 'Sessions']) expect(lines).toContain(title)
+    expect(lines.indexOf('Progress')).toBeLessThan(lines.indexOf('Board'))
+    expect((await ui.findAll({ type: 'Markdown' })).length).toBe(3)
+    await ui.unmount()
+  }
+
+  const widget = await $.ui.mount({ ...PANE, props: { ...PANE.props, placement: 'widget', anchoredEdges: [] }, surface: 'desktop' })
+  // The tree's one line, cut to the 26 columns of the body, ahead of a line a page.
+  expect((await widget.findAll({ type: 'Text' })).map(line => line.text)[0]).toBe('2 sessions, 1 working, 1 o')
+  await widget.unmount()
+})
+
+test('a file of the tree that changes is seen within a second, with no look and one run of the command', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...GROWN }, progress: () => ({ path: TREE_FILE, changed: true }) })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const looks = seen.looks.length
+
+  // A tick with nothing changed starts no process.
+  await clock.advance(1_000)
+  expect(seen.progressed.length).toBe(1)
+
+  // The planner under this session took a step: its plan.json changed, and python's next run says so.
+  const moved = NODES.map(one => (one.depth === 1 ? { ...one, steps: [{ addr: '2.1', content: 'Read the sources', status: 'in_progress', agents: 0 }] } : one))
+  seen.files[KID_PLAN] = '{"steps":[{"addr":"2.1"}]}'
+  seen.files[TREE_FILE] = treeOf(moved)
+  await clock.advance(1_000)
+
+  expect(seen.progressed.length).toBe(2)
+  expect(seen.looks.length).toBe(looks)
+  expect((await ui.findAll({ type: 'Text' })).map(line => line.text)).toContain('  [>] 2.1 Read the sources')
+  await ui.unmount()
+})
+
+test("the session's own task-list call refreshes the open pane's tree inside the turn, and no other tool's call does", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, { files: { ...GROWN }, progress: () => ({ path: TREE_FILE, changed: true }) })
+  on('classic.PostToolUse', () => ({}))
+  const call = { tool_input: {}, tool_response: 'ok', tool_use_id: 'toolu_p1' }
+
+  await $.session.start(START)
+  await clock.settle()
+
+  // With no pane open the call starts nothing.
+  await $.classic.PostToolUse({ ...call, tool_name: 'mcp__ccd_turn__update_plan' })
+  await clock.settle()
+  expect(seen.progressed).toEqual([])
+
+  await $.command.run(TYPED)
+  await $.classic.PostToolUse({ ...call, tool_name: 'Bash' })
+  await clock.settle()
+  expect(seen.progressed.length).toBe(1)
+
+  await $.classic.PostToolUse({ ...call, tool_name: 'mcp__ccd_turn__update_plan' })
+  await clock.settle()
+  expect(seen.progressed.length).toBe(2)
 })
 
 // A look where the store's phi.json turns `app_tools` on, and what the desktop app's two tools for sessions answer:

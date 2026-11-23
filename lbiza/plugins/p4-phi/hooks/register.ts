@@ -37,7 +37,7 @@ import type {
   TurnCompleteReason,
 } from 'claude-code'
 
-import type { PhiPage } from '../types'
+import type { PhiNode, PhiPage } from '../types'
 
 // What find-python.sh runs to prove an interpreter: the interpreter prints its own path.
 const PROOF = "import sys; print(sys.executable.replace(chr(92), '/'))"
@@ -239,6 +239,20 @@ const PAGE_CHARS = 24_000
 // The pages as the pane draws them, kept in `$.state`, where a write draws the open pane again. The tag declines
 // what another version of this module stored, which outlives a reload.
 const shown = atom({ plugin: 'p4-phi', key: 'pages' } as const, [], { shape: 'pages-1' })
+// The session tree as the pane draws it, kept in `$.state` beside the pages: scripts/progress.py writes it into
+// progress.json in the session's folder, and the module reads that file after each run of `phi.py progress`.
+const grown = atom({ plugin: 'p4-phi', key: 'tree' } as const, [], { shape: 'tree-1' })
+// How often the open pane checks the times of the files the tree was read from, how long one run of
+// `phi.py progress` may take, and the most files checked. plugins/mods/interface.md, "Redraw on a timer", has a
+// site that follows something no event tells redraw from `$.clock.every(1000, ...)`.
+const PANE_MS = 1_000
+const PROGRESS_MS = 10_000
+const MOST_SOURCES = 400
+// While no tree was read, as for a session whose folder is not made yet and after a reload of the module, the
+// open pane asks for one again every so many ticks.
+const EMPTY_TICKS = 10
+// The app's tool for a session's task list, whose record hook.py's WAITED has the call wait on.
+const STEP_TOOL = 'mcp__ccd_turn__update_plan'
 
 // The desktop app's own tools for sessions, which a session of the app has and no other session does. Unless a
 // store's phi.json turns `app_tools` off, the module asks them what phi.py otherwise reads from the app's record
@@ -268,6 +282,8 @@ const APP_CALL_MS = 5_000
 // `app_tools` is true unless that file turns `app_tools` off: the app's own tools are asked after such a look.
 // `app_sections` is true with it for a puppeteer: the sidebar's sections are asked for too.
 type Answer = {
+  // What `phi.py progress` prints: the file that holds the tree, and whether the run rewrote it.
+  path?: string
   app_tools?: boolean
   app_sections?: boolean
   rules?: string
@@ -364,8 +380,89 @@ let shellModel: { at: number; isWeighted: boolean } | undefined
 // `$.state`, as JSON: the same pages write nothing, so they draw nothing.
 let isPaneOpen = false
 let paged: string | undefined
+// The tree last set in `$.state`, as JSON, the files it was read from and the folders whose names are watched, and
+// their times and sizes at the last run of `phi.py progress`. One run is in flight at most, one more is owed where
+// a change came meanwhile, one check of the times is in flight at most, and the timer of those checks runs while
+// the pane is open.
+let treed: string | undefined
+let sources: readonly string[] = []
+let folders: readonly string[] = []
+let stamp = ''
+let isProgressing = false
+let isProgressOwed = false
+let isStamping = false
+let emptyTicks = 0
+let paneTimer: Timer | undefined
 
-// What a close of a pane leaves of that, given how it stood, and it is all the hook at `ui.close` does: a close of
+// One line of the Progress view: a session's title, the step in progress, a plain or a dim line, or a count of a
+// whole, which a surface with a `Progress` element draws as one and any other as `bar` draws it.
+export type PhiLine =
+  | { kind: 'title' | 'now' | 'text' | 'dim'; text: string; color?: string }
+  | { kind: 'bar'; label: string; value: number; max: number; text: string }
+
+// How a goal's state reads, and the colour of the states that ask for a look.
+const GOAL_WORDS: Record<string, string> = { asked: 'asked for', set: 'set', met: 'met', failed: 'failed', cleared: 'cleared' }
+const GOAL_COLORS: Record<string, string> = { asked: 'yellow', met: 'green', failed: 'red' }
+
+// A count of a whole as ten characters, for a surface whose table holds no `Progress`.
+export function bar(value: number, max: number): string {
+  const full = max > 0 ? Math.min(10, Math.max(0, Math.round((value / max) * 10))) : 0
+
+  return `[${'#'.repeat(full)}${'.'.repeat(10 - full)}]`
+}
+
+// The tree as lines, in its order: each session indented by its depth, then its goal, its steps and its plan.
+export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
+  const lines: PhiLine[] = []
+  for (const one of nodes) {
+    const pad = '  '.repeat(Math.min(Math.max(one.depth, 0), 6))
+    const state = one.working ? 'working' : one.done ? 'idle, shown done' : 'idle'
+    lines.push({ kind: 'title', text: `${pad}${one.title}: ${state}` })
+    if (one.goal !== null) {
+      const word = GOAL_WORDS[one.goal.state] ?? one.goal.state
+      const color = GOAL_COLORS[one.goal.state]
+      lines.push({ kind: 'text', text: `${pad}goal ${word}: ${one.goal.condition}`, ...(color === undefined ? {} : { color }) })
+      if (one.goal.reason) lines.push({ kind: 'dim', text: `${pad}  ${one.goal.reason}` })
+    }
+    if (one.steps.length > 0) {
+      const done = one.steps.filter(step => step.status === 'completed').length
+      lines.push({ kind: 'bar', label: `${pad}steps`, value: done, max: one.steps.length, text: `${done} of ${one.steps.length} steps` })
+      for (const step of one.steps) {
+        const mark = step.status === 'completed' ? 'x' : step.status === 'in_progress' ? '>' : ' '
+        const agents = step.agents > 0 ? `, ${step.agents} ${step.agents === 1 ? 'agent' : 'agents'} running` : ''
+        lines.push({ kind: step.status === 'in_progress' ? 'now' : 'text', text: `${pad}[${mark}] ${step.addr} ${step.content}${agents}` })
+      }
+    }
+    if (one.plan !== null) {
+      lines.push({ kind: 'text', text: `${pad}plan: ${one.plan.title}` })
+      lines.push({ kind: 'dim', text: `${pad}  ${one.plan.path}` })
+      const loop = one.plan.loop
+      if (loop !== null) {
+        const dry = loop.dry > 0 ? `, ${loop.dry} dry in a row` : ''
+        const text = `round ${loop.round} of ${loop.of}${dry}${loop.ended ? ', ended' : ''}`
+        lines.push({ kind: 'bar', label: `${pad}loop`, value: loop.round, max: loop.of, text })
+        if (loop.last !== '') lines.push({ kind: 'dim', text: `${pad}  last round: ${loop.last}` })
+      }
+      for (const section of one.plan.sections) {
+        const kind = section.lands ? 'text' : 'dim'
+        lines.push({ kind, text: `${pad}[${section.done ? 'x' : ' '}] ${section.head}` })
+      }
+    }
+  }
+
+  return lines
+}
+
+// The tree in one line, for the desktop app's widget.
+export function treeGlance(nodes: readonly PhiNode[]): string {
+  const steps = nodes.flatMap(one => one.steps)
+  const done = steps.filter(step => step.status === 'completed').length
+  const working = nodes.filter(one => one.working).length
+
+  return `${nodes.length} ${nodes.length === 1 ? 'session' : 'sessions'}, ${working} working, ${done} of ${steps.length} steps`
+}
+
+// What a close of a pane leaves of that, given how it stood,and it is all the hook at `ui.close` does: a close of
 // p4-phi's own pane leaves it closed, so a look reads its pages no more, and a close of any other pane leaves it
 // as it was. By the
 // types of `claude-code` every close raises `ui.close` with the pane's `id` and an `origin`: `person` for the
@@ -779,7 +876,10 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     isLooking = false
     looking = undefined
     paceBy(answer, now, isSlow, wasAsked)
-    if (isPaneOpen) void page($)
+    if (isPaneOpen) {
+      void page($)
+      watchPane($)
+    }
     // One turn at most for one look: a goal to set first, whose command starts its own turn, then the work a wait
     // left unmoved, else the upkeep that is due.
     const prompt = answer?.move || answer?.upkeep
@@ -1364,11 +1464,108 @@ async function page($: EngineInterface): Promise<void> {
   }
 }
 
+// The time and size of each file the tree was read from, and the names in each watched folder, as one string. A
+// file's time is read from its folder's list, one call a folder, and a folder that cannot be listed reads as empty.
+async function stamped($: EngineInterface): Promise<string> {
+  const files = sources.slice(0, MOST_SOURCES)
+  const dirs = [...new Set(files.map(path => path.slice(0, path.lastIndexOf('/'))))]
+  const lists = new Map<string, Map<string, string>>()
+  await Promise.all(
+    [...new Set([...dirs, ...folders])].map(async dir => {
+      // plugins/mods/api.md gives an entry `{ name, kind, size, isLink }`, and the types of 2.1.326 `mtimeMs` too
+      const entries: readonly { name: string; size: number; mtimeMs?: number }[] = await $.fs.list(dir).catch(() => [])
+      const seen = new Map<string, string>()
+      for (const entry of entries) seen.set(entry.name, `${String(entry.mtimeMs ?? '')}:${entry.size}`)
+      lists.set(dir, seen)
+    }),
+  )
+  const times = files.map(path => lists.get(path.slice(0, path.lastIndexOf('/')))?.get(path.slice(path.lastIndexOf('/') + 1)) ?? '-')
+  const names = folders.map(dir => [...(lists.get(dir)?.keys() ?? [])].sort().join(','))
+
+  return [...times, ...names].join('|')
+}
+
+// One run of `phi.py progress`, which writes the tree into progress.json, and that file put where the pane reads
+// it. One run is in flight at most: a second asked for meanwhile runs once the first has ended.
+async function progress($: EngineInterface): Promise<void> {
+  if (isProgressing) {
+    isProgressOwed = true
+
+    return
+  }
+  isProgressing = true
+  try {
+    // The times as they stand before python reads the files, and the lists they are the times of.
+    const before = await stamped($)
+    const listed = JSON.stringify([sources, folders])
+    const answer = await ask($, ['progress'], PROGRESS_MS)
+    // No answer, as from a run that was too slow or a python not found: the tree that is drawn stands.
+    if (answer === undefined) return
+    const text = typeof answer.path === 'string' ? await $.fs.read(answer.path).catch(() => '') : ''
+    let kept: { nodes?: unknown; sources?: unknown; folders?: unknown } = {}
+    try {
+      kept = text === '' ? {} : (JSON.parse(text) as typeof kept)
+    } catch {
+      kept = {}
+    }
+    const paths = (list: unknown): string[] =>
+      Array.isArray(list) ? list.filter((path): path is string => typeof path === 'string') : []
+    const nodes = Array.isArray(kept.nodes) ? (kept.nodes as PhiNode[]) : []
+    sources = paths(kept.sources)
+    folders = paths(kept.folders)
+    stamp = JSON.stringify([sources, folders]) === listed ? before : await stamped($)
+    const now = JSON.stringify(nodes)
+    if (now !== treed) {
+      await update($, grown, () => nodes)
+      treed = now
+    }
+  } catch (error) {
+    note($, `the pane's tree was not read: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
+  } finally {
+    isProgressing = false
+    if (isProgressOwed) {
+      isProgressOwed = false
+      void progress($)
+    }
+  }
+}
+
+// One check of the open pane's files: `phi.py progress` runs only where one of them changed since its last run.
+// With no tree read yet there is no file to check, and the command is asked again every EMPTY_TICKS ticks.
+async function glanceAt($: EngineInterface): Promise<void> {
+  if (!isPaneOpen || isProgressing || isStamping) return
+  if (sources.length === 0) {
+    emptyTicks += 1
+    if (emptyTicks < EMPTY_TICKS) return
+    emptyTicks = 0
+    await progress($)
+
+    return
+  }
+  isStamping = true
+  try {
+    if ((await stamped($)) !== stamp) await progress($)
+  } catch {
+    // the next tick checks again
+  } finally {
+    isStamping = false
+  }
+}
+
+// The open pane's timer, started once. A close of the pane cancels it, and so does a reload of the module.
+function watchPane($: EngineInterface): void {
+  paneTimer ??= $.clock.every(PANE_MS, () => {
+    void glanceAt($)
+  })
+}
+
 // The command `/phi-pane`: the pages as they stand, and then the pane. A pane a command of the person's opens is
 // placed at any width, by the types of `$.ui.open`, and where no surface places one the answer says why.
 async function openPane($: EngineInterface): Promise<string> {
   isPaneOpen = true
   await page($)
+  await progress($)
+  watchPane($)
   const opened = await $.ui.open({ id: PANE, title: PANE_TITLE })
 
   return opened.isPlaced ? "p4-phi's pane is open." : `p4-phi's pane is open and not drawn: ${opened.reason}`
@@ -1669,6 +1866,10 @@ export const register: Register = on => {
   // answers without `next` keeps the pane open.
   on('ui.close', ($, e, next) => {
     isPaneOpen = paneAfterClose(isPaneOpen, e)
+    if (!isPaneOpen) {
+      paneTimer?.cancel()
+      paneTimer = undefined
+    }
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -1679,20 +1880,48 @@ export const register: Register = on => {
   // title, and as the desktop app's widget one line a page, cut to the body's columns.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     isPaneOpen = true
-    const { Box, Text, Markdown } = $.ui.resolve(e)
+    const table = $.ui.resolve(e)
+    const { Box, Text, Markdown } = table
+    // `Progress` is in the tables of Claude Code 2.1.326 and not on plugins/mods/reference.md, "Elements".
+    const Progress = (table as unknown as Record<string, typeof Text | undefined>).Progress
     const pages = await read($, shown)
+    const nodes = await read($, grown)
     const isGlance = e.props.placement === 'widget'
     const none = isGlance
       ? 'p4-phi: no board and no ledger.'
       : 'This session keeps no board and no ledger: it is no puppeteer and no orchestrator, or no look has run yet.'
+    const tree = isGlance
+      ? nodes.length === 0
+        ? []
+        : [h(Text, { wrap: 'truncate-end' }, treeGlance(nodes).slice(0, Math.max(1, e.props.bodyColumns)))]
+      : [
+          ...(nodes.length === 0 ? [] : [h(Text, { bold: true }, 'Progress')]),
+          ...treeLines(nodes).map(line =>
+            line.kind === 'bar'
+              ? Progress === undefined
+                ? h(Text, {}, `${line.label} ${bar(line.value, line.max)} ${line.text}`)
+                : h(Progress, { label: line.label.trim(), value: line.value, max: line.max, valueText: line.text } as never)
+              : h(
+                  Text,
+                  {
+                    bold: line.kind === 'title' || line.kind === 'now',
+                    dimColor: line.kind === 'dim',
+                    ...(line.color === undefined ? {} : { color: line.color }),
+                  },
+                  line.text,
+                ),
+          ),
+        ]
     const rows =
       pages.length === 0
-        ? [h(Text, { dimColor: true }, none)]
+        ? tree.length === 0
+          ? [h(Text, { dimColor: true }, none)]
+          : []
         : isGlance
           ? pages.map(one => h(Text, { wrap: 'truncate-end' }, glance(one.text, e.props.bodyColumns)))
           : pages.flatMap(one => [h(Text, { bold: true }, one.title), h(Markdown, { text: one.text })])
 
-    return h(Box, { flexDirection: 'column' }, ...rows) as RenderElement
+    return h(Box, { flexDirection: 'column' }, ...tree, ...rows) as RenderElement
   }).catch(($, e) => {
     const { Text } = $.ui.resolve(e)
 
@@ -1710,6 +1939,10 @@ export const register: Register = on => {
   // answer says the message was queued gets the line that says what that means.
   on('classic.PostToolUse', async ($, e, next) => {
     const out = await next(e)
+    // The open pane's timer, where a reload of the module ended it. The task list changed and its record is
+    // written: the open pane shows it now, inside the turn.
+    if (isPaneOpen) watchPane($)
+    if (isPaneOpen && e.tool_name === STEP_TOOL) void progress($)
     const words = [...toldOf(e.tool_use_id), ...(await queued($, e.tool_name, e.tool_response))]
 
     return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
