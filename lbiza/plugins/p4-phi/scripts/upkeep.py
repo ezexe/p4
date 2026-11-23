@@ -1269,7 +1269,7 @@ def archive_acts(home, s, d, hand):
         last = (f" This is the {TRIES}rd time p4-phi hands it, and it hands it no more.") if n + 1 >= TRIES else ""
         closed = ("answered" if close_state(home, d, k) == "answered" else
                   "sent and not answered, with no background task listed at its last turn's end")
-        out.append((key, "archive", True,
+        out.append((f"{key}:retry" if calls else key, "archive", True,
                     f"archive: {name} is finished, landed and closed: no open step, its plan moved, its closing "
                     f"message {closed}, its last report handed, and every commit of it on its repository's default "
                     f"branch on the remote. Call `{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and "

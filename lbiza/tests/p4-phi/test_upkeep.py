@@ -464,8 +464,11 @@ class Refused(Base):
         kept = self.ends("t5", (self.BUSY, True))
         self.assertEqual((kept[KID]["n"], kept[KID]["said"]), (1, self.BUSY))
         self.assertEqual(self.lines(self.said(), "archive:"), [], "refused a moment ago: no call is handed")
+        self.t.stop(TOP, TASK, report="The app kept it, so it waits.", uuid="t5b")
         self.idle()
-        again = self.lines(self.said(), "archive:")
+        got = self.look("--net")
+        self.assertTrue(str(got.get("upkeep") or "").startswith("phi (p4-phi): upkeep is due"), "the retry wakes it")
+        again = self.lines(self.said(got["upkeep"]), "archive:")
         self.assertEqual(len(again), 1, "the one retry")
         self.assertIn(self.BUSY, again[0], "the app's words are passed on as they stand")
 
