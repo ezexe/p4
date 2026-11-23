@@ -3861,7 +3861,21 @@ BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|ch
 # a git command that stages or commits by itself, or sets work aside: in a checkout other sessions share it takes
 # their changes with it. Read as BRANCH_MOVE is, on the line with its quoted parts taken out.
 SHARED_TAKE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+"
-                         r"(commit|add|stash|rm|mv)(?![\w-])")
+                         r"(commit|add(?!\s+(?:-n|--dry-run)\b)|stash(?!\s+(?:list|show)\b)|rm|mv)(?![\w-])")
+
+
+def shared_repo(home, s, folders):
+    """True when one of `folders` lies in a repository another running session works in, by that session's `cwd`: a
+    repository this session made for itself, as a test's fixture, is shared with nobody and takes nobody's changes.
+    The folders are those the line names with `cd` or `git -C`, where git then runs, else the hook's own. Where the
+    record of the session that started this one holds no folder, nothing shows the repository is this session's
+    alone, and it is taken as shared."""
+    if not load_session(home, spawned_from(s)).get("cwd"):
+        return True
+    theirs = {relay.repo_of(relay.norm(str(o.get("cwd") or ""))) for oid, o in relay._sessions(home).items()
+              if oid != s.get("sessionId") and o.get("cwd") and not relay.gone(home, o)} - {""}
+    found = [relay.repo_of(f) for f in folders if f]     # a folder in no repository found shows nothing either
+    return not found or any(not r or r in theirs for r in found)
 
 
 def own_checkout(home, s, cwd):
@@ -3911,7 +3925,8 @@ def h_branch_guard(payload):
     line = str(inp.get("command") or "")
     named = [m.group(1).strip("'" + '"') for m in list(CD.finditer(line)) + list(DASH_C.finditer(line))]
     own = all(own_checkout(me.home, s, relay.norm(p, relay.norm(here)) if here else p) for p in [here] + named)
-    if takes and not own:
+    if takes and not own and shared_repo(me.home, s, [relay.norm(p, relay.norm(here)) if here else p
+                                                      for p in (named or [here])]):
         command = str(inp.get("command") or "").strip()
         RAN["branch_guard"] = command
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
@@ -4710,9 +4725,10 @@ def commit_main(argv):
             mine = relay.paths_of(rec) if spawned_from(rec) else []
         except Exception:  # noqa: BLE001
             mine = []
+        base = relay.norm(str(rec.get("cwd") or checkout)) if mine else ""   # where its paths were kept from
         for p in a.paths if mine else ():
             n = relay.norm(p, relay.norm(checkout))
-            if not any(relay.overlap(n, relay.norm(m, relay.norm(checkout))) for m in mine):
+            if not any(relay.overlap(n, relay.norm(m, base)) for m in mine):
                 print(f"phi: {p} is outside this session's paths, {', '.join(mine)}: nothing is committed",
                       file=sys.stderr)
                 return 2

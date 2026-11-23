@@ -3099,6 +3099,17 @@ class SharedCheckout(unittest.TestCase):
                     'git log --oneline -5', 'git show HEAD', 'grep -n "git commit" docs.md', 'echo "git add -A"'):
             self.assertIsNone(self.guard(KID, cmd), cmd)
         self.assertIsNone(self.guard(TOP, "git commit -m x"), "an orchestrator commits its own")
+        for cmd in ("git stash list", "git stash show -p", "git add -n .", "git add --dry-run ."):
+            self.assertIsNone(self.guard(KID, cmd), f"it changes nothing: {cmd}")
+
+    def test_a_child_is_not_refused_git_commit_in_a_repository_no_other_session_works_in(self):
+        mine = tempfile.mkdtemp(prefix="p4-own-repo-")
+        self.addCleanup(shutil.rmtree, mine, ignore_errors=True)
+        subprocess.run(["git", "init", "-q", mine], check=True, capture_output=True)
+        for cmd in ("git add . && git commit -m base", "git stash"):
+            self.assertIsNone(self.guard(KID, cmd, cwd=mine), f"a fixture of its own: {cmd}")
+        at = mine.replace("\\", "/")
+        self.assertIsNone(self.guard(KID, f"cd {at} && git commit -m base"), "named by cd from the shared checkout")
 
     def test_a_child_whose_folder_is_a_linked_worktree_of_its_own_is_asked_nothing_for_git_commit(self):
         own = os.path.join(self.t.proj, ".claude", "worktrees", "the-flush").replace("\\", "/")
