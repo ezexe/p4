@@ -146,7 +146,10 @@ class SkillText(unittest.TestCase):
     def test_a_move_makes_no_commit_and_no_orphan_branch(self):
         body = text()
         self.assertIn("A move is a plain move of the file into its subfolder", body)
+        move = body.split("## Moving a plan")[1].split("## The plan loop")[0]
         for word in ("orphan", "git worktree add", "origin plans", "git -C", "commit -m"):
+            self.assertNotIn(word, move, word)
+        for word in ("orphan", "origin plans", "commit -m"):
             self.assertNotIn(word, body, word)
 
     def test_the_prose_writes_no_parenthetical_and_each_list_item_is_one_line(self):
@@ -176,7 +179,9 @@ class SkillText(unittest.TestCase):
         hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
         for word in ("`**Files:**`", "`**Depends on:**`", "`**Checks:**`", "share a file or depend on one another",
                      "section `Distribution`", "landed by an integrator", "`phi.py sections <plan file>`",
-                     "A worker never edits the plan file"):
+                     "A worker never edits the plan file", "subagents and never sessions",
+                     "worktree add -b <run> <main checkout>/.claude/worktrees/<run> origin/main",
+                     "naming each branch, its commits and its check results"):
             self.assertIn(word, hand, word)
         self.assertLess(body.index("## The plan loop"), body.index("## What every section of a plan holds"))
 

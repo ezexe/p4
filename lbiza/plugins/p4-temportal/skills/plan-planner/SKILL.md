@@ -32,6 +32,9 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 
 - A session started to write a plan is started in plan mode, by the start tool's `permission_mode` or by `claude --permission-mode plan`, so Claude Code names its plan file in this folder and blocks every other edit, and its turn ends with `ExitPlanMode`, whose card ezexe answers in that session.
 - A plan written into this folder under a name of the session's own making is no plan file to Claude Code: `.claude` is a protected path, and Claude Code exempts from it the session's own plan file and no other file here, so each write of such a plan waits on ezexe.
+- Once `ExitPlanMode` returns approved, a planner another session started builds the plan itself, by the runs `Handing a plan's sections to workers` describes, and the session that started it only reviews, tests, merges and pushes.
+- A planner whose brief says it builds nothing is the one exception: it hands the command that prints the runs back in its report, and the session that started it makes the calls.
+- A top session ezexe is at makes those calls in its own turn.
 - A session whose plan mode ended with no approval, as when its mode was changed from outside, edits only its plan file and asks ezexe to approve the plan before it edits any other file.
 - Prep is the research one session hands to the planner that follows it: the prep session is started in plan mode too, writes the prep as its plan file, and puts `PREP COMPLETE <subject>` on line 1 once the prep is whole, which is how the planner finds it among the files directly in this folder.
 - The planner reads the prep as findings to check, and reads each source the prep leans on before a fence rests on it.
@@ -85,9 +88,14 @@ A plan is looped until it holds the whole development, and nothing is built befo
 - **A section that changes no file gets no worker:** the context and the distribution are such sections, and each has no `**Files:**` line or says `**Files:** none`.
 - **Sections become runs:** sections that share a file or depend on one another are one worker's run, landed in the plan's order, and every other section is a run of its own, each run in a git worktree of its own.
 - **The plan's section `Distribution` is a table of the runs:** each run's sections in order, its files, and its role with the model and effort the skill `sub-agentic` gives that role. A section whose fences are whole is landed by an integrator.
-- **The table's last row is the merge:** the runs' branches are merged into one branch, and the plugin's whole test folder is run once there before a push, since each run proved only its own files.
-- **A worker's brief names the plan file by its full path and its sections by number,** carries their `Files:` line and their checks as what done looks like, and tells the worker to stop and report where a fence does not fit the tree, writing no approach of its own.
+- **The table's last row is the merge:** the session that started the planner reads each run's branch and raises the version, the plugin's whole test folder is run once there before a push, since each run proved only its own files, and that session pushes by fast-forward and closes the plan.
+- **A worker's brief names the plan file by its full path and its sections by number,** carries their `Files:` line and their `Checks:` command as what done looks like, asks one commit per section, and tells the worker to stop and report where a fence does not fit the tree, writing no approach of its own.
 - **p4-phi drafts those starts where it is installed:** `phi.py sections <plan file>` prints one start call for each run.
+- **A planner another session started runs that command itself once `ExitPlanMode` returns approved,** and starts one `p4-phi:integrator` subagent for each run of the plan's `Distribution`, on `sonnet` at `medium` effort, in parallel where runs share no file, with each call's `prompt` as its brief.
+- **It starts subagents and never sessions:** the app refuses a start that runs at once in a turn ezexe's own message did not begin, and a subagent waits on no card.
+- **Before each run the planner makes that run's git worktree itself, standing outside it,** from `origin/main` freshly fetched, by `git -C <main checkout> worktree add -b <run> <main checkout>/.claude/worktrees/<run> origin/main`, and names that worktree in the run's brief.
+- **The planner mends a fence a run reports as not fitting** from the plan, and sends the mend to the same agent with SendMessage.
+- **No run and no planner pushes, merges or raises a version:** once every run has reported with its checks passing, the planner sends the session that started it one message naming each branch, its commits and its check results, and that message is the planner's done.
 - **A worker never edits the plan file:** its report holds the lines each fence landed at and each check's output, and the session that holds the plan writes them into the section as its Evidence.
 
 ## What every section of a plan holds
