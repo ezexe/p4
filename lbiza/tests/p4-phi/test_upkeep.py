@@ -33,6 +33,7 @@ import inproc  # noqa: E402
 import p4conf  # noqa: E402
 import phi  # noqa: E402
 import upkeep  # noqa: E402
+import shared  # noqa: E402
 import test_phi  # noqa: E402
 from test_phi import BRIEF, CLI, KID, KID2, TASK, TOP, Tree, context, handed, jload, write  # noqa: E402
 
@@ -845,6 +846,26 @@ class Leftovers(Base):
         self.assertEqual(self.lines(got, "leftovers of"), [], got)
         self.assertIn("it holds another checkout", flat(got))
         self.assertTrue(os.path.isdir(inner))
+
+    def test_a_worktree_that_holds_a_link_is_held_until_the_link_is_gone_and_its_target_is_left(self):
+        self.archived_kid()
+        with open(os.path.join(self.repo, ".git", "info", "exclude"), "a", encoding="utf-8") as f:
+            f.write("node_modules\n")
+        target = os.path.realpath(tempfile.mkdtemp())
+        kept = os.path.join(target, "keep.txt")
+        open(kept, "w").close()
+        at = os.path.join(self.wt, "node_modules")
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", at, target], check=True, capture_output=True)
+        else:
+            os.symlink(target, at, target_is_directory=True)
+        got = self.said()
+        self.assertEqual(self.lines(got, "leftovers of"), [], got)
+        self.assertIn("it holds a link", flat(got))
+        self.assertIn("unlink", flat(got))
+        self.assertTrue(shared.unlink(at))
+        self.assertEqual(len(self.lines(self.said(), "leftovers of")), 1, "free now: named")
+        self.assertTrue(os.path.isfile(kept), "what the link pointed at is whole")
 
     def test_a_worktree_the_archive_already_took_leaves_its_merged_branch_to_delete(self):
         import shutil

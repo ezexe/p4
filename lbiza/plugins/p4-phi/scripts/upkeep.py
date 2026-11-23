@@ -678,6 +678,15 @@ def nested(tree):
     return out
 
 
+LINKED = ("it holds a link, {link}, and Git for Windows before 2.54.0 empties what a junction points at when it "
+          "removes the worktree, so the link goes first, by `{cmd}`, which takes away each link and never its "
+          "target and then prints the removal to run")
+
+
+def unlink_cmd(tree):
+    return f"{PHI.commands()} unlink \"{tree}\""
+
+
 def links(tree):
     """The links a worktree holds among what git does not track there, which a removal must never follow; None
     where git could not list them, which a caller takes as a reason to remove nothing."""
@@ -774,6 +783,11 @@ def removals(home, s, trees, skip_own=False, but=(), kept=None):
         inner = [x for x in nested(t["path"]) if x not in going]
         if inner:
             held.append((tree, f"it holds another checkout, {inner[0]}, which a removal would take along"))
+            continue
+        tied = links(t["path"])
+        if tied is None or tied:
+            held.append((tree, "git could not list what it ignores there, so no removal of it is named"
+                         if tied is None else LINKED.format(link=tied[0], cmd=unlink_cmd(tree))))
             continue
         how, frm = stand(home, s, main, but=t["path"])
         rest = [f"worktree remove \"{tree}\""]
@@ -1080,6 +1094,19 @@ def terminal_acts(home, s, d, hand):
                             f"`report-{name}.md`, land what is whole as the push line says, and name the rest to "
                             f"ezexe once, in one line: a removal by force and a deletion of unmerged work are "
                             f"ezexe's."))
+            continue
+        tied = links(tree)
+        if tied is None:
+            continue                               # git could not list what it ignores: nothing is removed
+        if tied:
+            key = f"terminal-link:{name}"
+            if key not in d["named"]:
+                if hand:
+                    d["named"] = (d["named"] + [key])[-400:]
+                out.append((f"named:{key}", "named", False,
+                            f"left on disk, of the terminal worker `{name}`, whose run has ended: its worktree "
+                            f"{tree} is clean and landed, and " + LINKED.format(link=tied[0], cmd=unlink_cmd(tree))
+                            + "."))
             continue
         how, frm = stand(home, s, main, but=tree)
         rest = ([f"worktree unlock \"{tree}\""] if pid is not None else []) + [f"worktree remove \"{tree}\""]
