@@ -1446,7 +1446,7 @@ LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best
 # person answers the approval: docs/plugin-development.html, "Plan mode for a worker", has the card seen in the
 # desktop app, answered by ezexe alone. So such a session is told to enter no plan mode. sub-agents.md, "Built-in
 # subagents", Plan: "A research agent used during plan mode to gather context before presenting a plan", with
-# read-only tools, so it raises no card, and the session's starter approves by a message, which the two sentences of
+# read-only tools, so it raises no card, and the session's starter approves by a message, which the sentences of
 # GOAL_STARTER already count toward a condition. An allow at `classic.PermissionRequest` settles `ExitPlanMode` with
 # no person, seen in the desktop app on Claude Code 2.1.326, and p4-phi builds nothing on it: that would be a part
 # of the set of what it settles with no approval card, which is ezexe's to say yes to.
@@ -1483,7 +1483,8 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
                 "session. Once that returns approved, it runs `phi.py sections \"<its plan file>\"`, starts one "
                 "`p4-phi:integrator` subagent for each run, never a session, in a git worktree it makes from "
                 "`origin/main`, and sends the session that started it one message naming each branch, its commits "
-                "and its check results, and it pushes nothing, merges nothing and raises no version, unless its "
+                "and its check results, which ends its work: it awaits no reply, sets no wait for one and stops "
+                "each background task it started. It pushes nothing, merges nothing and raises no version, unless its "
                 "brief says it builds nothing. Where its task asks for " + PLAN_OPEN + ", and its brief does not "
                 "settle how, it has the built-in `Plan` subagent design the change, which only reads and raises no approval "
                 "card, sends that plan to the session that started it in one SendMessage, and takes that session's "
@@ -2107,6 +2108,8 @@ def approved_runs_text(payload, s):
                        "Neither this session nor any run pushes, merges or raises a version. Once every run has "
                        "reported with its checks passing, send the session that started this one one message that "
                        "names each branch, its commits and its check results: that message is this session's done. "
+                       "Await no reply to it, set no wait for one, and stop each background task, watch and "
+                       "subscription this session started before that turn ends. "
                        "That session reads each branch's change, raises the version, runs the plugin's whole test "
                        "folder, pushes by fast-forward and closes the plan. Only where this session's brief says it "
                        "builds nothing does it hand that command back in its report for that session to run.")
@@ -3183,9 +3186,11 @@ GOAL_ASKED = ("kept: p4-phi sets this condition as this session's goal once the 
               "condition names, since that model reads the conversation alone and runs nothing.")
 GOAL_SHORT = "state the goal's condition as a whole sentence: what holds when the work is done, and what shows it"
 GOAL_LONG = "a goal's condition holds 4,000 characters at most"
-GOAL_STARTER = ("The session that started this one is `{sid}`. A part of this condition counts as met once a message "
-                "from that session in this conversation says that session does that part itself or takes that part "
-                "or the whole work as done.")
+GOAL_STARTER = ("This condition is judged by its own words, and no part of it waits on a message from another "
+                "session: a part that names a message this session sends is met once this conversation shows that "
+                "message sent, with no reply to it. The session that started this one is `{sid}`. One more way a "
+                "part is met, and never a requirement: a message from that session in this conversation says that "
+                "session does that part itself or takes that part or the whole work as done.")
 
 
 def keep_review(s, brief):
@@ -3199,7 +3204,7 @@ def keep_review(s, brief):
 
 
 def goal_condition(s, line, cut_to_fit=True, review=False):
-    """A condition as it is set for the session `s`: `line`, and for a session another session started the two
+    """A condition as it is set for the session `s`: `line`, and for a session another session started the
     sentences of GOAL_STARTER after it, which name the starter by the id its messages carry. With `review`, the
     review of the change, plans.REVIEW_PART, stands between the two, for a brief that changes files. goal.md, "Write an
     effective condition": "The evaluator judges your condition against what Claude has surfaced in the conversation."
@@ -3207,7 +3212,11 @@ def goal_condition(s, line, cut_to_fit=True, review=False):
     that such a message counts. Seen in the desktop app on 2026-11-19, on Claude Code 2.1.326: a worker's line named
     "a session you start" and a push, its starter then made that start and that push itself and wrote that the work
     was taken as done, and the evaluator answered "it did not change the wording of the condition" and sent the
-    worker back nine times at the end of every turn, until its starter stopped the turn. A brief's line is cut to
+    worker back nine times at the end of every turn, until its starter stopped the turn. Seen there on 2026-11-23,
+    with those sentences worded as a rule, "counts as met once a message from that session": the evaluator took the
+    message as required, and a planner whose line ended at its own report was answered "only the starter's
+    acceptance is missing" at three turn ends, until its starter wrote. So the sentences say first that no part
+    waits on such a message, and give it as one more way a part is met. A brief's line is cut to
     leave the sentences room in the 4,000 characters a condition holds. With `cut_to_fit` false, for a condition the
     session stated itself, one that leaves them no room is set as it was stated."""
     line = str(line or "")
