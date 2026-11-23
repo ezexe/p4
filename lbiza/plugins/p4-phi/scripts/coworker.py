@@ -370,10 +370,10 @@ def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
 
 def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, sleep=time.sleep):
     """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there
-    and was written at or after the claim of the worker's node `name`, the time of its node.json, so a worker that
-    finished before the wait began is done at once; a report of no node counts from the wait's start. `long` after
-    `longest` seconds. It reads no transcript."""
-    since = (relay.node_time(home, name) if home and name else 0.0) or time.time()
+    and was written after the wait began, so the first report of a worker that went on working is no answer to a wait
+    made after it, whatever the claim time of its node `name`. `long` after `longest` seconds. It reads no
+    transcript."""
+    since = time.time()
     start = clock()
 
     def written():

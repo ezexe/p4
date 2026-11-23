@@ -5007,13 +5007,7 @@ def main(argv=None):
                         print(f"phi: a session named `{one['name']}` was started already, from its node "
                               f"{one['started']}, so nothing is written for it", file=sys.stderr)
                 return new
-            if a.land:                             # a terminal worker for each group not landed
-                if mode not in upkeep.NO_ASK:
-                    print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so an "
-                          "unattended tab would stop at its first question, and nothing is written: "
-                          f"`{commands()} sections \"{plan}\"` prints a start for a session in this checkout",
-                          file=sys.stderr)
-                    return 2
+            if a.land:                             # a terminal worker for each group not landed, in LAND_MODE
                 try:
                     found = coworker.land(plan, checkout, who, mode, claim=True, **node_of)
                 except ValueError as e:

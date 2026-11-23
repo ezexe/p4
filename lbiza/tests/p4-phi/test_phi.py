@@ -2850,17 +2850,22 @@ class TerminalWorker(unittest.TestCase):
     def node(self):
         return os.path.join(self.home, ".claude", "p4", "phi")
 
-    def test_land_writes_nothing_from_a_mode_that_asks(self):
+    def test_land_from_a_mode_that_asks_or_none_known_writes_the_start_in_bypass_permissions_mode(self):
+        """A landing worker always starts in bypassPermissions mode, so what mode its starter is in, or whether the
+        app's record names one, changes nothing about its start file."""
         self.mode("local_plan0002", "plan")
         self.mode("local_plan0003", "default")
-        for session, said in (("local_plan0002", "`plan`"), ("local_plan0003", "`default`"),
-                              ("cli-0001", "not known"), ("local_nomode001", "not known")):
+        for k, session in enumerate(("local_plan0002", "local_plan0003", "cli-0001", "local_nomode001")):
+            self.home = os.path.join(self.base, f"proj{k}", ".claude", "p4")
+            os.makedirs(self.home)
             ran = self.run_phi("--land", session=session)
-            self.assertEqual(ran.returncode, 2, ran.stdout)
-            self.assertIn(said, ran.stderr)
-            self.assertIn("unattended tab would stop at its first question", ran.stderr)
-            self.assertIn("sections", ran.stderr, "the other way is named")
-            self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing is written")
+            self.assertEqual(ran.returncode, 0, ran.stderr)
+            start = next(f for f in os.listdir(self.node()) if f.startswith("start-"))
+            with open(os.path.join(self.node(), start), encoding="utf-8") as f:
+                text = f.read()
+            self.assertIn("--permission-mode bypassPermissions", text, session)
+            self.assertNotIn("--permission-mode plan", text, session)
+            self.assertNotIn("--permission-mode default", text, session)
 
     def test_land_from_auto_writes_one_start_file_and_one_brief_into_the_node_and_a_second_land_writes_nothing(self):
         self.mode("local_plan0001", "auto")

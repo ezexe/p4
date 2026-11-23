@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
@@ -378,19 +379,32 @@ class Coworker(unittest.TestCase):
         self.assertEqual(relay.nodes(self.home), {}, "and the nodes of that call with it")
         self.assertEqual([one["folder"] for one in self.land()], [self.node(1), self.node(2)], "free again")
 
-    def test_wait_report_is_done_at_once_for_a_report_written_after_the_claim_and_before_the_wait(self):
+    def test_wait_report_counts_only_a_report_written_after_the_wait_began_whatever_the_claim_time(self):
+        """A worker that went on working after its first report writes another: the wait for it is not done at once
+        for the first, written after the node's claim and before the wait began."""
         one = self.land()[0]
+        store = relay.nodes(self.home)[one["name"]]
+        claimed = time.time() - 900
+        os.utime(os.path.join(store, "phi", relay.NODE), (claimed, claimed))
         with open(one["report"], "w", encoding="utf-8") as f:
-            f.write("landed\n")
+            f.write("the first report\n")
+        first = time.time() - 300
+        os.utime(one["report"], (first, first))
         now = [0.0]
-        self.assertEqual(coworker.wait_report(one["report"], self.home, one["name"], longest=60,
-                                              clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
-                         ("done", 0))
-        old = relay.node_time(self.home, one["name"]) - 600
-        os.utime(one["report"], (old, old))
+
+        def tick(s):
+            now[0] += s
+
+        def rewrite(s):
+            tick(s)
+            if now[0] >= 20:
+                with open(one["report"], "w", encoding="utf-8") as f:
+                    f.write("the second report\n")
         self.assertEqual(coworker.wait_report(one["report"], self.home, one["name"], longest=30,
-                                              clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
-                         ("long", 30), "a report from before the node is no report of it")
+                                              clock=lambda: now[0], sleep=tick), ("long", 30))
+        now[0] = 0.0
+        self.assertEqual(coworker.wait_report(one["report"], self.home, one["name"], longest=60,
+                                              clock=lambda: now[0], sleep=rewrite), ("done", 20))
 
     def test_kept_takes_the_checkout_from_the_node_so_a_wait_works_from_any_folder(self):
         from unittest import mock
@@ -439,7 +453,8 @@ class Coworker(unittest.TestCase):
         self.assertEqual(again.returncode, 2, "a plan's coworkers are started once")
         self.assertIn("was started already", again.stderr)
         land = subprocess.run(command + ["--for", "cli-0002", "--land"], capture_output=True, text=True, timeout=60)
-        self.assertEqual(land.returncode, 2, "no mode that asks nothing")
+        self.assertEqual(land.returncode, 0, "a landing worker needs no mode of its starter's")
+        self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(none.returncode, 2)
