@@ -1142,8 +1142,8 @@ def child_paths(home, s):
 # --- phi/ tracked in the store -------------------------------------------------------------------------------------------
 #
 # When the store's p4.json sets phi.track, the session tree reaches the other machines through the store's git, like
-# the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, plan.json and anchor.json are tracked,
-# and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
+# the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, children.jsonl, plan.json and
+# anchor.json are tracked, and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
 # tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
 # layout hook that seeds the rest of .gitignore runs beside this one at a start.
 

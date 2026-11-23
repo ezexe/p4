@@ -901,8 +901,8 @@ class Background(unittest.TestCase):
     def test_the_tree_is_printed(self):
         self.t.stop(KID, HANDED, [], "Half done.")
         out = self.t.cli(TOP, "tree").stdout
-        self.assertIn("- \"Narwhal exporter\" `", out)
-        self.assertIn("  - \"Fix the dropped row\" `", out)
+        self.assertIn("- 1 orchestrator \"Narwhal exporter\" `", out)
+        self.assertIn("  - 101 worker \"Fix the dropped row\" `", out)
         self.assertIn("not shown done, 1 turn", out)
 
     def test_show_prints_a_sessions_page(self):
@@ -2682,6 +2682,124 @@ class AppTools(unittest.TestCase):
         self.assertEqual(self.t.session(scripted).get("cliSessionIds"), [scripted])
 
 
+class Places(unittest.TestCase):
+    """children.jsonl: the lines a parent keeps, one for each session it started, which give the children's places."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="Narwhal exporter")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def kid(self, host, above=TOP):
+        self.t.record(host, above, host)
+        self.t.say(host, HANDED)
+
+    def lines(self, host=TOP):
+        return [r["id"] for r in phi.read_rows(os.path.join(self.t.dir(host), "children.jsonl"))]
+
+    def sessions(self):
+        import glob
+        out = {}
+        for p in glob.glob(os.path.join(self.t.p4, "phi", "sessions", "*", "session.json")):
+            d = jload(p)
+            out[d["sessionId"]] = d
+        return out
+
+    def address(self, host):
+        import node
+        return node.addresses(self.t.p4, self.sessions()).get(host)
+
+    def test_three_children_of_one_minute_stand_1_2_3_and_a_hook_after_adds_no_line(self):
+        for host in (KID, KID2, GRAND):
+            self.kid(host)
+        self.assertEqual(self.lines(), [KID, KID2, GRAND])
+        self.t.say(KID, "Again.")
+        self.t.stop(KID, HANDED, [], "Half done.")
+        self.assertEqual(self.lines(), [KID, KID2, GRAND], "no line for a hook of the first")
+        self.assertEqual([self.address(h) for h in (KID, KID2, GRAND)], ["101", "1001", "10001"])
+
+    def test_the_third_keeps_its_address_after_a_fourth_and_a_removed_folder_does_not_free_its_place(self):
+        for host in (KID, KID2, GRAND):
+            self.kid(host)
+        fourth = "local_kid00004"
+        self.kid(fourth)
+        self.assertEqual(self.address(GRAND), "10001")
+        self.assertEqual(self.address(fourth), "100001")
+        import shutil
+        shutil.rmtree(self.t.dir(GRAND))
+        fifth = "local_kid00005"
+        self.kid(fifth)
+        self.assertEqual(self.lines()[-2:], [fourth, fifth])
+        self.assertEqual(self.address(fifth), "1000001")
+
+    def test_a_record_first_made_with_no_parent_and_given_one_later_is_added(self):
+        self.t.record(KID, title="Fix the dropped row")
+        self.t.say(KID, HANDED)
+        self.assertEqual(self.lines(), [])
+        self.assertEqual(self.t.started_by(KID)[0], "")
+        self.t.record(KID, TOP, "Fix the dropped row")
+        self.t.say(KID, "Next.")
+        self.assertEqual(self.t.started_by(KID)[0], TOP)
+        self.assertEqual(self.lines(), [KID])
+
+    def test_a_child_recorded_before_its_parents_record_is_there_is_added_once_the_parents_is_ensured(self):
+        other = Tree(os.path.join(self._tmp.name, "other"))
+        other.record("local_up000001", title="Up")
+        other.record(KID, "local_up000001", "Down")
+        other.say(KID, HANDED)
+        rows = phi.read_rows(os.path.join(other.dir("local_up000001"), "children.jsonl"))
+        self.assertEqual([r["id"] for r in rows], [KID], "the parent's record was made with the child's, and the id added once")
+
+    def test_a_reparented_session_is_added_to_its_new_parents_lines_and_a_detached_one_is_a_top(self):
+        for host in (KID, KID2, GRAND):
+            self.kid(host)
+        self.assertEqual(self.t.cli(TOP, "reparent", GRAND, KID).returncode, 0)
+        self.assertEqual(self.lines(KID), [GRAND])
+        self.assertEqual(self.address(GRAND), "10101", "read from its new parent's lines")
+        self.assertEqual(self.t.cli(TOP, "reparent", GRAND, KID).stdout.strip(), "already there")
+        self.assertEqual(self.lines(KID), [GRAND], "no second line")
+        self.assertEqual(self.t.cli(TOP, "detach", GRAND).returncode, 0)
+        self.assertEqual(self.address(GRAND), "1")
+
+    def test_two_processes_that_each_record_a_child_at_the_same_time_leave_both_ids_in_the_file(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import phi; "
+                "[phi.place(sys.argv[2], f'{sys.argv[3]}{k:03}', sys.argv[4]) for k in range(60)]")
+        procs = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC, self.t.p4, tag, TOP])
+                 for tag in ("a", "b")]
+        for p in procs:
+            self.assertEqual(p.wait(timeout=60), 0)
+        ids = self.lines()
+        self.assertEqual(len(ids), 120, "no line lost")
+        self.assertEqual(set(ids), {f"{tag}{k:03}" for tag in "ab" for k in range(60)})
+
+    def test_a_session_json_gets_no_key_for_a_place(self):
+        self.kid(KID)
+        keys = set(self.t.session(KID))
+        self.assertFalse([k for k in keys if "place" in k.lower() or "address" in k.lower() or "child" in k.lower()], keys)
+        self.assertEqual(self.t.session(TOP).keys() & {"children", "places"}, set())
+
+    def test_the_tree_prints_each_session_with_its_address_and_level_and_its_leaves_under_it(self):
+        self.kid(KID)
+        write(os.path.join(self.t.dir(KID), "team.json"), json.dumps(
+            {"teammates": [{"name": "fences", "task": "x", "state": "idle", "doing": ""}]}))
+        out = self.t.cli(TOP, "tree").stdout.splitlines()
+        self.assertEqual(out[0], f"- 1 orchestrator \"Narwhal exporter\" `{TOP}`: no turn yet, 0 turns")
+        self.assertRegex(out[1], rf'^  - 101 worker "{KID}" `{KID}`: ')
+        self.assertEqual(out[2], "    - teammate fences: idle")
+
+    def test_node_prints_the_record_of_this_session(self):
+        self.kid(KID)
+        got = json.loads(self.t.cli(KID, "node").stdout)
+        self.assertEqual((got["id"], got["level"], got["address"], got["parent"], got["places"]),
+                         (KID, "worker", "101", TOP, [1]))
+        self.assertEqual(json.loads(self.t.cli(TOP, "node", KID).stdout)["address"], "101")
+        self.assertEqual(self.t.cli(TOP, "node", "local_none0001").returncode, 2)
+
+
 TICKS = chr(96) * 3
 WORKER_PLAN = ("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n"
                "## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Checks:** `python -m pytest t.py`\n\n"
@@ -2751,6 +2869,18 @@ class TerminalWorker(unittest.TestCase):
         self.assertIn("already started", again.stderr)
         self.assertEqual(sorted(os.listdir(self.folder)), files)
         self.assertEqual({f: os.path.getmtime(os.path.join(self.folder, f)) for f in files}, before)
+
+    def test_land_writes_terminals_json_in_the_planners_folder_and_a_second_land_replaces_nothing(self):
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land", "--write", self.folder)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        rows = jload(os.path.join(self.home, "phi", "sessions", "local_plan0001", "terminals.json"))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["kind"], rows[0]["sections"]), ("worker", ["1", "2"]))
+        self.assertTrue(rows[0]["report"].endswith(f"/report-{rows[0]['name']}.md"))
+        again = self.run_phi("--land", "--write", self.folder)
+        self.assertEqual(again.returncode, 2)
+        self.assertEqual(jload(os.path.join(self.home, "phi", "sessions", "local_plan0001", "terminals.json")), rows)
 
     def test_wait_report_returns_done_where_the_file_is_there(self):
         report = os.path.join(self.base, "report-tw-the-exporter-s-m-1-2-abcd.md")

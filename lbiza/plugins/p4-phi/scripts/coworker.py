@@ -17,6 +17,7 @@ appeared.
 
 import glob
 import hashlib
+import json
 import os
 import re
 import time
@@ -150,6 +151,25 @@ def write(folder, found):
         with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as f:
             f.write(text + "\n")
     return [os.path.join(folder, name).replace("\\", "/") for name in files]
+
+
+def note(home, sid, entries):
+    """One entry for each start file written, {name, kind: "reader" | "worker", sections, report, time}, added to
+    <home>/phi/sessions/<sid>/terminals.json, a list, which node.leaves reads; `report` is "" for a reading team.
+    A name that is already there is replaced. Nothing is written for a session with no id."""
+    sid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(sid or ""))[:80]
+    if not sid:
+        return []
+    path = os.path.join(home, "phi", "sessions", sid, "terminals.json")
+    held, _ = p4conf.load_json(path)
+    held = held if isinstance(held, list) else []
+    made = [{"name": one["name"], "kind": "worker" if one.get("report") else "reader",
+             "sections": list(one.get("sections") or []), "report": one.get("report") or "",
+             "time": time.strftime("%Y-%m-%d %H:%M")} for one in entries if one.get("name")]
+    mine = {m["name"] for m in made}
+    rows = [r for r in held if isinstance(r, dict) and r.get("name") not in mine] + made
+    p4conf.write_whole(path, json.dumps(rows, ensure_ascii=False, indent=1) + "\n")
+    return made
 
 
 QUIET = 90                       # seconds with no line written by a coworker or an agent under it

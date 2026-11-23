@@ -935,6 +935,9 @@ class ThreeSessions(unittest.TestCase):
         files = [x for x in shown if x.startswith("phi/")]
         self.assertTrue(any(x.endswith("/session.json") for x in files))
         self.assertFalse(any(x.endswith(("log.jsonl", "session.md")) for x in files), "per machine or made again")
+        self.assertIn(f"phi/sessions/{TOP}/children.jsonl", files, "a parent's lines of its children are tracked")
+        self.assertNotEqual(subprocess.run(["git", "-C", t.p4, "check-ignore", "-q",
+                                            f"phi/sessions/{TOP}/children.jsonl"]).returncode, 0, "and not ignored")
         self.assertNotIn(relay.UNTRACKED_MARK, open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(),
                          "tracking on takes the untracked tree's block out")
         self.assertFalse(relay.track(t.p4, first_only=True), "committed once")

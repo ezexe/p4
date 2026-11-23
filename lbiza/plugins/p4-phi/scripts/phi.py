@@ -775,7 +775,31 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
     above = spawned_from(s)
     if above and depth < CHAIN_MAX and not load_session(home, above).get("sessionId"):
         ensure_session(home, above, depth=depth + 1)
+    if above and load_session(home, above).get("sessionId"):
+        place(home, sid, above)                      # its place among the sessions its parent started
     return s
+
+
+def place(home, sid, parent):
+    """`sid` added to <parent's session folder>/children.jsonl where its id is in none of that file's lines: read
+    with no lock, and only where the id is in none, read again and added under relay.locked, one short line at the
+    file's end. A lock that is given up after three seconds is gone on without, and a line lost then is added again
+    at the child's next hook. node.addresses reads a child's place from where its id first stands. True where a line was added."""
+    sid, parent = safe_id(sid), safe_id(parent)
+    path = os.path.join(session_dir(home, parent), nd.CHILDREN)
+    if not sid or not parent or any(r.get("id") == sid for r in read_rows(path)):
+        return False
+    if relay._held(path):                            # this process holds the lock already
+        return _place(path, sid)
+    with relay.locked(path):                         # gives up after three seconds and goes on with no lock
+        return _place(path, sid)
+
+
+def _place(path, sid):
+    if any(r.get("id") == sid for r in read_rows(path)):
+        return False
+    append_line(path, {"id": sid})
+    return True
 
 
 def title_of(s):
@@ -4429,6 +4453,8 @@ def reparent(home, sid, under, source="reparented"):
     s["spawnedFrom"] = {"sessionId": under, "source": source, "from": old, "time": now()}
     s.pop("backgroundGivenFor", None)
     save_session(home, s)
+    if under:
+        place(home, sid, under)
     append_line(reports_path(home, old), {"time": now(), "left": sid, "to": under})
     turns = load_turns(home, sid)
     if turns:
@@ -4453,6 +4479,7 @@ def tree_text(home):
             continue                                 # an archived session, and what hangs under it, is not printed
         started.setdefault(above if above in sessions else "", []).append(s)
     out = []
+    where = nd.addresses(home, sessions)
 
     def walk(above, depth):
         for s in started.get(above, []):
@@ -4461,8 +4488,11 @@ def tree_text(home):
                 walk(s["sessionId"], depth)          # no record and no turns: an empty entry, its children kept
                 continue
             state = ("done" if turns[-1].get("done") else "not shown done") if turns else "no turn yet"
-            out.append(f"{'  ' * depth}- \"{title_of(s)}\" `{s['sessionId']}`: {state}, "
+            rec = nd.record(home, s["sessionId"], sessions)
+            address = nd.short(where[s["sessionId"]], rec["places"]) if s["sessionId"] in where else "-"
+            out.append(f"{'  ' * depth}- {address} {rec['level']} \"{title_of(s)}\" `{s['sessionId']}`: {state}, "
                        f"{len(turns)} turn{'s' * (len(turns) != 1)}")
+            out.extend(f"{'  ' * depth}  - {x['level']} {x['name']}: {x['state']}" for x in rec["leaves"])
             if depth < 30:
                 walk(s["sessionId"], depth + 1)
     walk("", 0)
@@ -4591,7 +4621,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
                  "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "conf", "sections",
-                 "coworkers", "progress", "spend"):
+                 "coworkers", "progress", "spend", "node"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -4649,6 +4679,9 @@ def main(argv=None):
                                 "store, behind one approval card that is ezexe's yes to the set whole; off takes "
                                 "it out; none prints the set, its id, how it stands and every kind of card")
             p.add_argument("set", nargs="?", default="", help="with on: the id of the set, as `phi.py cards` prints it")
+        if name == "node":
+            p.add_argument("moved", nargs="?", default="", help="the session whose node is printed, this one when "
+                                                                "left out")
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
@@ -4761,6 +4794,21 @@ def main(argv=None):
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
             return 0
+        if a.cmd == "node":                        # one node whole: its address, level, paths and leaves
+            sid = safe_id(a.moved or me.id)
+            if not sid:
+                print("phi: name the session, or run this from inside it", file=sys.stderr)
+                return 2
+            every = {}
+            for p in glob.glob(os.path.join(me.home, "phi", "sessions", "*", "session.json")):
+                d = read_json(p)
+                if d.get("sessionId"):
+                    every[d["sessionId"]] = d
+            if sid not in every:
+                print(f"phi: no session {sid} in this store", file=sys.stderr)
+                return 2
+            print(json.dumps(nd.record(me.home, sid, every), ensure_ascii=False, indent=1))
+            return 0
         if a.cmd == "cards":                       # the project's setting, which needs no session
             store = a.p4 or me.store or me.home
             if not a.act:
@@ -4820,6 +4868,7 @@ def main(argv=None):
                 return 2
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
             who = safe_id(a.planner or me.id)
+            planner_sid = who
             title = str((load_session(me.home, who) or {}).get("title") or "") if who else ""
             who = title or ("" if a.planner else who)
             if a.planner and not who:
@@ -4855,6 +4904,7 @@ def main(argv=None):
                           "has its brief or its report there, so nothing is written", file=sys.stderr)
                     return 2
                 coworker.write(folder, found)
+                coworker.note(me.home, planner_sid, found)
                 for one in found:
                     print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
                           f"{one['report']}")
@@ -4908,6 +4958,7 @@ def main(argv=None):
                           "nothing is written: a plan's coworkers are started once", file=sys.stderr)
                     return 2
                 coworker.write(os.path.abspath(a.write), found)
+                coworker.note(me.home, planner_sid, found)
                 if mode not in upkeep.NO_ASK:      # a mode that asks, or none the app's record names
                     print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so each "
                           "coworker may ask in its tab before an edit or a command: these coworkers only read, so "

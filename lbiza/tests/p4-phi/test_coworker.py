@@ -263,6 +263,23 @@ class Coworker(unittest.TestCase):
             self.assertFalse(coworker.stopped("cw-none"))
             self.assertFalse(coworker.stopped("../cw-a"))
 
+    def test_note_writes_one_entry_for_each_start_file_and_replaces_a_name_that_is_there(self):
+        home = os.path.join(self.base, "store")
+        found = coworker.land(self.path, "E:/repo", os.path.join(self.base, "w"), WHO, "auto", windows=True)
+        reading = coworker.drafts(self.path, "E:/repo", WHO, "auto", "E:/notes", windows=True)
+        self.assertEqual(coworker.note(home, "", found), [], "no session, nothing written")
+        coworker.note(home, "local_plan0001", reading)
+        rows = json.load(open(os.path.join(home, "phi", "sessions", "local_plan0001", "terminals.json"), encoding="utf-8"))
+        self.assertEqual([(r["name"], r["kind"], r["sections"], r["report"]) for r in rows],
+                         [(x["name"], "reader", x["sections"], "") for x in reading if x["team"]])
+        coworker.note(home, "local_plan0001", found)
+        coworker.note(home, "local_plan0001", found)
+        rows = json.load(open(os.path.join(home, "phi", "sessions", "local_plan0001", "terminals.json"), encoding="utf-8"))
+        self.assertEqual([r["kind"] for r in rows], ["reader"] * 2 + ["worker"] * len(found), "a name is there once")
+        worker = rows[2]
+        self.assertEqual((worker["name"], worker["report"]), (found[0]["name"], found[0]["report"]))
+        self.assertEqual(set(worker), {"name", "kind", "sections", "report", "time"})
+
     def test_a_path_that_holds_a_quote_is_refused_and_no_start_file_is_drafted(self):
         with self.assertRaises(ValueError):
             coworker.drafts(self.path, "E:/it's/repo", WHO, "auto", "E:/notes", windows=True)
