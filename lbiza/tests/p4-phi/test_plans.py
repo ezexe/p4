@@ -1076,7 +1076,7 @@ class Levels(unittest.TestCase):
         self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
         s = relay._session(self.t.p4, A)
         worker = {"steps": [{"addr": str(n), "content": c, "status": "pending"} for n, c in enumerate((
-            f"Review the retry design of {p}/src/export/retry.py from several angles",
+            f"Argue the retry design of {p}/src/export/retry.py from opposing sides",
             f"Port the exporter in {p}/src/export/flush.py to the new writer, with its tests",
             f"Port the importer in {p}/src/import/read.py to the new reader, with its tests"), 1)]}
         said = plans.split_advice(self.t.p4, {**s, "splitAdvised": []}, worker, True, "")
