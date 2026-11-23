@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -4500,8 +4501,77 @@ def remove_main(argv):
     return status
 
 
+COMMIT_TRIES = 100                             # repeats of a git call whose output names index.lock
+COMMIT_WAIT = 0.1                              # seconds between them
+
+
+def git_again(args, cwd, tries=COMMIT_TRIES, wait=COMMIT_WAIT):
+    """`git <args>` in `cwd`, run again after `wait` seconds while its output names index.lock, up to `tries` times:
+    (the finished process, True where the lock was still there after the last repeat)."""
+    for k in range(tries + 1):
+        ran = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace")
+        if ran.returncode == 0 or "index.lock" not in ran.stdout + ran.stderr:
+            return ran, False
+        if k < tries:
+            time.sleep(wait)
+    return ran, True
+
+
+def commit_paths(checkout, message, paths, tries=COMMIT_TRIES, wait=COMMIT_WAIT):
+    """The commit of exactly `paths` in `checkout`, as (status, lines): each path must be inside the checkout and
+    outside `.claude`, then `git add` and `git commit --only` take each as a literal pathspec, so what a sibling has
+    staged stays out. Git's own words end it on any failure but the lock, which is waited for."""
+    top = os.path.realpath(checkout)
+    specs, bad = [], []
+    for p in paths:
+        try:
+            rel = os.path.relpath(os.path.realpath(os.path.join(top, p)), top).replace("\\", "/")
+        except ValueError:                         # another drive
+            rel = ".."
+        parts = rel.split("/")
+        if rel == "." or parts[0] == ".." or ".claude" in parts:
+            bad.append(p)
+        specs.append(":(literal)" + rel)
+    if not paths or bad:
+        return 2, [f"phi: {', '.join(bad) if bad else 'no path'} " + ("is not a path inside the checkout and outside "
+                                                                    ".claude, so nothing is committed" if bad else
+                                                                    "was given to commit")]
+    trailer = subprocess.run(["git", "log", "-1", "--format=%(trailers:only,unfold)"], cwd=top, capture_output=True,
+                             text=True, encoding="utf-8", errors="replace").stdout.strip()
+    kept = [l for l in trailer.splitlines() if l.strip() and l not in message]
+    text = message.rstrip() + ("\n\n" + "\n".join(kept) if kept else "")
+    for args in (["add", "--", *specs], ["commit", "--only", "-m", text, "--", *specs]):
+        ran, locked = git_again(args, top, tries, wait)
+        if locked:
+            return 1, [f"phi: git's index.lock was still there after {tries} repeats of `git {args[0]}`: "
+                       "nothing is committed"]
+        if ran.returncode:
+            return ran.returncode, [(ran.stderr or ran.stdout).strip()]
+    short = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=top, capture_output=True, text=True).stdout
+    shown = subprocess.run(["git", "show", "--name-status", "--format=", "HEAD"], cwd=top, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace").stdout
+    return 0, [short.strip(), *shown.strip().splitlines()]
+
+
+def commit_main(argv):
+    """`phi.py commit -m <message> [--checkout <dir>] -- <path> ...`: commit_paths, which needs no store."""
+    import argparse
+    ap = argparse.ArgumentParser(prog="phi.py commit")
+    ap.add_argument("-m", "--message", required=True)
+    ap.add_argument("--checkout", default="")
+    ap.add_argument("paths", nargs="*")
+    a = ap.parse_args(argv)
+    status, lines = commit_paths(os.path.abspath(a.checkout or os.getcwd()), a.message, a.paths)
+    for line in lines:
+        print(line, file=sys.stderr if status else sys.stdout)
+    return status
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["commit"]:                     # a worker runs with the p4 plugins off and has no session record
+        return commit_main(argv[1:])
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     if argv[:1] == ["rules"]:                      # the hooks module's own, which needs no store

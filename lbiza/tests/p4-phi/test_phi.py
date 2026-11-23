@@ -2766,5 +2766,105 @@ class TerminalWorker(unittest.TestCase):
         self.assertEqual(how, ("long", 30))
 
 
+class CommitCommand(unittest.TestCase):
+    """`phi.py commit`, the one way a node commits in a shared checkout, run with no store and on real repositories."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-commit-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = os.path.realpath(self._tmp.name)
+        self.git("init", "-q", ".")
+        self.git("config", "user.email", "t@example.com")
+        self.git("config", "user.name", "t")
+        for name in ("keep.txt", "gone.txt", "old.txt", "a.txt", "b.txt", "g[1].txt", "sib.txt"):
+            self.put(name, f"the first text of {name}\n")
+        self.git("add", ".")
+        self.git("commit", "-qm", "first\n\nCo-Authored-By: Pair <pair@example.com>")
+
+    def put(self, name, text):
+        with open(os.path.join(self.repo, name), "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+    def git(self, *args):
+        ran = subprocess.run(["git", *args], cwd=self.repo, capture_output=True, text=True)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        return ran.stdout
+
+    def commit(self, message, *paths, cwd=None):
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "commit",
+                               "--checkout", self.repo, "-m", message, "--", *paths],
+                              capture_output=True, text=True, timeout=60, cwd=cwd or tempfile.gettempdir())
+
+    def held(self, rev="HEAD"):
+        return sorted(self.git("show", "--name-only", "--no-renames", "--format=", rev).split())
+
+    def test_it_runs_with_no_store_and_gives_the_commit_the_trailer_of_the_last_one(self):
+        self.put("a.txt", "2\n")
+        ran = self.commit("change a", "a.txt")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("a.txt", ran.stdout)
+        self.assertEqual(self.held(), ["a.txt"])
+        self.assertTrue(self.git("log", "-1", "--format=%B").rstrip()
+                        .endswith("Co-Authored-By: Pair <pair@example.com>"))
+        self.assertIn(self.git("rev-parse", "--short", "HEAD").strip(), ran.stdout.split("\n")[0])
+
+    def test_it_refuses_a_path_outside_the_checkout_and_one_under_dot_claude(self):
+        os.makedirs(os.path.join(self.repo, ".claude"))
+        self.put(".claude/x.txt", "1\n")
+        self.put("a.txt", "2\n")
+        before = self.git("rev-parse", "HEAD")
+        for bad in ("../outside.txt", ".claude/x.txt", os.path.join(os.path.dirname(self.repo), "z.txt"), "."):
+            ran = self.commit("m", "a.txt", bad)
+            self.assertEqual(ran.returncode, 2, bad)
+            self.assertIn("nothing is committed", ran.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), before)
+        self.assertEqual(self.commit("m").returncode, 2, "no path")
+
+    def test_two_processes_started_at_once_on_two_paths_both_commit_each_holding_its_own(self):
+        for k in range(4):
+            self.put("a.txt", f"a{k}\n")
+            self.put("b.txt", f"b{k}\n")
+            procs = [subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "commit",
+                                       "--checkout", self.repo, "-m", f"change {name} {k}", "--", name],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                     for name in ("a.txt", "b.txt")]
+            outs = [p.communicate(timeout=120) for p in procs]
+            self.assertEqual([p.returncode for p in procs], [0, 0], outs)
+            held = {rev: self.held(rev) for rev in self.git("log", "-2", "--format=%H").split()}
+            self.assertEqual(sorted(sum(held.values(), [])), ["a.txt", "b.txt"])
+            self.assertTrue(all(len(v) == 1 for v in held.values()), held)
+
+    def test_a_lock_held_past_the_tries_ends_in_the_failure_and_another_failure_ends_at_once(self):
+        import phi as phimod
+        self.put("a.txt", "2\n")
+        lock = os.path.join(self.repo, ".git", "index.lock")
+        open(lock, "w").close()
+        status, lines = phimod.commit_paths(self.repo, "m", ["a.txt"], tries=100, wait=0)
+        self.assertEqual(status, 1)
+        self.assertIn("index.lock", lines[0])
+        self.assertIn("100", lines[0])
+        os.remove(lock)
+        started = time.time()
+        status, lines = phimod.commit_paths(self.repo, "m", ["no-such-file.txt"], tries=100, wait=60)
+        self.assertNotEqual(status, 0)
+        self.assertLess(time.time() - started, 30, "a failure that is no lock is not waited for")
+        self.assertIn("no-such-file.txt", lines[0])
+
+    def test_a_new_a_deleted_a_renamed_and_a_glob_path_each_beside_a_siblings_staged_file(self):
+        self.put("sib.txt", "staged by a sibling\n")
+        self.git("add", "sib.txt")
+        self.put("fresh.txt", "new\n")
+        os.remove(os.path.join(self.repo, "gone.txt"))
+        os.rename(os.path.join(self.repo, "old.txt"), os.path.join(self.repo, "new.txt"))
+        self.put("g[1].txt", "2\n")
+        self.put("g1.txt", "an untracked neighbour\n")
+        ran = self.commit("all of them", "fresh.txt", "gone.txt", "old.txt", "new.txt", "g[1].txt")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(self.held(), ["fresh.txt", "g[1].txt", "gone.txt", "new.txt", "old.txt"])
+        self.assertEqual(self.git("diff", "--cached", "--name-only").split(), ["sib.txt"], "the sibling's stays staged")
+        self.assertEqual(self.git("ls-files", "--others", "--exclude-standard").split(), ["g1.txt"],
+                         "a glob that matched g1.txt would have taken it")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
