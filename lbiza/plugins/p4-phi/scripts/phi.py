@@ -4744,7 +4744,12 @@ def main(argv=None):
                 return 2
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
             who = safe_id(a.planner or me.id)
-            who = str((load_session(me.home, who) or {}).get("title") or who) if who else ""
+            title = str((load_session(me.home, who) or {}).get("title") or "") if who else ""
+            who = title or ("" if a.planner else who)
+            if a.planner and not who:
+                print(f"phi: no session {a.planner} with a title is in this store, so the coworkers would have "
+                      "nobody to send their lists to", file=sys.stderr)
+                return 2
             if a.land:
                 for name, text in coworker.land(plan, checkout, who):
                     print(f"to `{name}`:\n{text}\n")
@@ -4763,8 +4768,12 @@ def main(argv=None):
                               "its round from where it stopped")
                 return 0
             mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
-            found = coworker.drafts(plan, checkout, who, mode,
-                                    os.path.abspath(a.write).replace("\\", "/") if a.write else "<folder>")
+            try:
+                found = coworker.drafts(plan, checkout, who, mode,
+                                        os.path.abspath(a.write).replace("\\", "/") if a.write else "<folder>")
+            except ValueError as e:
+                print(f"phi: {e}", file=sys.stderr)
+                return 2
             if not found:
                 print("phi: no section of that plan names files on a `Files:` line, so it has no group to read",
                       file=sys.stderr)

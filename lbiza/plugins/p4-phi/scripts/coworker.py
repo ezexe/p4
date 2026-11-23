@@ -87,6 +87,9 @@ def script(name, checkout, mode, said, folder, windows=None):
     windows = upkeep.WINDOWS if windows is None else windows
     sep = "\\" if windows else "/"
     here, at = checkout.replace("\\", "/").replace("/", sep), folder.replace("\\", "/").replace("/", sep)
+    for path in (here, at):
+        if re.search(r"['\"`]", path):
+            raise ValueError(f"a start file's paths hold no quote: {path}")
     lv = level()
     flags = "".join(f" --{k} {lv[k]}" for k in ("model", "effort") if str(lv.get(k) or "inherit") != "inherit")
     run = (f"claude --name {name} --worktree {name}{flags}" + (f" --permission-mode {mode}" if mode else "")

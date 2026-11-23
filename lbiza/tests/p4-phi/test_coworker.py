@@ -154,6 +154,12 @@ class Coworker(unittest.TestCase):
             self.assertFalse(coworker.stopped("cw-none"))
             self.assertFalse(coworker.stopped("../cw-a"))
 
+    def test_a_path_that_holds_a_quote_is_refused_and_no_start_file_is_drafted(self):
+        with self.assertRaises(ValueError):
+            coworker.drafts(self.path, "E:/it's/repo", WHO, "auto", "E:/notes", windows=True)
+        with self.assertRaises(ValueError):
+            coworker.drafts(self.path, "E:/repo", WHO, "auto", "E:/it's/notes", windows=True)
+
     def test_the_command_prints_the_groups_and_with_write_the_call_that_starts_each(self):
         home = os.path.join(self.base, "proj", ".claude", "p4")
         os.makedirs(home)
@@ -188,3 +194,5 @@ class Coworker(unittest.TestCase):
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(none.returncode, 2)
+        nobody = subprocess.run(command + ["--for", "cli-9999"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(nobody.returncode, 2)
