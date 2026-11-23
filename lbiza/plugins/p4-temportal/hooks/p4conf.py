@@ -2629,6 +2629,9 @@ def watch(project, payload):
             and ((rec.get("kept") or {}).get(fwd(target)) or {})
             == {"keeper": KEEPER}
             and not asks_moved(p4, project)
+            # a key of the section that p4 leaves unwritten is said once: a keep with no `tell`, as the layout's
+            # move makes at a store's first start, wrote the record and said nothing
+            and wants(p4, target, sys.platform)[1] == (rec.get("asked") or {})
             and (unread != "none" or phi_on(project, target, sys.platform, _asked(p4)[0]) == phi)):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
