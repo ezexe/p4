@@ -30,21 +30,24 @@ class OneStore(unittest.TestCase):
         self.proj = os.path.join(self.tmp, "proj")
         os.makedirs(self.proj)
         self.config = os.path.join(self.tmp, "config")
-        os.makedirs(self.config)
+        os.makedirs(os.path.join(self.config, "plugins"))
+        # p4-phi as `claude plugin install` leaves it at user scope, so the keeper knows it runs for the project
+        with open(os.path.join(self.config, "plugins", "installed_plugins.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": 2, "plugins": {"p4-phi@p4-marketplace": [{"scope": "user", "version": "0.11.74"}]}}, f)
         self.assertIsNotNone(shutil.which("sh"), "sh is not found: a command hook starts it")
         self.assertIsNotNone(shutil.which("git"), "git is not found: the store makes a repository")
         self.assertEqual(subprocess.run(["git", "init", "-q", self.proj], capture_output=True).returncode, 0)
         self.p4 = os.path.join(self.proj, ".claude", "p4")
         self.local = os.path.join(self.proj, ".claude", "settings.local.json")
 
-    def hook(self, plugin, wrapper, *args):
+    def hook(self, plugin, wrapper, *args, event="SessionStart"):
         """One command hook as Claude Code runs it: `sh <wrapper> <args>` with the plugin's own root, the project's and
         a configuration folder with nothing in it."""
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "P4_"))}
         env.update({"CLAUDE_PROJECT_DIR": self.proj, "CLAUDE_PLUGIN_ROOT": str(plugin),
                     "CLAUDE_CONFIG_DIR": self.config, "P4_RECALL_SYNC": "1"})
         r = subprocess.run(["sh", str(plugin / "hooks" / wrapper), *args],
-                           input=json.dumps({**START, "cwd": self.proj}), capture_output=True, text=True, env=env,
+                           input=json.dumps({**START, "hook_event_name": event, "cwd": self.proj}), capture_output=True, text=True, env=env,
                            timeout=120)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertNotIn("Traceback", r.stderr)
@@ -56,8 +59,9 @@ class OneStore(unittest.TestCase):
     def layout(self):
         self.hook(PHI, "recall-hook.sh", "layout")
 
-    def keep(self):
-        self.hook(TEMPORTAL, "run-hook.sh", "store", "keep")
+    def prompt(self):
+        """The entry a session runs at each prompt, where the keeper copies what p4-phi asked since the last check."""
+        self.hook(TEMPORTAL, "run-hook.sh", "store", "prompt", event="UserPromptSubmit")
 
     def asked(self):
         with open(os.path.join(self.p4, "settings.local.json"), encoding="utf-8") as f:
@@ -76,12 +80,12 @@ class OneStore(unittest.TestCase):
                         "the project's local file holds the phi.py rule for p4-phi's scripts folder of this checkout")
         self.assertEqual(sorted(held), sorted(asked), "and what the file asks for, no more")
 
-    def test_make_then_layout_then_keep_copies_the_rule_into_the_local_file(self):
+    def test_make_then_layout_then_a_prompt_copies_the_rule_into_the_local_file(self):
         self.make()
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "p4.json")), "p4-temportal made the store")
         self.layout()
         self.assertTrue(os.path.isfile(os.path.join(self.p4, "settings.local.json")), "p4-phi wrote its file")
-        self.keep()
+        self.prompt()
         self.check_the_local_file()
 
     def test_layout_before_the_store_leaves_no_file_and_the_next_start_leaves_the_rule(self):
@@ -89,7 +93,15 @@ class OneStore(unittest.TestCase):
         self.assertFalse(os.path.exists(self.p4), "no store yet: p4-phi writes no file and makes no folder")
         self.make()
         self.layout()
-        self.keep()
+        self.prompt()
+        self.check_the_local_file()
+
+    def test_a_start_alone_copies_the_rule_of_a_file_p4_phi_already_wrote(self):
+        self.make()
+        self.layout()
+        with open(self.local, encoding="utf-8") as f:
+            self.assertFalse((json.load(f).get("permissions") or {}).get("allow"), "no rule was copied yet")
+        self.make()
         self.check_the_local_file()
 
 

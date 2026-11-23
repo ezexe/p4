@@ -21,7 +21,23 @@ PLUGINS = SRC.parents[1]
 # What the keeper writes as plansDirectory in a project that holds its own store: the store's folder of plan files,
 # from the project's root.
 PLANS = ".claude/p4/temportal/plan-planner"
+STORE_PY = PLUGINS / "p4-temportal" / "hooks" / "store.py"
 COPIES = [PLUGINS / "p4-temportal" / "hooks" / "p4conf.py", PLUGINS / "p4-phi" / "scripts" / "p4conf.py"]
+
+
+_STORE = []
+
+
+def temportal_store():
+    """p4-temportal's hooks/store.py, loaded by its path: the watch runs from its hook entries now, and these cases
+    move to p4-temportal's folder with the class in section 5 of the plan."""
+    if not _STORE:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("temportal_store", STORE_PY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _STORE.append(module)
+    return _STORE[0]
 
 
 class P4Conf(unittest.TestCase):
@@ -1711,6 +1727,27 @@ class ClaudeSettings(unittest.TestCase):
         p4conf.keep_settings(self.project, platform="win32", owned_only=True)
         self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "a ConfigChange moves none")
 
+    def test_an_older_copy_leaves_p4s_rules_where_the_file_asks_for_others(self):
+        """Two plugin versions at once: a copy whose GEN is lower than the `gen` the record holds for the rules part
+        wrote none of them, so where the file asks for the rule of another folder it leaves the entries as they are."""
+        from unittest import mock
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        asks(self.project, *self.rules(SRC))
+        p4conf.keep_settings(self.project, platform="win32")
+        rules = self.read(self.local())["permissions"]["allow"]
+        name = p4conf.fwd(p4conf.settings_file(self.project))
+        held = p4conf.read_record(os.path.join(self.project, ".claude", "p4"))["rules"][name]
+        self.assertEqual(held["gen"], p4conf.GEN, "the record holds the gen of the copy that wrote them")
+        older = os.path.join(self.tmp, "older", "p4-phi", "scripts")
+        fake_phi(older)
+        asks(self.project, *self.rules(older))
+        with mock.patch.object(p4conf, "GEN", p4conf.GEN - 1):
+            p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "the older copy leaves them")
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], self.rules(older),
+                         "a copy of the gen the record holds moves them")
+
     def test_a_rule_deleted_by_hand_stays_gone_when_the_plugin_folder_moves(self):
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         asks(self.project, *self.rules(SRC))
@@ -1940,18 +1977,17 @@ class Watcher(unittest.TestCase):
         with mock.patch.object(urllib.request, "urlopen", refuse), mock.patch.object(socket, "create_connection",
                                                                                       refuse), \
                 mock.patch.object(subprocess, "Popen", refuse), mock.patch.dict(os.environ, {"P4_PHI_SETTINGS": "0"}):
-            self.assertEqual(hook.settings_watch(self.project, {"hook_event_name": "SessionStart"}), [])
+            self.assertEqual(temportal_store()._watch(self.project, {"hook_event_name": "SessionStart"}), [])
         got = p4conf.claim_watch(p4)
         self.assertEqual(len(got), 1, got)
         self.assertIn("ConfigChange", got[0])
 
     def test_a_settings_change_reads_no_changelog(self):
         """The read belongs to a start: a ConfigChange leaves what is owed as it is."""
-        import hook
         p4 = os.path.join(self.project, ".claude", "p4")
         self.owe(p4, "2.1.300", "2.1.401")
         self.cache("# Changelog\n\n## 2.1.401\n\n- `ConfigChange` hooks now get a new field\n")
-        hook.settings_watch(self.project, {"hook_event_name": "ConfigChange", "source": "local_settings"})
+        temportal_store()._watch(self.project, {"hook_event_name": "ConfigChange", "source": "local_settings"})
         self.assertEqual(p4conf.read_record(p4)["changelog"], {"from": "2.1.300", "to": "2.1.401"})
         self.assertEqual(p4conf.claim_watch(p4), [])
 
@@ -2456,13 +2492,12 @@ class SettingsVariables(unittest.TestCase):
         """A failure of any kind in the settings check is one line, among the asks the layout hook shows as its
         systemMessage or among the lines migrate_layout returns, never the hook's own failure."""
         from unittest import mock
-        import hook
         p4 = self.store({})
 
         def boom(*a, **k):
             raise TypeError("a record of another shape")
         with mock.patch.object(p4conf, "watch", boom):
-            got = hook.settings_watch(self.project, {"hook_event_name": "SessionStart"})
+            got = temportal_store()._watch(self.project, {"hook_event_name": "SessionStart"})
         self.assertEqual(len(got), 1)
         self.assertIn("TypeError", got[0])
         with mock.patch.object(p4conf, "keep_settings", boom):

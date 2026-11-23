@@ -5,8 +5,18 @@ moved from p4-phi's scripts/hook.py as they were, so the store a new project get
   make    at SessionStart, reads the hook's input from stdin as hookio does, takes the project from CLAUDE_PROJECT_DIR
           and then the input's cwd, and runs init_layout: moves a store of an older layout, and makes `.claude/p4/`
           with its .gitignore, p4.json and its git repository where they are missing, and adds the
-          `.git/info/exclude` line. It prints one systemMessage that opens "p4-temportal: " with the lines
-          p4conf.migrate_layout returned, and nothing where there were none.
+          `.git/info/exclude` line. It then runs the settings watch, which p4-phi's layout hook ran before: the cheap
+          comparison of p4conf.watch, which on any change runs the keeper, and the read of Claude Code's cached
+          changelog. It prints one systemMessage that opens "p4-temportal: " with the lines p4conf.migrate_layout
+          returned and the watch's asks, and nothing where there were none.
+  settings  at ConfigChange of a local, project or user settings file: p4conf.watch checks the keys the record owns,
+          never a block. Prints nothing.
+  prompt  at UserPromptSubmit: where what p4-phi asks in the store's settings.local.json moved, and the last whole check
+          knows whether p4-phi runs, the keeper copies the rules (asks_only), and then a line for each change of Claude
+          Code the changelog read found, once, as additionalContext. Nothing when there is none.
+  asks    at FileChanged: where the changed file is the store's settings.local.json and its asks moved, the keeper
+          copies the rules, as at a prompt. Prints nothing. scratchpad.py's notebook-out hands the path to Claude Code
+          as watchPaths.
 
   unkeep  takes out everything the settings keeper wrote, the keys and rules of a settings file and the import line of
           CLAUDE.local.md, deletes a file the keeper made and emptied, and sets `claude.keep` false in p4.json, so no
@@ -23,6 +33,7 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+LIMITS = os.path.join(HERE, "claude_code_limits.json")   # the terms the changelog read looks for
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402 - the store's p4.json and its layout
@@ -41,6 +52,7 @@ claude-settings.json
 phi/cards.json
 settings.local.json
 phi/claude-code-watch.pending.json*
+temportal/claude-code-watch.pending.json*
 phi/sessions/*/log.jsonl
 phi/sessions/*/session.md
 phi/sessions.md
@@ -163,11 +175,67 @@ def exclude_line(project):
     return True
 
 
+def _store_of(project):
+    return os.path.join(p4conf.main_root(project)[0], ".claude", "p4")
+
+
+def _watch(project, payload):
+    """p4conf.watch at a start or a settings change: the asks to show ezexe. At a start it then reads the versions the
+    record owes from Claude Code's own cached changelog, a local file read in the hook's own time, with no web call and
+    no process of its own. A failure of any kind is one line among the asks, never the hook's own failure, so the rest
+    of the command runs."""
+    try:
+        got = p4conf.watch(project, payload)
+        if payload.get("hook_event_name") != "ConfigChange":
+            p4conf.read_changelog(_store_of(project), limits=LIMITS)
+    except Exception as e:  # noqa: BLE001
+        return [f"the settings watcher failed: {type(e).__name__}: {e}"]
+    return got["asks"]
+
+
 def cmd_make():
     payload = hookio.payload_from_stdin()
-    moved = init_layout(hookio.project_root(payload))
-    if moved:
-        print(json.dumps({"systemMessage": "p4-temportal: " + "; ".join(moved) + "."}))
+    project = hookio.project_root(payload)
+    lines = init_layout(project) + _watch(project, payload)
+    if lines:
+        print(json.dumps({"systemMessage": "p4-temportal: " + "; ".join(lines) + "."}))
+    return 0
+
+
+def cmd_settings():
+    """ConfigChange of the local, project or user settings file: the keys the record owns checked, never a block."""
+    payload = hookio.payload_from_stdin()
+    _watch(hookio.project_root(payload), payload)
+    return 0
+
+
+def cmd_prompt():
+    """UserPromptSubmit: the keeper copies what p4-phi asks where Claude Code raised no FileChanged for the file, then
+    the pending watch lines are taken once as additionalContext."""
+    payload = hookio.payload_from_stdin()
+    project = hookio.project_root(payload)
+    p4 = _store_of(project)
+    if not os.path.isdir(p4):
+        return 0
+    if p4conf.asks_due(p4, project):
+        p4conf.keep_settings(project, p4=p4, asks_only=True)
+    lines = p4conf.claim_watch(p4)
+    if lines:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                 "additionalContext": "\n".join(lines)}}))
+    return 0
+
+
+def cmd_asks():
+    """FileChanged: the keeper copies what p4-phi asks when the changed file is the one p4-phi writes in the store."""
+    payload = hookio.payload_from_stdin()
+    path = payload.get("file_path")
+    project = hookio.project_root(payload)
+    p4 = _store_of(project)
+    if not isinstance(path, str) or not path or not os.path.isdir(p4):
+        return 0
+    if hookio.same(path, p4conf.asks_file(p4)) and p4conf.asks_due(p4, project):
+        p4conf.keep_settings(project, p4=p4, asks_only=True)
     return 0
 
 
@@ -197,7 +265,8 @@ def cmd_keep():
     return 0
 
 
-COMMANDS = {"make": cmd_make, "unkeep": cmd_unkeep, "keep": cmd_keep}
+COMMANDS = {"make": cmd_make, "settings": cmd_settings, "prompt": cmd_prompt, "asks": cmd_asks,
+            "unkeep": cmd_unkeep, "keep": cmd_keep}
 
 
 def main(argv=None):

@@ -77,13 +77,14 @@ def run_sub(sub, payload, extra=None, **kw):
 
 def said(printed, pad=None):
     """What a hook's stdout says to a session: plain text as it is, and of the hook's JSON the `additionalContext`,
-    '' when it holds none. With `pad`, the JSON names that folder alone as `watchPaths`."""
+    '' when it holds none. With `pad`, the JSON names that folder and the store's settings.local.json, the file p4-phi
+    asks the keeper in, as `watchPaths`."""
     try:
         out = json.loads(printed)["hookSpecificOutput"]
     except (ValueError, KeyError, TypeError):
         return printed
     if pad is not None:
-        assert out["watchPaths"] == [pad] and os.path.isabs(pad), out
+        assert out["watchPaths"] == [pad, os.path.join(os.path.dirname(os.path.dirname(pad)), "settings.local.json")] and os.path.isabs(pad), out
     return out.get("additionalContext", "")
 
 

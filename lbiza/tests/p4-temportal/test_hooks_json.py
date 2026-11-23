@@ -44,7 +44,7 @@ class StoreMakerTest(unittest.TestCase):
         self.assertEqual(counts, {"startup": 1, "resume": 1, "clear": 1, "compact": 1, "fork": 1})
         group = [g for g in HOOKS["SessionStart"] if any("store make" in h["command"] for h in g["hooks"])][0]
         self.assertEqual((group["matcher"], group["hooks"][0]["timeout"], group["hooks"][0]["onFailure"]),
-                         ("startup|resume|clear|compact|fork", 15, "continue"))
+                         ("startup|resume|clear|compact|fork", 30, "continue"))
         tmp = tempfile.mkdtemp()
         try:
             proj = os.path.join(tmp, "empty")
@@ -322,8 +322,157 @@ class FileChangedTest(unittest.TestCase):
     def test_the_move_at_a_start_stays_and_hands_the_notebook_to_watch(self):
         for source in ("startup", "resume", "clear", "compact"):
             self.assertEqual(sum("scratchpad notebook-out" in c for c in runs("SessionStart", source)), 1, source)
-        text = (SRC / "scratchpad.py").read_text(encoding="utf-8")
-        self.assertIn('"watchPaths": [pad]', text)
+
+
+class StoreWatchTest(unittest.TestCase):
+    """The settings watch, the changelog watch and the keeper at a settings change run from p4-temportal's entries. By
+    https://code.claude.com/docs/en/hooks.md, "ConfigChange" matches `user_settings`, `project_settings`,
+    `local_settings`, `policy_settings` and `skills`; "FileChanged" runs a group with an omitted matcher for every
+    watched file."""
+
+    def command(self, event, name):
+        found = [h for g in HOOKS[event] for h in g["hooks"] if h["command"].endswith(f"store {name}")]
+        self.assertEqual(len(found), 1, (event, name))
+        return found[0]
+
+    def test_the_entries_name_store_settings_prompt_and_asks_on_documented_matchers(self):
+        config = [g for g in HOOKS["ConfigChange"] if any(h["command"].endswith("store settings") for h in g["hooks"])]
+        self.assertEqual(len(config), 1)
+        self.assertTrue(set(config[0]["matcher"].split("|")) <= {"user_settings", "project_settings", "local_settings",
+                                                                  "policy_settings", "skills"}, config[0]["matcher"])
+        for event, name in (("ConfigChange", "settings"), ("UserPromptSubmit", "prompt"), ("FileChanged", "asks")):
+            hook = self.command(event, name)
+            self.assertEqual((hook["type"], hook["onFailure"]), ("command", "continue"), name)
+        self.assertTrue(all("matcher" not in g for g in HOOKS["UserPromptSubmit"]), "UserPromptSubmit ignores a matcher")
+        self.assertTrue(all("matcher" not in g for g in HOOKS["FileChanged"]), "no matcher adds a file to the watch")
+
+
+class StoreWatchRunTest(unittest.TestCase):
+    """Each entry run as Claude Code runs it: `sh -c <command>` with the plugin's root, in a made store."""
+
+    def setUp(self):
+        import os
+        import shutil
+        import subprocess
+        import tempfile
+        self.assertIsNotNone(shutil.which("sh"), "sh is not found: a command hook starts it")
+        self.assertIsNotNone(shutil.which("git"), "git is not found: the store makes a repository")
+        self.tmp = tempfile.mkdtemp(prefix="p4-hooks-json-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.proj = os.path.join(self.tmp, "proj")
+        os.makedirs(self.proj)
+        self.config = os.path.join(self.tmp, "config")
+        os.makedirs(self.config)
+        self.assertEqual(subprocess.run(["git", "init", "-q", self.proj], capture_output=True).returncode, 0)
+        self.p4 = os.path.join(self.proj, ".claude", "p4")
+        self.local = os.path.join(self.proj, ".claude", "settings.local.json")
+        self.asked = os.path.join(self.p4, "settings.local.json")
+
+    def entry(self, event, name, payload):
+        import os
+        import subprocess
+        command = [h for g in HOOKS[event] for h in g["hooks"] if h["command"].endswith(f"store {name}")][0]["command"]
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "P4_"))}
+        env.update(CLAUDE_PLUGIN_ROOT=SRC.parent.as_posix(), CLAUDE_PROJECT_DIR=self.proj, CLAUDE_CONFIG_DIR=self.config)
+        r = subprocess.run(["sh", "-c", command], input=json.dumps({"cwd": self.proj, **payload}),
+                           capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        return r.stdout.strip()
+
+    def start(self):
+        return self.entry("SessionStart", "make", {"hook_event_name": "SessionStart", "source": "startup"})
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+
+    def phi_folder(self):
+        """A scripts folder laid out as the plugin p4-phi, outside the plugin cache: a checkout loaded by
+        --plugin-dir, whose rule the file may ask for."""
+        import os
+        scripts = os.path.join(self.tmp, "p4-phi", "scripts")
+        os.makedirs(scripts)
+        os.makedirs(os.path.join(self.tmp, "p4-phi", ".claude-plugin"))
+        with open(os.path.join(scripts, "phi.py"), "w", encoding="utf-8") as f:
+            f.write("")
+        with open(os.path.join(self.tmp, "p4-phi", ".claude-plugin", "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "p4-phi"}, f)
+        return scripts.replace(os.sep, "/")
+
+    def ask(self, *rules):
+        import os
+        os.makedirs(self.p4, exist_ok=True)
+        with open(self.asked, "w", encoding="utf-8", newline="\n") as f:
+            json.dump({"permissions": {"allow": list(rules)}}, f, indent=2)
+            f.write("\n")
+
+    def allow(self):
+        import os
+        return self.read(self.local)["permissions"]["allow"] if os.path.exists(self.local) else []
+
+    def test_a_prompt_hands_the_pending_lines_once_and_the_second_prompt_nothing(self):
+        import os
+        self.start()
+        pending = os.path.join(self.p4, "temportal", "claude-code-watch.pending.json")
+        os.makedirs(os.path.dirname(pending), exist_ok=True)
+        with open(pending, "w", encoding="utf-8") as f:
+            json.dump({"lines": ["p4-temportal: Claude Code 2.1.401 changed `x`", "another"]}, f)
+        out = json.loads(self.entry("UserPromptSubmit", "prompt", {"hook_event_name": "UserPromptSubmit",
+                                                                    "prompt": "hello"}))
+        self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                                      "additionalContext": "p4-temportal: Claude Code 2.1.401 "
+                                                                           "changed `x`\nanother"}})
+        self.assertEqual(self.entry("UserPromptSubmit", "prompt", {"hook_event_name": "UserPromptSubmit",
+                                                                    "prompt": "again"}), "")
+
+    def test_a_changed_asks_file_is_copied_at_its_change_and_no_other_file_moves_the_keeper(self):
+        import os
+        folder = self.phi_folder()
+        rule = f'Bash(python -I -X utf8 "{folder}/phi.py" *)'
+        self.ask(rule)
+        self.start()
+        self.assertEqual(self.allow(), [rule], "the start's whole check copied the rule")
+        self.ask(rule, "mcp__p4-phi__note")
+        change = {"hook_event_name": "FileChanged", "event": "change"}
+        self.entry("FileChanged", "asks", {**change, "file_path": os.path.join(self.p4, "p4.json")})
+        self.assertEqual(self.allow(), [rule], "another file at FileChanged writes nothing")
+        self.entry("FileChanged", "asks", {**change, "file_path": self.asked})
+        self.assertEqual(self.allow(), [rule, "mcp__p4-phi__note"], "the file p4-phi asks in moved the keeper")
+
+    def test_a_prompt_copies_what_the_file_asks_where_no_event_was_raised(self):
+        folder = self.phi_folder()
+        rule = f'Bash(python -I -X utf8 "{folder}/phi.py" *)'
+        self.ask(rule)
+        self.start()
+        self.ask(rule, "mcp__p4-phi__done")
+        self.entry("UserPromptSubmit", "prompt", {"hook_event_name": "UserPromptSubmit", "prompt": "hello"})
+        self.assertEqual(self.allow(), [rule, "mcp__p4-phi__done"])
+
+    def test_a_config_change_of_the_local_file_notes_a_key_taken_out_by_hand(self):
+        import os
+        import sys
+        self.start()
+        sys.path.insert(0, str(SRC))
+        import p4conf
+        written = [k for k in ("plansDirectory", "autoMemoryDirectory") if k in self.read(self.local)]
+        self.assertTrue(written, "the start wrote a key of its own")
+        data = self.read(self.local)
+        data.pop(written[0])
+        with open(self.local, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        self.entry("ConfigChange", "settings", {"hook_event_name": "ConfigChange", "source": "local_settings"})
+        rec = p4conf.read_record(self.p4)
+        self.assertIn(written[0], (rec.get("hand") or {}).get(p4conf.fwd(os.path.abspath(self.local)), []))
+
+    def test_a_start_hands_the_asks_of_the_watch_in_its_system_message(self):
+        import os
+        os.makedirs(self.p4, exist_ok=True)
+        with open(os.path.join(self.p4, "p4.json"), "w", encoding="utf-8") as f:
+            json.dump({"claude": {"model": "opus"}}, f)
+        out = json.loads(self.start())
+        self.assertTrue(out["systemMessage"].startswith("p4-temportal: "), out)
+        self.assertIn("model", out["systemMessage"])
 
 
 class PreCompactTest(unittest.TestCase):

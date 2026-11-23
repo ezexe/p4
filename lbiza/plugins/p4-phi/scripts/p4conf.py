@@ -2654,8 +2654,9 @@ def _unkeep_lines(name, rec, out):
 
 
 # --- The watcher, ezexe/p4#246 -------------------------------------------------------------------------------------
-# p4-phi's hook.py runs watch() at every SessionStart, from its layout handler, and at a ConfigChange of a settings
-# file, and at a start runs read_changelog, which reads what the record owes from Claude Code's own cached changelog.
+# p4-temportal's store.py runs watch() at every SessionStart, from its `make` command, and at a ConfigChange of a
+# settings file, and at a start runs read_changelog, which reads what the record owes from Claude Code's own cached
+# changelog.
 MARKET = "p4-marketplace"
 
 
@@ -2668,14 +2669,28 @@ def _version(v):
 
 
 SETTINGS_ENV = "P4_PHI_SETTINGS"          # 0 turns the settings watcher off
-VERSION_S = 2.0                           # what one `--version` may take, inside the layout hook's 15 s
+VERSION_S = 2.0                           # what one `--version` may take, inside the 30 s of p4-temportal's `store make`
 # claude-directory.md, "Kept until you delete them": "`cache/changelog.md` | Cached copy of the Claude Code changelog,
 # shown by `/release-notes`. Refreshed in the background." It is a path under `~/.claude/`, which CLAUDE_CONFIG_DIR
 # moves. p4 fetches no changelog of its own. What that copy lacks is the search for WATCHED and a record of the
 # versions read, and it can be older than the binary that runs, so the record keeps the versions still owed.
 CHANGELOG_CACHE = ("cache", "changelog.md")
-WATCH_PAGE = ("phi", "claude-code-watch.md")
-WATCH_PENDING = ("phi", "claude-code-watch.pending.json")
+WATCH_PAGE = ("temportal", "claude-code-watch.md")
+WATCH_PENDING = ("temportal", "claude-code-watch.pending.json")
+
+
+def _carry_watch(p4):
+    """The watcher's page and pending file lived under phi/ before p4-temportal ran the watch: where one is still there
+    and the one under temportal/ is not, it is moved by one rename, so no line a session was owed is lost."""
+    for name in (WATCH_PAGE, WATCH_PENDING):
+        old = os.path.join(p4, "phi", name[-1])
+        new = os.path.join(p4, *name)
+        try:
+            if os.path.exists(old) and not os.path.exists(new):
+                os.makedirs(os.path.dirname(new), exist_ok=True)
+                os.replace(old, new)
+        except OSError:
+            pass
 CONFIG_SOURCES = ("local_settings", "project_settings", "user_settings")
 # The documented defaults p4 relies on, each with the issue to act on when the changelog names it.
 WATCHED = {
@@ -2799,6 +2814,7 @@ def watch(project, payload):
     p4 = os.path.join(main_root(project)[0], ".claude", "p4")
     if not os.path.isdir(p4):
         return out
+    _carry_watch(p4)
     hand_settings(payload, settings_file(project))
     if payload.get("hook_event_name") == "ConfigChange":
         if payload.get("source") in CONFIG_SOURCES:
@@ -2900,6 +2916,7 @@ def read_changelog(p4, text=None, limits=None):
     only the sections it holds are read and the record then owes the rest, from the newest version read; a missing
     copy reads nothing and owes all of it. A copy with the time and size of the last read is not opened again. All of
     it runs under the store's SETTINGS_LOCK, so the record never loses what the keeper writes. Returns the hits."""
+    _carry_watch(p4)
     owed = read_record(p4).get("changelog")
     if not owed:
         return []
@@ -2950,7 +2967,7 @@ def _note_changelog(p4, old, new, text, limits):
     os.makedirs(os.path.dirname(page), exist_ok=True)
     head = "" if os.path.exists(page) else (
         "# Claude Code changes p4 watches\n\nEach section is one read of Claude Code's changelog after a new version"
-        " ran here, by p4conf.py's watcher.\n")
+        " ran here, by p4-temportal's watcher.\n")
     body = f"\n## {time.strftime('%Y-%m-%d %H:%M')}, {old} to {new}\n\n"
     body += "".join(f"- `{t}` in {v}, act on {i}: {l}\n" for t, v, i, l in hits) or "- No watched term.\n"
     with open(page, "a", encoding="utf-8", newline="\n") as f:
@@ -2958,7 +2975,7 @@ def _note_changelog(p4, old, new, text, limits):
     if hits:
         pend = os.path.join(p4, *WATCH_PENDING)
         have = (read_json(pend) or {}).get("lines") or []
-        lines = have + [f"phi (p4-phi): Claude Code {v} changed `{t}` by its changelog; read that entry and "
+        lines = have + [f"p4-temportal: Claude Code {v} changed `{t}` by its changelog; read that entry and "
                         f"{os.path.join(*WATCH_PAGE)} in the store, and act on {i}." for t, v, i, _ in hits]
         replace_text(pend, json.dumps({"lines": list(dict.fromkeys(lines))}, ensure_ascii=False) + "\n")
     return hits
@@ -2966,6 +2983,7 @@ def _note_changelog(p4, old, new, text, limits):
 
 def claim_watch(p4):
     """The pending watch lines, taken by one rename so one session gets each once; [] when there are none."""
+    _carry_watch(p4)
     pend = os.path.join(p4, *WATCH_PENDING)
     mine = f"{pend}.{os.getpid()}"
     try:

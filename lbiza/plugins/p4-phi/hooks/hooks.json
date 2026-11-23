@@ -1,5 +1,5 @@
 {
-  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop, StopFailure and SessionEnd, whose hooks share 1.5 seconds that a plugin's timeout does not raise. recall-hook.sh runs scripts/hook.py at every event here, ConfigChange among them, where its layout entry at SessionStart only finds the store, which p4-temportal's store make makes, and runs the settings watch and the served sweep where there is one, and hook.py hands phi.py its records after a tool call and its work at a subagent's start and stop. After a call that worked, only a tool whose record can answer has an entry the call waits on, which the matcher of PostToolUse names: a shell tool and the tools phi.py keeps a record of. The tie of a memory to the issue a call filed is made by the one async entry of PostToolBatch, which Claude Code runs once for a batch of calls, so a batch of parallel calls starts one process. Every entry on which onFailure acts sets it to continue, so a runner that cannot start, as on Windows without Git Bash, blocks no call, prompt or change; Stop, SubagentStop and the async entries set none, since onFailure does nothing there. register.ts is the hooks module, whose functions run inside Claude Code: it finds the python the runners proved, and it is an orchestrator's watcher, which runs `phi.py look` at a turn's end, at a message's arrival and on its timer, it keeps the session's context fill and plan limits in usage.json in the session's folder, it wakes an idle session: it sends the report of a worker's turn to the session that started it, and it starts a turn for the work a turn's wait left unmoved, and it sets the rules built into p4-phi as a section of the system prompt, so no SessionStart entry hands them, and it binds each subagent to the Agent call that launched it, which the subagent-start handler reads, and it keeps the origin Claude Code stamps on each prompt in origin.json, where the UserPromptSubmit hooks read whose message the prompt is, and it is the guard before a tool call, at tool.check: it runs `hook.py lookup-check` for the calls python has a check for and for no other, so no PreToolUse entry runs for every tool, and it declares `note`, `done` and `tree` as tools of the session, which run those commands of phi.py with no shell line, and it declares the command `/phi-pane`, which opens a pane that shows a puppeteer's board, the ledger of ezexe's requests and an orchestrator's ledger of its sessions from the session's folder, read anew after each look while the pane is open, and above them the session tree's goals, steps and plan loops from progress.json, which `phi.py progress` writes whenever a record of the tree changed.",
+  "description": "p4-phi's hooks. run-hook.sh runs scripts/phi.py at SessionStart, UserPromptSubmit, Stop, StopFailure and SessionEnd, whose hooks share 1.5 seconds that a plugin's timeout does not raise. recall-hook.sh runs scripts/hook.py at every event here, where its layout entry at SessionStart only finds the store, which p4-temportal's store make makes, and writes what p4-phi asks the keeper for into the store's settings.local.json and sweeps the served records where there is one, and hook.py hands phi.py its records after a tool call and its work at a subagent's start and stop. After a call that worked, only a tool whose record can answer has an entry the call waits on, which the matcher of PostToolUse names: a shell tool and the tools phi.py keeps a record of. The tie of a memory to the issue a call filed is made by the one async entry of PostToolBatch, which Claude Code runs once for a batch of calls, so a batch of parallel calls starts one process. Every entry on which onFailure acts sets it to continue, so a runner that cannot start, as on Windows without Git Bash, blocks no call, prompt or change; Stop, SubagentStop and the async entries set none, since onFailure does nothing there. register.ts is the hooks module, whose functions run inside Claude Code: it finds the python the runners proved, and it is an orchestrator's watcher, which runs `phi.py look` at a turn's end, at a message's arrival and on its timer, it keeps the session's context fill and plan limits in usage.json in the session's folder, it wakes an idle session: it sends the report of a worker's turn to the session that started it, and it starts a turn for the work a turn's wait left unmoved, and it sets the rules built into p4-phi as a section of the system prompt, so no SessionStart entry hands them, and it binds each subagent to the Agent call that launched it, which the subagent-start handler reads, and it keeps the origin Claude Code stamps on each prompt in origin.json, where the UserPromptSubmit hooks read whose message the prompt is, and it is the guard before a tool call, at tool.check: it runs `hook.py lookup-check` for the calls python has a check for and for no other, so no PreToolUse entry runs for every tool, and it declares `note`, `done` and `tree` as tools of the session, which run those commands of phi.py with no shell line, and it declares the command `/phi-pane`, which opens a pane that shows a puppeteer's board, the ledger of ezexe's requests and an orchestrator's ledger of its sessions from the session's folder, read anew after each look while the pane is open, and above them the session tree's goals, steps and plan loops from progress.json, which `phi.py progress` writes whenever a record of the tree changed.",
   "modules": ["./register.ts"],
   "hooks": {
     "SessionStart": [
@@ -32,16 +32,6 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.sh\" user-prompt-submit",
             "timeout": 20,
-            "onFailure": "continue"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" watch",
-            "timeout": 10,
             "onFailure": "continue"
           }
         ]
@@ -139,19 +129,6 @@
             "type": "command",
             "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" subagent-stop",
             "timeout": 30
-          }
-        ]
-      }
-    ],
-    "ConfigChange": [
-      {
-        "matcher": "local_settings|project_settings|user_settings",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/recall-hook.sh\" settings",
-            "timeout": 10,
-            "onFailure": "continue"
           }
         ]
       }

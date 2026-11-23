@@ -103,21 +103,18 @@ class Base(unittest.TestCase):
 class HooksJson(unittest.TestCase):
     def test_events_matchers_timeouts(self):
         h = own_hooks(HOOKS_JSON, "/hooks/recall-hook.sh")
-        self.assertEqual(set(h), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure",
-                                  "PostToolBatch", "SubagentStop", "ConfigChange", "SubagentStart"})
-        # ezexe/p4#246: the settings watcher runs in the layout hook at every start, and here at a change of a
-        # settings file, which it never blocks
-        self.assertEqual(h["ConfigChange"][0]["matcher"], "local_settings|project_settings|user_settings")
+        self.assertEqual(set(h), {"SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure",
+                                  "PostToolBatch", "SubagentStop", "SubagentStart"})
+        # ezexe/p4#246: the settings watcher is p4-temportal's, so no entry here runs at a prompt or a settings change
         self.assertEqual(h["SessionStart"][0]["matcher"], "startup|resume|clear|compact|fork")
         self.assertEqual(h["SessionStart"][0]["hooks"][0]["timeout"], 15)
         self.assertEqual(len(h["SessionStart"]), 1, "the layout hook alone: no catch-up")
-        self.assertEqual(h["UserPromptSubmit"][0]["hooks"][0]["timeout"], 10)
         self.assertEqual(h["PreToolUse"][0]["matcher"], "Agent")
         self.assertEqual(h["PreToolUse"][0]["hooks"][0]["timeout"], 10)
         self.assertEqual(h["SubagentStop"][0]["matcher"], ".+")
         names = {x["command"].split()[-1] for ev in h.values() for m in ev for x in m["hooks"]}
-        self.assertEqual(names, {"layout", "watch", "agent", "lookup-record", "lookup-batch", "subagent-start",
-                                 "subagent-stop", "settings"}, "no catch-up, recall, close or train")
+        self.assertEqual(names, {"layout", "agent", "lookup-record", "lookup-batch", "subagent-start",
+                                 "subagent-stop"}, "no watch, catch-up, recall, close or train")
         import hook
         for name in names:
             self.assertIn(name, hook.HANDLERS, name)
@@ -218,22 +215,6 @@ class Layout(Base):
         for source in ("startup", "resume", "clear", "compact"):
             r = run_hook("layout", {"hook_event_name": "SessionStart", "source": source, "cwd": self.proj}, self.proj)
             self.assertEqual((r.returncode, r.stdout), (0, ""), source)
-
-
-class Watch(Base):
-    def test_a_change_of_claude_code_is_handed_once_and_nothing_else(self):
-        import hook
-        payload = {"hook_event_name": "UserPromptSubmit", "prompt": "hello", "session_id": SESSION, "cwd": self.proj}
-        with mock.patch.dict(os.environ, {"CLAUDE_PROJECT_DIR": self.proj}):
-            self.assertIsNone(hook.h_watch(payload), "no pending file: silent")
-            write(os.path.join(self.p4, "phi", "claude-code-watch.pending.json"), "{}")
-            with mock.patch.object(p4conf, "claim_watch", return_value=["a line", "another"]) as claim:
-                out = hook.h_watch(payload)
-                claim.assert_called_once()
-            self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                                          "additionalContext": "a line\nanother"}})
-            with mock.patch.object(p4conf, "claim_watch", return_value=[]):
-                self.assertIsNone(hook.h_watch(payload), "a pending file that holds nothing")
 
 
 class Agent(Base):

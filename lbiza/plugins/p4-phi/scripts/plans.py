@@ -856,7 +856,7 @@ PARENT_EFFORT = ""            # phi.Me sets it: the effort the session of this h
 
 def capped(effort):
     """`effort`, or PARENT_EFFORT when that is the lower of the two: the app starts no session above its starter's
-    effort, a limit no docs page states and scripts/claude_code_limits.json logs."""
+    effort, a limit no docs page states and p4-temportal's hooks/claude_code_limits.json logs."""
     if PARENT_EFFORT in EFFORTS and effort in EFFORTS and EFFORTS.index(effort) > EFFORTS.index(PARENT_EFFORT):
         return PARENT_EFFORT
     return effort

@@ -173,6 +173,7 @@ class Gitignore(Base):
         self.assertEqual(tail[1:], ["temportal/notebook/.out/", "phi/served/", ".layout.lock",
                                     ".settings.lock", "claude-settings.json", "phi/cards.json", "settings.local.json",
                                     "phi/claude-code-watch.pending.json*",
+                                    "temportal/claude-code-watch.pending.json*",
                                     "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
                                     "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",
                                     "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", ".venv/", "*.pyc"])
@@ -207,6 +208,32 @@ class ExcludeLine(Base):
         shutil.rmtree(os.path.join(self.proj, ".git", "info"))
         write(os.path.join(self.proj, ".git", "info", "exclude"), "/.claude/p4\n")
         self.assertFalse(store.exclude_line(self.proj), "a line that names .claude/p4 is enough")
+
+
+class Watch(Base):
+    def test_the_watcher_files_move_from_phi_to_temportal_at_the_next_watch(self):
+        """A store that kept the watcher's page and pending file under phi/ gets them under temportal/ by a rename at
+        the next start, so no line a session was owed is lost."""
+        self.assertEqual(p4conf.WATCH_PAGE, ("temportal", "claude-code-watch.md"))
+        self.assertEqual(run_make(self.proj).returncode, 0)
+        write(os.path.join(self.p4, "phi", "claude-code-watch.md"), "# Claude Code changes p4 watches\n")
+        write(os.path.join(self.p4, "phi", "claude-code-watch.pending.json"), '{"lines": ["a line"]}\n')
+        r = run_make(self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for name in ("claude-code-watch.md", "claude-code-watch.pending.json"):
+            self.assertFalse(os.path.exists(os.path.join(self.p4, "phi", name)), name)
+            self.assertTrue(os.path.exists(os.path.join(self.p4, "temportal", name)), name)
+        self.assertEqual(p4conf.claim_watch(self.p4), ["a line"])
+
+    def test_the_terms_the_changelog_read_looks_for_are_p4_temportals_file(self):
+        """ezexe/p4#157: the plugin's hooks module sends a worker's report to its starter at each turn's end with
+        `$.session.send`, so the limit a closing line worked around is logged no more."""
+        self.assertEqual(store.LIMITS, os.path.join(SRC, "claude_code_limits.json"))
+        with open(store.LIMITS, encoding="utf-8") as f:
+            logged = json.load(f)
+        self.assertNotIn(157, [row["issue"] for row in logged])
+        self.assertFalse([row["issue"] for row in logged if "notify_when_idle" in row["terms"]])
+        self.assertGreater(len(p4conf.watched_terms(store.LIMITS)), len(p4conf.WATCHED), "the file's terms are read")
 
 
 if __name__ == "__main__":

@@ -210,12 +210,14 @@ def moved_line(root):
 def cmd_notebook_out(payload):
     """At SessionStart: the move, and the notebook's folder as a path Claude Code watches. hooks.md, "SessionStart
     decision control", gives `watchPaths` as "Array of absolute paths to watch for FileChanged events during this
-    session". Seen on Claude Code 2.1.328 in a `claude -p` run: a folder there raised FileChanged with the event
+    session", and this one hook returns both paths, the notebook's folder and the file p4-phi asks the keeper in, since no
+    page says two SessionStart hooks that each return it are joined. Seen on Claude Code 2.1.328 in a `claude -p` run: a folder there raised FileChanged with the event
     `add` for a new file in it and in a folder under it, and `change` for a file in it that was appended to."""
     root = project_root(payload)
     line = moved_line(root)
     pad = p4conf.sub(os.path.join(os.path.abspath(root), ".claude", "p4"), "scratchpad")
-    out = {"hookEventName": "SessionStart", "watchPaths": [pad]}
+    asks = p4conf.asks_file(os.path.join(p4conf.main_root(root)[0], ".claude", "p4"))
+    out = {"hookEventName": "SessionStart", "watchPaths": [pad, asks]}
     if line:
         out["additionalContext"] = line
     print(json.dumps({"hookSpecificOutput": out}))

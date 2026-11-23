@@ -1198,7 +1198,7 @@ class Levels(unittest.TestCase):
 
 class ParentEffort(unittest.TestCase):
     """The app starts no session above its starter's effort, a limit no docs page states and
-    scripts/claude_code_limits.json logs. hooks.md, "Common input fields", gives every hook with a tool-use context
+    p4-temportal's hooks/claude_code_limits.json logs. hooks.md, "Common input fields", gives every hook with a tool-use context
     `effort`, an "Object whose `level` is the effort level setting when the hook runs", and says "`$CLAUDE_EFFORT`
     holds the same level." So p4-phi reads the starter's level there, keeps the last one seen on the session's record,
     and names no start's effort above it."""

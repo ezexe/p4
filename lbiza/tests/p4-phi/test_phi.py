@@ -1127,14 +1127,6 @@ class NewTask(unittest.TestCase):
         finally:
             phi.project_conf("")
 
-    def test_the_limit_of_issue_157_is_logged_no_more(self):
-        """ezexe/p4#157: the plugin's hooks module sends a worker's report to its starter at each turn's end with
-        `$.session.send`, so the limit a closing line worked around is logged no more."""
-        with open(os.path.join(SRC, "claude_code_limits.json"), encoding="utf-8") as f:
-            logged = json.load(f)
-        self.assertNotIn(157, [row["issue"] for row in logged])
-        self.assertFalse([row["issue"] for row in logged if "notify_when_idle" in row["terms"]])
-
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
         self.say(KID, HANDED)

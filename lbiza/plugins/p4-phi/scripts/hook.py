@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """hook.py <name>: the p4-phi hooks that hooks/recall-hook.sh runs with Claude Code's JSON payload on stdin: the
-store's layout, the watch of Claude Code's changelog, the hand-over of a launch's text to its subagent, and the
-records phi.py keeps after a tool call. The check before a tool call is here too, and the plugin's hooks module runs
+store's layout, the hand-over of a launch's text to its subagent, and the records phi.py keeps after a tool call.
+The settings watch and the watch of Claude Code's changelog are p4-temportal's, hooks/store.py. The check before a tool call is here too, and the plugin's hooks module runs
 it with a PreToolUse hook's payload. Every handler resolves `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's
 `cwd`, prints only what its row below names, and on any failure exits 0 with one `systemMessage` for ezexe, never
 context for the model. Each row gives the handler's name, the event and matcher hooks/hooks.json runs it on, and what
@@ -9,17 +9,11 @@ it does.
 
   layout         SessionStart, matcher `startup|resume|clear|compact|fork`. p4-temportal's `store make` makes the
                  store, `.claude/p4/` with its .gitignore, p4.json and its git repository, and moves a store of an
-                 older layout; this hook only finds it. Where ready() gives a store it sweeps the served folder and
-                 runs p4conf.watch, the cheap comparison of the running Claude Code binary, the p4 plugins' versions,
-                 the store's `claude` section and the P4_* variables its p4.json asks for with p4conf's record, which
-                 on any change runs p4conf.keep_settings, and p4conf.read_changelog, which reads the versions a newer
-                 Claude Code left owed from Claude Code's own cached changelog. Where it gives none it does nothing.
-                 It prints a `systemMessage` only with a key a store wants that p4 never writes, and never
-                 `additionalContext`: a rule every session holds is a rules file, which Claude Code loads itself.
-  settings       ConfigChange, matcher `local_settings|project_settings|user_settings`. p4conf.watch checks the
-                 keys the record owns, never a block, and prints nothing.
-  watch          UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, as
-                 `additionalContext`; nothing when there is none.
+                 older layout; this hook only finds it. Where ready() gives a store it writes what p4-phi asks the
+                 keeper for, p4conf.want_settings, into the store's settings.local.json, which p4-temportal's keeper
+                 copies, and sweeps the served folder. Where it gives none it does nothing. It prints a
+                 `systemMessage` only with a failure of want_settings, and never `additionalContext`: a rule every
+                 session holds is a rules file, which Claude Code loads itself.
   agent          PreToolUse, matcher `Agent`. Nothing: the call runs with its prompt as written. phi.py's text for
                  the subagent waits for its start.
   subagent-start SubagentStart. phi.py binds the subagent, by the `agent_id` the input carries, to the launching
@@ -144,8 +138,8 @@ def sweep_served(p4, now_s=None):
 
 def h_layout(payload):
     """p4-temportal's `store make` makes the store, so this writes what p4-phi asks the keeper for into the store's
-    settings.local.json, runs the settings watch and the served sweep where ready() gives a store, and does nothing
-    where it gives none."""
+    settings.local.json and sweeps the served records where ready() gives a store, and does nothing where it gives
+    none."""
     if not ready(payload):
         return None
     project = project_of(payload)
@@ -154,47 +148,8 @@ def h_layout(payload):
         p4conf.want_settings(os.path.join(p4conf.main_root(project)[0], ".claude", "p4"))
     except Exception as e:  # noqa: BLE001 — a failure is one line of the message, never the hook's own
         asks.append(f"what p4-phi asks the keeper for was not written: {type(e).__name__}: {e}")
-    asks += settings_watch(project, payload)
     sweep_served(os.path.join(project, ".claude", "p4"))
     return {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else None
-
-
-# --- `settings`, on ConfigChange, and the watcher the layout hook runs ----------------------------------------
-
-LIMITS = os.path.join(HERE, "claude_code_limits.json")
-
-
-def settings_watch(project, payload):
-    """p4conf.watch at a start or a settings change: the asks to show ezexe. At a start it then reads the versions
-    the record owes from Claude Code's own cached changelog, a local file read in the hook's own time, with no web
-    call and no process of its own. A failure of any kind is one line among the asks, which the layout hook shows as
-    its systemMessage, never the hook's own failure, so the rest of the layout handler runs."""
-    try:
-        got = p4conf.watch(project, payload)
-        if payload.get("hook_event_name") != "ConfigChange":
-            p4conf.read_changelog(os.path.join(p4conf.main_root(project)[0], ".claude", "p4"), limits=LIMITS)
-    except Exception as e:  # noqa: BLE001
-        return [f"the settings watcher failed: {type(e).__name__}: {e}"]
-    return got["asks"]
-
-
-def h_settings(payload):
-    """ConfigChange of the local, project or user settings file: the keys the record owns checked, never a block."""
-    settings_watch(project_of(payload), payload)
-    return None
-
-
-# --- `watch`, on UserPromptSubmit ------------------------------------------------------------------------
-
-def h_watch(payload):
-    """A line for each change the read of Claude Code's cached changelog found, taken once, as additionalContext."""
-    p4 = p4_of(payload)
-    if not os.path.exists(os.path.join(p4, "phi", "claude-code-watch.pending.json")):
-        return None
-    watch = p4conf.claim_watch(p4)
-    if not watch:
-        return None
-    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(watch)}}
 
 
 # --- `agent`, on PreToolUse for the Agent tool ---------------------------------------------------------
@@ -467,7 +422,7 @@ def h_lookup_record(payload):
                                    "additionalContext": said}}
 
 
-HANDLERS = {"settings": h_settings, "layout": h_layout, "watch": h_watch, "agent": h_agent,
+HANDLERS = {"layout": h_layout, "agent": h_agent,
             "subagent-start": h_subagent_start, "subagent-stop": h_subagent_stop, "lookup-check": h_lookup_check,
             "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-batch": h_lookup_batch}
 
