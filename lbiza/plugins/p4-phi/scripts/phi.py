@@ -1478,7 +1478,7 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
                 "plan file there whole, asks the session that started it in one SendMessage for the lead of an "
                 "agent team, as the skill `plan-planner` of the plugin p4-temportal words that ask, has the team "
                 "read the plan in rounds, mending what held after each, until a round has nothing to mend or its "
-                "held findings are no fewer than the round before, and ends its turn with "
+                "held findings are more than the round before, and ends its turn with "
                 "`ExitPlanMode`, whose approval card ezexe answers in this "
                 "session. Once that returns approved, it runs `phi.py sections \"<its plan file>\"`, starts one "
                 "`p4-phi:integrator` subagent for each run, never a session, in a git worktree it makes from "

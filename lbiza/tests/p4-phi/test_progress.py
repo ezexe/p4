@@ -137,7 +137,9 @@ class Plan(Store):
         self.assertEqual((on["round"], on["of"], on["held"], on["state"], on["ended"]), (2, 4, 1, "", False))
         clean = progress.loop_of(log + "- Round 2: clean, 3 minutes\n")
         self.assertEqual((clean["held"], clean["state"], clean["ended"]), (0, "clean", True))
-        stopped = progress.loop_of(log + "- Round 2: 3 held, 5 minutes: no fewer than before.\n")
+        level = progress.loop_of(log + "- Round 2: 3 held, 5 minutes: as many as before.\n")
+        self.assertEqual((level["state"], level["ended"]), ("", False), "a level count goes on to a next round")
+        stopped = progress.loop_of(log + "- Round 2: 4 held, 5 minutes: more than before.\n")
         self.assertEqual((stopped["state"], stopped["ended"]), ("stopped", True))
         self.assertEqual(progress.loop_of("## Loop log\n"),
                          {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False})
