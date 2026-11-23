@@ -294,11 +294,15 @@ Agent teams run in the terminal `claude` command and not in the desktop app, so 
 The skill's section "A team in a terminal session" gives the start file the session writes, the one line it types and their conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
 The start file clears the variables a desktop session's shell hands down, as a terminal worker's start script does, so the lead is a session of its own in p4-phi's records.
 The skill `sub-agentic` holds the team as a role, and its rule 12 says when one `p4-phi:check` stays the reader and that the rounds of a plan's read are a team's.
-A planner asks the session that started it for that lead, since plan mode writes only the plan file, and then runs the rounds itself: the lead sends each list straight to the planner, and the planner sends each later round to the lead by its name.
-The same teammates read every round, so a later round reads only what the mends changed, and the tab stays open until the planner says its loop has ended.
+A plan is read by groups of its sections, each by a coworker, a terminal lead in a git worktree of its own: `phi.py coworkers <plan file>` puts the plan's runs into groups of five fences, prints them, and with `--write` writes each coworker's start file for the planner's starter to type.
+A coworker starts with p4-phi, p4-temportal and p4-native off, by the settings file the command writes, since p4's hooks would set up a second store in its worktree: it is handed nothing of p4's at its start, works from its task line and its planner's messages, and lands its group in that worktree once ezexe approved the plan, by the message `phi.py coworkers <plan file> --land` prints.
+Where the starting session's permission mode is neither auto nor bypass permissions, `--write` prints that the coworkers only read, and their groups are landed by integrator subagents.
+The same teammates read every round of their group, so a later round reads only what the mends changed, and a coworker's tab stays open until it has reported its branch.
+See more: https://code.claude.com/docs/en/worktrees.md
 A teammate was seen with no tool that fetches a page, so the lead reads each live page through one `web-fetch` subagent.
 The start file's last line names the lead's model and effort, Sonnet at medium, and a teammate on the lead's model inherits its effort: the teams seen live ran under a lead on the terminal's own model, Fable 5.2, with no effort recorded for a teammate, and a lead on Sonnet was not seen.
 `phi.py spend <session>` prints what a session and each teammate and subagent under it spent, from the transcripts Claude Code keeps: a teammate's finish notice held no token count, and on Claude Code 2.1.328 each teammate's transcript was beside its lead's, in the folder `subagents` under the lead's session id, with a `.meta.json` that names it.
+A coworker has no record in the store, so `phi.py spend <name>` reads it by the transcripts of the worktree of its name.
 The read of one plan on 2026-11-23 by three Sonnet teammates and one page subagent, one round, took 140 API calls, 18,613,450 tokens in, 17,759,246 of them read from the cache, and 125,587 tokens out.
 See more: https://code.claude.com/docs/en/costs.md
 p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
