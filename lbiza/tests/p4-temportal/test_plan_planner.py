@@ -165,7 +165,9 @@ class SkillText(unittest.TestCase):
         agent-teams.md, "Avoid file conflicts": "each teammate owns a different set of files"."""
         body = text()
         loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
-        for word in ("researches the section first", "one writer of the plan file",
+        for word in ("researches the section first", "in both places every time",
+                     "sends a research agent to the upstream pages", "the upstream page wins",
+                     "restates nothing an upstream page says", "`See more: <url>`", "one writer of the plan file",
                      "a reader that has not seen the writing", "two dry rounds in a row, or after five rounds",
                      "no session that writes is started and no file but the plan is edited"):
             self.assertIn(word, loop, word)

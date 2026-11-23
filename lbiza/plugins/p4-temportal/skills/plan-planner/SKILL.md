@@ -67,7 +67,10 @@ The evidence links below are written from `plan-planner/`, where `../../../../` 
 
 A plan is looped until it holds the whole development, and nothing is built before that.
 
-- **A round takes each section in turn:** it researches the section first, in the checkout and on the upstream pages read live, and then writes what it found into that section as its intents, its fences and each fence's Documented and Derivation.
+- **A round takes each section in turn:** it researches the section first, in both places every time, the checkout and the upstream pages read live on the web, and then writes what it found into that section as its intents, its fences and each fence's Documented and Derivation.
+- **The web research is an agent's own step:** each round sends a research agent to the upstream pages for the section's subject, read live, beside the read of the checkout, and a section whose subject has an upstream page holds a Documented from that page, never from the checkout's docs alone.
+- **Where the two speak of the same thing, the upstream page wins:** it holds the latest recommended approach, so the fence follows it, and the section gains a fence that brings the checkout's doc in step with it.
+- **The checkout's docs say only what is this code's own:** a fence that writes a doc restates nothing an upstream page says, writes what the code does and why, and links the upstream page as `See more: <url>` where the subject is upstream's.
 - **Research only reads:** a search or a read across files goes to a subagent that only reads, and the session that holds the plan is the one writer of the plan file.
 - **A round ends with one read by a reader that has not seen the writing:** it reads the plan against the sources and the checkout, and names each section that lacks a fence, a source, a file or a check, and each defect that would make a fence fail to apply, a new test fail, a test that passes now fail, the feature not work in a real session, or leave a worker a decision. The loop's reads are counted by its rounds, and the one second read the skill `sub-agentic` allows after a mend is its rule for what an agent wrote.
 - **One round's reader traces the live path of each new hook,** from Claude Code's event through every wrapper script to the handler, since a test that calls a handler by name passes with a gate shut in front of it.
