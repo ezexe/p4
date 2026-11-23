@@ -882,12 +882,17 @@ def h_lookup_record(payload):
 def h_train(payload):
     import contextlib
     import io
-    import train
     p4 = ready(payload)
     if not p4:
         return None
+    try:                        # the digests of the sessions closed since the last sweep. They are corpus and no
+        import digests          # model, so they are written whatever recall.learn says, and a failure here costs
+        digests.sweep(p4)       # no round and leaves no retrain notice
+    except Exception:  # noqa: BLE001
+        pass
     if not p4conf.section(p4, "recall", write=False).get("learn", True):
         return None             # recall.learn false, set by the p4-model skill's mode off: the models stay untouched
+    import train
 
     class A:
         pass
