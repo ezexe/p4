@@ -74,7 +74,7 @@ A tick that finds none changed starts no process, and a change costs one run of 
 A pane that holds no tree yet, as for a session whose folder is not made, asks again every ten seconds.
 A session's plan file is the first its own Write or Edit wrote directly in the store's `temportal/plan-planner`, kept on `session.json` as `planFile` while that file is there, and a worker's is the plan its brief names.
 A goal ezexe typed shows where the store's `phi.json` turns `goal` on, since only then is the session's transcript path kept, and a goal p4-phi set shows in every store.
-The loop's round is read from the plan's last heading, `## Loop log`, as p4-temportal's skill `plan-planner` shapes it.
+The loop's round and the findings that held in it are read from the plan's last heading, `## Loop log`, as p4-temportal's skill `plan-planner` shapes it, and the bar's whole is the most rounds the loop can take, one more than round 1 held findings.
 A plan's path and a session's title are drawn as text, since no page documents a link that opens a file or a session from a pane.
 Under a session the view lists each terminal worker it started, from its `upkeep.json`, as not started, running, ended or removed, where running means the process named in git's lock on the worker's worktree lives, the lock being looked for under the worker's own name.
 A worker's run has p4-phi turned off, so its steps and its goal are not shown, and its state turns to ended at the tree's next change, since no watched file changes when its run ends.
@@ -100,7 +100,7 @@ The section of the system prompt is left out where `P4_PHI=0`, `P4_PHI_RULES=0`,
 The rule `plan-mode` has a switch of its own, `phi.plan_mode`, so a project whose sessions enter plan mode only when asked leaves it out and keeps the act-don't-wait rule, and it reads in one of two ways, by whether another session started the session, which the app's record of it says.
 In a session ezexe is at it names which change is one whose approach is open in the words of the `EnterPlanMode` tool's own text, one that could be made in more than one way, that decides a structure, or that reaches past two or three files, and it names the plans folder from `p4conf.PLANS`, relative to the store, where the settings keeper points `plansDirectory`.
 How a plan is shaped and where it moves once it is done is p4-temportal's skill `plan-planner`, which the rule names.
-The rule also says that a plan is looped until two dry rounds in a row or five rounds, as p4-temportal's skill `plan-planner` counts them, that no session that writes is started and no file but the plan is edited before ezexe approves the whole plan, and that `phi.py sections <the plan file>` then prints one start call for each run of its sections.
+The rule also says that a plan is written whole and then read, in rounds by an agent team whose lead the planner's starter starts, until a round has nothing to mend, or by one `p4-phi:check` with one more read of the mends in a session no session started, as p4-temportal's skill `plan-planner` says, that no session that writes is started and no file but the plan is edited before ezexe approves the whole plan, and that `phi.py sections <the plan file>` then prints one start call for each run of its sections.
 A step of a task list that plans stays with the orchestrator, and in plan mode the advice after a task list names no start, a feature step is given no new orchestrator and no work step is nudged to a worker.
 No hook event tells of a change of the permission mode, so p4-phi keeps whether a session plans at each call of `EnterPlanMode` and `ExitPlanMode`, by a record of its own after each, and reads that ahead of the mode it kept at the last prompt.
 At the approval, which is `ExitPlanMode`'s record, an orchestrator is handed the advice on its open work steps and the feature line that plan mode held back.
@@ -292,7 +292,14 @@ A worker's own goal asks for the same round on its own change where `phi.goal_re
 Agent teams run in the terminal `claude` command and not in the desktop app, so a desktop session that wants one starts a terminal session to lead it, from the app's Terminal panel, and talks to that lead by message.
 The skill's section "A team in a terminal session" gives the start file the session writes, the one line it types and their conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
 The start file clears the variables a desktop session's shell hands down, as a terminal worker's start script does, so the lead is a session of its own in p4-phi's records.
-The skill `sub-agentic` holds the team as a role, and its rule 12 says when one `p4-phi:check` stays the reader.
+The skill `sub-agentic` holds the team as a role, and its rule 12 says when one `p4-phi:check` stays the reader and that the rounds of a plan's read are a team's.
+A planner asks the session that started it for that lead, since plan mode writes only the plan file, and then runs the rounds itself: the lead sends each list straight to the planner, and the planner sends each later round to the lead by its name.
+The same teammates read every round, so a later round reads only what the mends changed, and the tab stays open until the planner says its loop has ended.
+A teammate was seen with no tool that fetches a page, so the lead reads each live page through one `web-fetch` subagent.
+The start file's last line names the lead's model and effort, Sonnet at medium, and a teammate on the lead's model inherits its effort: the teams seen live ran under a lead on the terminal's own model, Fable 5.2, with no effort recorded for a teammate, and a lead on Sonnet was not seen.
+`phi.py spend <session>` prints what a session and each teammate and subagent under it spent, from the transcripts Claude Code keeps: a teammate's finish notice held no token count, and on Claude Code 2.1.328 each teammate's transcript was beside its lead's, in the folder `subagents` under the lead's session id, with a `.meta.json` that names it.
+The read of one plan on 2026-11-23 by three Sonnet teammates and one page subagent, one round, took 140 API calls, 18,613,450 tokens in, 17,759,246 of them read from the cache, and 125,587 tokens out.
+See more: https://code.claude.com/docs/en/costs.md
 p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
 
 ## The readings of an unclear message
