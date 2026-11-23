@@ -94,12 +94,12 @@ def findings(text):
 
 
 def on(home=""):
-    """False when the issue loop is off: P4_PHI_ISSUES and p4.json's phi.issues read by p4conf, the variable ahead
-    of p4.json when a person set it, 1, 0, true and false alike."""
+    """False when the issue loop is off: the store's p4.json decides, by p4conf.load, with a person's variable
+    P4_PHI_ISSUES ahead of it, 1, 0, true and false alike. A call with no store answers true, the default."""
     try:
         import p4conf
         if not home:
-            return p4conf.env_value("phi.issues", os.environ.get("P4_PHI_ISSUES"), True) is not False
+            return True
         return p4conf.section(home, "phi", write=False).get("issues", True) is not False
     except Exception:  # noqa: BLE001
         return True
@@ -111,8 +111,7 @@ def new_on(home=""):
     try:
         import p4conf
         if not home:
-            name = p4conf.env_name("phi.new_issues")
-            return p4conf.env_value("phi.new_issues", os.environ.get(name), True) is not False
+            return True
         return p4conf.section(home, "phi", write=False).get("new_issues", True) is not False
     except Exception:  # noqa: BLE001
         return True

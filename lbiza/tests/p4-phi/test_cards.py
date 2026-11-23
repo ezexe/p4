@@ -75,7 +75,7 @@ class TheSet(unittest.TestCase):
         self.assertFalse(p4conf.cards_on(self.p4), "a plain true names no set")
         say_yes(self.p4)
         self.assertTrue(p4conf.cards_on(self.p4))
-        self.assertNotIn(p4conf.CARDS_KEY, p4conf.env_wants(self.p4), "and none is written for it")
+        self.assertNotIn(p4conf.CARDS_KEY, p4conf.env_keys(), "and none is written for it")
         changed = p4conf.CARD_SET + (("more", "One more thing settled with no card."),)
         with mock.patch.object(p4conf, "CARD_SET", changed):
             self.assertNotEqual(p4conf.card_set_id(), sid)

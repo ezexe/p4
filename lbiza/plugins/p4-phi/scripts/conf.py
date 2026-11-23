@@ -7,7 +7,6 @@ is left to that command, and a key of Claude Code's own settings is no key of p4
 """
 
 import json
-import os
 
 import p4conf
 
@@ -45,9 +44,6 @@ def _refused(key):
 
 def _kept(store, key, value):
     p4conf.set_key(store, key, value)
-    project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
-    if os.path.basename(os.path.dirname(os.path.abspath(store))) == ".claude":
-        p4conf.keep_settings(project, p4=store)        # the variable that mirrors a changed setting
     return 0, show(store, key)
 
 

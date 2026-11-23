@@ -774,13 +774,6 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(self.read(self.local()), before)
         self.assertIn("plansDirectory", self.owned())
 
-    def test_the_settings_page_says_which_keys_the_keeper_writes(self):
-        """docs/claude-settings.html holds a row for each key of WRITES in its table of the keys p4 writes."""
-        page = (PLUGINS.parents[1] / "docs" / "claude-settings.html").read_text(encoding="utf-8")
-        written = page.split("<th>Why it is p4's</th>", 1)[1].split("</table>", 1)[0]
-        for key in p4conf.WRITES:
-            self.assertIn(f"<tr><td><code>{key}</code></td>", written, key)
-
     def test_the_keeper_reads_the_managed_settings_by_the_method_and_name_the_hooks_module_uses(self):
         """The keeper takes the managed settings from the hooks module by the method and under the name the code
         uses."""
@@ -878,7 +871,7 @@ class ClaudeSettings(unittest.TestCase):
             self.assertEqual(got["permissions"]["ask"], mine, "p4's own entry is gone, the user's rules are untouched")
             self.assertNotIn("askRules", json.loads(Path(self.record(project)).read_text(encoding="utf-8")))
             self.assertNotIn("deny", got["permissions"], "p4 writes no deny rule")
-            self.assertEqual(got.get("env", {}).get("P4_PHI_UPKEEP"), "1" if upkeep else None)
+            self.assertNotIn("env", got, "and no variable is written for the setting")
 
     def test_upkeep_on_leaves_an_archive_ask_rule_the_user_wrote(self):
         """An ask rule on the archive tool that ezexe wrote is no entry of p4's: it stays with the setting on."""
@@ -1819,9 +1812,8 @@ class Watcher(unittest.TestCase):
         self.assertEqual(p4conf.watched_terms(path)["fooSetting"], "ezexe/p4#999")
         self.assertEqual(p4conf.watched_terms(os.path.join(self.tmp, "none.json")), p4conf.WATCHED)
 
-    def test_a_setting_changed_in_p4_json_reaches_the_local_file_at_the_next_start(self):
-        """p4.json is no settings file, so no ConfigChange tells of an edit: the next start's cheap check sees that
-        the variables p4.json asks for differ from the record's and runs the whole check, with no --version."""
+    def test_a_setting_changed_in_p4_json_writes_no_variable_into_the_local_file(self):
+        """p4 writes no P4_* variable: an edit of p4.json changes nothing in the local file and runs no whole check."""
         from unittest import mock
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
@@ -1836,7 +1828,7 @@ class Watcher(unittest.TestCase):
             _write(p4conf.path(p4), {"phi": {"max_depth": 5}})
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
             with open(local, encoding="utf-8") as f:
-                self.assertEqual(json.load(f)["env"], {"P4_PHI_MAX_DEPTH": "5"})
+                self.assertNotIn("env", json.load(f))
             self.assertEqual(self.runs(), 1, "the same binary: no --version runs")
 
 
@@ -1849,7 +1841,7 @@ class WatcherFiles(unittest.TestCase):
 
     def test_a_second_local_file_of_the_store_is_kept_too(self):
         """On Windows a session started in a worktree has a local file of its own beside the main checkout's, both
-        of one store: after a p4.json edit each file's next start writes its variable."""
+        of one store: after a p4.json edit no file of the store gets a variable."""
         from unittest import mock
         main = self.project
         _git(main, "init", "-q")
@@ -1871,7 +1863,7 @@ class WatcherFiles(unittest.TestCase):
             for project in (main, wt):
                 p4conf.watch(project, start)
                 got = json.loads(Path(project, ".claude", "settings.local.json").read_text(encoding="utf-8"))
-                self.assertEqual(got.get("env"), {"P4_PHI_MAX_DEPTH": "5"}, project)
+                self.assertNotIn("env", got, project)
 
 
 # The development project's local settings file, which ezexe set as the reference for what the keeper writes in a
@@ -1915,6 +1907,23 @@ class SettingsVariables(unittest.TestCase):
             _write(p4conf.path(p4), conf)
         return p4
 
+    def legacy(self, p4, **env):
+        """A store a keeper before 17 kept: each P4_* entry in the local file and owned in the record, the way
+        keeper 16 wrote them."""
+        local = self.local()
+        data = self.read(local) if os.path.exists(local) else {}
+        data.setdefault("env", {}).update(env)
+        _write(local, data)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8")) if os.path.exists(self.record()) else {}
+        name = os.path.abspath(local).replace("\\", "/")
+        owned = rec.setdefault("files", {}).setdefault(name, {})
+        for k, v in env.items():
+            owned[f"env.{k}"] = {"v": v, "gen": 16}
+        rec.setdefault("kept", {})[name] = {"keeper": 16, "p4env": dict(env)}
+        rec["cardsCarried"] = {"at": "2026-11-20"}              # a record keeper 16 had checked whole
+        _write(self.record(), rec)
+        return rec
+
     def test_every_setting_has_one_variable_of_its_own(self):
         """Each setting of DEFAULTS, and each phi key read when set, has a name of its own, and no name is an older
         variable of another meaning: the two older switches that share a name mean what their setting means."""
@@ -1931,35 +1940,6 @@ class SettingsVariables(unittest.TestCase):
                 older |= set(re.findall(r"P4_[A-Z0-9_]+", path.read_text(encoding="utf-8", errors="replace")))
         self.assertEqual(older & set(names), {"P4_SCRATCHPAD_ASKS", "P4_PHI_ISSUES"})
         self.assertEqual(p4conf.env_name("phi.watch_s"), "P4_PHI_WATCH_SECONDS", "P4_PHI_WATCH_S is puppeteer's tick")
-
-    def test_the_settings_page_lists_every_variable_with_its_default(self):
-        """docs/claude-settings.html has a row for each variable: its name, its setting and its default as written."""
-        import html
-        page = (PLUGINS.parents[1] / "docs" / "claude-settings.html").read_text(encoding="utf-8")
-        for key, default in p4conf.env_keys().items():
-            row = f"<tr><td><code>{p4conf.env_name(key)}</code></td><td><code>{key}</code></td><td>"
-            self.assertIn(row, page, key)
-            if default is not p4conf._NONE and default is not None:
-                shown = html.escape(p4conf.env_text(key, default, default), quote=False)
-                self.assertIn(f"{row}<code>{shown}</code></td>", page, key)
-
-    def test_each_value_reads_back_from_the_text_written(self):
-        """A bool is 1 or 0, a string is written as it is unless it would read back as another value, and every
-        other value is compact JSON; each reads back as the same value of the same type."""
-        cases = {"phi.max_depth": [5, 1], "phi.watch_s": [2.5, 10.0], "phi.levels": [False, True],
-                 "phi.home": ["https://github.com/x/y.git", "5", "true", "[x"], "scratchpad.ignorable_ext": [[], ["a"]],
-                 "temportal.cache": [{"notebook/.out": {"max_age_days": 3}}],
-                 "phi.child_levels": [{"worker": {"model": "x"}}]}
-        keys = p4conf.env_keys()
-        for key, values in cases.items():
-            for v in values:
-                text = p4conf.env_text(key, v, keys[key])
-                got = p4conf.env_value(key, text, keys[key])
-                self.assertEqual(json.dumps(got), json.dumps(v), f"{key}={v!r} written as {text!r}")
-        self.assertEqual(p4conf.env_text("phi.levels", False, True), "0")
-        self.assertEqual(p4conf.env_text("phi.home", "https://github.com/x/y.git", None), "https://github.com/x/y.git")
-        self.assertEqual(p4conf.env_text("phi.home", "5", None), "5", "a string key takes its text")
-        self.assertEqual(p4conf.env_text("scratchpad.ignorable_ext", ["a", "b"], []), '["a","b"]')
 
     def test_a_variable_wins_over_p4_json_and_a_bad_one_falls_back_to_it(self):
         """A variable that fits its key wins over p4.json; an empty one is unset; one that does not fit is passed
@@ -2026,29 +2006,42 @@ class SettingsVariables(unittest.TestCase):
         finally:
             phi.project_conf(None)
 
-    def test_a_changed_setting_is_written_under_env_and_goes_at_its_default(self):
-        """Each setting p4.json changes is a variable p4 owns under `env`; one back at its default goes, and `env`
-        goes with the last of p4's variables."""
-        p4 = self.store({"phi": {"max_depth": 5, "home": "https://github.com/x/y.git", "watch_s": 5, "levels": False},
-                         "scratchpad": {"ignorable_ext": ["log"]}})
-        p4conf.keep_settings(self.project)
-        self.assertEqual(self.read(self.local())["env"], {
-            "P4_SCRATCHPAD_IGNORABLE_EXT": '["log"]', "P4_PHI_HOME": "https://github.com/x/y.git",
-            "P4_PHI_MAX_DEPTH": "5", "P4_PHI_LEVELS": "0"}, "watch_s 5 equals the default 5.0: no variable")
-        owned = list(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"].values())[0]
-        self.assertIn("env.P4_PHI_MAX_DEPTH", owned)
-        _write(p4conf.path(p4), {"phi": {"max_depth": 3, "home": "https://github.com/x/y.git", "levels": False}})
-        p4conf.keep_settings(self.project)
-        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_HOME": "https://github.com/x/y.git",
-                                                         "P4_PHI_LEVELS": "0"})
-        _write(p4conf.path(p4), {})
+    def test_a_changed_setting_writes_no_variable_and_the_entry_a_keeper_wrote_goes(self):
+        """A setting p4.json changes writes no variable, and each P4_* entry a keeper before 17 wrote goes at the
+        next start: its text is kept in p4past, its key in hand, and the record holds keeper 17."""
+        from unittest import mock
+        p4 = self.store({"phi": {"max_depth": 5}})
+        self.legacy(p4, P4_PHI_MAX_DEPTH="5")
         p4conf.keep_settings(self.project)
         self.assertNotIn("env", self.read(self.local()))
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        local = os.path.abspath(self.local()).replace("\\", "/")
+        self.assertEqual(rec["p4past"][local], {"P4_PHI_MAX_DEPTH": ["5"]})
+        self.assertIn("env.P4_PHI_MAX_DEPTH", rec["hand"][local])
+        self.assertEqual(rec["kept"][local], {"keeper": 17})
+        self.assertNotIn("env.P4_PHI_MAX_DEPTH", rec.get("files", {}).get(local, {}))
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 5, "p4's text is passed over, p4.json's 5 holds")
+            _write(p4conf.path(p4), {"phi": {"max_depth": 7}})
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 7, "still passed over where the environment holds it")
+        p4conf.keep_settings(self.project)
+        self.assertNotIn("env", self.read(self.local()), "a setting changed in p4.json writes no entry")
 
+    def test_a_keeper_of_16_run_after_this_one_writes_no_entry_back(self):
+        """A session of the version before writes by its _keep_key, which finds the key in hand: the entry this
+        keeper took out stays out."""
+        p4 = self.store({"phi": {"max_depth": 5}})
+        self.legacy(p4, P4_PHI_MAX_DEPTH="5")
+        p4conf.keep_settings(self.project)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        local = os.path.abspath(self.local()).replace("\\", "/")
+        data, owned, gone = self.read(self.local()), {}, list(rec["hand"][local])
+        new = json.loads(json.dumps(data))
+        p4conf._keep_key(p4, self.project, new, "env.P4_PHI_MAX_DEPTH", "5", owned, gone, False)
+        self.assertEqual(new, data, "the key is in hand: nothing is written")
     def test_ezexes_own_keys_and_variables_stay_untouched(self):
         """enabledPlugins, autoMemoryEnabled, every permission key but p4's own allow, ask and deny entries, ezexe's
-        own variables and a P4_* variable set by hand are left as they are, and the record never names them; a
-        variable p4 wrote and ezexe changed leaves the record and is never touched again."""
+        own variables and a P4_* variable set by hand are left as they are, and the record never names them."""
         self.store({"phi": {"max_depth": 5, "max_children": 6, "chain_max": 4}})
         mine = {"enabledPlugins": {"p4-phi@p4-marketplace": False}, "autoMemoryEnabled": False,
                 "permissions": {"allow": ["Bash(npm test)"], "ask": ["Bash(git push *)"], "deny": ["Read(./.env)"],
@@ -2065,21 +2058,11 @@ class SettingsVariables(unittest.TestCase):
         self.assertEqual(got["permissions"]["allow"][0], "Bash(npm test)")
         self.assertEqual(got["permissions"]["ask"], mine["permissions"]["ask"] + list(p4conf.ASK_RULES))
         self.assertEqual(got["permissions"]["deny"], mine["permissions"]["deny"] + list(p4conf.DENY_RULES))
-        self.assertEqual(got["env"], {"FOO": "1", "P4_PHI_MAX_CHILDREN": "4", "P4_PHI_MAX_DEPTH": "5",
-                                      "P4_PHI_CHAIN_MAX": "4"})
+        self.assertEqual(got["env"], mine["env"], "no entry of p4's is added")
         rec = json.dumps(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"])
         for k in ("enabledPlugins", "autoMemoryEnabled", "FOO", "P4_PHI_MAX_CHILDREN", "defaultMode", "deny"):
             self.assertNotIn(k, rec)
-        got["env"]["P4_PHI_MAX_DEPTH"] = "6"
-        del got["env"]["P4_PHI_CHAIN_MAX"]
-        _write(self.local(), got)
-        self.store({"phi": {"max_depth": 7, "chain_max": 4}})
-        p4conf.keep_settings(self.project, platform="win32")
-        env = self.read(self.local())["env"]
-        self.assertEqual(env["P4_PHI_MAX_DEPTH"], "6", "changed by hand: ezexe's from now")
-        self.assertNotIn("P4_PHI_CHAIN_MAX", env, "deleted by hand: not written back")
-
-    def reference(self, env=None):
+    def reference(self):
         scripts = os.path.abspath(SRC).replace("\\", "/")
         kept = {}
         for k, v in REFERENCE.items():
@@ -2088,14 +2071,12 @@ class SettingsVariables(unittest.TestCase):
                 kept.update(WRITTEN_BESIDE_IT.get(k, {}))
         text = json.dumps(kept)
         out = json.loads(text.replace("<memory>", self.memory()).replace("<scripts>", scripts))
-        if env:
-            out["env"] = env
         return out
 
     def test_a_fresh_projects_file_is_the_reference_file(self):
         """A fresh project whose store gives the co-author line: the keeper's file is the reference file, keys in
-        the same order, apart from ezexe's own keys, the defaults left to the app and the paths; after a setting
-        changes it holds that variable too, and nothing else moves."""
+        the same order, apart from ezexe's own keys, the defaults left to the app and the paths; it holds no `env`,
+        also after a setting changes."""
         self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]}})
         p4conf.keep_settings(self.project, platform="win32")
         got = self.read(self.local())
@@ -2104,10 +2085,7 @@ class SettingsVariables(unittest.TestCase):
         self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]},
                     "phi": {"max_depth": 5}})
         p4conf.keep_settings(self.project, platform="win32")
-        got = self.read(self.local())
-        self.assertEqual(got, self.reference({"P4_PHI_MAX_DEPTH": "5"}))
-        self.assertEqual(list(got), list(self.reference({"P4_PHI_MAX_DEPTH": "5"})))
-
+        self.assertEqual(self.read(self.local()), self.reference())
     def test_the_keeper_never_writes_the_two_defaults(self):
         """disableAllHooks and disableSkillShellExecution are left to the app: a fresh project's file holds neither,
         one an earlier copy wrote and still holds its value goes, and a true ezexe set stays."""
@@ -2133,33 +2111,28 @@ class SettingsVariables(unittest.TestCase):
         set wins."""
         from unittest import mock
         p4 = self.store({"phi": {"max_depth": 5}})
-        p4conf.keep_settings(self.project)
-        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"})
+        self.legacy(p4, P4_PHI_MAX_DEPTH="5")
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
             _write(p4conf.path(p4), {"phi": {"max_depth": 7}})
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 7, "edited, the keeper not run yet")
             p4conf.keep_settings(self.project)
-            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "7"})
+            self.assertNotIn("env", self.read(self.local()))
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 7, "the session still holds p4's old 5")
             _write(p4conf.path(p4), {})
-            p4conf.keep_settings(self.project)
-            self.assertNotIn("env", self.read(self.local()))
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 3, "removed, and still held by the session")
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "9"}):
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 9, "a person's value wins")
-
     def test_an_entry_a_person_wrote_with_p4s_value_is_never_taken_or_removed(self):
-        """A P4_* entry a person wrote that already holds what p4 would write: p4 writes nothing for it, never
-        records it as its own and never removes it when the setting goes back to its default."""
+        """A P4_* entry a person wrote, holding p4's value or another, is never recorded as p4's and never taken
+        out; a setting changed in p4.json writes no entry."""
         self.store({"phi": {"max_depth": 5}})
-        _write(self.local(), {"env": {"P4_PHI_MAX_DEPTH": "5"}})
+        _write(self.local(), {"env": {"P4_PHI_MAX_DEPTH": "5", "P4_PHI_CHAIN_MAX": "9"}})
         p4conf.keep_settings(self.project)
         owned = json.loads(Path(self.record()).read_text(encoding="utf-8")).get("files") or {}
         self.assertNotIn("P4_PHI_MAX_DEPTH", json.dumps(owned))
         self.store({})
         p4conf.keep_settings(self.project)
-        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"})
-
+        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5", "P4_PHI_CHAIN_MAX": "9"})
     def test_a_value_is_checked_as_its_reader_takes_it(self):
         """Each variable is checked against what its reader takes, items included; temportal.cache merges over the
         default rules as p4.json does; and a value that cannot be read at all falls back, never raising."""
@@ -2187,14 +2160,18 @@ class SettingsVariables(unittest.TestCase):
         self.assertEqual((got["phi"]["home"], got["phi"]["max_children"]), ("5", 7))
 
     def test_the_raw_readers_read_a_variable_as_p4conf_does(self):
-        """issues.on and scratchpad's asks read 1, 0, true and false alike."""
+        """issues.on follows p4.json for the store it is given, a person's variable wins, 1, 0, true and false
+        alike, and a call with no store answers true; scratchpad's asks read the same texts."""
         from unittest import mock
         import issues
-        p4 = self.store({})
-        for text, want in (("0", False), ("false", False), ("1", True), ("true", True), ("", True)):
+        p4 = self.store({"phi": {"issues": False, "new_issues": False}})
+        self.assertIs(issues.on(p4), False)
+        self.assertIs(issues.new_on(p4), False)
+        for text, want in (("0", False), ("false", False), ("1", True), ("true", True)):
             with mock.patch.dict(os.environ, {"P4_PHI_ISSUES": text}):
-                self.assertIs(issues.on(""), want, text)
                 self.assertIs(issues.on(p4), want, text)
+        self.assertIs(issues.on(""), True)
+        self.assertIs(issues.new_on(""), True)
         hooks = str(PLUGINS / "p4-temportal" / "hooks")
         sys.path.insert(0, hooks)
         try:
@@ -2205,44 +2182,31 @@ class SettingsVariables(unittest.TestCase):
                     self.assertIs(scratchpad.asks_on(), want, text)
         finally:
             sys.path.remove(hooks)
-
-    def test_a_variable_set_elsewhere_gets_no_entry_of_p4s(self):
-        """A variable set in the shell with a text p4 did not write, or in the user, project or managed settings,
-        gets no entry of p4's in the local file, which would override it, and p4's own entry goes once the variable
-        appears there; p4's own text in the environment is no such variable."""
+    def test_a_variable_set_elsewhere_is_read_and_no_entry_is_written(self):
+        """A variable set in the shell or in a settings file wins over p4.json, and the keeper writes no entry of its
+        own beside it."""
         from unittest import mock
         p4 = self.store({"phi": {"max_depth": 5, "max_children": 4, "chain_max": 4}})
         _write(os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "settings.json"), {"env": {"P4_PHI_MAX_CHILDREN": "6"}})
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "8"}):
             p4conf.keep_settings(self.project)
-            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_CHAIN_MAX": "4"})
+            self.assertNotIn("env", self.read(self.local()))
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 8, "the shell's value holds")
-        with mock.patch.dict(os.environ, {"P4_PHI_CHAIN_MAX": "4"}):
-            p4conf.keep_settings(self.project)
-            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_CHAIN_MAX": "4", "P4_PHI_MAX_DEPTH": "5"},
-                             "p4's own text in the environment is no other setter")
-        _write(os.path.join(self.project, ".claude", "settings.json"), {"env": {"P4_PHI_CHAIN_MAX": "2"}})
-        p4conf.keep_settings(self.project)
-        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"}, "p4's entry gives way")
-
     def test_a_text_a_person_changed_or_deleted_mid_session_stays_p4s(self):
-        """An entry p4 wrote that a person then changes or deletes leaves the record, but its text is kept as one
-        p4 wrote, so a session that still holds it reads p4.json and not that text."""
+        """An entry a keeper wrote that a person then changes leaves the record and stays in the file as the
+        person's; the text p4 wrote is still passed over, and the person's own text wins."""
         from unittest import mock
-        p4 = self.store({"phi": {"max_depth": 5, "chain_max": 4}})
-        p4conf.keep_settings(self.project)
+        p4 = self.store({"phi": {"max_depth": 7}})
+        self.legacy(p4, P4_PHI_MAX_DEPTH="5")
         d = self.read(self.local())
         d["env"]["P4_PHI_MAX_DEPTH"] = "6"
-        del d["env"]["P4_PHI_CHAIN_MAX"]
         _write(self.local(), d)
-        p4conf.keep_settings(self.project, owned_only=True)
-        self.store({"phi": {"max_depth": 7, "chain_max": 2}})
-        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5", "P4_PHI_CHAIN_MAX": "4"}):
-            got = p4conf.load(p4)["phi"]
-        self.assertEqual((got["max_depth"], got["chain_max"]), (7, 2))
+        p4conf.keep_settings(self.project)
+        self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "6"}, "a person's: left as it is")
+        with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 7)
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "6"}):
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 6, "the person's own text wins")
-
     def test_a_malformed_record_falls_back_to_p4_json(self):
         """A record edited by hand into another shape never makes a load or a keep raise: no variable can then be
         told from p4's own, so p4.json alone holds."""
@@ -2298,22 +2262,18 @@ class SettingsVariables(unittest.TestCase):
         self.assertTrue(any("not kept" in x and "TypeError" in x for x in lines), lines)
 
     def test_a_malformed_record_leaves_every_variable_as_it_is(self):
-        """While the record is malformed no variable can be told from p4's own, so the keeper adds and removes no
-        P4_* entry that run, even with p4's own text in the environment and p4.json changed."""
+        """While the record is malformed no variable can be told from p4's own: the keeper leaves every env entry as
+        it is, and load reads p4.json alone."""
         from unittest import mock
         p4 = self.store({"phi": {"max_depth": 5}})
-        p4conf.keep_settings(self.project)
+        self.legacy(p4, P4_PHI_MAX_DEPTH="5")
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         rec["p4past"] = "x"
         _write(self.record(), rec)
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
             p4conf.keep_settings(self.project)
             self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"})
-            _write(self.record(), rec)
-            self.store({"phi": {"max_depth": 5, "chain_max": 4}})
-            p4conf.keep_settings(self.project)
-            self.assertEqual(self.read(self.local())["env"], {"P4_PHI_MAX_DEPTH": "5"}, "none added")
-
+            self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 5)
 
 class ReadDuringAReplace(unittest.TestCase):
     """A file p4 keeps is written whole to a temp file and moved over the old one with os.replace. On Windows a read

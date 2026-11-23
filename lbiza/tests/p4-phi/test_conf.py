@@ -48,6 +48,12 @@ class Conf(unittest.TestCase):
         self.assertEqual(conf.unset(self.store, "phi.new_issues")[0], 0)
         self.assertIs(self.held("phi.new_issues"), True)
 
+    def test_conf_set_writes_p4_json_and_no_settings_file(self):
+        project = os.path.dirname(os.path.dirname(self.store))
+        self.assertEqual(conf.put(self.store, "phi.max_depth", "5")[0], 0)
+        self.assertEqual(self.held("phi.max_depth"), 5)
+        self.assertEqual(os.listdir(os.path.join(project, ".claude")), ["p4"], "no settings file is written")
+
     def test_what_does_not_fit_or_is_not_its_to_write_changes_nothing(self):
         p4conf.load(self.store)
         with open(p4conf.path(self.store), encoding="utf-8") as f:
