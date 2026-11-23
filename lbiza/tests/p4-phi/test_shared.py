@@ -11,6 +11,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, SRC)
 import p4conf  # noqa: E402
 import shared  # noqa: E402
+import phi  # noqa: E402
 
 
 def link(at, target):
@@ -78,6 +79,65 @@ class Shared(unittest.TestCase):
         self.assertTrue(shared.unlink(at))
         self.assertFalse(os.path.lexists(at))
         self.assertTrue(os.path.isfile(kept), "what the link pointed at is whole")
+
+    def test_a_session_that_starts_in_a_worktree_is_told_and_one_in_the_main_checkout_is_not(self):
+        self.conf(worktree_python=".venv/python.exe")
+        got = phi.share_notice({"cwd": os.path.join(self.tree, "src")})
+        self.assertTrue(got.startswith("phi (p4-phi): this session's folder is a git worktree. "), got)
+        self.assertIn("build no environment here", got)
+        self.assertEqual(phi.share_notice({"cwd": self.main}), "")
+        self.assertEqual(phi.share_notice({}), "")
+
+
+class Commands(unittest.TestCase):
+    """`phi.py shared` and `phi.py unlink`, on a real repository and a real worktree of it."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = os.path.realpath(tmp.name)
+        self.main, self.tree, self.target = (os.path.join(root, n) for n in ("main", "tree", "target"))
+        os.makedirs(self.target)
+        self.kept = os.path.join(self.target, "keep.txt")
+        open(self.kept, "w").close()
+        for args in (["init", "-q", self.main],
+                     ["-C", self.main, "-c", "user.name=t", "-c", "user.email=t@t.invalid", "-c",
+                      "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "first"],
+                     ["-C", self.main, "worktree", "add", "-q", self.tree, "-b", "work"]):
+            subprocess.run(["git", *args], check=True, capture_output=True)
+        with open(os.path.join(self.main, ".git", "info", "exclude"), "a", encoding="utf-8") as f:
+            f.write("node_modules\n")
+        self.at = os.path.join(self.tree, "node_modules")
+        link(self.at, self.target)
+
+    def run_phi(self, *argv):
+        import contextlib
+        import io
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = phi.main(list(argv))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_shared_needs_no_store_and_says_so_where_nothing_is_named(self):
+        code, out, _ = self.run_phi("shared", self.tree)
+        self.assertEqual((code, out.strip()), (0, shared.NONE))
+
+    def test_unlink_refuses_a_main_checkout_and_a_subfolder(self):
+        os.makedirs(os.path.join(self.tree, "src"))
+        for folder in (self.main, os.path.join(self.tree, "src")):
+            code, _, err = self.run_phi("unlink", folder)
+            self.assertEqual(code, 2, folder)
+            self.assertIn("not the top folder of a linked worktree", err)
+        self.assertTrue(os.path.lexists(self.at))
+
+    def test_unlink_takes_the_link_away_leaves_its_target_and_prints_the_removal(self):
+        code, out, _ = self.run_phi("unlink", self.tree)
+        self.assertEqual(code, 0)
+        self.assertIn("unlinked ", out)
+        self.assertIn("worktree remove", out)
+        self.assertNotIn("--force", out)
+        self.assertFalse(os.path.lexists(self.at))
+        self.assertTrue(os.path.isfile(self.kept), "what the link pointed at is whole")
 
 
 if __name__ == "__main__":

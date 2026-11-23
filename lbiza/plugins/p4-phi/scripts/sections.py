@@ -77,7 +77,7 @@ def name(title, run):
     return f"{title}: section{'s' if len(run) > 1 else ''} " + ", ".join(s["n"] for s in run)
 
 
-def brief(path, title, run):
+def brief(path, title, run, base=""):
     """A run's brief: the plan by its full path, the sections by number, their files, their checks as what done
     looks like, and the two boundaries of a worker that lands a plan."""
     many = len(run) > 1
@@ -91,7 +91,7 @@ def brief(path, title, run):
              "edit. ezexe approved the plan, so its fences are the change: where a fence does not fit the tree as "
              "it is, stop and report the fence and why, and write no approach of this session's own.", "",
              "Files: " + ", ".join(files), "",
-             puppeteer.WORKTREE_LINE, "",
+             *puppeteer.worktree_lines(base),
              "This session never edits the plan file. Its report holds, for each fence, the path and the lines it "
              "landed at, and each check's output, which the session that holds the plan writes into the section as "
              "its Evidence.", ""]
@@ -113,7 +113,7 @@ def calls(path, base=""):
         # the brief names its own level, which plans.child_level lays over the kind call_of would read from its words
         out.append(puppeteer.call_of({
             "title": name(title, run), "context": "fresh", "parent": "plan",
-            "brief": plans.level_said(brief(path, title, run), level),
+            "brief": plans.level_said(brief(path, title, run, base), level),
             "background": f"ezexe approved the plan `{path}`, and this start lands {name(title, run)}, whose "
                           "every edit is a fence there with its source."}))
     return out

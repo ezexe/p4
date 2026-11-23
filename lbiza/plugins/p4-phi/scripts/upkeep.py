@@ -61,6 +61,7 @@ import time
 import p4conf
 import plans
 import relay
+import shared
 import store as st
 
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
@@ -675,6 +676,13 @@ def nested(tree):
             if os.path.isdir(p) and os.path.exists(os.path.join(p, ".git")):
                 out.append(relay.norm(p))
     return out
+
+
+def links(tree):
+    """The links a worktree holds among what git does not track there, which a removal must never follow; None
+    where git could not list them, which a caller takes as a reason to remove nothing."""
+    got = _out(tree, "status", "--porcelain", "--ignored")
+    return None if got is None else shared.links(tree, got)
 
 
 def repos_of(home, s, gone="", kept=None):

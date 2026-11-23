@@ -1262,5 +1262,12 @@ class Look(Base):
             self.assertIn(call, module, "the watcher's timer, events and look are the hooks module's")
 
 
+
+class WorktreeLines(unittest.TestCase):
+    def test_a_brief_with_nothing_shared_holds_the_worktree_line_alone(self):
+        self.assertEqual(puppeteer.worktree_lines(), [puppeteer.WORKTREE_LINE, ""])
+        self.assertEqual(puppeteer.worktree_lines(tempfile.mkdtemp()), [puppeteer.WORKTREE_LINE, ""])
+
+
 if __name__ == "__main__":
     unittest.main()

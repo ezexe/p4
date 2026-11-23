@@ -109,3 +109,18 @@ class Sections(unittest.TestCase):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")
         self.assertEqual(sections.calls(self.path, self.base), [])
+
+    def test_a_runs_brief_names_the_environment_its_worktree_shares(self):
+        import json
+        import p4conf
+        main = os.path.realpath(tempfile.mkdtemp())
+        os.makedirs(os.path.join(main, ".git"))
+        os.makedirs(os.path.join(main, ".claude", "p4"))
+        os.makedirs(os.path.join(main, ".venv"))
+        open(os.path.join(main, ".venv", "python.exe"), "w").close()
+        with open(p4conf.path(os.path.join(main, ".claude", "p4")), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"worktree_python": ".venv/python.exe"}}, f)
+        first = sections.calls(self.path, main)[0]
+        self.assertIn("build no environment here", first["prompt"])
+        self.assertIn(main.replace("\\", "/") + "/.venv/python.exe", first["prompt"])
+        self.assertNotIn("build no environment here", sections.calls(self.path, self.base)[0]["prompt"])

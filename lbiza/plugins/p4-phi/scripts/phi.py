@@ -59,6 +59,7 @@ import plans  # noqa: E402  each session's task list with step addresses, which 
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
 import sections  # noqa: E402  an approved plan's sections as the starts of the workers that land them
+import shared  # noqa: E402  what a worktree's session takes from its main checkout, and the links a worktree holds
 import issues  # noqa: E402  a writing child's issue, its Closes #N commit, regression test, push and archive
 import puppeteer  # noqa: E402  the watcher's ledger, routing, start drafts, the gate, routes, the meta pass
 import rows  # noqa: E402  whose message a prompt is, by the origin the hooks module kept of it
@@ -2519,13 +2520,19 @@ def tracked(home):
         return False
 
 
+def share_notice(payload):
+    """What a session whose folder is a linked worktree runs on, in words, whichever tool made the worktree."""
+    share = shared.start_text(str((payload or {}).get("cwd") or ""))
+    return ("phi (p4-phi): this session's folder is a git worktree. " + share) if share else ""
+
+
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
         # a project with no .claude/p4 yet has nothing to hand: the rules p4-phi carries itself are in its system
         # prompt, as rules_section says
         RAN["start"] = "no store"
-        return None
+        return share_notice(payload) or None       # read from the main checkout's store, which needs none here
     p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
@@ -2560,6 +2567,9 @@ def h_session_start(payload):
     if me.home_missing:
         notices.append(f"phi (p4-phi): this project's p4.json names the shared store {me.home_missing} for the "
                        f"session tree, and this machine has not seen it; the tree stays in this project's store.")
+    share = share_notice(payload)
+    if share:
+        notices.append(share)
     first = ""
     if source == "compact" and controls.is_puppeteer(s, me.store):
         first = controls.compacted(me.home, s)     # a puppeteer's board path before anything else
@@ -4370,12 +4380,44 @@ def tree_text(home):
     return "\n".join(out)
 
 
+def shared_main(argv):
+    """`phi.py shared [folder]`: what a worktree of that folder's checkout shares, as a brief's lines."""
+    print(shared.text(os.path.abspath(argv[0] if argv else os.getcwd())) or shared.NONE)
+    return 0
+
+
+def unlink_main(argv):
+    """`phi.py unlink <worktree>`: each link the linked worktree holds among what git does not track is taken away
+    and its target left, and the removal that follows is printed."""
+    tree = os.path.abspath(argv[0]) if argv else ""
+    top, main = shared.tree_of(tree) if tree else ("", "")
+    same = lambda a, b: os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))  # noqa: E731
+    if not top or not same(top, tree) or same(top, main):
+        print(f"phi: {tree or 'no folder'} is not the top folder of a linked worktree, so nothing is unlinked",
+              file=sys.stderr)
+        return 2
+    found = upkeep.links(tree)
+    if found is None:
+        print(f"phi: git could not list what it ignores in {tree}, so nothing is unlinked", file=sys.stderr)
+        return 2
+    for p in found:
+        print(("unlinked " if shared.unlink(p) else "left, since it could not be unlinked: ") + p)
+    if upkeep.links(tree) == []:
+        print(f"no link is left there: `git -C \"{main}\" worktree remove \"{tree}\"`, with no force and run from a "
+              "folder outside the worktree, removes it now".replace("\\", "/"))
+    return 0
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     if argv[:1] == ["rules"]:                      # the hooks module's own, which needs no store
         return rules_main()
+    if argv[:1] == ["shared"]:                     # read from the main checkout's store, wherever it is run
+        return shared_main(argv[1:])
+    if argv[:1] == ["unlink"]:
+        return unlink_main(argv[1:])
     import argparse
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)

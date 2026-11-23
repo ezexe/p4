@@ -63,6 +63,7 @@ import p4conf  # noqa: E402
 import plans  # noqa: E402
 import starts  # noqa: E402
 import issues  # noqa: E402
+import shared  # noqa: E402
 
 PHI = None                       # phi.py's running module, which phi.py sets when it imports this one
 WATCH_S = 5.0                    # the watcher's tick: the least seconds between two looks
@@ -1137,6 +1138,13 @@ WORKTREE_LINE = ("This session works in a git worktree of its own, on a branch o
                  "orchestrator merges that branch into the default branch and pushes, and this session does neither.")
 
 
+def worktree_lines(base=""):
+    """A worker's brief on its worktree: where it works and who lands it, then what that worktree shares with its
+    main checkout, where the p4.json of the checkout `base` lies in names it."""
+    more = shared.lines(base) if base else []
+    return [WORKTREE_LINE, ""] + ([*more, ""] if more else [])
+
+
 def topic_of(req):
     first = re.split(r"(?<=[.!?])\s+|\n+", " ".join(str(req).split()), maxsplit=1)[0]
     first = re.sub(r"^\W*(?:(?:please|now that|now|also|and|so|ok|okay|can you|could you)\s+)+", "", first, flags=re.I)
@@ -1264,7 +1272,7 @@ def prompter(home, s, req, read, base):
         lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                   f"`Finding:` line, which the parent session passes up unchanged.", ""]
     if parent:
-        lines += [WORKTREE_LINE, ""]
+        lines += worktree_lines(base)
     tests = test_files(base, paths)
     lines += [phi.RESEARCH, "", phi.DECIDE, ""]
     if tests:                                       # the tests the change touches, and no whole suite
