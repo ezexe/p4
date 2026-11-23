@@ -43,6 +43,8 @@ The last two are loaded through ToolSearch before their first call.
 A tool's result is what its command prints, and a call the command refuses ends in the command's own error.
 The shell line stays for a session whose tool list holds none of them, and for acting for another session or store, since no tool takes `--session` or `--p4`.
 `/phi-pane` is a command ezexe types, which no session can run: it opens a pane beside the chat that shows this session's `board.md`, `asks.md` and `ledger.md`, whichever of them its folder holds, read anew after each look of the watcher while the pane is open.
+Above them it draws Progress, the session and every live session under it with its goal, its steps and the plan it works, which follows the records within about a second.
+A plan's loop shows there once the plan holds its `## Loop log`, one line a round.
 The three pages stay the files a session reads, and the pane writes none of them.
 
 - `note "<claim>" --source "<where it was checked>"` keeps a finding for every session below this one, and `--kind` labels it with a free word, such as `decision`, `waiting` or `parked`.
