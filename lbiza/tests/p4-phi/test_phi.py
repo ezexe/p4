@@ -23,6 +23,7 @@ the prompt's cap held on a page; a hook never failing a call; hooks.json's shape
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -3025,6 +3026,87 @@ class CommitCommand(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only").split(), ["sib.txt"], "the sibling's stays staged")
         self.assertEqual(self.git("ls-files", "--others", "--exclude-standard").split(), ["g1.txt"],
                          "a glob that matched g1.txt would have taken it")
+
+
+class SharedCheckout(unittest.TestCase):
+    """Every session p4-phi starts works in its starter's checkout, on the paths of its `Files:` line: a start that
+    passes `use_worktree: true` is asked about, and a child that shares its starter's checkout is refused the git
+    commands that stage, commit or set aside what the others changed there, with `phi.py commit` named in their
+    place."""
+
+    COMMIT = 'phi.py" commit -m "<message>" -- <path> ...'
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-shared-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.t = t = Tree(os.path.realpath(self._tmp.name))
+        self.git("init", "-q", ".")
+        write(os.path.join(t.proj, "a.py"), "a = 1\n")
+        self.git("add", "a.py")
+        self.git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "first")
+        t.record(TOP, title="the exporter top")
+        t.record(KID, TOP, title="the flush child")
+        t.say(TOP, "Build the exporter")
+        t.say(KID, "Task:\nPort the flush.\nFiles: a.py")
+
+    def git(self, *args, cwd=None):
+        ran = subprocess.run(["git", *args], cwd=cwd or self.t.proj, capture_output=True, text=True)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+
+    def guard(self, host, cmd, cwd=None):
+        r = self.t.hook("branch-guard", host, {"tool_name": "Bash", "tool_input": {"command": cmd},
+                                               **({"cwd": cwd} if cwd else {})})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def start(self, prompt, **more):
+        path = os.path.join(self._tmp.name, "transcript.jsonl")
+        write(path, "x")
+        r = self.t.hook("start-advice", TOP, {
+            "hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session",
+            "transcript_path": path, "tool_input": {"initiation": "user_asked", "context": "fresh",
+                                                    "title": "the flush", "prompt": prompt, **more}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def test_a_start_that_passes_use_worktree_true_is_asked_about_and_false_or_omitted_is_not(self):
+        brief = "Port the exporter's flush to the new writer and run its suite.\nFiles: src/flush.py"
+        out = self.start(brief, use_worktree=True)
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        self.assertIn("advises `use_worktree: false`", out["permissionDecisionReason"])
+        self.assertIn("starts works in its starter's checkout", out["permissionDecisionReason"])
+        self.assertIsNone(self.start(brief, use_worktree=False), "false is what p4-phi's own call passes")
+        self.assertIsNone(self.start(brief), "and so is leaving it out")
+
+    def test_a_child_in_the_main_checkout_is_refused_what_takes_the_others_changes(self):
+        for cmd in ('git commit -m x', 'git add -A', 'git stash', 'x && git commit -qm y', 'git add . && git status',
+                    'git stash pop', 'git rm a.py', 'git mv a.py b.py', 'git -C . commit -m x'):
+            out = self.guard(KID, cmd)
+            self.assertIsNotNone(out, cmd)
+            self.assertEqual(out["permissionDecision"], "deny", cmd)
+            self.assertIn(self.COMMIT, out["permissionDecisionReason"], cmd)
+            self.assertIn(cmd, out["permissionDecisionReason"], "it names the command it refuses")
+
+    def test_a_child_in_the_main_checkout_is_not_refused_phi_commit_or_a_read(self):
+        for cmd in ('python phi.py commit -m "git commit" -- a.py', 'git status', 'git diff', 'git log',
+                    'git log --oneline -5', 'git show HEAD', 'grep -n "git commit" docs.md', 'echo "git add -A"'):
+            self.assertIsNone(self.guard(KID, cmd), cmd)
+        self.assertIsNone(self.guard(TOP, "git commit -m x"), "an orchestrator commits its own")
+
+    def test_a_child_whose_folder_is_a_linked_worktree_of_its_own_is_asked_nothing_for_git_commit(self):
+        own = os.path.join(self.t.proj, ".claude", "worktrees", "the-flush").replace("\\", "/")
+        self.git("worktree", "add", "-q", "-b", "claude/the-flush", own)
+        kid = "local_kid00003"
+        CLI.setdefault(kid, "dddd4444-0000-4000-8000-000000000000")
+        self.t.record(kid, TOP, title="the flush worker", cwd=own)
+        self.assertEqual(self.t.say(kid, "Task:\nLook at the flush.").returncode, 0)
+        for cmd in ("git commit -m x", "git add -A", "git stash"):
+            self.assertIsNone(self.guard(kid, cmd, cwd=own), f"its own worktree: {cmd}")
+        self.assertIsNotNone(self.guard(kid, "git push origin HEAD", cwd=own), "landing stays the orchestrator's")
+        out = self.guard(kid, f"cd {self.t.proj} && git commit -m x", cwd=own)
+        self.assertEqual(out["permissionDecision"], "deny", "a command aimed at the shared checkout is refused")
 
 
 if __name__ == "__main__":

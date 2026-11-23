@@ -443,11 +443,11 @@ TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(
                        r"findings|steps?|checks?)\b", re.I)
 
 
-# The checkout a start gets, in the words of a line, as starts.use_worktree decides it for an exact call: a worker that
-# writes works in a git worktree and on a branch of its own, and a new orchestrator in this checkout.
-OWN_TREE = "`use_worktree: true`, so it works in a git worktree and on a branch of its own and commits there"
-TOP_TREE = ("`use_worktree: false`, since an orchestrator lands its tree's work in this checkout and its workers get "
-            "the worktrees")
+# The checkout a start gets, in the words of a line, as starts.use_worktree decides it for an exact call: every
+# session works in this checkout, a worker on the paths of its `Files:` line.
+OWN_TREE = ("`use_worktree: false`, so it works in this checkout on the paths of its `Files:` line and commits by "
+            "`phi.py commit`")
+TOP_TREE = "`use_worktree: false`, since an orchestrator works in this checkout as its workers do"
 # the route of a turn ezexe did not begin: what such a turn may start, and the card it proposes, are the start tool's
 # own text, so this names no `initiation` and holds only what that text lacks
 CARD_EACH = (f"Give each to `mcp__ccd_session__start_session`, `context` `fresh`, {OWN_TREE}, carrying the `model` "

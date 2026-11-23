@@ -82,10 +82,10 @@ class Sections(unittest.TestCase):
         _, found = sections.parse(PLAN, self.base)
         self.assertEqual([[s["n"] for s in run] for run in sections.runs(found)], [["1", "2", "4"], ["3"]])
 
-    def test_each_run_is_one_start_call_of_an_integrator_in_a_worktree(self):
+    def test_each_run_is_one_start_call_of_an_integrator_in_this_checkout(self):
         first, second = sections.calls(self.path, self.base)
         self.assertEqual(first["title"], "The exporter's move: sections 1, 2, 4")
-        self.assertEqual((first["initiation"], first["context"], first["use_worktree"]), ("user_asked", "fresh", True))
+        self.assertEqual((first["initiation"], first["context"], first["use_worktree"]), ("user_asked", "fresh", False))
         self.assertEqual(first["model"], plans.CHILD_LEVELS["static"]["model"])
         self.assertGreaterEqual(len(first["background"]), 80, "the app refuses a fresh start with a shorter one")
         for word in (f"of the plan `{self.path}`, in that order",
@@ -113,14 +113,20 @@ class Sections(unittest.TestCase):
         self.assertEqual(runs, [["2"], ["3"], ["4"]], "section 2 depends on 1, which is met, and joins nothing")
         self.assertEqual([[s["n"] for s in g] for g in sections.groups(found)], [["2", "3", "4"]])
 
-    def test_a_brief_with_no_where_names_the_worktree_and_one_with_where_holds_those_lines_and_none_of_it(self):
+    def test_a_brief_with_no_where_names_the_checkout_and_one_with_where_holds_those_lines_and_none_of_it(self):
         title, found = sections.parse(PLAN, self.base)
         plain = sections.brief(self.path, title, found[:1], self.base)
         self.assertEqual(plain, sections.brief(self.path, title, found[:1], self.base, where=None))
-        self.assertIn(sections.puppeteer.WORKTREE_LINE, plain)
+        cmd = sections.puppeteer._phi().commands()
+        lines = [line.replace("{cmd}", cmd) for line in sections.puppeteer.CHECKOUT_LINES]
+        self.assertEqual(len(lines), 3, "the three lines of CHECKOUT_LINES")
+        for line in lines:
+            self.assertIn(line, plain)
+        self.assertNotIn("worktree of its own", plain)
         there = sections.brief(self.path, title, found[:1], self.base, where=["Work in E:/repo, no worktree.", ""])
         self.assertIn("\nWork in E:/repo, no worktree.\n", there)
-        self.assertNotIn(sections.puppeteer.WORKTREE_LINE, there)
+        for line in lines:
+            self.assertNotIn(line, there)
 
     def test_a_plan_with_no_files_line_has_no_run(self):
         with open(self.path, "w", encoding="utf-8") as f:
@@ -163,7 +169,7 @@ class Sections(unittest.TestCase):
         self.assertTrue(sections.team([self.section(1, 2, "`python -m pytest tests/test_a.py`")]))
         self.assertTrue(sections.team([self.section(1, 3), self.section(2, 2)]))
 
-    def test_a_runs_brief_names_the_environment_its_worktree_shares(self):
+    def test_a_runs_brief_names_no_environment_a_worktree_shares_since_it_has_no_worktree(self):
         import json
         import p4conf
         main = os.path.realpath(tempfile.mkdtemp())
@@ -174,6 +180,6 @@ class Sections(unittest.TestCase):
         with open(p4conf.path(os.path.join(main, ".claude", "p4")), "w", encoding="utf-8") as f:
             json.dump({"phi": {"worktree_python": ".venv/python.exe"}}, f)
         first = sections.calls(self.path, main)[0]
-        self.assertIn("build no environment here", first["prompt"])
-        self.assertIn(main.replace("\\", "/") + "/.venv/python.exe", first["prompt"])
+        self.assertNotIn("build no environment here", first["prompt"], "the run works in the checkout, which holds it")
+        self.assertNotIn(main.replace("\\", "/") + "/.venv/python.exe", first["prompt"])
         self.assertNotIn("build no environment here", sections.calls(self.path, self.base)[0]["prompt"])

@@ -1600,7 +1600,7 @@ def new_top_route(owner_turn=True):
     """How an orchestrator starts a new orchestrator for a topic outside its task: what the start tool's own text
     lacks, the files the brief covers on its `Files:` line and the two moves that detach the session to top level. In a
     turn ezexe did not begin it names no `initiation`: what such a turn may start, and the card it proposes, are that
-    tool's own text. It passes `use_worktree: false`, as starts.use_worktree gives a new orchestrator."""
+    tool's own text. It passes `use_worktree: false`, as starts.use_worktree gives every start."""
     if ASK_ROUTE:
         return ASK_ROUTE
     how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
@@ -1642,8 +1642,7 @@ FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these ses
                "states it. Plan its split now, before other work: every part of its task that writes files or makes a "
                "decision gets a session of its own, one per disjoint set of files, started in this turn with "
                "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, " + plans.OWN_TREE
-               + " for a part that writes files and `use_worktree: false` for one that only reads, "
-               "each brief holding its `Files:` line; where the app refuses that start, the part is shown as a "
+               + " for every part, with a `Files:` line in the brief of a part that writes; where the app refuses that start, the part is shown as a "
                "suggested task card, the start tool's `initiation` `own_initiative`, which ezexe presses in this "
                "session. Subagents keep reads, "
                "searches, single command runs and independent checks, which return a result and hold no files. A "
@@ -1741,8 +1740,8 @@ def split_text(home, s, prompt, by=""):
 def _split_full(home, s):
     """What a brief written in a turn another session began holds beyond what the start tool asks of it: a
     child's, its `Files:` line and its level line; a new orchestrator's, those and the line on which it is detached
-    to top level, or for a controlled orchestrator the request to its puppeteer. A new orchestrator's start passes
-    `use_worktree: false`, for the reason new_top_route's line gives."""
+    to top level, or for a controlled orchestrator the request to its puppeteer. Every start passes
+    `use_worktree: false`, as starts.use_worktree gives."""
     if spawned_from(s):
         return ("phi (p4-phi): a task of its own in this turn, outside this session's task, goes out by "
                 "`mcp__ccd_session__start_session` with a brief that names the files it covers on a line "
@@ -3675,7 +3674,7 @@ def h_go_guard(payload):
     to the puppeteer that names no matter of ezexe's, is held by a `deny` whose reason names the session it belongs
     to, from book.flag, once for that message and target, so a resend goes through. A puppeteer's message that
     goes out takes the request its turn opened to the session messaged. No message is warned about for the files
-    another session holds: each session that writes has a worktree of its own, so a go waits on no file."""
+    another session holds: each session works in the one checkout, on its own paths, so a go waits on no file."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -3705,17 +3704,13 @@ def h_go_guard(payload):
 
 def h_start_advice(payload):
     """PreToolUse on mcp__ccd_session__start_session. It denies two starts: a controlled session's new
-    orchestrator, which its puppeteer starts instead, and a puppeteer's second standing worker. No start is refused
-    for the files its brief names and none waits on another session's files: each session that writes has a git
-    worktree of its own, so no two share a file on disk. For the rest it advises fork or fresh by
-    relay.advise_start, from the parent's transcript size and how much of the parent's scope the brief's paths
-    cover, and never a fork for a brief that writes unless fork_apart says the fork gets a worktree of its own, so
-    a call that forks a writer from a plain checkout is asked about. So is a fresh start of a worker that writes,
-    made from a plain folder with `use_worktree` left out, which shares that folder by the start tool's own text.
-    It is silent when the call already does what is advised, and for a fresh start that passes
-    `use_worktree: true`, which a fork cannot take, else a permission `ask` with the reason, so ezexe sees it and
-    decides. A start in a worktree or on a branch of the child's own is never asked about: a session that writes
-    gets both, as starts.use_worktree says. A PreToolUse `permissionDecision` is `allow`, `deny`, `ask` or `defer`;
+    orchestrator, which its puppeteer starts instead, and a puppeteer's second standing worker. For the rest it
+    advises fork or fresh by relay.advise_start, from the parent's transcript size and how much of the parent's scope
+    the brief's paths cover, for a writer's start as for any. It is silent when the call already does what is
+    advised, else a permission `ask` with the reason, so ezexe sees it and decides. A start that passes
+    `use_worktree: true` is asked about once: every session p4-phi starts works in its starter's checkout, on the
+    paths of its `Files:` line, and a worktree's branch waits on a merge. A PreToolUse `permissionDecision` is `allow`,
+    `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
     write. A call that carries the marker of a start request to a puppeteer claims it, and is advised nothing."""
@@ -3759,14 +3754,13 @@ def h_start_advice(payload):
         size = os.path.getsize(payload.get("transcript_path") or "")
     except OSError:
         size = 0
-    here = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
-    advised, why, own_tree = relay.advise_start(me.home, me.id, inp, size, apart=fork_apart(here))
-    RAN.update(advice=advised, wanted=wanted, transcript=size, own_tree=own_tree)
-    if own_tree:                                    # a fresh start of a writer that would share this plain folder
-        return cards.raised(on, parent, f"phi (p4-phi) advises `use_worktree: true` here: {why}.")
-    # a fresh start in a worktree of its own is never advised to fork: the start tool's own text says `use_worktree`
-    # is "rejected with \"fork\"", and of a fork that "from a plain checkout it shares the folder"
-    if advised == wanted or (advised == "fork" and inp.get("use_worktree") is True):
+    advised, why = relay.advise_start(me.home, me.id, inp, size)
+    RAN.update(advice=advised, wanted=wanted, transcript=size)
+    if inp.get("use_worktree") is True:             # a worktree leaves the partition, and its branch waits on a merge
+        return cards.raised(on, parent, "phi (p4-phi) advises `use_worktree: false` here: every session p4-phi "
+                            "starts works in its starter's checkout, on the paths of its `Files:` line, and a "
+                            "worktree's branch waits on a merge.")
+    if advised == wanted:
         return None
     return cards.raised(on, parent, f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
 
@@ -3838,19 +3832,10 @@ QUOTED = re.compile(r"'[^']*'|\"[^\"]*\"")
 # neither does `git branch <name>` or `git worktree add`.
 BRANCH_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b[^\n|;&]*?\b(switch\b|checkout\s+-[bB]\b|"
                          r"checkout\s+(?!-)(?![\w./-]*\.\w{1,6}\s*$)[\w./-]+\s*$)")
-
-
-def fork_apart(cwd):
-    """True when a fork of the session working in `cwd` gets a git worktree of its own. The start tool's own text on
-    `context`: a fork "from a worktree session gets a fresh worktree, normally cut from your branch tip", and "from
-    a plain checkout it shares the folder". So `cwd` is read as own_checkout reads it: a linked worktree, by its
-    `.git` file, is a worktree session's folder, and the main checkout or a folder of no repository is a plain
-    one."""
-    here = relay.repo_of(cwd) if cwd else ""
-    if not here:
-        return False
-    main, found = p4conf.main_root(here)
-    return bool(found) and relay.norm(os.path.realpath(main)) != here
+# a git command that stages or commits by itself, or sets work aside: in a checkout other sessions share it takes
+# their changes with it. Read as BRANCH_MOVE is, on the line with its quoted parts taken out.
+SHARED_TAKE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git(?:\s+(?:-[Cc]\s+\S+|--[\w-]+(?:=\S+)?))*\s+"
+                         r"(commit|add|stash|rm|mv)(?![\w-])")
 
 
 def own_checkout(home, s, cwd):
@@ -3889,8 +3874,10 @@ def h_branch_guard(payload):
     if name not in SHELL_TOOLS:
         return None
     on, parent = cards_on(me), spawned_from(s)
-    moves = BRANCH_MOVE.search(QUOTED.sub("''", str(inp.get("command") or "")))
-    if not moves and not issues.landing(inp.get("command")):
+    text = QUOTED.sub("''", str(inp.get("command") or ""))
+    moves = BRANCH_MOVE.search(text)
+    takes = SHARED_TAKE.search(text)
+    if not moves and not takes and not issues.landing(inp.get("command")):
         return None
     # a worktree of its own is judged where the command runs: the hook's folder, and each folder the line names
     # with `cd` or `git -C`, so a line aimed at a checkout the session shares is never read as its own
@@ -3898,6 +3885,16 @@ def h_branch_guard(payload):
     line = str(inp.get("command") or "")
     named = [m.group(1).strip("'" + '"') for m in list(CD.finditer(line)) + list(DASH_C.finditer(line))]
     own = all(own_checkout(me.home, s, relay.norm(p, relay.norm(here)) if here else p) for p in [here] + named)
+    if takes and not own:
+        command = str(inp.get("command") or "").strip()
+        RAN["branch_guard"] = command
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": (
+                                           f"phi (p4-phi): this session shares its checkout with other sessions, and "
+                                           f"`{command}` takes or sets aside whatever is changed there, theirs too. "
+                                           f"Commit with `{commands()} commit -m \"<message>\" -- <path> ...`, "
+                                           f"which takes only the paths it is given. A rename is an add of the new "
+                                           f"path and a removal of the old, both named there.")}}
     if moves and not own:
         what = "moving the checkout to another branch, which in a shared checkout moves the parent's too"
     elif issues.landing(inp.get("command")):
@@ -3912,16 +3909,15 @@ def h_branch_guard(payload):
         verb = verbs[0]
         RAN["branch_guard"] = verb
         return cards.raised(on, parent, f"phi (p4-phi): this session is a child, and `{verb}` lands work, which "
-                                        f"only the tree's orchestrator does: a child that writes works in its own "
-                                        f"worktree, commits there on its own branch and reports, a `Closes #N` "
-                                        f"commit included, and the tree's orchestrator merges and pushes. Ask its "
+                                        f"only the tree's orchestrator does: a child commits by "
+                                        f"`phi.py commit` and reports, a `Closes #N` commit included, and the tree's "
+                                        f"orchestrator merges and pushes. Ask its "
                                         f"parent session, {parent}, with SendMessage instead.")
     else:
         return None
     RAN["branch_guard"] = what
     return cards.raised(on, parent, f"phi (p4-phi): this session is a child, and {what} is asked first: this "
-                                    f"session works in the checkout of the session that started it. A session "
-                                    f"that writes is started with `use_worktree: true` and moves only its own.")
+                                    f"session works in the checkout of the session that started it.")
 
 
 STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
@@ -4881,8 +4877,8 @@ def main(argv=None):
                 if mode not in upkeep.NO_ASK:
                     print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so an "
                           "unattended tab would stop at its first question, and nothing is written: "
-                          f"`{commands()} sections \"{plan}\"` prints a start for a session in a worktree of its "
-                          "own", file=sys.stderr)
+                          f"`{commands()} sections \"{plan}\"` prints a start for a session in this checkout",
+                          file=sys.stderr)
                     return 2
                 try:
                     found = coworker.land(plan, checkout, who, mode, claim=True, **node_of)

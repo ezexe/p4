@@ -614,8 +614,8 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("is 1 commit behind main", got[0])
 
     def test_a_deprecation_is_handed_to_a_sibling_whole_and_stops_none_of_its_uncommitted_work(self):
-        """Each session that writes has a git worktree of its own, so a sibling's note and this session's files never
-        name one file on disk: the stop that held a session's uncommitted file against a note's path is gone, here
+        """Every session works in the one checkout, on the paths of its own `Files:` line, so a sibling's note and
+        this session's files are held apart by those paths, not by a stop: the stop that held a session's uncommitted file against a note's path is gone, here
         with both sessions in one folder, where the two paths did meet. The note is still handed on in full, once,
         and the anchor holds the note's paths and no heads or files of the sibling's."""
         t = self.t
@@ -1077,9 +1077,9 @@ class ThreeSessions(unittest.TestCase):
 
     def test_a_message_about_another_sessions_owned_paths_is_routed_there_by_the_address_book(self):
         """relay.owners held the paths a message names against the other sessions' owned paths as absolute paths,
-        which never meet once the owner works in a git worktree of its own. So that compare is gone, and the route
-        line reads the address book, which reads each path from its own repository's root: a message naming a file
-        of the main checkout is sent to the worker that owns it in its worktree."""
+        which never meet once an owner works in a git worktree of its own, which a started session does not by
+        default. So that compare is gone, and the route line reads the address book, which reads each path from its
+        own repository's root: a message naming a file of the main checkout is sent to the worker that owns it."""
         t = self.t
         t.cli(A, "shard", self.x("lib"))
         ctx = context(t.say(B, f"please fix {self.x('lib', 'y.py')} too"))
@@ -1127,9 +1127,9 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.holders(B, f"work in `{t.proj}` on `{self.x('lib', 'y.py')}`"), [A],
                          "a real path beside the root is still routed")
         t.cli(TOP, "shard", self.x("docs"))
-        advised, why, own_tree = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"},
-                                                    10 * 1024)
-        self.assertEqual((advised, own_tree), ("fresh", False), why)
+        advised, why = relay.advise_start(t.p4, TOP, {"prompt": f"Check one thing in `{t.proj}`, read-only"},
+                                          10 * 1024)
+        self.assertEqual(advised, "fresh", why)
         self.assertIn("names no path", why)
         self.assertTrue(relay.names_nothing(relay.norm(t.proj), t.p4, t.proj))
         self.assertFalse(relay.names_nothing(self.x("lib"), t.p4, t.proj))
@@ -1183,8 +1183,8 @@ class ThreeSessions(unittest.TestCase):
 
     def test_a_note_that_names_a_finished_childs_file_or_owned_path_supersedes_nothing(self):
         """relay.superseded held the paths a newer note names against a finished child's changed files and owned
-        paths, as absolute paths. Each session that writes has a git worktree of its own, so the two never name one
-        file, and the child's work stands on its own branch until the tree's orchestrator merges it. That arm is
+        paths, as absolute paths. Every session works in the one checkout, on its own paths, and the child's work
+        stands in its commits until the tree's orchestrator pushes it. That arm is
         gone, here with both sessions in one folder, where the paths did meet: a note that names the child's very
         file and owned path, and says nothing of its parent step, marks it stale no longer."""
         t = self.t
@@ -1306,92 +1306,74 @@ class ForkOrFresh(ThreeSessions):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
 
-    def test_a_writer_is_never_advised_to_fork_from_a_plain_checkout_and_a_fork_of_one_is_asked_about(self):
-        """The case the move to worktrees left open. The start tool's own text: `use_worktree` is "\"fresh\" only
-        (rejected with \"fork\")", and a fork "from a worktree session gets a fresh worktree" and "from a plain
-        checkout it shares the folder". So a fork cannot be given a worktree, and from a plain checkout a forked
-        session that writes shares its starter's files. p4-phi never advises that fork, where size and paths would
-        have, and asks about a call that makes it. A fork of a session that works in a worktree gets its own, so
-        there the advice goes by size and paths as before, and a brief that only reads forks as before."""
+    def test_a_writers_fork_is_advised_by_size_and_paths_like_any_and_asked_about_only_for_a_worktree(self):
+        """advise_start returns two values, the advice and its why, and no longer advises a worktree: a writer's
+        start is advised "fork" or "fresh" by the parent's size and the paths its brief covers, as a reader's is, and
+        only a call that passes `use_worktree: true` is asked about, since every session p4-phi starts works in its
+        starter's checkout. A fork from a plain checkout is no longer held against a writer, and phi.fork_apart is
+        gone."""
         import phi
         import starts
         t = self.t
         t.cli(TOP, "shard", self.x("lib"))
         brief = f"Rework `{self.x('lib')}` and commit it.\nFiles: {self.x('lib', 'x.py')}"
         self.assertTrue(starts.writes(brief, t.proj))
-        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)[0], "fresh", "a plain checkout")
-        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024, apart=True)[0], "fork")
-        self.assertFalse(phi.fork_apart(self.work), "the main checkout is a plain one")
-        self.assertFalse(phi.fork_apart(self._tmp.name), "and so is a folder of no repository")
-        for extra in ({"use_worktree": True}, {"use_worktree": False}):
-            self.assertIsNone(self.writer(TOP, "fresh", cwd=self.work, **extra), f"never advised to fork: {extra}")
-        self.assertNotIn("fork", self.writer(TOP, "fresh", cwd=self.work)["permissionDecisionReason"].split(":")[0],
-                         "nor with `use_worktree` left out, which is asked about for the folder it would share")
-        out = self.writer(TOP, "fork", cwd=self.work)
+        self.assertFalse(hasattr(phi, "fork_apart"), "no fork is judged by the folder it starts from")
+        got = relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)
+        self.assertEqual(len(got), 2, "the advice and why, nothing about a worktree")
+        self.assertEqual(got[0], "fork", "a short parent whose scope the brief covers: a writer forks as a reader does")
+        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 3 * 1024 * 1024)[0], "fresh")
+        self.assertIsNone(self.writer(TOP, "fork", cwd=self.work), "a fork that fits is not asked about")
+        self.assertIsNone(self.writer(TOP, "fork", cwd=self.work, use_worktree=False))
+        out = self.writer(TOP, "fresh", cwd=self.work)
         self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
-        why = out["permissionDecisionReason"]
-        self.assertIn('advises context "fresh" here, not "fork"', why)
-        self.assertIn("a fork from a plain checkout shares its starter's folder", why)
-        self.assertIn("`use_worktree: true`", why)
-        own = os.path.join(self.work, ".claude", "worktrees", "the-top").replace("\\", "/")
-        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-top", own],
-                       check=True, capture_output=True)
-        self.assertTrue(phi.fork_apart(own), "a linked worktree: its fork gets a fresh one")
-        self.assertIsNone(self.writer(TOP, "fork", cwd=own), "a fork of a worktree session is its own to make")
-        self.assertIn("3.0 MB", self.writer(TOP, "fork", size=3 * 1024 * 1024, cwd=own)["permissionDecisionReason"],
-                      "and is still advised fresh by its parent's size")
+        self.assertIn('advises context "fork" here, not "fresh"', out["permissionDecisionReason"])
+        self.assertNotIn("use_worktree", out["permissionDecisionReason"])
+        big = self.writer(TOP, "fork", size=3 * 1024 * 1024, cwd=self.work)
+        self.assertIn("3.0 MB", big["permissionDecisionReason"], "a long parent's fork is advised fresh by its size")
         self.assertIsNone(self.advise(TOP, "fork", f"Rework `{self.x('lib')}`", 200 * 1024),
-                          "a brief that only reads forks from a plain checkout as before")
+                          "a brief that only reads forks as before")
         import puppeteer
         import inspect
         self.assertIn('context = "fresh"', inspect.getsource(puppeteer.prompter), "every drafted start is fresh")
 
-    def test_a_fresh_start_of_a_writer_that_names_no_worktree_from_a_plain_folder_is_asked_about(self):
-        """The start tool's own text on `use_worktree`: "Omitted: the same folder when this session works in a plain
-        folder and has never had a worktree (its own, a shared one, or one it will enter later); otherwise its own
-        worktree." So a fresh start of a worker that writes, made from a plain folder with `use_worktree` left out,
-        would write in its starter's files, and p4-phi asks about that call as it asks about a fork of a writer.
-        It asks about no other: one that passes `true`, one that passes `false` and so chose the folder, one from a
-        session in a worktree, a brief that only reads, a new orchestrator, which lands in this folder, and a start
-        that names another place."""
+    def test_a_start_of_a_writer_that_names_no_worktree_is_not_asked_about_one(self):
+        """A writer's start that leaves `use_worktree` out, or passes `false`, is asked nothing about a worktree
+        from a plain folder or with a start of another place; relay.advise_start names none. One that passes `true`
+        is asked about, with the reason that every session p4-phi starts works in its starter's checkout."""
         import phi
         t = self.t
+        t.cli(TOP, "shard", self.x("lib"))
         brief = f"Rework `{self.x('lib')}` and commit it.\nFiles: {self.x('lib', 'x.py')}"
-        self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)[2], True)
-        out = self.writer(TOP, "fresh", cwd=self.work)
-        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
-        why = out["permissionDecisionReason"]
-        self.assertTrue(why.startswith("phi (p4-phi) advises `use_worktree: true` here: "), why)
-        self.assertIn("a fresh start that leaves `use_worktree` out from a plain folder shares that folder", why)
-        self.assertIn("a git worktree and on a branch of its own", why)
-        self.assertEqual(self.writer(TOP, "fresh", cwd=self.work, initiation="own_initiative")["permissionDecision"],
-                         "ask", "a suggested task card starts the same call")
-        for extra in ({"use_worktree": True}, {"use_worktree": False}, {"cwd": "D:/another/project"},
-                      {"target": "cloud"}, {"preset": "the api repo"}, {"host": "devbox"}):
+        self.assertEqual(len(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024)), 2)
+        for extra in ({}, {"use_worktree": False}, {"cwd": "D:/another/project"}, {"target": "cloud"},
+                      {"preset": "the api repo"}, {"host": "devbox"}):
             path = os.path.join(self._tmp.name, "short.jsonl")
             write(path, "x")
             r = t.hook("start-advice", TOP, {
                 "hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session", "cwd": self.work,
-                "transcript_path": path, "tool_input": {"initiation": "user_asked", "context": "fresh",
+                "transcript_path": path, "tool_input": {"initiation": "user_asked", "context": "fork",
                                                         "title": "the lib rework", "prompt": brief, **extra}})
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), f"not asked: {extra}")
-            self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": brief, **extra}, 10 * 1024)[2], False, extra)
-        own = os.path.join(self.work, ".claude", "worktrees", "the-top").replace("\\", "/")
-        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/the-top", own],
-                       check=True, capture_output=True)
-        self.assertIsNone(self.writer(TOP, "fresh", cwd=own), "from a worktree it gets a worktree of its own")
-        self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": brief}, 10 * 1024, apart=True)[2], False)
+        out = self.writer(TOP, "fork", cwd=self.work, use_worktree=True)
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        why = out["permissionDecisionReason"]
+        self.assertTrue(why.startswith("phi (p4-phi) advises `use_worktree: false` here: "), why)
+        self.assertIn("every session p4-phi starts works in its starter's checkout", why)
+        self.assertEqual(self.writer(TOP, "fork", cwd=self.work, use_worktree=True,
+                                     initiation="own_initiative")["permissionDecision"],
+                         "ask", "a suggested task card starts the same call")
         for reads in ("Check the layout of `lib` and report.\nFiles: none",
                       "Build the importer's nightly run and commit it. " + phi.NEW_TOP_BRIEF):
-            self.assertIs(relay.advise_start(t.p4, TOP, {"prompt": reads}, 3 * 1024 * 1024)[2], False, reads[:40])
+            self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": reads}, 3 * 1024 * 1024)[0], "fresh", reads[:40])
         self.assertIsNone(self.advise(TOP, "fresh", "Write the docs", 3 * 1024 * 1024),
-                          "a brief that only reads names no worktree and is asked nothing")
+                          "a brief that names no worktree and no scope is asked nothing")
 
-    def test_a_start_with_its_own_worktree_or_branch_is_not_asked(self):
-        """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
-        session in its own worktree gives it a separate copy of the files to edit", so p4-phi asks about neither,
-        and its own word for a new worker's call is `use_worktree: true`. A fresh start in a worktree is not
-        advised to fork either: the start tool's text gives `use_worktree` as rejected with a fork."""
+    def test_a_start_that_passes_use_worktree_true_is_asked_about_and_one_that_passes_false_is_not(self):
+        """Every session p4-phi starts works in its starter's checkout, on the paths of its `Files:` line, so a start
+        that passes `use_worktree: true`, with or without a branch name or a source branch, is asked about, and its
+        own word for a new worker's call is `use_worktree: false`. A fresh start that passes false where a fork
+        fits is advised the fork, as any is."""
         self.t.cli(TOP, "shard", self.x("lib"))
         path = os.path.join(self._tmp.name, "short.jsonl")
         with open(path, "w", encoding="utf-8") as f:
@@ -1400,9 +1382,15 @@ class ForkOrFresh(ThreeSessions):
                       {"use_worktree": True, "source_branch": "main"}):
             r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
                                                   "tool_input": {"context": "fresh", "prompt": "write docs\nFiles: none", **extra}})
-            self.assertEqual(r.stdout.strip(), "", f"not asked: {extra}")
-        self.assertIsNone(self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024, use_worktree=True),
-                          "a fork is not advised over a worktree of its own")
+            out = json.loads(r.stdout)["hookSpecificOutput"]
+            self.assertEqual(out["permissionDecision"], "ask", f"asked: {extra}")
+            self.assertIn("advises `use_worktree: false`", out["permissionDecisionReason"], extra)
+        r = self.t.hook("start-advice", TOP, {"tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
+                                              "tool_input": {"context": "fresh", "prompt": "write docs\nFiles: none",
+                                                             "use_worktree": False}})
+        self.assertEqual(r.stdout.strip(), "", "not asked: use_worktree false")
+        self.assertIn("advises `use_worktree: false`", self.advise(
+            TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024, use_worktree=True)["permissionDecisionReason"])
         self.assertIn('advises context "fork"', self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024,
                                                             use_worktree=False)["permissionDecisionReason"])
 
@@ -1424,7 +1412,10 @@ class ForkOrFresh(ThreeSessions):
                          {"Bash", "PowerShell"}, "the guard reads shell calls alone")
         self.assertIsNone(guard(B, "git worktree add ../wt -b mine"), "a worktree made moves no checkout")
         self.assertIsNone(guard(B, "git branch mine"), "a branch made without a move")
-        self.assertIsNone(guard(B, "git status && git commit -qm x"), "ordinary git is never asked")
+        self.assertIsNone(guard(B, "git status"), "a status reads")
+        out = guard(B, "git status && git commit -qm x")
+        self.assertEqual(out["permissionDecision"], "deny", "a commit in a shared checkout takes the others' changes")
+        self.assertIn('phi.py" commit -m "<message>" -- <path> ...', out["permissionDecisionReason"])
         self.assertIsNone(guard(B, "grep -n 'git checkout -b' docs.md"), "quoted text is not a command")
         self.assertIsNone(guard(B, "git checkout -- lib/x.py"), "restoring a file is not a branch change")
         self.assertEqual(guard(B, "git switch main")["permissionDecision"], "ask", "a branch change in a child")
@@ -1530,7 +1521,7 @@ class ForkOrFresh(ThreeSessions):
                     "gh api graphql -f query='\nmutation {\n  mergePullRequest(input: {pullRequestId: \"P\"}) {\n"
                     "    clientMutationId\n  }\n}'",
                     'git -C "C:/Users/a b/repo" push', 'git -c "user.name=a b" push', "cmd /c git push",
-                    'Invoke-Expression "git push"', 'git commit -qm "x" && git push'):
+                    'Invoke-Expression "git push"'):
             out = guard(B, cmd)
             self.assertIsNotNone(out, cmd)
             self.assertEqual(out["permissionDecision"], "ask", cmd)
@@ -1538,6 +1529,9 @@ class ForkOrFresh(ThreeSessions):
         r = self.t.hook("branch-guard", B, {"tool_name": "PowerShell", "tool_input": {
             "command": "Set-Location C:/x; & git.exe push origin main"}})
         self.assertEqual(json.loads(r.stdout)["hookSpecificOutput"]["permissionDecision"], "ask", "a PowerShell push")
+        out = guard(B, 'git commit -qm "x" && git push')
+        self.assertEqual(out["permissionDecision"], "deny", "the commit is refused before the push is asked about")
+        self.assertIn('phi.py" commit -m "<message>" -- <path> ...', out["permissionDecisionReason"])
         gate = os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")
         for k, cmd in enumerate(("gh pr merge 12", "gh api -X PATCH repos/o/r/git/refs/heads/main -f sha=abc",
                                  "/usr/bin/git push", "/usr/bin/git pull", "/usr/bin/git rebase main",
@@ -1554,8 +1548,12 @@ class ForkOrFresh(ThreeSessions):
         self.assertIsNone(guard(B, "git log --grep push"), "a log reads")
         self.assertIsNone(guard(B, "git status"), "a status reads")
         self.assertIsNone(guard(B, "echo push"), "an echo lands nothing")
-        self.assertIsNone(guard(B, 'git commit -qm "say git push to land it"'), "a message naming a push")
-        self.assertIsNone(guard(B, 'git commit -q --message="then git push"'), "a --message= value is data")
+        for cmd, what in (('git commit -qm "say git push to land it"', "a message naming a push"),
+                          ('git commit -q --message="then git push"', "a --message= value is data")):
+            out = guard(B, cmd)     # denied as a commit, never asked as a push: its message is data
+            self.assertEqual(out["permissionDecision"], "deny", what)
+            self.assertIn('phi.py" commit -m "<message>" -- <path> ...', out["permissionDecisionReason"], what)
+            self.assertNotIn("merges and pushes", out["permissionDecisionReason"], what)
         self.assertIsNone(guard(B, 'grep -rn "git push" docs/'), "a quoted pattern is data")
         self.assertIsNone(guard(B, 'echo "then git pull"'), "a quoted echo is data")
         self.assertIsNone(guard(B, 'rg "gh pr merge"'), "a quoted search is data")

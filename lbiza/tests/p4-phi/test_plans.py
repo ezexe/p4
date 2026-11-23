@@ -465,8 +465,8 @@ class TreeOfPlans(unittest.TestCase):
             self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
 
     def test_a_subagent_is_told_no_file_a_sibling_changed(self):
-        """A sibling of the launching session works in a git worktree of its own, so a file it changed is not under
-        the subagent's hands: the anchor holds no files, and the subagent's tool calls, through `lookup-check`, give
+        """A sibling of the launching session works in the one checkout, on the paths of its own `Files:` line, so
+        a file it changed is not under the subagent's hands: the anchor holds no files, and the subagent's tool calls, through `lookup-check`, give
         no files line however often the sibling's entry changes. A sibling's note still reaches it."""
         t = self.t
         docs = f"{t.proj}/docs/layout.md".replace("\\", "/")
@@ -509,8 +509,10 @@ class TreeOfPlans(unittest.TestCase):
         for a in ("2.1", "2.2", "2.3"):
             self.assertIn(a, ctx.split("can each run")[0])
         self.assertIn("`initiation` `user_asked`", ctx)
-        self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", ctx)
-        self.assertNotIn("use_worktree: false", ctx, "a step that writes shares no checkout")
+        self.assertIn("`use_worktree: false`, so it works in this checkout on the paths of its `Files:` line and "
+                      "commits by `phi.py commit`", ctx)
+        self.assertNotIn("use_worktree: true", ctx, "no step is started in a worktree")
+        self.assertNotIn("a git worktree and on a branch of its own", ctx)
         self.assertNotIn("on this session's branch", ctx)
         self.assertIn("Judged by", ctx)
         self.assertNotIn("can each run", self.plan(B, {"advance": True}) or "", "said once per set")

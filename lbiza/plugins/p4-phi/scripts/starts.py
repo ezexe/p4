@@ -8,10 +8,9 @@ its **Start** "starts the task in another session", and "the sidebar lists the s
 session". The start tool's own text adds that "the user sees a card and nothing runs until they start it", and
 `mcp__ccd_session__dismiss_task` withdraws a card that went stale.
 
-No start waits on another session's files. A session that writes works in a git worktree of its own, so no two
-sessions share a file on disk, and p4-phi keeps no lock on a file: worktrees.md, "Running each Claude Code session in
-its own worktree gives it a separate copy of the files to edit, so one session can build a feature while a second
-fixes a bug." A brief's `Files:` line says what the session covers, which the address book and routing read.
+Every session works in the one checkout on the paths of its `Files:` line: agent-teams.md, "Avoid file conflicts",
+"Break the work so each teammate owns a different set of files." A brief's `Files:` line says what the session
+covers, which the address book, routing and the path guard read.
 
 A start request is the one start that card cannot hold: a start addressed to a puppeteer. A card is shown in the
 session that proposes it and its session is listed under that session, so no card asks another session for an
@@ -137,22 +136,11 @@ def stopped(s):
 
 # --- the checkout a started session works in ---------------------------------------------------------------------------
 #
-# A session that writes gets a git worktree and a branch of its own, which is Claude Code's own answer to parallel
-# writers. worktrees.md: "Running each Claude Code session in its own worktree gives it a separate copy of the files
-# to edit, so one session can build a feature while a second fixes a bug." desktop.md, "Run a session in its own
-# worktree": "Worktrees are stored in `<project-root>/.claude/worktrees/` by default." The app's start tool takes it
-# as `use_worktree`, in its own text: "use_worktree false = shares this checkout and can edit it", "true = its own
-# worktree". So every start call p4-phi drafts for a worker that writes passes `use_worktree: true`, and one for a
-# session that only reads passes `false`.
-#
-# That text also says `use_worktree` is "\"fresh\" only (rejected with \"fork\")", and of a fork that "from a plain
-# checkout it shares the folder", so a start drafted for a writer is always `fresh`.
-#
-# A new orchestrator is started with `false`. It lands its tree's work in the checkout that holds the default branch
-# and syncs the store under that checkout, and worktrees.md, "How Claude Code enforces isolation", refuses both from
-# inside a worktree: "Claude Code blocks a Bash, PowerShell, or Monitor command whose working directory resolves to
-# the main checkout", and "blocks a Bash or Monitor command that redirects git into the main checkout". Its own work
-# steps go to workers, each in a worktree.
+# Every session p4-phi starts works in its starter's checkout. The app's start tool says it in its own text:
+# "use_worktree false = shares this checkout and can edit it". The work is divided by the paths each session holds,
+# agent-teams.md, "Avoid file conflicts": "Break the work so each teammate owns a different set of files." Section 2's
+# guard, in phi.py, is what holds that. A start tool's `use_worktree` is "\"fresh\" only (rejected with \"fork\")", so
+# a start drafted for a writer is always `fresh`.
 
 NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)   # a new orchestrator's brief line
 
@@ -171,10 +159,9 @@ def writes(brief, base=""):
 
 
 def use_worktree(brief, base=""):
-    """What a start call drafted for `brief` passes as `use_worktree`: True for a worker that writes, which works in
-    a git worktree and on a branch of its own, False for a session that only reads, which shares its starter's
-    checkout, and False for a new orchestrator, which lands in the checkout that holds the default branch."""
-    return not NEW_TOP.search(str(brief or "")) and writes(brief, base)
+    """What a start call drafted for `brief` passes as `use_worktree`: False for every brief, since every session
+    p4-phi starts works in its starter's checkout, on the paths of its `Files:` line. One home for the answer."""
+    return False
 
 
 # --- a start request, addressed to a puppeteer --------------------------------------------------------------------------

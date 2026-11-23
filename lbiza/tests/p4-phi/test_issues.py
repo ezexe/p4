@@ -783,7 +783,7 @@ class FindingsGoUp(unittest.TestCase):
         with self.subTest("another gh call, and the words as data, pass"):
             self.assertEqual(self.refused(A, "gh issue view 7 -R ezexe/demo"), "")
             self.assertEqual(self.refused(A, "gh issue list -R ezexe/demo --search \"issue create\""), "")
-            self.assertEqual(self.refused(A, "git commit -m \"gh issue create is the publisher's\""), "")
+            self.assertEqual(self.refused(A, "git log --grep \"gh issue create is the publisher's\""), "")
             self.assertEqual(issues.publishes("echo 'gh issue create'"), "")
             self.assertEqual(issues.publishes(self.CREATE), "gh issue create")
         with self.subTest("the issue loop's switch turns the refusal off"):

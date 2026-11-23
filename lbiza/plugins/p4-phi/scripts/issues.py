@@ -961,8 +961,8 @@ def gate(home, s, cwd=""):
     top = f"\"{top_title}\" `{top_id}`" if top_id else "the top session of this tree"
     if not closing:
         why = (f"phi (p4-phi): the regression test passed on {head}, but no commit of this session says "
-               f"`Closes #{n}`. Commit the work on this session's own branch, in its own worktree, with `Closes #{n}` "
-               f"in its message and report; "
+               f"`Closes #{n}`. Commit the work by `phi.py commit`, with `Closes #{n}` "
+               f"in its message, and report; "
                f"this session does not push it, since only the tree's orchestrator, {top}, lands and pushes.")
         return False, ("" if _told(iss, f"no-close:{head}") else why), ""
     if not pushed:

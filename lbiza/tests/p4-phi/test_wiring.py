@@ -507,7 +507,7 @@ class CheckRunner(unittest.TestCase):
 
     def test_entering_a_worktree_has_no_check(self):
         """hook.PHI_CHECK routed EnterWorktree to phi.py's branch guard, which has answered nothing for the tool since
-        each session that writes has a worktree of its own. So the entry is gone, and the hooks module lists no such
+        every session works in the one checkout, on its own paths. So the entry is gone, and the hooks module lists no such
         tool either."""
         sys.path.insert(0, SCRIPTS)
         try:

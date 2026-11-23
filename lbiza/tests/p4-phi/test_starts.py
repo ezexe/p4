@@ -4,8 +4,9 @@ the app's suggested task card cannot hold, run through phi.py's hooks.
 
     python -m pytest tests/p4-phi/test_starts.py
 
-The tree: two orchestrators and a child of the first. A session that writes works in a git worktree of its own, so
-no start is refused for the files its brief names, none is held while a live session covers one of them, none is
+The tree: two orchestrators and a child of the first. Every session works in the one checkout, on the paths of its
+`Files:` line; section 2 of the plan is what refuses and holds a start for those paths, so today no start is refused
+for the files its brief names, none is held while a live session covers one of them, none is
 queued behind a busy writer, and no command narrows or releases what a session covers. A start the child may not
 make is the app's suggested task card, desktop.md, "Start a task that Claude suggests", so `phi.py request` keeps
 only a request to a puppeteer. A brief's `Files:` line is read as what the session covers, a withdrawn request is
@@ -80,27 +81,26 @@ class StartRequests(unittest.TestCase):
         self.assertNotIn("mcp__ccd_turn__wrap_up", source, "starts.py orders no wrap-up")
         self.assertIn("`mcp__ccd_session__start_session`", source)
 
-    def test_a_start_drafted_for_a_writer_passes_use_worktree_true_and_one_for_a_reader_false(self):
-        """A session that writes gets a git worktree and a branch of its own, worktrees.md, "Running each Claude Code
-        session in its own worktree gives it a separate copy of the files to edit". So the call drafted for a brief
-        that writes passes `use_worktree: true`, one for a brief that only reads passes false and shares the
-        checkout, and one for a new orchestrator passes false, since it lands in the checkout that holds the default
-        branch."""
+    def test_a_start_drafted_for_any_brief_passes_use_worktree_false(self):
+        """Every session p4-phi starts works in its starter's checkout, on the paths of its `Files:` line, agent-teams.md,
+        "Avoid file conflicts". So the call drafted for a brief that writes, one for a brief that only reads and one
+        for a new orchestrator all pass `use_worktree: false`, and the lines that draft a start say so."""
         port = "Port the exporter's flush to the new writer and run its suite. Report when done."
         check = "Check what the exporter's flush does and report it."
-        for brief, want in ((port + "\nFiles: src/flush.py", True), (port, True), (port + "\nFiles: none", False),
-                            (check + "\nFiles: none", False), (check, False), (check + "\nFiles: src/flush.py", True),
-                            (port + "\nFiles: the tests only", True), (port + "\nFiles: read-only", False),
-                            (port + "\nFiles: src/flush.py\n" + phi.NEW_TOP_BRIEF, False)):
-            self.assertIs(starts.use_worktree(brief), want, brief)
+        for brief in (port + "\nFiles: src/flush.py", port, port + "\nFiles: none", check + "\nFiles: none", check,
+                      check + "\nFiles: src/flush.py", port + "\nFiles: the tests only", port + "\nFiles: read-only",
+                      port + "\nFiles: src/flush.py\n" + phi.NEW_TOP_BRIEF, phi.NEW_TOP_BRIEF):
+            self.assertIs(starts.use_worktree(brief), False, brief)
         import plans
         import puppeteer
-        for line in (plans.CARD_EACH, phi.FIRST_SPLIT, puppeteer.WORKTREE_LINE):
-            self.assertIn("a git worktree", line)
-        self.assertIn("`use_worktree: true`", plans.OWN_TREE)
+        self.assertIn("`use_worktree: false`", plans.OWN_TREE)
+        self.assertNotIn("`use_worktree: true`", plans.OWN_TREE)
+        self.assertIn("`use_worktree: false`", plans.TOP_TREE)
+        self.assertIn("`use_worktree: false`", plans.CARD_EACH)
         self.assertIn("`use_worktree: false`", phi.new_top_route())
         draft = {"title": "the flush", "context": "fresh", "brief": port, "background": "x" * 90, "parent": TOP}
-        self.assertIs(puppeteer.call_of(draft)["use_worktree"], True, "a worker's draft")
+        self.assertIs(puppeteer.call_of(draft)["use_worktree"], False, "a worker's draft")
+        self.assertIs(puppeteer.call_of({**draft, "brief": check})["use_worktree"], False, "a reader's draft")
         self.assertIs(puppeteer.call_of({**draft, "parent": ""})["use_worktree"], False, "a new orchestrator")
 
     def writer(self, sid="local_wrt00009", files="src/flush.py"):
@@ -112,7 +112,7 @@ class StartRequests(unittest.TestCase):
 
     def start(self, host, prompt, **more):
         """What p4-phi's hook answers a start call with: its decision and reason, both '' when it says nothing."""
-        call = {"initiation": "user_asked", "title": "the port", "context": "fresh", "use_worktree": True,
+        call = {"initiation": "user_asked", "title": "the port", "context": "fresh", "use_worktree": False,
                 "prompt": prompt, "background": "The exporter top holds the port; this child takes the flush. " * 2,
                 **more}
         r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse", "tool_name": START,
@@ -122,11 +122,14 @@ class StartRequests(unittest.TestCase):
         return out.get("permissionDecision", ""), out.get("permissionDecisionReason", "")
 
     def test_no_start_is_refused_for_a_brief_that_names_no_files(self):
-        """The refusal of a start whose brief declares no write set is gone, with its key phi.file_sets: a session
-        that writes works in a git worktree of its own, worktrees.md, "Running each Claude Code session in its own
-        worktree gives it a separate copy of the files to edit", so a brief with no `Files:` line starts, and the
-        call p4-phi's own advice words carries `use_worktree: true`."""
+        """The refusal of a start whose brief declares no write set is gone, with its key phi.file_sets, and a brief
+        with no `Files:` line starts today. # section 2: the start refusal of the plan's fence 2.2 comes back for a
+        writer's brief with no `Files:` line, so the first and third calls below, which name none, are what section 2
+        turns to a refusal; the `Files: none` and reader cases stay as they are."""
         t = self.t
+        # a reader's brief and one that says `Files: none` start, as they will after section 2
+        self.assertEqual(self.start(TOP, "Check what the exporter's flush does and report it.\nFiles: none"), ("", ""))
+        # section 2: a writer's brief with no `Files:` line is refused here, and in the retired-key case below
         self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""))
         self.assertEqual(self.start(TOP, "Port the exporter's flush. Report when done.\nFiles: src/flush.py"),
                          ("", ""))
@@ -137,14 +140,15 @@ class StartRequests(unittest.TestCase):
         self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""),
                          "the retired key switches nothing")
         import plans
-        self.assertIn("`use_worktree: true`", plans.CARD_EACH)
+        self.assertIn("`use_worktree: false`", plans.CARD_EACH)
 
     def test_no_start_is_held_while_a_live_session_covers_its_files(self):
         """The held start is gone, with starts.held_by, starts.writers and starts.files_overlap: a start whose brief
-        names a file a live writer covers goes through, since each writer has a worktree of its own and no two share
-        a file on disk."""
+        names a file a live writer covers goes through today. # section 2: the partition of fence 2 turns the two
+        starts below to a refusal for a path another live session covers."""
         w = self.writer()
         self.assertEqual(self.t.session(w)["fileSet"], [relay.norm("src/flush.py", self.t.proj)])
+        # section 2: both of these are refused once a start's paths are partitioned
         self.assertEqual(self.start(TOP, BRIEF), ("", ""), "a live writer of src/flush.py holds no start")
         self.assertEqual(self.start(TOP2, BRIEF), ("", ""), "nor another orchestrator's")
         with open(phi.__file__, encoding="utf-8") as f:

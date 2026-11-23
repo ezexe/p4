@@ -598,8 +598,8 @@ class Supervisor(unittest.TestCase):
 
     def test_a_go_to_a_writer_is_warned_about_for_no_file_another_controlled_session_covers(self):
         """The early-go warning is gone, with controls.go_text: a puppeteer's go to a controlled session whose brief
-        names a file another controlled session covers goes out with no line, since each session that writes has a
-        git worktree of its own, worktrees.md, "a separate copy of the files to edit"."""
+        names a file another controlled session covers goes out with no line; the paths each session covers are held
+        by the guard at a start and an edit, not by a warning on a go."""
         t = self.t
         t.say(TOP, "Task:\nBuild the exporter's flush.\nFiles: src/flush.py, src/writer.py")
         t.say(TOP3, "Task:\nBuild the retry on the same writer.\nFiles: src/writer.py")

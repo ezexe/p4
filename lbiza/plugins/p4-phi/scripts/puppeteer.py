@@ -7,11 +7,11 @@ start draft, the gate and the watcher, which the functions `prompty`, `prompter`
   linear     Routing reads ezexe's message against the records the ledger is built from: the area it names and the
              live session that is that area's code owner. The start draft is the exact next session: its topic, a
              brief written as its own instruction, its parent session and the issue it closes, started fresh, a
-             worker in a git worktree of its own. The gate checks the draft: the issue it names is open, or it
+             worker in this checkout. The gate checks the draft: the issue it names is open, or it
              names none, p4-phi files none and the child's findings go up in its report; the parent session is the
              right orchestrator. A clean draft is handed as the exact start_session call; one whose area has a
              live code owner is routed there with SendMessage; one the depth or count cap holds starts no session.
-             No draft waits on a running writer's files, since a worker writes in a worktree of its own. The
+             No draft waits on a running writer's files: every session works in the one checkout, on its own paths. The
              watcher is one look at a time over an orchestrator's subtree, which the
              plugin's hooks module runs inside Claude Code at a turn's end, at a message's arrival and on its
              timer: a look writes <session>/ledger.md from p4-phi's records and the app's session records, only
@@ -1153,16 +1153,23 @@ def arrived(s, prompt):
     return bool(s.get("draft"))
 
 
-# the line a worker's brief carries, since its start passes `use_worktree: true`: where it works and who lands it
-WORKTREE_LINE = ("This session works in a git worktree of its own, on a branch of its own: commit there. Its tree's "
-                 "orchestrator merges that branch into the default branch and pushes, and this session does neither.")
+# the lines a worker's brief carries, since its start passes `use_worktree: false`: where it works, what it may change
+# and how it commits, as a terminal worker's brief says them
+CHECKOUT_LINES = [
+    "This session works in the checkout it is started in, on the branch checked out there, beside other sessions. It "
+    "makes no worktree and no branch, and runs no `git stash`, `git reset`, `git switch` or `git checkout <branch>`.",
+    "It changes only the paths of its `Files:` line. p4-phi refuses an edit outside them: a path it needs beyond them "
+    "is asked of the session that started it, by SendMessage.",
+    "It commits only by `{cmd} commit -m \"<message>\" -- <path> ...`, naming every path it changed, added or "
+    "removed and no other, and never by `git add` or `git commit`. It pushes and merges nothing: its tree's "
+    "orchestrator pushes.",
+]
 
 
-def worktree_lines(base=""):
-    """A worker's brief on its worktree: where it works and who lands it, then what that worktree shares with its
-    main checkout, where the p4.json of the checkout `base` lies in names it."""
-    more = shared.lines(base) if base else []
-    return [WORKTREE_LINE, ""] + ([*more, ""] if more else [])
+def checkout_lines(base=""):
+    """A worker's brief on where it works, what it may change and how it commits, then one empty line."""
+    cmd = _phi().commands()
+    return [line.replace("{cmd}", cmd) for line in CHECKOUT_LINES] + [""]
 
 
 def topic_of(req):
@@ -1262,8 +1269,8 @@ def prompter(home, s, req, read, base):
     session, its parent session and the issue it closes when the message names one. The brief states the task by
     its title, its files, what done looks like, and the model and effort the call adds; it quotes no sentence of the
     message and says nothing of who asked or how the request travelled. A close registered route gives the starting
-    shape. Every draft is `fresh`: a worker's draft writes, so its call passes `use_worktree: true`, which the start
-    tool's own text gives as "\"fresh\" only (rejected with \"fork\")"."""
+    shape. Every draft is `fresh`, and its call passes `use_worktree: false`; the start
+    tool's own text gives `use_worktree` as "\"fresh\" only (rejected with \"fork\")"."""
     phi = _phi()
     sid = s["sessionId"]
     parent = sid if read["within"] or relay._parent(s) else ""
@@ -1292,7 +1299,7 @@ def prompter(home, s, req, read, base):
         lines += [f"It names no issue in {slug}, and p4-phi files none: each finding goes into the report as one "
                   f"`Finding:` line, which the parent session passes up unchanged.", ""]
     if parent:
-        lines += worktree_lines(base)
+        lines += checkout_lines(base)
     tests = test_files(base, paths)
     lines += [phi.RESEARCH, "", phi.DECIDE, ""]
     if tests:                                       # the tests the change touches, and no whole suite
@@ -1316,16 +1323,15 @@ def prompter(home, s, req, read, base):
 
 
 def call_of(d):
-    """The exact start_session input that starts a draft. A worker's draft writes, so it passes `use_worktree: true`
-    and the worker gets a git worktree and a branch of its own. A new orchestrator lands in this checkout, so it
-    passes false, as starts.use_worktree says."""
+    """The exact start_session input that starts a draft. Every draft passes `use_worktree: false`, as
+    starts.use_worktree says: the session works in this checkout, on the paths of its `Files:` line."""
     # the start tool's schema, of `wake_when_done`: true "also continues you if this session never gets its task
     # some other way, such as a brief that is not sent; default false; not with own_initiative". Every call here
     # runs at once, as `user_asked`, and no card is built here.
     call = {"initiation": "user_asked", "title": d["title"], "context": d["context"], "prompt": d["brief"],
             "wake_when_done": True}
     if d["context"] == "fresh":
-        call.update(use_worktree=bool(d.get("parent")), background=d["background"])
+        call.update(use_worktree=starts.use_worktree(call["prompt"]), background=d["background"])
     # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
     # decide-by-research line every brief carries is no word of its kind of work
     brief = d["brief"].replace(_phi().DECIDE, "")
@@ -1337,8 +1343,8 @@ def call_of(d):
 def pioneer(home, s, d, read, net=True):
     """The gate: a draft checked for the state of the issue it names and that its parent session is the right
     orchestrator. The verdict is start, route, or here when the depth or count cap holds, with what the gate saw;
-    the draft is kept. No draft waits on a running writer: a worker's start passes `use_worktree: true`, so it
-    writes in a git worktree of its own and shares no file on disk with a session at work."""
+    the draft is kept. No draft waits on a running writer here: every start passes `use_worktree: false`, and
+    the partition of its `Files:` line is held at the start, in phi.py."""
     phi = _phi()
     sid = s["sessionId"]
     gate = []

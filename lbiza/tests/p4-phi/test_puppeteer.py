@@ -8,7 +8,7 @@ linear: the ledger an orchestrator's watcher writes holds a row for each live se
 only when a source changed, and leads with a reconcile line when the app archived a session p4-phi lists or shows a
 child p4-phi does not hold; the watcher is one look at a time, `phi.py look`, which the plugin's hooks module starts
 and which ends, and no hook starts a process; a message of ezexe's that is work is drafted from ezexe's words and gate-checked into the exact
-start_session call, a worker's with `use_worktree: true` whatever a running writer edits, or into a SendMessage to the
+start_session call, every one with `use_worktree: false` whatever a running writer edits, or into a SendMessage to the
 session whose owned paths hold its area; a question is left alone.
 recursive: a landed topic registers its route only once its issue is closed, a commit closing it is pushed and its
 session is archived with its outcome kept; a later message with matching words is drafted from that route; a route
@@ -175,9 +175,13 @@ class Linear(Base):
         self.assertNotIn("running writer", ctx, "the gate looks for no writer of its files")
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
-        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", True),
-                         "a worker's draft writes, so it gets a git worktree and a branch of its own")
-        self.assertIn(puppeteer.WORKTREE_LINE, call["prompt"], "its brief says where it works and who lands it")
+        self.assertIn('"use_worktree": false', ctx, "the drafted start of a session with a parent, as text")
+        self.assertNotIn('"use_worktree": true', ctx)
+        self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False),
+                         "a worker's draft works in this checkout, on the paths of its `Files:` line")
+        for line in puppeteer.checkout_lines():
+            if line:
+                self.assertIn(line, call["prompt"], "its brief says where it works, what it changes and how it commits")
         # docs/plugin-development.html, "Plan mode for a worker": a worker started in plan mode comes out of it in
         # auto, and under a starter that bypasses permission prompts every message between the two is then held,
         # so a draft names no permission mode and its worker starts in its starter's own
@@ -195,7 +199,7 @@ class Linear(Base):
         self.assertIn("so it is a new orchestrator", other)
         self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
         self.assertIs(call_in(other)["use_worktree"], False, "a new orchestrator lands in this checkout")
-        self.assertNotIn(puppeteer.WORKTREE_LINE, call_in(other)["prompt"])
+        self.assertNotIn(puppeteer.checkout_lines()[0], call_in(other)["prompt"], "a new orchestrator's brief has no worker's lines")
 
     def test_a_draft_whose_area_has_a_live_owner_is_routed_there(self):
         t = self.t
@@ -241,7 +245,7 @@ class Linear(Base):
         said = RETRY + ", and give its session a /goal as /plan would"
         prompt = call_in(context(t.say(TOP, said)))["prompt"]
         self.assertNotIn("Area:", prompt)
-        self.assertNotIn("Files:", prompt)
+        self.assertNotRegex(prompt, r"(?m)^Files: ")
         self.assertNotRegex(prompt, r"`[^`\n]*/(goal|plan)`")
         prompt = call_in(context(t.say(TOP, said + ", in `lib/x.py`")))["prompt"]
         files = next(x for x in prompt.splitlines() if x.startswith("Files: "))
@@ -262,7 +266,7 @@ class Linear(Base):
         said = RETRY + ", rebased onto origin/main of ezexe/p4"
         prompt = call_in(context(t.say(TOP, said)))["prompt"]
         self.assertNotIn("Area:", prompt)
-        self.assertNotIn("Files:", prompt)
+        self.assertNotRegex(prompt, r"(?m)^Files: ")
         prompt = call_in(context(t.say(TOP, said + ", in `lib/x.py`")))["prompt"]
         files = next(x for x in prompt.splitlines() if x.startswith("Files: "))
         self.assertRegex(files, r"^Files: `[^`]*lib/x\.py`$", "the file it names, and no ref and no repository")
@@ -295,7 +299,7 @@ class Linear(Base):
         said = RETRY + ", as the repository anthropics/claude-code and anthropics/claude-code#110694 have it"
         prompt = call_in(context(t.say(TOP, said)))["prompt"]
         self.assertNotIn("Area:", prompt)
-        self.assertNotIn("Files:", prompt)
+        self.assertNotRegex(prompt, r"(?m)^Files: ")
         prompt = call_in(context(t.say(TOP, said + ", in a new folder docs/guides")))["prompt"]
         self.assertRegex(prompt, r"(?m)^Files: `[^`]*docs/guides`$", "the folder to be made, and no repository")
         self.assertNotIn("claude-code`", prompt)
@@ -416,10 +420,10 @@ class Linear(Base):
         for text in said:
             self.assertIsNone(asks.search(text), text)
 
-    def test_a_draft_whose_files_a_running_writer_edits_is_started_in_a_worktree_and_never_queued(self):
+    def test_a_draft_whose_files_a_running_writer_edits_is_started_in_the_checkout_and_never_queued(self):
         """The queue behind a busy writer is gone: a draft that names a file a running writer is at work on is
-        handed as a start at once, with `use_worktree: true`, since that worker writes in a git worktree of its own
-        and shares no file on disk with the running writer. The gate names no writer, keeps no start request, and
+        handed as a start at once, with `use_worktree: false`, since the part of the partition that holds the two
+        sessions to their own paths is section 2's guard in phi.py, not a wait here. The gate names no writer, keeps no start request, and
         `pioneer` prints the same verdict again."""
         t = self.t
         t.record(TOP2, title="the docs top")
@@ -437,9 +441,9 @@ class Linear(Base):
         self.assertEqual(draft["verdict"], "start")
         self.assertNotIn("busy", draft)
         self.assertEqual((call["initiation"], call["context"]), ("user_asked", "fresh"))
-        self.assertIs(call["use_worktree"], bool(draft["parent"]), "a worker's draft in a worktree of its own")
+        self.assertIs(call["use_worktree"], False, "a worker's draft works in this checkout")
         worker = puppeteer.call_of({**draft, "parent": TOP})
-        self.assertIs(worker["use_worktree"], True, "whatever a running writer edits")
+        self.assertIs(worker["use_worktree"], False, "whatever a running writer edits")
         r = t.cli(TOP, "pioneer", did)
         self.assertIn("Start it now: `mcp__ccd_session__start_session` with ", r.stdout)
         self.assertNotIn("queued", r.stdout + r.stderr)
@@ -587,7 +591,7 @@ class TermsAndGuides(Base):
         self.assertIn(phi.DECIDE, writing)
         t.stop(TOP, "retry", report="drafted")
         none = call_in(context(t.say(TOP, RETRY)))["prompt"]
-        self.assertNotIn("Files:", none)
+        self.assertNotRegex(none, r"(?m)^Files: ")
         self.assertIn(phi.DECIDE, none)
         self.assertIn("decisions.md", phi.DECIDE)
 
@@ -1270,10 +1274,16 @@ class Look(Base):
 
 
 
-class WorktreeLines(unittest.TestCase):
-    def test_a_brief_with_nothing_shared_holds_the_worktree_line_alone(self):
-        self.assertEqual(puppeteer.worktree_lines(), [puppeteer.WORKTREE_LINE, ""])
-        self.assertEqual(puppeteer.worktree_lines(tempfile.mkdtemp()), [puppeteer.WORKTREE_LINE, ""])
+class CheckoutLines(unittest.TestCase):
+    def test_a_brief_with_nothing_shared_holds_the_checkout_lines_alone(self):
+        cmd = phi.commands()
+        want = [line.replace("{cmd}", cmd) for line in puppeteer.CHECKOUT_LINES] + [""]
+        self.assertEqual(len(puppeteer.CHECKOUT_LINES), 3)
+        self.assertEqual(puppeteer.checkout_lines(), want)
+        self.assertEqual(puppeteer.checkout_lines(tempfile.mkdtemp()), want)
+        self.assertIn("`Files:` line", want[1])
+        self.assertIn(f"{cmd} commit -m", want[2])
+        self.assertNotIn("worktree of its own", " ".join(want))
 
 
 class NodeStores(unittest.TestCase):

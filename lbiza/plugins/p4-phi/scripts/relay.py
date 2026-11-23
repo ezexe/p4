@@ -7,8 +7,7 @@ plans.py, issues.py, puppeteer.py, controls.py, starts.py and gaps.py call them 
   owned paths  what a session alone may change: paths or globs, set by `phi.py shard <paths>` and kept in its
           session.json as `shard`. The address book lists them and routes a message by them, as book.py says, and a
           start's advice and a puppeteer's routing read them as a session's scope. No session is held against
-          another's: each session that writes works in a git worktree of its own, so two sessions' paths name
-          different files on disk and never meet.
+          another's: each session works in the one checkout, on the paths it holds, as phi.py keeps them apart.
   delta   a turn's change, kept on its row in turns.jsonl at Stop: the branch heads of the repositories it edited
           in, the files it changed, and its `deprecates:` and `replaces:` notes written since its last turn, with
           the paths they name. The heads and files are the session's own record, which its outcome, its closing
@@ -1187,17 +1186,8 @@ def route_text(home, s, text, store=""):
 # whose transcript is at most FORK_MAX_BYTES, for a child whose paths cover at least FORK_SHARE of the parent's
 # scope; otherwise a fresh session.
 #
-# A session that writes is never advised to fork where the fork would share its starter's folder. The start tool's
-# own text gives `use_worktree` as "\"fresh\" only (rejected with \"fork\")", and says of `context` that a fork
-# "from a worktree session gets a fresh worktree" and "from a plain checkout it shares the folder". So a fork cannot
-# be given a worktree, and only a fork of a session that works in one gets its own.
-#
-# A fresh start shares the folder too when it names no worktree. The same text on `use_worktree`: "Omitted: the same
-# folder when this session works in a plain folder and has never had a worktree (its own, a shared one, or one it
-# will enter later); otherwise its own worktree." So a fresh start of a worker that writes, made from a plain folder
-# with `use_worktree` left out, is advised to pass `use_worktree: true`. A start that names another place, by `cwd`,
-# `host`, `preset`, `environment`, `repository` or a `target` other than local, is not this session's folder to
-# share, and one that passes `false` chose the folder.
+# A start that names another place, by `cwd`, `host`, `preset`, `environment`, `repository` or a `target` other than
+# local, is not this session's folder to share: the partition of a start's paths is not read for it.
 ELSEWHERE = ("cwd", "host", "preset", "environment", "repository")
 
 FORK_MAX_BYTES = 1024 * 1024
@@ -1218,27 +1208,11 @@ def scope_of(home, sid):
     return sorted(files)
 
 
-def advise_start(home, parent, tool_input, transcript_bytes, apart=False):
-    """What is advised for a start_session call from `parent`: "fork" or "fresh", why, and True when the call is to
-    pass `use_worktree: true` and leaves it out. `apart` says `parent` works in a git worktree, so a fork of it and
-    a fresh start that names no worktree each get one of their own. Without it both share `parent`'s folder. So a
-    brief that writes, as starts.writes reads it, is advised fresh whatever its size and paths, and a fresh start
-    here of a worker that writes, as starts.use_worktree reads it, that leaves `use_worktree` out is advised to
-    pass it."""
+def advise_start(home, parent, tool_input, transcript_bytes):
+    """What is advised for a start_session call from `parent`: "fork" or "fresh", and why. By the size of the
+    parent's transcript and how much of the parent's scope the brief's paths cover, for a writer's start as for any."""
     s = _session(home, parent)
     base = s.get("cwd") or ""
-    import starts                                 # starts.py reads relay.py at its import, so it is read here
-    prompt = str(tool_input.get("prompt") or "")
-    if not apart and starts.writes(prompt, base):
-        here = str(tool_input.get("target") or "local") == "local" and not any(tool_input.get(k) for k in ELSEWHERE)
-        if str(tool_input.get("context") or "fresh") != "fork" and tool_input.get("use_worktree") is None \
-                and here and starts.use_worktree(prompt, base):
-            return "fresh", ("the brief is of a session that writes, and a fresh start that leaves `use_worktree` "
-                             "out from a plain folder shares that folder, by the start tool's own text. Started "
-                             "with `use_worktree: true` it works in a git worktree and on a branch of its own"), True
-        return "fresh", ("the brief is of a session that writes, and a fork from a plain checkout shares its "
-                         "starter's folder, where the start tool rejects `use_worktree` with a fork. A fresh session "
-                         "started with `use_worktree: true` works in a git worktree and on a branch of its own"), False
     brief = " ".join(str(tool_input.get(k) or "") for k in ("prompt", "background", "title"))
     child = [c for c in paths_in(brief, base) if not names_nothing(c, home, base)]
     scope = [p for p in scope_of(home, parent) if not names_nothing(p, home, base)]
@@ -1247,7 +1221,7 @@ def advise_start(home, parent, tool_input, transcript_bytes, apart=False):
     mb = transcript_bytes / (1024 * 1024)
     if short and share >= FORK_SHARE:
         return "fork", (f"the parent's transcript is {mb:.1f} MB, under {FORK_MAX_BYTES // (1024 * 1024)} MB, and the "
-                        f"brief's paths cover {share:.0%} of the parent's scope: the child's work is the parent's"), False
+                        f"brief's paths cover {share:.0%} of the parent's scope: the child's work is the parent's")
     why = []
     if not short:
         why.append(f"the parent's transcript is {mb:.1f} MB, over {FORK_MAX_BYTES // (1024 * 1024)} MB: a fork "
@@ -1256,7 +1230,7 @@ def advise_start(home, parent, tool_input, transcript_bytes, apart=False):
         why.append(f"the brief's paths cover {share:.0%} of the parent's scope" + ("" if child else
                                                                                     ": the brief names no path"))
     return "fresh", "; ".join(why) + ". A fresh session given a brief and p4-phi's slice of the anchor starts on its " \
-                                      "own task alone", False
+                                      "own task alone"
 
 
 def pin_text(s):

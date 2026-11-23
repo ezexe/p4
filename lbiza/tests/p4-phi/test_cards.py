@@ -631,7 +631,7 @@ class Guards(unittest.TestCase):
         r = self.t.hook("start-advice", A, {"hook_event_name": "PreToolUse", "permission_mode": "auto",
                                             "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
                                             "tool_input": {"initiation": "user_asked", "context": "fresh",
-                                                           "title": "a child", "use_worktree": True,
+                                                           "title": "a child", "use_worktree": False,
                                                            "permission_mode": "plan",
                                                            "prompt": "Read the docs.\nFiles: none"}})
         self.assertEqual(r.stdout.strip(), "", "auto and plan are one class")
@@ -659,7 +659,7 @@ class Guards(unittest.TestCase):
         r = self.t.hook("start-advice", who, {"hook_event_name": "PreToolUse",
                                               "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
                                               "tool_input": {"initiation": "user_asked", "context": "fresh",
-                                                             "title": "a child", "use_worktree": True,
+                                                             "title": "a child", "use_worktree": False,
                                                              "prompt": "Read the docs.\nFiles: none", **inp}})
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
