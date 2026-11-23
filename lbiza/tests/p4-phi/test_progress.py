@@ -250,6 +250,63 @@ class Others(Store):
         self.assertEqual(len(progress.build(self.home, TOP)["nodes"]), 1, "a team that is over leaves no row")
 
 
+class Spend(Store):
+    def rows(self, path, *calls):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            for mid, model, usage in calls:
+                f.write(json.dumps({"type": "assistant", "message": {"id": mid, "model": model, "usage": usage}})
+                        + "\n")
+
+    def test_a_message_is_counted_once_by_the_last_line_that_carries_its_id(self):
+        path = os.path.join(self.root, "t", "lead.jsonl")
+        self.rows(path, ("m1", "claude-sonnet-5-5", {"input_tokens": 3, "output_tokens": 1}),
+                  ("m1", "claude-sonnet-5-5", {"input_tokens": 3, "cache_read_input_tokens": 10, "output_tokens": 7}),
+                  ("m2", "<synthetic>", {"input_tokens": 0, "output_tokens": 0}))
+        self.assertEqual(progress.spend_of(path), {"calls": 2, "models": ["claude-sonnet-5-5"], "input": 3,
+                                                   "cache_write": 0, "cache_read": 10, "output": 7})
+        self.assertEqual(progress.spend_of(os.path.join(self.root, "none.jsonl"))["calls"], 0)
+
+    def test_a_lead_is_found_by_its_name_and_each_agent_under_it_is_a_row(self):
+        lead = os.path.join(self.root, "t", "lead.jsonl")
+        self.rows(lead, ("m1", "claude-fable-5-2", {"input_tokens": 5, "output_tokens": 2}))
+        mate = os.path.join(self.root, "t", "lead", "subagents", "agent-afences-1.jsonl")
+        self.rows(mate, ("m2", "claude-sonnet-5-5",
+                         {"input_tokens": 1, "cache_creation_input_tokens": 4, "output_tokens": 3}))
+        with open(mate[:-6] + ".meta.json", "w", encoding="utf-8") as f:
+            json.dump({"name": "fences", "taskKind": "in_process_teammate"}, f)
+        page = os.path.join(self.root, "t", "lead", "subagents", "agent-a9.jsonl")
+        self.rows(page, ("m3", "claude-haiku-5-5", {"input_tokens": 2, "output_tokens": 1}))
+        self.session("cli-old-0001", title="plan-read", createdAt="2026-11-22 09:00")
+        self.session("cli-lead-0001", title="plan-read", createdAt="2026-11-23 09:00", transcript=lead)
+        got = progress.spend(self.home, "plan-read")
+        self.assertEqual([(r["who"], r["kind"], r["calls"]) for r in got],
+                         [("the session itself", "session", 1), ("subagent a9", "subagent", 1),
+                          ("teammate fences", "teammate", 1), ("all of them", "all", 3)])
+        self.assertEqual((got[-1]["input"], got[-1]["cache_write"], got[-1]["output"]), (8, 4, 6))
+        self.assertEqual(got[-1]["models"], ["claude-fable-5-2", "claude-haiku-5-5", "claude-sonnet-5-5"])
+        self.assertEqual(progress.spend(self.home, "cli-lead-0001")[0]["input"], 5, "and by its session id")
+        self.assertEqual(progress.spend(self.home, "no-such-name"), [])
+        # the command itself, in a process of its own as the case of `phi.py progress` runs it
+        command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "spend", "--p4", self.home,
+                   "--session", "cli-lead-0001"]
+        ran = subprocess.run(command + ["plan-read"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(len(ran.stdout.strip().split("\n")), 4, "one line a row")
+        none = subprocess.run(command + ["no-such-name"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(none.returncode, 2)
+
+    def test_a_record_with_no_path_is_read_by_its_cli_id_under_the_projects_folder(self):
+        from unittest import mock
+        config = os.path.join(self.root, "config")
+        self.rows(os.path.join(config, "projects", "E--proj", "cli-0002.jsonl"),
+                  ("m1", "claude-sonnet-5-5", {"input_tokens": 9, "output_tokens": 1}))
+        self.session("cli-0002", cliSessionIds=["cli-0001", "cli-0002"])
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            self.assertEqual(progress.spend(self.home, "cli-0002")[0]["input"], 9)
+            self.assertEqual(progress.transcript_of({"cliSessionIds": ["cli-9999"]}), "")
+
+
 class Kept(Store):
     def me(self):
         return types.SimpleNamespace(home=self.home, store=self.home, id=TOP, rec={}, cli="")

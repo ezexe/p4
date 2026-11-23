@@ -4495,7 +4495,7 @@ def main(argv=None):
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
                  "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "conf", "sections",
-                 "progress"):
+                 "progress", "spend"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -4511,6 +4511,10 @@ def main(argv=None):
             p.add_argument("which", nargs="?", default="")
         if name == "sections":
             p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed as starts")
+        if name == "spend":
+            p.add_argument("who", nargs="?", default="",
+                           help="a session id of the store or the name a terminal session was started under, this "
+                                "session when left out")
         if name == "goal":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off", "set", "failed", "ask"),
                            help="on and off write `goal` in the store's phi.json; set is the hooks module's word "
@@ -4627,6 +4631,17 @@ def main(argv=None):
             import progress
             sys.stdout.write(json.dumps(progress.write(me.home, safe_id(me.id)), ensure_ascii=False, sort_keys=True)
                              + "\n")
+            return 0
+        if a.cmd == "spend":                       # what a session and the agents under it spent, by their transcripts
+            import progress
+            rows = progress.spend(me.home, a.who or safe_id(me.id))
+            if not rows:
+                print(f"phi: no transcript is found for {a.who or me.id}, so its spend is not read", file=sys.stderr)
+                return 2
+            for r in rows:
+                print(f"{r['who']}: {r['calls']} API calls, {r['input'] + r['cache_write'] + r['cache_read']} tokens "
+                      f"in, of them {r['cache_read']} read from the cache, and {r['output']} tokens out, on "
+                      f"{', '.join(r['models']) or 'no model named'}")
             return 0
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")

@@ -6,8 +6,10 @@ session under it, with its goal as session.json holds it, its task list as plan.
 works with that plan's sections and its loop log. The hooks module runs the command while its pane is open and draws
 the file. `sources` lists the files the nodes were read from, whose times the module watches between two runs, and
 `folders` the folders whose list of names it watches, where a new session's folder appears.
+`phi.py spend` prints what `spend` reads: the tokens a session and each teammate and subagent under it spent.
 """
 
+import glob
 import os
 import re
 
@@ -16,6 +18,7 @@ import puppeteer
 import relay
 import sections
 import starts
+import transcript
 
 FILE = "progress.json"
 NODES = 64                       # the most sessions one file holds
@@ -217,3 +220,60 @@ def write(home, sid):
     if changed:
         relay._write_json(path, m)
     return {"path": path.replace("\\", "/"), "changed": changed}
+
+
+# What one API call's `usage` holds, by the key each figure is summed under.
+SPENT = (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens"),
+         ("cache_read", "cache_read_input_tokens"), ("output", "output_tokens"))
+
+
+def spend_of(path):
+    """What the API calls of one transcript spent: `calls`, the tokens of `input`, `cache_write`, `cache_read` and
+    `output`, and the `models` named. An assistant message is written one line per content block, so each is
+    counted once, by the last line that carries its id. Zeros for a file that is not there."""
+    last = {}
+    for d in transcript.read_lines(path):
+        m = d.get("message") or {}
+        if d.get("type") == "assistant" and isinstance(m.get("usage"), dict):
+            last[m.get("id") or d.get("uuid")] = m
+    out = {"calls": len(last),
+           "models": sorted({str(m["model"]) for m in last.values() if str(m.get("model") or "").startswith("claude")})}
+    for key, name in SPENT:
+        out[key] = sum(int(m["usage"].get(name) or 0) for m in last.values())
+    return out
+
+
+def transcript_of(s):
+    """A session's transcript: the path its record keeps, else the file Claude Code names by the session's last
+    CLI id under a project of its `projects` folder, '' where neither is there."""
+    kept = os.path.expanduser(str(s.get("transcript") or ""))
+    if kept:
+        return kept
+    ids = [str(x) for x in s.get("cliSessionIds") or [] if x]
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    found = sorted(glob.glob(os.path.join(base, "projects", "*", ids[-1] + ".jsonl"))) if ids else []
+    return found[0] if found else ""
+
+
+def spend(home, who):
+    """What a session and each agent under it spent, for `phi.py spend`: a row for the session itself, one for each
+    transcript in the `subagents` folder beside its own, a teammate's or a subagent's by the `.meta.json` beside
+    it, and a last row for all of them. `who` is a session id of the store, or a session's title, as the name a
+    terminal lead was started under is, where the newest session of that title is taken. [] for a session with no
+    transcript."""
+    held = relay._sessions(home)
+    s = held.get(who) or max((x for x in held.values() if x.get("title") == who),
+                             key=lambda x: str(x.get("createdAt") or ""), default={})
+    main = transcript_of(s)
+    if not main:
+        return []
+    rows = [dict(spend_of(main), who="the session itself", kind="session")]
+    for path in sorted(glob.glob(os.path.join(os.path.splitext(main)[0], "subagents", "agent-*.jsonl"))):
+        meta = relay._read_json(os.path.splitext(path)[0] + ".meta.json")
+        kind = "teammate" if meta.get("taskKind") == "in_process_teammate" else "subagent"
+        name = str(meta.get("name") or meta.get("agentType") or os.path.basename(path)[6:-6])
+        rows.append(dict(spend_of(path), who=f"{kind} {name}", kind=kind))
+    rows.append({"who": "all of them", "kind": "all", "calls": sum(r["calls"] for r in rows),
+                 "models": sorted({m for r in rows for m in r["models"]}),
+                 **{key: sum(r[key] for r in rows) for key, _ in SPENT}})
+    return rows
