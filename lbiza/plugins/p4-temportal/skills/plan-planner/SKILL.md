@@ -79,6 +79,7 @@ A plan is looped until it holds the whole development, and nothing is built befo
 - **One round's reader traces the live path of each new hook,** from Claude Code's event through every wrapper script to the handler, since a test that calls a handler by name passes with a gate shut in front of it.
 - **A check is a command its worker runs as written:** it names the interpreter by its full path, the folder it is run from and the test files, and the plan's writer runs that interpreter once to see that it holds the test runner.
 - **A round is dry when it changes no fence, no file list and no check.** The loop ends after two dry rounds in a row, or after five rounds, and the plan says at its head how its loop ended, and what is still open where it ended at five.
+- **The rounds are logged at the plan's end:** under a last heading `## Loop log`, one line a round as `- Round <n> of 5: <what the round changed>`, or `- Round <n> of 5: dry` for a dry round, written once the round's read is answered, so a reader counts the round the plan is on, what the last round changed and the dry rounds that stand in a row.
 - **The plan is whole when every edit the development makes is a fence in it,** every section that changes files names its files, what it depends on and its checks, and its section `Distribution` gives each of those sections to a run.
 - **Nothing is built before the approval:** until ezexe approves the whole plan, no session that writes is started and no file but the plan is edited.
 

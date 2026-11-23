@@ -174,6 +174,8 @@ class SkillText(unittest.TestCase):
                      "sends a research agent to the upstream pages", "the upstream page wins",
                      "restates nothing an upstream page says", "`See more: <url>`", "one writer of the plan file",
                      "a reader that has not seen the writing", "two dry rounds in a row, or after five rounds",
+                     "under a last heading `## Loop log`", "`- Round <n> of 5: <what the round changed>`",
+                     "`- Round <n> of 5: dry`",
                      "no session that writes is started and no file but the plan is edited"):
             self.assertIn(word, loop, word)
         hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
