@@ -348,6 +348,21 @@ Where a step or an item wants a new session on a turn no person began, which the
 Such a worker has no row in the sidebar, no Changes card and no archive, and once its run has ended and its work is on the default branch upkeep names the close of its tab, the unlock of its worktree and their removal.
 The skill page lists what upkeep cannot do, a start on a turn no person began among them.
 
+### A digest of a closed session
+
+A later session's retrieval reaches of an earlier session only its message rows, so p4-phi writes one digest entry for each session that is no longer live, into the store's `phi/store/digests/`.
+The digest holds what the session was asked, what it showed done and reported, the notes it kept as decisions and findings, the files it changed, the heads it left and the plan steps it left open.
+It is built from the session's `session.json`, `turns.jsonl`, `notes.jsonl` and `plan.json`, and never from the transcript, a command a turn ran or a tool's output.
+A fenced block of a report is left out, and a string shaped like a credential is replaced with `[redacted]`.
+No hook of Claude Code is known to run when a session is archived in the app, so nothing is written at the archive itself.
+The async `train` entry of Stop sweeps the store at most once in five minutes, and writes, at most 40 a sweep, the digest of each session that its own record or the app's holds as stale, counted as archived or archived, and whose records are newer than its digest.
+A session archived long ago is written by the next sweeps, and a session revived and archived again is written again in the same file.
+The `replaces:` note of "Upkeep of a session tree" stays as it is: it tells the sessions under one parent who took a child's place, and the digest is what retrieval ranks.
+Retrieval prints a digest's line with the kind `archived session`, and `recall.inject` at its default holds that line back from the model as it holds back every line that is no rule or fact.
+The served ranker learns a digest as it learns every document, from the labels of the turns it was served to and from history labels, and the dual encoder's pretraining reads it as a text file git keeps in the store.
+
+See more: https://code.claude.com/docs/en/hooks.md#sessionend
+
 ## Approval cards and a session's start
 
 A session another session started stops on no approval card for work its brief covers, once ezexe has said yes to the set of what p4-phi settles with no card.
