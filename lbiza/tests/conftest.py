@@ -27,7 +27,7 @@ or skipped for a missing `sh`.
 A file that tests the code of a plugin sits in the folder of tests/ named after that plugin and reaches that code by
 its SRC folder. A hooks module's `*.test.ts` file stays inside its plugin, where `claude plugin test` reads it.
 
-Both plugins hold a p4conf.py, which each plugin's files and tests import by that one name, and python keeps one
+Both plugins hold a file named p4conf.py, each its own, which that plugin's files and tests import by that one name, and python keeps one
 module for a name in a process. So each folder of tests/ has the modules of plugin code its own files imported, and
 `own` hands them to the process before a test file of that folder is imported and before each of its tests runs:
 `import p4conf` in a test file, or in a file of the plugin it tests, gives that plugin's copy, whichever folder's

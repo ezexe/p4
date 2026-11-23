@@ -84,7 +84,6 @@ def p4_of(payload):
 def ready(payload):
     """The .claude/p4 directory where it holds its p4.json, which the layout hook writes; None otherwise."""
     p4 = p4_of(payload)
-    p4conf.migrate_layout(p4)             # a store in an older layout is moved first
     return p4 if os.path.isfile(os.path.join(p4, p4conf.FILE)) else None
 
 

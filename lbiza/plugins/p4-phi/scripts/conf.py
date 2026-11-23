@@ -2,8 +2,9 @@
 
 A session's file tools write nothing under `.claude` without a prompt, so a setting a conversation with ezexe settled
 is written here, checked as its reader takes it, and read back. The keys are p4conf.env_keys(): every default of
-p4.json and each key of the `phi` section that is read only when a project sets it. A key with a command of its own
-is left to that command, and a key of Claude Code's own settings is no key of p4.json.
+the `phi` section of p4.json and each key of it that is read only when a project sets it. A key of another section,
+`scratchpad` or `temportal`, is set in p4.json by hand. A key with a command of its own is left to that command, and a
+key of Claude Code's own settings is no key of p4.json.
 """
 
 import json

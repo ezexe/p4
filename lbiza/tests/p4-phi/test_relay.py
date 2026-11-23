@@ -994,7 +994,7 @@ class ThreeSessions(unittest.TestCase):
 
     def test_an_archived_tmp_and_lock_file_reach_another_machine_whole(self):
         """An older store's archive/ holds files named *.tmp and *.lock and one that names the project's root. The
-        layout moves it to phi/archive/ at a session start, the store is committed and pushed, and a second clone
+        p4-temportal's `store make` moves it to phi/archive/ at a session start, the store is committed and pushed, and a second clone
         of it holds every archived file as it was."""
         t = self.t
         g = ["-c", "user.name=t", "-c", "user.email=t@t"]
@@ -1010,6 +1010,14 @@ class ThreeSessions(unittest.TestCase):
         for args in (("add", "-A", "--", "archive", "p4.json"), (*g, "commit", "-qm", "the old archive")):
             subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
         subprocess.run(["git", "init", "-q", "--bare", "-b", "main", bare], check=True, capture_output=True)
+        temportal = os.path.join(SRC, "..", "..", "p4-temportal")
+        self.assertIsNotNone(shutil.which("sh"), "sh is not found: a command hook starts it")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE", "P4_"))}
+        env.update({"CLAUDE_PROJECT_DIR": t.proj, "CLAUDE_PLUGIN_ROOT": os.path.normpath(temportal)})
+        made = subprocess.run(["sh", os.path.join(os.path.normpath(temportal), "hooks", "run-hook.sh"), "store", "make"],
+                              input=json.dumps({"hook_event_name": "SessionStart", "source": "startup", "cwd": t.proj}),
+                              capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(made.returncode, 0, made.stderr)
         self.assertEqual(t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"}).returncode, 0)
         for name in kept:
             self.assertTrue(os.path.isfile(os.path.join(t.p4, "phi", "archive", name)), "moved under phi/")

@@ -1,7 +1,7 @@
 """hookio.py: what every p4-temportal hook script reads the same way, kept once here. A hook's input is the JSON
 Claude Code writes on its stdin, and its project is CLAUDE_PROJECT_DIR, which Claude Code sets for a hook, else the
 input's `cwd`, as the hooks reference describes both. A link into the store is removed as a link, never by entering
-it. Only p4-temportal's hooks import it; p4conf.py, which each plugin carries a copy of, holds is_link and the store's
+it. Only p4-temportal's hooks import it; p4conf.py beside this file holds is_link and the store's
 own-repository test.
 """
 

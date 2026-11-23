@@ -8,7 +8,8 @@ The p4 marketplace: two Claude Code plugins, p4-phi and p4-temportal, and the pa
   `python -m pytest tests/<plugin>/<file> -q -p no:cacheprovider`; `lbiza/pyproject.toml` says what to install.
 - `register.ts` of each plugin is its hooks module, type-checked by `claude plugin validate <path> --strict` and run by
   `claude plugin test <path>`.
-- `p4conf.py` has one copy in each plugin, and the two stay the same byte for byte.
+- Each plugin has a `p4conf.py` of its own: p4-phi's reads its section of `p4.json` and holds the cards set, and
+  p4-temportal's holds the layout, the settings keeper and the watch.
 - The pages are in `docs`, and `README.md` links them.
 - Read the skill `native` before a native feature of Claude Code is built on, and when ezexe corrects how a p4
   plugin behaves.

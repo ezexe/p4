@@ -24,6 +24,20 @@ import test_relay  # noqa: E402  its tree of three sessions, taken by its setUp 
 
 A, B = test_relay.A, test_relay.B
 
+
+def _keeper():
+    """p4-temportal's p4conf.py, loaded by its path as a module of its own beside p4-phi's: the settings keeper and
+    its record are its, and p4-phi's reads the file p4-phi writes for it."""
+    import importlib.util
+    path = os.path.join(SRC, "..", "..", "p4-temportal", "hooks", "p4conf.py")
+    spec = importlib.util.spec_from_file_location("p4conf_keeper", os.path.normpath(path))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+keeper = _keeper()
+
 ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
 
 
@@ -52,12 +66,12 @@ class TheSet(unittest.TestCase):
         self._env.start()
         for k in [k for k in os.environ if k.startswith("P4_")]:
             os.environ.pop(k)
-        keep = p4conf.keep_settings
+        keep = keeper.keep_settings
 
         def kept(project, *args, p4=None, **kw):       # p4-phi's `layout` entry writes what it asks for first
             p4conf.want_settings(p4 or os.path.join(p4conf.main_root(project)[0], ".claude", "p4"))
             return keep(project, *args, p4=p4, **kw)
-        self._asking = mock.patch.object(p4conf, "keep_settings", kept)
+        self._asking = mock.patch.object(keeper, "keep_settings", kept)
         self._asking.start()
 
     def tearDown(self):
@@ -105,7 +119,7 @@ class TheSet(unittest.TestCase):
         written by set_key, by an edit of the file, or by the command itself where no hook of p4-phi runs, as in
         the app's Terminal panel, leaves the set off, and the keeper writes none of the set's rules."""
         sid = p4conf.card_set_id()
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         tools = lambda: [r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__")]   # noqa: E731
         asked_tools = lambda: [r for r in jload(p4conf.asks_file(self.p4))["permissions"]["allow"]   # noqa: E731
                                if r.startswith("mcp__")]
@@ -136,7 +150,7 @@ class TheSet(unittest.TestCase):
         self.assertTrue(p4conf.cards_on(self.p4))
         self.assertEqual(sorted(asked_tools()), sorted(p4conf.CARD_TOOLS), "and the file p4-phi writes asks for the set")
         self.assertEqual(tools(), [], "the local file follows when the keeper next runs")
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(sorted(tools()), sorted(p4conf.CARD_TOOLS), "and the keeper copied it")
         kept = yes_of(self.p4)
         self.assertEqual((kept["set"], kept["session"], kept["call"]), (sid, "local_top00001", "toolu_1"))
@@ -144,13 +158,13 @@ class TheSet(unittest.TestCase):
         self.assertEqual(cards.switch(self.p4, False)[0], 0)
         self.assertIsNone(yes_of(self.p4), "`off` takes the yes out with the key")
         self.assertEqual(asked_tools(), [], "`off` changes what the file asks for")
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(tools(), [], "and the local file follows after the keeper")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4), "the key written again after an `off`")
         say_yes(self.p4)
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertIsNone(yes_of(self.p4), "the key taken out by hand: the keeper drops the yes")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4))
@@ -240,41 +254,41 @@ class TheSet(unittest.TestCase):
         person already wrote stays theirs, p4's rules for phi.py are as before, and no ask or deny rule is written."""
         mine = "mcp__p4-phi__done"
         write(self.local, json.dumps({"permissions": {"allow": [mine, "Bash(ls *)"]}}))
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         before = self.rules(p4conf.ALLOW_KEY)
         self.assertEqual([r for r in before if r.startswith("mcp__")], [mine], "set off: no rule of the set")
         self.assertEqual(self.rules(p4conf.ASK_KEY), [], "no ask rule, with phi.upkeep off")
         say_yes(self.p4)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         allow = self.rules(p4conf.ALLOW_KEY)
         self.assertEqual(sorted(r for r in allow if r.startswith("mcp__")), sorted(p4conf.CARD_TOOLS))
         self.assertEqual(allow[:len(before)], before, "nothing of the list before is moved or dropped")
-        rec = p4conf.read_record(self.p4)
+        rec = keeper.read_record(self.p4)
         owned = rec["toolRules"][p4conf.fwd(self.local)]["entries"]
         self.assertEqual(sorted(owned), sorted(t for t in p4conf.CARD_TOOLS if t != mine), "the person's own stays theirs")
         self.assertEqual(self.rules(p4conf.ASK_KEY), [], "nor with the set in force")
-        self.assertEqual(self.rules(p4conf.DENY_KEY), list(p4conf.DENY_RULES), "and no deny rule")
+        self.assertEqual(self.rules(keeper.DENY_KEY), list(keeper.DENY_RULES), "and no deny rule")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ALLOW_KEY), before, "the yes withdrawn: p4's rules go, the person's stays")
-        self.assertNotIn("toolRules", p4conf.read_record(self.p4))
+        self.assertNotIn("toolRules", keeper.read_record(self.p4))
 
     def test_the_general_part_is_written_only_while_the_set_is_in_force(self):
         """CARD_SET's `general`: the keeper writes its allow rules into the local file where ezexe's yes to the set
         stands, and takes its own entries out again with the set. KEEPER 14 came with the part, so a store's
         next start runs the whole check."""
-        self.assertGreaterEqual(p4conf.KEEPER, 14)
-        p4conf.keep_settings(self.proj, p4=self.p4)
+        self.assertGreaterEqual(keeper.KEEPER, 14)
+        keeper.keep_settings(self.proj, p4=self.p4)
         self.assertNotIn("Bash(git *)", self.rules(p4conf.ALLOW_KEY), "set off")
         say_yes(self.p4)
-        p4conf.keep_settings(self.proj, p4=self.p4)
+        keeper.keep_settings(self.proj, p4=self.p4)
         general = list(p4conf.GENERAL_RULES) + (list(p4conf.GENERAL_WIN) if sys.platform.startswith("win") else [])
         for rule in general:
             self.assertIn(rule, p4conf.want_settings(self.p4)["permissions"]["allow"], "p4-phi asks for it")
             self.assertIn(rule, self.rules(p4conf.ALLOW_KEY))
         p4conf.cards_no(self.p4)
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
-        p4conf.keep_settings(self.proj, p4=self.p4)
+        keeper.keep_settings(self.proj, p4=self.p4)
         self.assertNotIn("Bash(git *)", self.rules(p4conf.ALLOW_KEY), "taken out with the set")
 
     def test_a_leftover_ask_rule_goes_only_with_upkeep_on_and_the_set_in_force(self):
@@ -285,14 +299,14 @@ class TheSet(unittest.TestCase):
         other = "Bash(git push --force *)"
         write(self.local, json.dumps({"permissions": {"ask": [ARCHIVE, other]}}))
         p4conf.set_key(self.p4, "phi.upkeep", True)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ASK_KEY), [ARCHIVE, other], "set off: not p4's own by the record, so left")
         say_yes(self.p4)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ASK_KEY), [other], "the leftover is taken out, and no other ask rule")
-        self.assertNotIn("askRules", p4conf.read_record(self.p4))
+        self.assertNotIn("askRules", keeper.read_record(self.p4))
         p4conf.set_key(self.p4, "phi.upkeep", False)
-        p4conf.keep_settings(self.proj)
+        keeper.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ASK_KEY), [other], "upkeep off: p4 writes no ask rule back")
 
     def test_a_brief_tells_its_session_to_push_by_a_clause_that_says_so(self):
@@ -746,7 +760,7 @@ class Guards(unittest.TestCase):
         cmd = f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'
         self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_lock")["permissionDecision"], "ask")
         self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
-        lock = os.path.join(self.t.p4, p4conf.SETTINGS_LOCK)
+        lock = os.path.join(self.t.p4, keeper.SETTINGS_LOCK)
         open(lock, "w").close()
         said = self.after(TOP, cmd, "toolu_lock")
         os.remove(lock)

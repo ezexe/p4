@@ -123,15 +123,17 @@ def run(*args, stdin="", cwd=None, **env):
 
 class OwnCopy(unittest.TestCase):
     def test_these_tests_run_the_copy_in_p4_temportals_hooks(self):
-        """Both plugins hold a p4conf.py and import it by that one name. Whichever test file was imported before
-        this one, as the files of tests/p4-phi/ are in the suite's own order, `p4conf` here and in lifetime.py is
-        the copy in p4-temportal's hooks/, which has no phi.py beside it and so leaves the allow rules as they are.
-        test_isolation.py runs this case after the like case of test_p4conf.py, and before it."""
+        """Both plugins hold a file named p4conf.py, each its own, and import it by that one name. Whichever test
+        file was imported before this one, as the files of tests/p4-phi/ are in the suite's own order, `p4conf` here
+        and in lifetime.py is the file in p4-temportal's hooks/: the one that keeps the settings and asks for no
+        allow rule of its own. test_isolation.py runs this case after the like case of test_p4conf.py, and before
+        it."""
         own = os.path.join(SRC, "p4conf.py")
         self.assertEqual(os.path.normcase(os.path.realpath(p4conf.__file__)), os.path.normcase(os.path.realpath(own)))
         self.assertIs(lifetime.p4conf, p4conf)
         self.assertIs(sys.modules["p4conf"], p4conf)
-        self.assertIsNone(p4conf.allow_rules(sys.platform))
+        self.assertTrue(hasattr(p4conf, "keep_settings"))
+        self.assertFalse(hasattr(p4conf, "allow_rules"))
 
 
 class Tick(unittest.TestCase):

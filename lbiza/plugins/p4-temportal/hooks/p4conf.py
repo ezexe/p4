@@ -1,25 +1,28 @@
 """
-p4conf.py: the settings of every p4 plugin, kept in one file of the store, `<project>/.claude/p4/p4.json`.
+p4conf.py: p4-temportal's reader of `<project>/.claude/p4/p4.json`, the store's layout, the settings keeper and the watch.
 
-Each plugin carries its own copy of this file, since an installed plugin cannot import another plugin's code, and
-test_p4conf.py holds the copies the same byte for byte. `load(p4)` returns DEFAULTS with the file merged over them. It
-writes the file when it is missing, when it lacks a key of DEFAULTS and when a default an older generation of this
-file wrote has changed, keeping every value set by hand: WRITTEN records what it wrote. One limit: a value set by
-hand that equals the value load recorded as written moves at the next GEN. A file that is not valid JSON is never overwritten: the
-defaults are used and a line goes to stderr. Each setting has a variable `P4_<SECTION>_<KEY>`, named by env_name,
-and `load` reads one a person set ahead of p4.json for the session's own store; one p4 wrote, or one that does not
-fit, is passed over for p4.json's value. p4 writes no such variable: a person's is read ahead of p4.json, and the
-settings keeper below reads CLAUDE_PROJECT_DIR and CLAUDE_CONFIG_DIR, as Claude Code sets them.
+Each plugin carries a p4conf.py of its own, since an installed plugin cannot import another plugin's code: this one
+reads the `scratchpad` and `temportal` sections of p4.json and p4-phi's reads the `phi` section. Each keeps the other's
+sections as it finds them. `load(p4)` returns DEFAULTS with the file merged over them. It writes the file when it is
+missing, when it lacks a key of DEFAULTS and when a default an older generation of this file wrote has changed, keeping
+every value set by hand: WRITTEN records what it wrote. One limit: a value set by hand that equals the value load
+recorded as written moves at the next GEN. A file that is not valid JSON is never overwritten: the defaults are used
+and a line goes to stderr. Each setting has a variable `P4_<SECTION>_<KEY>`, named by env_name, and `load` reads one a
+person set ahead of p4.json for the session's own store; one p4 wrote, or one that does not fit, is passed over for
+p4.json's value. p4 writes no such variable: a person's is read ahead of p4.json, and the settings keeper below reads
+CLAUDE_PROJECT_DIR and CLAUDE_CONFIG_DIR, as Claude Code sets them.
 
-It also holds the store's layout: each plugin writes in a folder of its own, `.claude/p4/<plugin>/`, beside p4.json
-and the store's own git files. `sub(p4, name, ...)` is where a kind of file lives and `rel(name, ...)` the same path
-as git names it. `migrate_layout(p4)` moves files from an earlier place of the layout into their plugin's folder.
-Every plugin calls it at its start, so whichever plugin runs first moves them.
+It holds the store's layout: each plugin writes in a folder of its own, `.claude/p4/<plugin>/`, beside p4.json and the
+store's own git files. `sub(p4, name, ...)` is where a kind of file lives and `rel(name, ...)` the same path as git
+names it. `migrate_layout(p4)` moves files from an earlier place of the layout, p4-phi's folders too, into their
+plugin's folder; `store make` runs it at every start.
 
-It also keeps the Claude Code settings p4 relies on, ezexe/p4#246: `keep_settings(project)` writes
-`autoMemoryDirectory`, `plansDirectory` and `attribution.commit` when the store gives a text into the project's
-`.claude/settings.local.json`, merged with what is there, and records what it owns in the store's RECORD. It takes out
-each `P4_*` entry under `env` that a keeper before KEEPER 17 wrote.
+It keeps the Claude Code settings p4 relies on, ezexe/p4#246: `keep_settings(project)` writes `autoMemoryDirectory`,
+`plansDirectory` and `attribution.commit` when the store gives a text into the project's `.claude/settings.local.json`,
+merged with what is there, and records what it owns in the store's RECORD. It copies the allow rules p4-phi asks for
+from the store's settings.local.json, which p4-phi writes, and reads no other file of p4-phi's. It takes out each `P4_*`
+entry under `env` that a keeper before KEEPER 17 wrote. watch() and read_changelog() keep what the record owes of
+Claude Code's own versions and changelog.
 """
 
 import copy
@@ -51,35 +54,6 @@ DEFAULTS = {
         "repo_uses_max": 200,            # candidate names one git grep carries
         "repo_uses_lines": 10,           # lines printed at most; the rest counted on one more
     },
-    "phi": {                             # p4-phi's session tree
-        "home": None,                    # the git remote of a store whose session tree this project shares
-        "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
-        "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
-        "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
-        "levels": True,                  # false: no delegation rule
-        "plan_mode": True,               # false: p4-phi's plan rule, which hands plan mode, is left out
-        "goal_review": True,             # false: a worker's goal asks for no review of its change by a reader
-                                         # that has not seen the conversation
-        "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
-                                         # for it, no regression test at Stop and no push line
-        "new_issues": True,              # false: no session is told to publish a new issue, and `gh issue create`
-                                         # is asked about in the top session and refused in a started one; an open
-                                         # issue a brief names is still taken, with its commit line and push line
-        # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
-        # the wrong type or out of range
-        "max_depth": 3,                  # how deep the session tree goes before a session is told to start no more
-        "max_children": 8,               # live sessions of one session before it is told to start no more
-        "sibling_turns": 5,              # the last turns of the siblings a start background carries
-        "own_turns": 3,                  # a session's own last turns its start background carries
-        "chain_max": 8,                  # sessions above one whose tasks its background carries
-        "turn_steps": 12,                # the steps of one turn a report keeps
-        "tree_checks": 6,                # the sessions of the tree checked at once for a stall
-        "keep_going_max": 2,             # times the Stop hook sends a turn with open steps back
-        "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
-        "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
-        "upkeep": False,                 # true: a session that started others is handed their upkeep as acts that
-                                         # wait on nobody; `phi.py upkeep on` and `off` set it
-    },
     "temportal": {                       # lifetimes under .claude/p4/temportal/, read by p4-temportal's lifetime.py
         "cache": {                       # a rule per folder, relative to temportal/, and memory/ is never cleared
             "notebook/.out": {"max_age_days": 14, "max_mb": 500},     # the logs, build output and binaries moved here
@@ -93,8 +67,11 @@ OPEN = ("temportal.cache",)
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude",
-                 "phi.cards", "phi.worktree_python", "phi.worktree_lines", "recall")
+READ_WHEN_SET = ("temportal.compact_at", "claude", "recall")
+
+# The top-level keys of p4.json that are another plugin's sections: p4-phi's `phi`. _merge keeps it as it is and does
+# not name it as unknown.
+OTHERS = ("phi",)
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree and the archive a
@@ -683,7 +660,7 @@ def _merge(base, over, unknown, prefix=""):
     out = copy.deepcopy(base)
     for k, v in over.items():
         if k not in base:
-            if prefix + k not in READ_WHEN_SET:
+            if prefix + k not in READ_WHEN_SET and (prefix or k not in OTHERS):
                 unknown.append(prefix + k)
             out[k] = v                   # kept, so a key a newer plugin copy wrote survives an older copy's rewrite
         elif prefix + k in OPEN and isinstance(base[k], dict) and isinstance(v, dict):
@@ -723,8 +700,9 @@ WRITTEN = "_written"
 # `phi.goal_review`, the switch of the review a worker's goal asks for.
 # 15 came with the default `phi.new_issues` and with the general part of CARD_SET, whose rules an installed copy of
 # 14 leaves to the copy that wrote them. 16 came with the removal of the group `recall`, which a store that still
-# holds it keeps, since READ_WHEN_SET names it.
-GEN = 16
+# holds it keeps, since READ_WHEN_SET names it. 17 came with the defaults of p4.json held by the plugin that reads
+# them, each in a file of its own.
+GEN = 17
 
 
 def _leaves(d, prefix=""):
@@ -848,14 +826,6 @@ def set_key(p4, dotted, value):
     return value
 
 
-def upkeep_on(p4):
-    """True when the store turns p4-phi's upkeep of a session tree on, by `phi.upkeep` or its variable."""
-    try:
-        return _get(load(p4, write=False, warn=False), "phi.upkeep") is True
-    except Exception:  # noqa: BLE001 — a store that cannot be read has upkeep off
-        return False
-
-
 def _at(d, dotted):
     for part in dotted.split("."):
         d = d.get(part, {}) if isinstance(d, dict) else {}
@@ -913,18 +883,14 @@ def configure(module_globals, p4, dotted, names, write=True):
 # only ever applies to the store of the session's own project, by env_applies.
 ENV_PREFIX = "P4_"
 ENV_SKIP = ()                             # the keys of DEFAULTS that are a record and no setting: none
-# `phi.cards` has no variable: what is settled with no approval card is in force by the store's file alone, cards_on.
-ENV_SET_ONLY = tuple(k for k in READ_WHEN_SET if k.startswith("phi.") and k != "phi.cards")
-# A name the rule would give that an older variable of other meaning already has: P4_PHI_WATCH_S is puppeteer.py's
-# tick for one run, used whether or not a session is busy, while phi.watch_s is the tick of a busy watcher only.
-ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
+# p4-phi's keys, the `phi` section, have their variables in p4-phi's own file: this one has none set-only.
+ENV_SET_ONLY = ()
+# A name the rule would give that an older variable of other meaning already has: none of the keys this file reads.
+ENV_NAMES = {}
 # What a key's reader takes where its default does not say: "num" a number, "strs" a list of strings, "rules" the
 # lifetime rules of temportal.cache by folder, "levels" plans.child_levels' kinds.
 ENV_SCHEMA = {
-    "phi.home": str,
-    "phi.child_levels": "levels", "phi.puppeteer_section": str,
-    "phi.worktree_python": str, "phi.worktree_lines": "strs",
-    "phi.clear_at": "num", "temportal.cache": "rules",
+    "temportal.cache": "rules",
 }
 # The strings a key's reader knows.
 ENV_CHOICES = {}
@@ -1671,9 +1637,9 @@ def carry_memory(src, dst):
 # entries, never reorders or drops another, and replaces one when the plugin folder moves, only on a start and only at
 # a GEN at least the entry's, so two plugin versions running at once never take each other's entries away. An entry
 # deleted by hand is recorded by its identity, the tool form, the script and its arguments without the folder, and
-# never written back, wherever the plugin folder moves. Only p4-phi's copy, which sits beside phi.py and so knows the
-# path phi.py prints, writes them; the copy in p4-temportal leaves them as they are. The store's `claude` section sets
-# `allowRules` false to have p4 remove its entries.
+# never written back, wherever the plugin folder moves. Only p4-phi's file, which sits beside phi.py and so knows the
+# path phi.py prints, asks for them, in the store's settings.local.json, and this file copies them. The store's `claude`
+# section sets `allowRules` false to have p4 remove its entries.
 # An installed copy sits in Claude Code's plugin cache at `cache/<marketplace>/<plugin>/<version>/`, and an update
 # makes a new version folder beside the old one. plugins/loading.md, "When auto-update runs": "The running session
 # keeps the versions it loaded", and "Cleanup of previous versions": Claude Code "removes that directory in a
@@ -1699,41 +1665,12 @@ def own_switch(p4, key):
         return (load(p4, write=False, warn=False).get(SECTION) or {}).get(key, True) is not False
     except Exception:  # noqa: BLE001 — a store that cannot be read keeps what it kept
         return True
-PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: this file's own folder, when phi.py is there
+
+
 _RULE = re.compile(r'^(\w+)\(python -I -X utf8 "(?:.*/)?([^/"]+)"(.*)\)$')
 
 
-def allow_rules(platform):
-    """The allow rules for phi.py that p4-phi asks for, or None when this copy has no phi.py beside it and cannot tell
-    which. The switch claude.allowRules is the keeper's."""
-    here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
-    if not os.path.isfile(os.path.join(here, "phi.py")):
-        return None
-    out = []
-    for s in [fwd(here)] + version_folders(here):
-        cmd = f'python -I -X utf8 "{s}/phi.py" *'
-        out.append(f"Bash({cmd})")
-        if platform.startswith("win"):
-            out.append(f"PowerShell({cmd})")
-    return out
-
-
 _CACHED = re.compile(r"^(.+/cache/[^/]+/[^/]+)/([^/]+)/scripts$")
-
-
-def version_folders(here):
-    """The scripts folders of the other versions of this plugin that Claude Code's plugin cache still holds beside
-    the running copy's, each with a phi.py: the folders a session that loaded an older version still runs from. []
-    for a copy that is not in the cache's `<plugin>/<version>/` layout, such as a checkout."""
-    m = _CACHED.match(fwd(here))
-    if not m:
-        return []
-    try:
-        names = sorted(os.listdir(m.group(1)))
-    except OSError:
-        return []
-    return [f"{m.group(1)}/{n}/scripts" for n in names
-            if n != m.group(2) and os.path.isfile(os.path.join(m.group(1), n, "scripts", "phi.py"))]
 
 
 # The ask rules p4 keeps, under RECORD's `askRules`: none. Until KEEPER 15 the keeper wrote one on
@@ -1776,33 +1713,8 @@ PHI_PART = "phi"
 LISTS = "lists"
 LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules", "generalRules"), ASK_KEY: ("askRules",), DENY_KEY: ("denyRules",)}
 
-# --- what is settled before a session's start, with no approval card -------------------------------------------------
-# A session another session started stops on no approval card for work its brief covers. desktop.md names the prompt
-# an approval card. permissions.md, "Manage permissions": allow rules "let Claude Code use the specified tool without
-# manual approval". permission-modes.md, "Actions no mode auto-approves", lists what prompts in every mode, with
-# "Tools matched by an explicit ask rule" first, and a question a hook raises is put to a person in every mode too:
-# on 2026-11-19 the transcripts of this tree held 39 approvals of p4-phi's own branch guard and 32 of the ask rule
-# on the archive tool, every one in a session that bypasses permission prompts.
-# What may be settled with no card is a permission, so it is ezexe's to decide. The whole set is CARD_SET, kept here
-# and nowhere else, and it is in force for a store only while two things hold: `phi.cards` in that store's p4.json
-# holds card_set_id(), the name of the set as this copy has it, and the store's phi/cards.json holds ezexe's yes to
-# that set. `phi.py cards on <id>` writes the key and nothing more: the key is what is asked for. The yes is
-# kept by cards_yes, which phi.py's hook runs at the end of the shell call that ran the command, and only for a call
-# p4-phi's guard had raised its approval card for, so the yes is ezexe's own press, in every permission mode, and
-# covers the set whole. No docs page gives a hook a field that says a person approved a call. hooks.md gives
-# PostToolUse as fired "after a tool has already executed successfully", and a call the guard answered `ask` for
-# runs only once the card is pressed, so that hook's run for that call is the press as p4 can know it. A key
-# written any other way, by an edit of p4.json, by set_key, or by the command run where no hook of p4-phi runs,
-# such as the app's Terminal panel, has no yes beside it and leaves the set off. The yes is in phi/cards.json, a
-# file of p4-phi's own, which the store's seeded .gitignore keeps on one machine, so a yes is no part of a store's
-# sync, and it names the store it was given for. Each write replaces the whole file by a rename, so no lock is
-# kept. What this does not close: a session runs with ezexe's own rights on the machine, so one that sets out to
-# write the file of a press ezexe never made can write that file too.
-# A copy whose set differs has another id, so a changed set is in force nowhere until ezexe has said yes to it. The
-# key is read from the file alone and has no variable. Nothing in the set lifts a deny rule, and nothing in it
-# touches a credential.
-CARDS_KEY = "phi.cards"
-CARDS_FILE = ("phi", "cards.json")
+# The rules a keeper writes for p4-phi, which _asked takes from the store's settings.local.json: the tools of a p4 hooks
+# module, and the general part of what a session does in every task. p4-phi's file holds the set they belong to.
 CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
               "mcp__p4-temportal__lifetime")
 # The general part of the set: what a session does in every task. permissions.md: a bare tool name matches every use
@@ -1814,116 +1726,6 @@ CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mc
 # a PreToolUse hook where "patterns that try to constrain command arguments are fragile".
 GENERAL_RULES = ("Edit", "Write", "Bash(git *)")
 GENERAL_WIN = ("PowerShell(git *)",)
-CARD_SET = (
-    ("tools", "The project's local settings file holds an allow rule for each tool a p4 hooks module declares: "
-              + ", ".join(f"`{t}`" for t in CARD_TOOLS) + "."),
-    ("archive", "Where `phi.upkeep` is on, an entry of `permissions.ask` in that file that is exactly `"
-                + ASK_RETIRED[0] + "` is taken out, also where p4's record no longer holds it as p4's own."),
-    ("own-branch", "In a session another session started that works in a git worktree of its own, p4-phi's branch "
-                   "guard asks nothing before `git rebase`, `git merge` and `git pull`, which move that worktree's "
-                   "own branch and nothing else."),
-    ("push", "In such a session p4-phi's branch guard asks nothing before `git push` where the session's brief "
-             "tells it to push."),
-    ("refusal", "In a session another session started, every other call a guard of p4-phi raises a card for is "
-                "refused instead, with the reason and the session to ask by SendMessage: a push its brief does not "
-                "tell it to make, a move of a shared checkout to another branch, a hand push or pull of a store, "
-                "and a start p4-phi advises another way."),
-    ("start", "A session another session started is refused a start whose `permission_mode` is of another class "
-              "than its own, since every message between the two would be held, and a start in another folder, "
-              "on another host or in the cloud, which the top session makes in a turn of ezexe's."),
-    ("general", "The project's local settings file holds an allow rule for each of `Edit`, `Write` and `Bash(git *)`, "
-                "and on Windows `PowerShell(git *)`, so a session edits files and runs git with no approval card. No "
-                "allow rule lifts Claude Code's own prompt for a write under `.claude`. With the set in force "
-                "p4-phi's guard asks ezexe, in every session and every permission mode, before a git command that "
-                "forces, that deletes work found nowhere else, or that reads or writes a stored login, and refuses "
-                "it in a session another session started."),
-)
-
-
-def card_set_id():
-    """The name of CARD_SET as this copy has it: ten hex characters of its hash, which `phi.cards` holds while the
-    set is in force."""
-    return hashlib.sha256(json.dumps(CARD_SET, ensure_ascii=False).encode("utf-8")).hexdigest()[:10]
-
-
-def cards_file(p4):
-    """The file in store `p4` that holds ezexe's yes to the set, `phi/cards.json`."""
-    return os.path.join(p4, *CARDS_FILE)
-
-
-def _cards(p4):
-    """The content of cards_file: {"yes": the yes, "carried": the date}. Where it holds no "carried", the keeper's
-    record is read once, and its `cardsYes` taken as the yes where it is an object whose "set" is a text, which is how
-    a yes kept before this file stood; "carried" is set to today's date either way and the file is written, where
-    the store has a folder."""
-    got = read_json(cards_file(p4))
-    got = got if isinstance(got, dict) else {}
-    if "carried" in got:
-        return got
-    rec = read_json(record_path(p4))
-    yes = rec.get("cardsYes") if isinstance(rec, dict) else None
-    if isinstance(yes, dict) and isinstance(yes.get("set"), str):
-        got["yes"] = yes
-    got["carried"] = time.strftime("%Y-%m-%d")
-    if os.path.isdir(p4):
-        _write_cards(p4, got)
-    return got
-
-
-def _write_cards(p4, got):
-    write_whole(cards_file(p4), json.dumps(got, indent=1, ensure_ascii=False) + "\n")
-
-
-def cards_on(p4):
-    """True when ezexe's yes to the set stands for the store `p4`: `phi.cards` in its p4.json is this copy's
-    card_set_id(), and the store's cards.json holds the yes to that set, kept for this store by cards_yes. The two
-    files alone are read, so no variable puts the set in force, and neither does a write of the key by itself."""
-    try:
-        sid = card_set_id()
-        if not p4 or cards_asked(p4) != sid:
-            return False
-        yes = _cards(p4).get("yes")
-        return isinstance(yes, dict) and yes.get("set") == sid and _norm(yes.get("store")) == _norm(p4)
-    except Exception:  # noqa: BLE001 — a store that cannot be read has the set off
-        return False
-
-
-def cards_asked(p4):
-    """The set `phi.cards` names in the store's p4.json, as a text, or '' for none: what was asked for, in force or
-    not."""
-    try:
-        held = _get(_load_file(p4, write=False, warn=False), CARDS_KEY) if p4 else None
-    except Exception:  # noqa: BLE001 — a store that cannot be read asks for none
-        held = None
-    return held if isinstance(held, str) else ""
-
-
-def cards_yes(p4, **by):
-    """Keeps ezexe's yes to the set for the store `p4`, in its cards.json, with what `by` says of the press: the
-    session and the call whose approval card ezexe pressed. phi.py's hook after that call is its one caller. The key
-    must already name this copy's set, which the approved command wrote, so a card pressed for a command that wrote
-    nothing keeps no yes. True when the yes is kept."""
-    sid = card_set_id()
-    if not p4 or not os.path.isdir(p4) or cards_asked(p4) != sid:
-        return False
-    got = _cards(p4)
-    got["yes"] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                  **{k: str(v) for k, v in by.items() if v}}
-    _write_cards(p4, got)
-    return True
-
-
-def cards_no(p4):
-    """Takes the kept yes out of the store's cards.json, as the command's `off` does and as its `on` does before it
-    writes the key, so each yes is one press for one writing of the key. True when one was there."""
-    if not p4 or not os.path.isdir(p4):
-        return False
-    got = _cards(p4)
-    if "yes" not in got:
-        return False
-    got.pop("yes")
-    _write_cards(p4, got)
-    return True
 
 
 # --- what p4-phi asks the keeper for ---------------------------------------------------------------------------------
@@ -1951,32 +1753,6 @@ def _same_asks(a, b):
             mine["adopt"] = sorted(str(x) for x in mine["adopt"])
         return json.dumps(v, sort_keys=True)
     return norm(a) == norm(b)
-
-
-def want_settings(p4, platform=None):
-    """Writes into the store's settings.local.json what p4-phi asks the keeper for: the allow rules for phi.py of this
-    folder and of each cached version folder; with the set in force the tool rules and the general rules too; with
-    `phi.upkeep` on as well, p4.adopt. None, and no write, where `p4` is no folder or this copy has no phi.py beside it.
-    The file is written only where what it holds differs, each list taken as a set. Returns what is wanted."""
-    if not p4 or not os.path.isdir(p4):
-        return None
-    platform = platform or sys.platform
-    rules = allow_rules(platform)
-    if rules is None:
-        return None
-    yes = _cards(p4).get("yes")
-    if yes is not None and (not isinstance(yes, dict) or yes.get("set") != cards_asked(p4)):
-        cards_no(p4)                                    # the key no longer names the set the yes was for
-    on = cards_on(p4)
-    allow = list(rules)
-    if on:
-        allow += list(CARD_TOOLS) + list(GENERAL_RULES) + (list(GENERAL_WIN) if platform.startswith("win") else [])
-    want = {"permissions": {"allow": allow}}
-    if on and upkeep_on(p4):
-        want["p4"] = {"adopt": list(ASK_RETIRED)}
-    if not _same_asks(read_json(asks_file(p4)), want):
-        write_whole(asks_file(p4), json.dumps(want, indent=2, ensure_ascii=False) + "\n")
-    return want
 
 
 def _phi_folder(folder):

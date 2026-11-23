@@ -2587,7 +2587,6 @@ def h_session_start(payload):
         # prompt, as rules_section says
         RAN["start"] = "no store"
         return share_notice(payload) or None       # read from the main checkout's store, which needs none here
-    p4conf.migrate_layout(me.store)       # the memory read below is where the other plugins will have moved it
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli)
