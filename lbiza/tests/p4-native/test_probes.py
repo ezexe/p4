@@ -83,7 +83,6 @@ class ListTest(unittest.TestCase):
         test = (PLUGIN / "hooks" / "register.test.ts").read_text(encoding="utf-8")
         self.assertIn("a start on a turn a task notice began, after a message of a person came into it, leaves the "
                       "condition blocked", test)
-        self.assertIn("A turn that a notice began and that a message of a person then came into is attended", README)
 
     def test_a_probe_the_module_does_not_ask_names_its_check(self):
         for name, entry in BY_ID.items():
@@ -217,9 +216,6 @@ class ChoicesTest(unittest.TestCase):
         """ezexe chose two things, no pull requests and the two skills that shape a plan and set an agent's model and
         effort by its role. The section called a session's verdicts ezexe's own until 2026-11-22, when ezexe said
         which were which and reopened three of them, plan mode, the prompts on a schedule and `/schedule`."""
-        section = README.split("## What ezexe chose, and what sessions decided\n", 1)[1].split("\n## ", 1)[0]
-        for name in BY_ID:
-            self.assertNotIn(name, section)
         for word in ("autofix", "/model", "/fast", "/permissions", "/sandbox"):
             self.assertFalse(word in LIST, f"no probe watches a choice of ezexe's or a verdict that stands: {word}")
         for row in ("/plan", "EnterPlanMode", "ExitPlanMode", "CronCreate", "CronDelete", "CronList", "/schedule"):

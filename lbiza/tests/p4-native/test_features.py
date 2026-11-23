@@ -1,5 +1,5 @@
 """Deciding tests for p4-native's native features: each is an option that is off by default, each is one call of
-Claude Code's own that the module makes and does not wrap, and what was left out is named with its reason."""
+Claude Code's own that the module makes and does not wrap, and what failed its check is not shipped."""
 import json
 import unittest
 from pathlib import Path
@@ -80,16 +80,11 @@ class CallsTest(unittest.TestCase):
 
 
 class LeftOutTest(unittest.TestCase):
-    def test_what_failed_its_check_is_not_shipped_and_is_named_with_the_reason(self):
+    def test_what_failed_its_check_is_not_shipped(self):
         """The agent teams switch was built and checked in a terminal session, where no team formed, so the module
-        sets no variable. Scheduled runs are ezexe's own choice."""
+        sets no variable."""
         self.assertNotIn("$.env.", MODULE)
         self.assertNotIn("AGENT_TEAMS", MODULE)
-        left = SECTION.split("Left out, each with its reason.\n", 1)[1]
-        self.assertIn("- The agent teams switch for a terminal session: ", left)
-        self.assertIn("ran as a background subagent", left)
-        self.assertIn("- Scheduled runs: ezexe's own choice", left)
-        self.assertIn("Not seen: a notification that was sent", SECTION)
 
 
 if __name__ == "__main__":

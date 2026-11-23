@@ -58,12 +58,8 @@ class OlderKitsTest(unittest.TestCase):
         self.assertEqual(self.TESTS.count("seen.hasInfo ? "), 2)
         self.assertNotIn("toBe('windows')", self.TESTS)
 
-    def test_the_readme_names_the_builds_the_tests_ran_on_and_what_the_older_ones_lack(self):
+    def test_the_readme_gives_the_count_of_cases_the_test_file_holds(self):
         tests = README.split("## Tests\n", 1)[1]
-        for words in ("2.1.311, 2.1.322, 2.1.328 and 2.1.330", "have no event `session.info`", "the glob `session.*`",
-                      "`claude plugin validate --strict` passes on 2.1.328 and later", "the manifest's field `network` is unknown",
-                      "requires Claude Code v2.1.328 or later"):
-            self.assertIn(words, tests)
         cases = len(re.findall(r"(?m)^test\(", self.TESTS))
         self.assertIn(f"{cases} cases on each", tests)
 

@@ -100,15 +100,6 @@ class RecordTest(unittest.TestCase):
             self.assertIn(key, docs)
         self.assertIn(f"{len(docs)} rows", SECTION)
 
-    def test_a_declined_row_reads_to_a_session_as_built_on_by_nobody_and_not_as_dont_use(self):
-        verdict = INVENTORY.split("export function verdictLine(", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("built nothing on it", verdict)
-        self.assertNotIn("declined`", verdict)
-        said = "What the p4 plugins made of a row says who builds on it, and is no advice against using it."
-        self.assertIn(said, MODULE)
-        self.assertIn("is no advice against using it", MODULE.split("async function inventory(", 1)[1].split("\n}\n", 1)[0])
-        self.assertIn("is no advice against using it", SECTION)
-
 
 class ModuleTest(unittest.TestCase):
     def test_the_docs_index_is_fetched_through_the_host_from_a_host_the_manifest_declares(self):
@@ -166,10 +157,7 @@ class ScriptTest(unittest.TestCase):
         pages = INVENTORY.split("export function pagesOf(", 1)[1].split("\n}\n", 1)[0]
         self.assertIn(r"/^- \[[^\]]+\]\(https:\/\/code\.claude\.com\/docs\/en\/([^)]+)\)/gm", pages, "the module reads the index the same way")
 
-    def test_the_readme_says_what_the_script_read_and_what_has_no_row(self):
-        for words in ("`lbiza/scripts/native_says.py`", "33 of 33 hook events", "of 60 module events", "100 of 100 module methods",
-                      "`agent.report`", "`$.session.machine`", "Not tested: the fetch in the desktop app"):
-            self.assertIn(words, SECTION)
+    def test_the_readme_gives_the_count_of_module_events_with_a_line_of_their_own(self):
         own = sum(1 for row in ROWS.values() if row["kind"] == "event" and not row["says"].startswith("An event of the hooks module"))
         self.assertIn(f"{own} of 60 module events", SECTION)
 

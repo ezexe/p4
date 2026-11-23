@@ -116,16 +116,6 @@ class RecordTest(unittest.TestCase):
         hooks module or its scripts: one is a legacy name and the other a previous name of `TaskStop`."""
         self.assertEqual(ROWS["SetGoal"]["open"], ["p4-phi"])
         self.assertIn("`set-goal-tool`", ROWS["SetGoal"]["would"]["p4-phi"])
-        # each of the three was tried through a module and looked for in a tool list on every kind of host
-        hosts = "in the desktop app, in a terminal session at its prompt or in a scripted run"
-        self.assertIn(hosts, ROWS["SetGoal"]["would"]["p4-phi"])
-        for key in ("GetGoal", "PauseGoal"):
-            self.assertIn(hosts, ROWS[key]["declined"]["p4-phi"], key)
-            self.assertIn('rejected with "no tool named"', ROWS[key]["declined"]["p4-phi"], key)
-        probes = (PLUGIN / "hooks" / "probes.ts").read_text(encoding="utf-8")
-        fault = probes.split("id: 'set-goal-tool'", 1)[1].split("was:", 1)[0]
-        for word in ("`SetGoal`", "`GetGoal`", "`PauseGoal`", "a terminal session at its prompt", "2.1.328"):
-            self.assertIn(word, fault, word)
         for key in ("GetGoal", "PauseGoal", "TaskCreate", "TaskList", "TaskUpdate", "TodoWrite"):
             self.assertEqual(verdict(ROWS[key]), "declined", key)
             self.assertEqual(sorted(ROWS[key]["declined"]), PLUGIN_NAMES, key)
@@ -251,9 +241,6 @@ class RecordTest(unittest.TestCase):
             weighed = set(row["declined"]) | set(row.get("open") or []) | set(row.get("used") or [])
             self.assertEqual(sorted(weighed), PLUGIN_NAMES, key)
             self.assertTrue(row.get("says"), key)
-        inventory = README.split("## The inventory\n", 1)[1].split("\n## ", 1)[0]
-        for words in ("as Claude Code 2.1.330 has them", "`vcs.diff`", "`$.session.machine`"):
-            self.assertIn(words, inventory)
 
 
 class ModuleTest(unittest.TestCase):

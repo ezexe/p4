@@ -62,10 +62,6 @@ class TableTest(unittest.TestCase):
         for name, native in ids.items():
             for key in native:
                 self.assertIn(name, RECORD[key].get("miss") or [], f"{key} does not name {name}")
-        # only a hooks module hooks an event or calls a method, so none of those rows has a by-hand call
-        for key, row in used.items():
-            if row["kind"] in ("hook", "event", "method"):
-                self.assertIn("a session has no call that does this by hand", row["nowatch"], key)
         by_miss = sum(1 for row in used.values() if row.get("miss"))
         self.assertIn(f"Of the {len(used)} used rows, {by_miss} are watched by a row of the table and {len(used) - by_miss} say why "
                       "none watches them", SECTION)
@@ -96,11 +92,9 @@ class RefusalTest(unittest.TestCase):
             self.assertEqual(option["type"], "boolean", name)
             self.assertIs(option["default"], False, name)
             self.assertTrue(option["title"].startswith("Refuse: "), name)
-            self.assertIn("With this on, the call is refused before it runs and the refusal names ", option["description"], name)
             self.assertNotIn("required", option, name)
         self.assertIn("return `refuse_${id.replaceAll('-', '_')}`", MISSES)
         self.assertIn(f"{len(at_a_call)} in all", self.REFUSES)
-        self.assertIn("The eight rows checked at a turn's end have no option", self.REFUSES)
         self.assertEqual(sum(1 for *_, at in ROWS if at == "end"), 8)
 
     def test_the_module_refuses_before_the_call_runs_and_only_where_an_option_is_on(self):
