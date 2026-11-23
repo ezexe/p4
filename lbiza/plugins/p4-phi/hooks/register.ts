@@ -343,6 +343,15 @@ let isNoticeTurn = false
 // permission prompts holds each message of one that does not, and the other way round, and past the deadline it
 // "drops the message and reports it as expired to a sender it can reach".
 const DELIVERY_NOTICE = /^\s*\[Cross-session delivery notice\]/
+// Whether the main conversation's turn was begun by a prompt the person typed in this session, by the origin
+// Claude Code stamped on it: the kinds rows.OWN_KINDS names in python, Enter in a terminal, a Remote Control
+// client and a ping from Slack.
+let isOwnTurn = false
+const OWN_KINDS: ReadonlySet<string> = new Set(['composer', 'bridge', 'slack-ping'])
+// Where an agent of the session's own stands while its work is not done, as AgentStatus names it in the types of
+// `claude-code`: `pending` not started, `running` a turn, `waiting` held on its own background work, a plan's
+// approval or an Agent call. A teammate that is `idle` waits for a message and has ended its turn.
+const UNFINISHED: ReadonlySet<string> = new Set(['pending', 'running', 'waiting'])
 // The condition of the goal command that has not answered yet: `$.command.run` queues the command until the session
 // is idle, so the call can stay open through a whole turn.
 let goalFlying: string | undefined
@@ -953,21 +962,46 @@ function reportText(answer: string, reason: TurnCompleteReason): string {
   return `phi (p4-phi): this session ended a turn. Its report follows, and needs no reply.\n\n${cut}`
 }
 
+// Whether an agent of the session's own, a subagent or a teammate, has work that is not done, by `$.agent.list()`.
+// A Claude Code with no `$.agent.list`, or a list that fails, has nothing running, so the turn reports as before.
+async function isRunningOwn($: EngineInterface): Promise<boolean> {
+  try {
+    const agents = await $.agent.list()
+
+    return agents.some(one => UNFINISHED.has(String(one.status)))
+  } catch {
+    return false
+  }
+}
+
 // At the end of a turn of a session another session started: its report goes to that session, where a message
-// starts a turn when the session is idle. A turn the person stopped is theirs to speak of. A starter that runs under
-// a new id since a clear or a resume is asked of python once more. A turn begun by a delivery notice sends none:
-// seen in the desktop app on Claude Code 2.1.326, a worker in auto mode whose starter bypassed permission prompts
-// had each report held there, the notice of each started a turn of the worker, and that turn's report was held in
-// its turn, 44 times in five minutes, until the worker was detached.
+// starts a turn when the session is idle. The desktop app sends the starter its own note of each turn's end of a
+// session it started, so a report goes only where the turn's end is worth a turn of the starter.
+// A turn that ends while a subagent or a teammate of the session's own has work that is not done sends none: it is
+// an interim turn, and the turn that follows that agent's report speaks. A planner that waited on its subagents
+// ended a dozen turns saying it still waited, and each one started a turn of its starter twice.
+// A turn begun by a prompt the person typed in this session sends none: a session the person talks to is theirs to
+// follow, and it tells its starter what it wants told with its own SendMessage. A side chat the person forked and
+// typed in sent every one of its answers to the session it was forked from.
+// Every other turn sends its report: one begun by its brief, by another session's message, by a background event or
+// by a plugin's prompt, with nothing of its own running. That keeps a turn that is done, blocked, asks, finds or
+// hands over.
+// A turn the person stopped is theirs to speak of. A starter that runs under a new id since a clear or a resume is
+// asked of python once more. A turn begun by a delivery notice sends none: seen in the desktop app on Claude Code
+// 2.1.326, a worker in auto mode whose starter bypassed permission prompts had each report held there, the notice
+// of each started a turn of the worker, and that turn's report was held in its turn, 44 times in five minutes,
+// until the worker was detached.
 async function report(
   $: EngineInterface,
   answer: string,
   reason: TurnCompleteReason,
   isNotice: boolean,
+  isOwn: boolean,
 ): Promise<void> {
   try {
     switches ??= readSwitches($)
-    if ((await switches).isPhiOff || reason === 'aborted' || isNotice) return
+    if ((await switches).isPhiOff || reason === 'aborted' || isNotice || isOwn) return
+    if (await isRunningOwn($)) return
     const to = await starterOf($)
     if (!to) return
     const text = reportText(answer, reason)
@@ -1836,6 +1870,7 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       isInTurn = true
       isNoticeTurn = DELIVERY_NOTICE.test(e.text ?? '')
+      isOwnTurn = OWN_KINDS.has(originOf(e.text ?? '')?.kind ?? '')
     }
 
     return next(e)
@@ -1848,8 +1883,9 @@ export const register: Register = on => {
   on('turn.complete', ($, e, next) => {
     if (e.agentId === undefined) {
       isInTurn = false
-      void report($, e.answer, e.reason, isNoticeTurn)
+      void report($, e.answer, e.reason, isNoticeTurn, isOwnTurn)
       isNoticeTurn = false
+      isOwnTurn = false
     }
     if (e.agentId === undefined || isWatching) void look($, true)
     void team($)

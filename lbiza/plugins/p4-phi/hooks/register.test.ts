@@ -870,6 +870,91 @@ test('a turn begun by the notice of a held message sends no report, and the turn
   expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT, 'The test of the flush passes.'])
 })
 
+test('a turn that ends with an agent of its own at work sends no report, and the turn after its report does', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let agents: Record<string, unknown>[] = [
+    { id: 'a0', kind: 'local_agent', description: 'Find the ports', label: 'Find the ports', status: 'running' },
+  ]
+  const seen = machine(on, { look: () => STARTED, agents: () => agents })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete({ ...TURN, answer: 'Still waiting on the finder.' })
+  await clock.settle()
+  agents = [{ id: 'a1', kind: 'in_process_teammate', name: 'scout', description: 'Read', label: 'Read', status: 'waiting' }]
+  await $.turn.complete({ ...TURN, turnId: 't2', answer: 'Still waiting on the scout.' })
+  await clock.settle()
+  agents = [{ id: 'a2', kind: 'local_agent', description: 'Plan', label: 'Plan', status: 'pending' }]
+  await $.turn.complete({ ...TURN, turnId: 't3', answer: 'The planner starts.' })
+  await clock.settle()
+  expect(seen.sent).toEqual([])
+
+  // The agents have ended or wait for a message, so the turn that follows the finder's report speaks.
+  agents = [
+    { id: 'a0', kind: 'local_agent', description: 'Find the ports', label: 'Find the ports', status: 'completed' },
+    { id: 'a1', kind: 'in_process_teammate', name: 'scout', description: 'Read', label: 'Read', status: 'idle' },
+  ]
+  await $.turn.complete({ ...TURN, turnId: 't4', answer: REPORT })
+  await clock.settle()
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT])
+})
+
+test("a turn the person's own prompt began sends no report, and one another session's message began does", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let turn = 0
+  const seen = machine(on, {
+    look: () => STARTED,
+    // The engine starts the prompt's turn while the prompt is in flight.
+    enters: async text => {
+      turn += 1
+      await $.turn.start({ text, turnId: `t${turn}` })
+    },
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  for (const kind of ['composer', 'bridge', 'slack-ping']) {
+    await $.prompt.submit({ text: `what is left, by ${kind}`, origin: { kind }, wait: false } as never)
+    await $.turn.complete({ ...TURN, turnId: `t${turn}`, answer: `Left: the flush, by ${kind}.` })
+  }
+  await clock.settle()
+  expect(seen.sent).toEqual([])
+
+  await $.prompt.submit({ ...WORD, wait: false } as never)
+  await $.turn.complete({ ...TURN, turnId: `t${turn}`, answer: REPORT })
+  await clock.settle()
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT])
+
+  // A background event and a plugin's prompt are no person's words either.
+  await $.prompt.submit({ text: 'the test run ended', origin: { kind: 'task-notification' }, wait: false } as never)
+  await $.turn.complete({ ...TURN, turnId: `t${turn}`, answer: 'The test of the flush passes.' })
+  await $.prompt.submit({ text: MOVE, origin: { kind: 'plugin', name: 'p4-phi' }, wait: false } as never)
+  await $.turn.complete({ ...TURN, turnId: `t${turn}`, answer: 'Step 2 is done.' })
+  await clock.settle()
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT, 'The test of the flush passes.', 'Step 2 is done.'])
+})
+
+test('a turn whose agents cannot be listed sends its report', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const seen = machine(on, {
+    look: () => STARTED,
+    agents: () => {
+      throw new Error('no agent list on this surface')
+    },
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.prompt.submit({ ...WORD, wait: false } as never)
+  await $.turn.complete({ ...TURN, answer: REPORT })
+  await clock.settle()
+
+  expect(seen.sent.map(one => one.text.split('\n\n')[1])).toEqual([REPORT])
+})
+
 test("a subagent's turn, a turn the person stopped and a session nobody started send no report", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
