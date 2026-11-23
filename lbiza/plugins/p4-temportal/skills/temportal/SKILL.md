@@ -12,6 +12,7 @@ Transcripts, plans, file history and subagent memory stay where Claude Code puts
 
 - p4-temportal makes the store: `hooks/store.py make`, at each start, makes `.claude/p4/` with its `p4.json`, `.gitignore`, git repository and `CLAUDE.md`, and p4-phi only finds it.
 - The settings keeper writes `@.claude/p4/CLAUDE.md` into the project's `CLAUDE.local.md`, which gives a session started at the project's root the store's text. `claude.importLine` false in `p4.json` takes the line out.
+- The keeper copies the allow rules p4-phi asks for in the store's `settings.local.json`, and the store's git ignores that file.
 - `store.py unkeep` takes out everything the keeper wrote, the keys, the rules and that line, and sets `claude.keep` false so no later start writes them again; `store.py keep` sets it true and writes them. What a person changed is left and named.
 - `temportal/memory/` is the project's auto memory directory once `autoMemoryDirectory` in `.claude/settings.local.json` names it: Claude Code writes memory files and their `MEMORY.md` index there and loads the index at each start itself, and nothing in it is ever cleared.
 - Until that key is there, Claude Code keeps the memory in its own folder under `~/.claude/projects/`, and p4-temportal moves nothing out of it.
