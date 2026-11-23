@@ -68,7 +68,7 @@ The evidence links below are written from `plan-planner/`, where `../../../../` 
 
 ## The plan loop
 
-A plan is written whole and then read in rounds, each group of its sections by a coworker's agent team, until a round has nothing to mend, and nothing is built before ezexe approves it.
+A plan is written whole and then read in rounds, each group of its sections by a coworker's agent team, until a round has nothing to mend or a group's held findings grow, and nothing is built before ezexe approves it.
 
 - **Each section is researched before it is written:** in both places every time, the checkout and the upstream pages read live on the web, and then the section gets its intents, its Research, its Observed and Assumed lines, its fences and each fence's Documented and Derivation.
 - **The web research is an agent's own step:** a research agent goes to the upstream pages for the section's subject, read live, beside the read of the checkout, and a section whose subject has an upstream page holds a Documented from that page, never from the checkout's docs alone.

@@ -81,8 +81,8 @@ def held_of(said):
 
 
 def loop_of(bare):
-    """A plan's loop as its log says it, or None for a plan with no `## Loop log`: the round it is on, the most
-    rounds it can take, which is one more than round 1 held findings, the findings that held in the last round,
+    """A plan's loop as its log says it, or None for a plan with no `## Loop log`: the round it is on, `of`, which is
+    that same round, since no count of rounds bounds a loop, the findings that held in the last round,
     what that round's line says, and how the loop ended: `clean` at a round with nothing to mend, `stopped` where a
     round held more findings than the round before, and '' while it goes on, as it does at a level count. `bare` is the plan's text with its
     fences blanked, so a log quoted in a fence is no log."""
@@ -100,7 +100,7 @@ def loop_of(bare):
     if not state and ENDED.search(bare[m.end():]):
         state = "stopped"
     n, said = rows[-1]
-    return {"round": n, "of": max(n, (held[0] or 0) + 1), "held": held[-1] or 0, "last": relay._short(said, 200),
+    return {"round": n, "of": n, "held": held[-1] or 0, "last": relay._short(said, 200),
             "state": state, "ended": bool(state)}
 
 

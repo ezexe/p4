@@ -131,16 +131,22 @@ class Goal(unittest.TestCase):
 class Plan(Store):
     def test_the_loop_log_gives_the_round_its_held_findings_and_how_the_loop_ended(self):
         log = "## Loop log\n\n- Round 1: 3 held, 9 minutes: two fences mended.\n  - 2: a check: mended, named.\n"
-        self.assertEqual(progress.loop_of(log), {"round": 1, "of": 4, "held": 3, "state": "", "ended": False,
+        self.assertEqual(progress.loop_of(log), {"round": 1, "of": 1, "held": 3, "state": "", "ended": False,
                                                  "last": "3 held, 9 minutes: two fences mended."})
         on = progress.loop_of(log + "- Round 2: 1 held, 4 minutes: one check narrowed.\n")
-        self.assertEqual((on["round"], on["of"], on["held"], on["state"], on["ended"]), (2, 4, 1, "", False))
+        self.assertEqual((on["round"], on["of"], on["held"], on["state"], on["ended"]), (2, 2, 1, "", False))
         clean = progress.loop_of(log + "- Round 2: clean, 3 minutes\n")
         self.assertEqual((clean["held"], clean["state"], clean["ended"]), (0, "clean", True))
         level = progress.loop_of(log + "- Round 2: 3 held, 5 minutes: as many as before.\n")
         self.assertEqual((level["state"], level["ended"]), ("", False), "a level count goes on to a next round")
         stopped = progress.loop_of(log + "- Round 2: 4 held, 5 minutes: more than before.\n")
         self.assertEqual((stopped["state"], stopped["ended"]), ("stopped", True))
+        long = progress.loop_of(log + "".join(f"- Round {n}: 3 held, 1 minutes: level.\n" for n in range(2, 7)))
+        self.assertEqual((long["round"], long["of"], long["state"]), (6, 6, ""), "a level run goes on past any count")
+        rise = progress.loop_of(log + "- Round 2: 1 held, 2 minutes: fewer.\n- Round 3: 2 held, 2 minutes: more.\n")
+        self.assertEqual(rise["state"], "stopped", "only the last two rounds are compared")
+        bare = progress.loop_of(log + "- Round 2: two fences mended.\n")
+        self.assertEqual((bare["state"], bare["held"]), ("", 0), "a line that says no count stops nothing")
         self.assertEqual(progress.loop_of("## Loop log\n"),
                          {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False})
         self.assertEqual(progress.loop_of("## Loop log\n\n- Round 2 of 5: dry\n")["round"], 2, "the earlier shape")

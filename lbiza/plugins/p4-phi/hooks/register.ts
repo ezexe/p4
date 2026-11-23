@@ -464,7 +464,9 @@ export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
       if (loop !== null) {
         const held = loop.state === 'clean' ? 'clean' : `${loop.held} held`
         const text = `round ${loop.round}, ${held}${loop.state === 'stopped' ? ', stopped' : ''}`
-        lines.push({ kind: 'bar', label: `${pad}loop`, value: loop.round, max: loop.of, text })
+        // A loop that goes on has no last round to draw a bar against: a level count is followed by a next round.
+        if (loop.ended) lines.push({ kind: 'bar', label: `${pad}loop`, value: loop.round, max: loop.of, text })
+        else lines.push({ kind: 'text', text: `${pad}loop: ${text}` })
         if (loop.last !== '') lines.push({ kind: 'dim', text: `${pad}  last round: ${loop.last}` })
       }
       for (const section of one.plan.sections) {
