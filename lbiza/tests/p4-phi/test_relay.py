@@ -686,7 +686,8 @@ class ThreeSessions(unittest.TestCase):
             self.assertIn(f"; source: commit near{k}", ctx, "what touches its task is given in full")
         self.assertNotIn("commit far", ctx, "what does not is not shown")
         self.assertIn("deprecation or replacement notes not shown: 27", ctx, "the remainder by count")
-        page = os.path.join(t.p4, "phi", "sessions", A, "session.md").replace("\\", "/")
+        relay.forget(t.p4)
+        page = os.path.join(relay._dir(t.p4, A), "session.md").replace("\\", "/")
         self.assertIn(f"27 on {page}", ctx, "and by the page that holds it")
         self.assertIn("narwhal exporter build 26", open(page, encoding="utf-8").read(), "the page holds them whole")
         again = context(t.say(B, "and after"))
@@ -925,6 +926,12 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid="tr1").returncode, 0)
         self.assertEqual(t.stop(A, "move it", report="Moved.", uuid="tr2").returncode, 0)
         self.assertTrue(os.path.exists(os.path.join(t.p4, "phi", "reports.jsonl")))
+        relay.forget(t.p4)
+
+        def rel(sid, name):                        # a session's file as git names it: a started one's in its node
+            return os.path.relpath(os.path.join(relay._dir(t.p4, sid), name), t.p4).replace("\\", "/")
+        self.assertTrue(rel(A, "session.json").startswith(".claude/p4/phi/sessions/"), "a started session is nested")
+        write(os.path.join(relay._dir(t.p4, A), "usage.json"), json.dumps({"context": 40}))
         self.assertFalse([x for x in status.splitlines() if "phi/sessions/" in x or x.endswith(
             ("phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl"))], status)
         write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
@@ -932,12 +939,14 @@ class ThreeSessions(unittest.TestCase):
         shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
                                capture_output=True, text=True).stdout.split()
         self.assertEqual(shown[:4], ["phi:", "the", "session", "tree,"])
-        files = [x for x in shown if x.startswith("phi/")]
+        files = [x for x in shown if x.startswith(("phi/", ".claude/"))]
         self.assertTrue(any(x.endswith("/session.json") for x in files))
-        self.assertFalse(any(x.endswith(("log.jsonl", "session.md")) for x in files), "per machine or made again")
-        self.assertIn(f"phi/sessions/{TOP}/children.jsonl", files, "a parent's lines of its children are tracked")
+        self.assertFalse(any(x.endswith(("log.jsonl", "session.md", "usage.json")) for x in files),
+                         "per machine or made again, in a node's store as in the root")
+        self.assertIn(rel(A, "session.json"), files, "a nested session's session.json is committed")
+        self.assertIn(rel(TOP, "session.json"), files, "and a flat one's")
         self.assertNotEqual(subprocess.run(["git", "-C", t.p4, "check-ignore", "-q",
-                                            f"phi/sessions/{TOP}/children.jsonl"]).returncode, 0, "and not ignored")
+                                            rel(A, "session.json")]).returncode, 0, "and not ignored")
         self.assertNotIn(relay.UNTRACKED_MARK, open(os.path.join(t.p4, ".gitignore"), encoding="utf-8").read(),
                          "tracking on takes the untracked tree's block out")
         self.assertFalse(relay.track(t.p4, first_only=True), "committed once")
@@ -945,13 +954,13 @@ class ThreeSessions(unittest.TestCase):
         relay.track(t.p4)
         staged = subprocess.run(["git", "-C", t.p4, "diff", "--cached", "--name-only"], capture_output=True,
                                 text=True).stdout
-        self.assertIn(f"phi/sessions/{B}/notes.jsonl", staged, "after the first time, staged for the next commit")
+        self.assertIn(rel(B, "notes.jsonl"), staged, "after the first time, staged for the next commit")
         root = pathfilter.project_of(t.p4)
-        committed = subprocess.run(["git", "-C", t.p4, "show", f"HEAD:phi/sessions/{A}/session.json"],
+        committed = subprocess.run(["git", "-C", t.p4, "show", f"HEAD:{rel(A, 'session.json')}"],
                                    capture_output=True, text=True).stdout
-        on_disk = open(os.path.join(t.p4, "phi", "sessions", A, "session.json"), encoding="utf-8").read()
+        on_disk = open(os.path.join(relay._dir(t.p4, A), "session.json"), encoding="utf-8").read()
         self.assertIn(root, on_disk.replace("\\\\", "/"), "the file on disk names this machine's root")
-        self.assertIn("{project}", committed, "git holds the root as {project}")
+        self.assertIn("{project}", committed, "git holds the root as {project}, a nested file through the filter too")
         self.assertNotIn(root.lower(), committed.lower().replace("\\\\", "/"))
 
     def test_the_watchers_state_files_are_ignored_with_tracking_off_and_on(self):
@@ -1929,6 +1938,99 @@ class WarnTogether(unittest.TestCase):
         finally:
             relay.LOCK_WAIT_S = wait
             shutil.rmtree(home, ignore_errors=True)
+
+
+class Nodes(unittest.TestCase):
+    """A node's store: relay.store_of, stores, nodes, claim, and _dir and _sessions through them."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = os.path.join(self._tmp.name, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+
+    def same(self, a, b):
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+    def test_store_of_gives_one_more_claude_for_each_further_child(self):
+        self.assertEqual(relay.store_of("S", 1), os.path.join("S", ".claude", "p4"))
+        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", ".claude", "p4"))
+
+    def test_stores_finds_the_root_two_children_and_a_grandchild_and_no_folder_named_otherwise(self):
+        one, two = relay.store_of(self.home, 1), relay.store_of(self.home, 2)
+        grand = relay.store_of(one, 1)
+        for d in (one, two, grand, os.path.join(self.home, ".claude", "worktrees", "x"),
+                  os.path.join(self.home, ".claude", ".claude", "q4"), os.path.join(one, "p4")):
+            os.makedirs(d, exist_ok=True)
+        relay.forget(self.home)
+        self.assertEqual(relay.stores(self.home), [self.home, one, grand, two], "the root first, depth first")
+
+    def test_claim_gives_1_2_3_to_three_ids_and_the_same_store_to_an_id_asked_twice(self):
+        got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]
+        self.assertEqual(got, [relay.store_of(self.home, i) for i in (1, 2, 3)])
+        self.assertEqual(relay.claim(self.home, self.home, "b", "session", "top"), got[1])
+        n = relay.node_record(self.home, "a")
+        self.assertEqual((n["id"], n["kind"], n["parent"], n["sections"]), ("a", "session", "top", []))
+        self.assertEqual(sorted(os.listdir(got[0])), ["phi"], "a node's store holds only phi/")
+        self.assertEqual(os.listdir(os.path.join(got[0], "phi")), [relay.NODE])
+
+    def test_dir_is_the_nodes_folder_for_a_claimed_id_and_the_flat_one_for_any_other(self):
+        store = relay.claim(self.home, self.home, "kid", "session", "top")
+        self.assertTrue(self.same(relay._dir(self.home, "kid"), os.path.join(store, "phi", "sessions", "kid")))
+        self.assertTrue(self.same(relay._dir(self.home, "top"), os.path.join(self.home, "phi", "sessions", "top")))
+        self.assertTrue(self.same(relay._dir(self.home, "top"), relay.flat(self.home, "top")))
+
+    def test_sessions_holds_a_flat_session_and_a_nested_one(self):
+        write(os.path.join(self.home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
+        store = relay.claim(self.home, self.home, "kid", "session", "top")
+        write(os.path.join(store, "phi", "sessions", "kid", "session.json"),
+              json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}}))
+        self.assertEqual(sorted(relay._sessions(self.home)), ["kid", "top"])
+
+    def test_two_processes_that_claim_at_once_get_two_stores_for_two_ids_and_one_store_for_one(self):
+        code = ("import sys; sys.path.insert(0, sys.argv[1]); import relay; "
+                "print(relay.claim(sys.argv[2], sys.argv[2], sys.argv[3], 'session', 'top'))")
+
+        def at_once(*ids):
+            procs = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC, self.home, i], stdout=subprocess.PIPE,
+                                      text=True) for i in ids]
+            return [p.communicate(timeout=60)[0].strip() for p in procs]
+        two = at_once("a", "b")
+        self.assertEqual(len(set(two)), 2)
+        self.assertEqual(set(two), {relay.store_of(self.home, 1), relay.store_of(self.home, 2)})
+        one = at_once("c", "c")
+        self.assertEqual(one[0], one[1])
+        relay.forget(self.home)
+        self.assertEqual(len(relay.stores(self.home)), 4, "one store for c")
+
+    def test_two_claims_for_one_id_with_the_lock_given_up_both_return_the_first_store(self):
+        first = relay.claim(self.home, self.home, "kid", "session", "top")
+        real = relay.nodes
+        asked = []
+
+        def blind(home):                       # the second caller looked before the first wrote its node.json
+            asked.append(home)
+            return {} if len(asked) == 1 else real(home)
+        with mock.patch.object(relay, "nodes", blind):
+            second = relay.claim(self.home, self.home, "kid", "session", "top")
+        self.assertEqual(second, first)
+        self.assertTrue(os.path.isdir(relay.store_of(self.home, 2)), "the other stays an empty node")
+
+    def test_claim_makes_nothing_where_the_stores_path_would_pass_180_characters(self):
+        deep = os.path.join(self.home, *(["x" * 30] * 6))
+        self.assertGreater(len(os.path.abspath(relay.store_of(deep, 1))), relay.NODE_PATH_MAX)
+        self.assertEqual(relay.claim(self.home, deep, "kid", "session", "top"), "")
+        self.assertFalse(os.path.exists(deep))
+        self.assertEqual(relay.nodes(self.home), {})
+
+    def test_each_ignore_and_attribute_line_of_phi_has_a_twin_for_a_nodes_store(self):
+        for lines in (relay.IGNORED, relay.UNTRACKED):
+            for k, x in enumerate(lines):
+                if x.startswith("phi/"):
+                    self.assertEqual(lines[k + 1], ".claude/**/" + x)
+                elif x.startswith("!phi/"):
+                    self.assertEqual(lines[k + 1], "!.claude/**/" + x[1:])
+        self.assertEqual(relay.ATTRS[2:], (".claude/**/phi/** filter=p4path", ".claude/**/phi/archive/** -filter"))
 
 
 if __name__ == "__main__":

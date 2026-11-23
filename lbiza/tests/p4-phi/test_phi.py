@@ -149,7 +149,10 @@ class Tree:
                                       "last_assistant_message": report}, **kw)
 
     def dir(self, host):
-        return os.path.join(self.p4, "phi", "sessions", host)
+        """The session's folder, its node's where a hook claimed one: the walk is made again, since the hook ran
+        in another process."""
+        relay.forget(self.p4)
+        return relay._dir(self.p4, host)
 
     def session(self, host):
         return jload(os.path.join(self.dir(host), "session.json"))
@@ -2683,7 +2686,8 @@ class AppTools(unittest.TestCase):
 
 
 class Places(unittest.TestCase):
-    """children.jsonl: the lines a parent keeps, one for each session it started, which give the children's places."""
+    """A node's store: a session another session started is given a store nested in its starter's at its first
+    hook, relay.claim, and its address is that store's."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -2698,83 +2702,92 @@ class Places(unittest.TestCase):
         self.t.record(host, above, host)
         self.t.say(host, HANDED)
 
-    def lines(self, host=TOP):
-        return [r["id"] for r in phi.read_rows(os.path.join(self.t.dir(host), "children.jsonl"))]
+    def store(self, host):
+        relay.forget(self.t.p4)
+        return relay.nodes(self.t.p4).get(host, "")
 
-    def sessions(self):
-        import glob
-        out = {}
-        for p in glob.glob(os.path.join(self.t.p4, "phi", "sessions", "*", "session.json")):
-            d = jload(p)
-            out[d["sessionId"]] = d
-        return out
+    def flat(self, host):
+        return relay.flat(self.t.p4, host)
 
     def address(self, host):
         import node
-        return node.addresses(self.t.p4, self.sessions()).get(host)
+        relay.forget(self.t.p4)
+        return node.addresses(self.t.p4, relay._sessions(self.t.p4)).get(host)
 
-    def test_three_children_of_one_minute_stand_1_2_3_and_a_hook_after_adds_no_line(self):
+    def test_a_started_session_gets_a_node_at_its_first_hook_with_its_session_json_and_no_flat_folder(self):
+        self.kid(KID)
+        node = self.store(KID)
+        self.assertEqual(os.path.normcase(node), os.path.normcase(os.path.join(self.t.p4, ".claude", "p4")))
+        self.assertTrue(os.path.isfile(os.path.join(node, "phi", "sessions", KID, "session.json")))
+        self.assertEqual(jload(os.path.join(node, "phi", relay.NODE))["kind"], "session")
+        self.assertEqual(jload(os.path.join(node, "phi", relay.NODE))["parent"], TOP)
+        self.assertFalse(os.path.exists(self.flat(KID)), "no flat folder is made")
+        self.assertEqual(self.store(TOP), "", "a top stays flat")
+        self.assertTrue(os.path.isfile(os.path.join(self.flat(TOP), "session.json")))
+
+    def test_three_children_stand_101_1001_10001_and_a_hook_after_moves_none(self):
         for host in (KID, KID2, GRAND):
             self.kid(host)
-        self.assertEqual(self.lines(), [KID, KID2, GRAND])
         self.t.say(KID, "Again.")
         self.t.stop(KID, HANDED, [], "Half done.")
-        self.assertEqual(self.lines(), [KID, KID2, GRAND], "no line for a hook of the first")
-        self.assertEqual([self.address(h) for h in (KID, KID2, GRAND)], ["101", "1001", "10001"])
+        self.assertEqual([self.address(h) for h in (TOP, KID, KID2, GRAND)], ["1", "101", "1001", "10001"])
+        self.assertEqual(len(relay.stores(self.t.p4)), 4)
 
-    def test_the_third_keeps_its_address_after_a_fourth_and_a_removed_folder_does_not_free_its_place(self):
-        for host in (KID, KID2, GRAND):
-            self.kid(host)
-        fourth = "local_kid00004"
-        self.kid(fourth)
-        self.assertEqual(self.address(GRAND), "10001")
-        self.assertEqual(self.address(fourth), "100001")
-        import shutil
-        shutil.rmtree(self.t.dir(GRAND))
-        fifth = "local_kid00005"
-        self.kid(fifth)
-        self.assertEqual(self.lines()[-2:], [fourth, fifth])
-        self.assertEqual(self.address(fifth), "1000001")
+    def test_the_child_of_a_nested_session_is_nested_in_that_sessions_store(self):
+        self.kid(KID)
+        self.kid(GRAND, KID)
+        self.assertEqual(os.path.normcase(self.store(GRAND)),
+                         os.path.normcase(os.path.join(self.store(KID), ".claude", "p4")))
+        self.assertEqual(self.address(GRAND), "10101")
 
-    def test_a_record_first_made_with_no_parent_and_given_one_later_is_added(self):
+    def test_a_session_whose_flat_folder_is_there_stays_flat_with_its_later_files_beside_it(self):
+        write(os.path.join(self.flat(KID), "log.jsonl"), json.dumps({"hook": "failed"}) + "\n")
+        self.kid(KID)
+        self.t.stop(KID, HANDED, [], "Half done.")
+        self.assertEqual(self.store(KID), "")
+        for name in ("session.json", "turns.jsonl", "log.jsonl"):
+            self.assertTrue(os.path.isfile(os.path.join(self.flat(KID), name)), name)
+        self.assertEqual(self.address(KID), "1")
+        self.assertFalse(os.path.isdir(os.path.join(self.t.p4, ".claude")), "no store was made")
+
+    def test_a_first_prompts_hooks_leave_every_file_of_a_started_session_in_its_node(self):
+        self.kid(KID)
+        self.t.stop(KID, HANDED, [], "Half done.")
+        folder = os.path.join(self.store(KID), "phi", "sessions", KID)
+        for name in ("session.json", "turns.jsonl", "log.jsonl"):
+            self.assertTrue(os.path.isfile(os.path.join(folder, name)), name)
+        self.assertFalse(os.path.exists(self.flat(KID)))
+        self.assertEqual(os.path.normcase(self.t.dir(KID)), os.path.normcase(folder))
+
+    def test_a_record_first_made_with_no_parent_stays_flat_once_it_is_given_one(self):
         self.t.record(KID, title="Fix the dropped row")
         self.t.say(KID, HANDED)
-        self.assertEqual(self.lines(), [])
         self.assertEqual(self.t.started_by(KID)[0], "")
         self.t.record(KID, TOP, "Fix the dropped row")
         self.t.say(KID, "Next.")
         self.assertEqual(self.t.started_by(KID)[0], TOP)
-        self.assertEqual(self.lines(), [KID])
+        self.assertEqual(self.store(KID), "", "its flat folder was there first")
 
-    def test_a_child_recorded_before_its_parents_record_is_there_is_added_once_the_parents_is_ensured(self):
+    def test_a_child_recorded_before_its_parents_record_is_there_is_nested_once_the_parents_is_ensured(self):
         other = Tree(os.path.join(self._tmp.name, "other"))
         other.record("local_up000001", title="Up")
         other.record(KID, "local_up000001", "Down")
         other.say(KID, HANDED)
-        rows = phi.read_rows(os.path.join(other.dir("local_up000001"), "children.jsonl"))
-        self.assertEqual([r["id"] for r in rows], [KID], "the parent's record was made with the child's, and the id added once")
+        relay.forget(other.p4)
+        self.assertTrue(os.path.isfile(os.path.join(relay.flat(other.p4, "local_up000001"), "session.json")))
+        self.assertEqual(os.path.normcase(relay.nodes(other.p4).get(KID, "")),
+                         os.path.normcase(os.path.join(other.p4, ".claude", "p4")))
 
-    def test_a_reparented_session_is_added_to_its_new_parents_lines_and_a_detached_one_is_a_top(self):
-        for host in (KID, KID2, GRAND):
+    def test_a_reparented_session_keeps_its_store_and_a_detached_one_too(self):
+        for host in (KID, KID2):
             self.kid(host)
-        self.assertEqual(self.t.cli(TOP, "reparent", GRAND, KID).returncode, 0)
-        self.assertEqual(self.lines(KID), [GRAND])
-        self.assertEqual(self.address(GRAND), "10101", "read from its new parent's lines")
-        self.assertEqual(self.t.cli(TOP, "reparent", GRAND, KID).stdout.strip(), "already there")
-        self.assertEqual(self.lines(KID), [GRAND], "no second line")
-        self.assertEqual(self.t.cli(TOP, "detach", GRAND).returncode, 0)
-        self.assertEqual(self.address(GRAND), "1")
-
-    def test_two_processes_that_each_record_a_child_at_the_same_time_leave_both_ids_in_the_file(self):
-        code = ("import sys; sys.path.insert(0, sys.argv[1]); import phi; "
-                "[phi.place(sys.argv[2], f'{sys.argv[3]}{k:03}', sys.argv[4]) for k in range(60)]")
-        procs = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC, self.t.p4, tag, TOP])
-                 for tag in ("a", "b")]
-        for p in procs:
-            self.assertEqual(p.wait(timeout=60), 0)
-        ids = self.lines()
-        self.assertEqual(len(ids), 120, "no line lost")
-        self.assertEqual(set(ids), {f"{tag}{k:03}" for tag in "ab" for k in range(60)})
+        held = self.store(KID2)
+        self.assertEqual(self.t.cli(TOP, "reparent", KID2, KID).returncode, 0)
+        self.assertEqual(self.t.started_by(KID2)[0], KID)
+        self.assertEqual(self.store(KID2), held)
+        self.assertEqual(self.address(KID2), "1001", "the address of the store it has")
+        self.assertEqual(self.t.cli(TOP, "detach", KID2).returncode, 0)
+        self.assertEqual(self.store(KID2), held)
 
     def test_a_session_json_gets_no_key_for_a_place(self):
         self.kid(KID)
@@ -2809,7 +2822,7 @@ WORKER_PLAN = ("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n
 
 
 class TerminalWorker(unittest.TestCase):
-    """`phi.py coworkers --land --write` and `--wait --report`, the terminal worker of a plan's sections."""
+    """`phi.py coworkers --land` and `--wait --report`, the terminal worker of a plan's sections, in its node."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-worker-", dir=FIXTURES or None)
@@ -2821,7 +2834,6 @@ class TerminalWorker(unittest.TestCase):
         self.home = os.path.join(self.base, "proj", ".claude", "p4")
         os.makedirs(self.home)
         self.app = os.path.join(self.base, "app")
-        self.folder = os.path.join(self.base, "workers")
 
     def mode(self, name, mode):
         os.makedirs(os.path.join(self.app, "acct", "org"), exist_ok=True)
@@ -2834,66 +2846,74 @@ class TerminalWorker(unittest.TestCase):
                                self.plan, "--p4", self.home, "--session", session, "--checkout", self.base, *args],
                               capture_output=True, text=True, timeout=60, env=env)
 
-    def test_land_writes_nothing_without_write_and_from_a_mode_that_asks(self):
-        self.mode("local_plan0001", "auto")
+    def node(self):
+        return os.path.join(self.home, ".claude", "p4", "phi")
+
+    def test_land_writes_nothing_from_a_mode_that_asks(self):
         self.mode("local_plan0002", "plan")
         self.mode("local_plan0003", "default")
-        none = self.run_phi("--land")
-        self.assertEqual(none.returncode, 2)
-        self.assertIn("--write", none.stderr)
         for session, said in (("local_plan0002", "`plan`"), ("local_plan0003", "`default`"),
                               ("cli-0001", "not known"), ("local_nomode001", "not known")):
-            ran = self.run_phi("--land", "--write", self.folder, session=session)
+            ran = self.run_phi("--land", session=session)
             self.assertEqual(ran.returncode, 2, ran.stdout)
             self.assertIn(said, ran.stderr)
             self.assertIn("unattended tab would stop at its first question", ran.stderr)
             self.assertIn("sections", ran.stderr, "the other way is named")
-            self.assertFalse(os.path.exists(self.folder), "nothing is written")
+            self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing is written")
 
-    def test_land_from_auto_writes_one_start_file_and_one_brief_and_a_second_land_writes_nothing(self):
+    def test_land_from_auto_writes_one_start_file_and_one_brief_into_the_node_and_a_second_land_writes_nothing(self):
         self.mode("local_plan0001", "auto")
-        ran = self.run_phi("--land", "--write", self.folder)
+        ran = self.run_phi("--land")
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        files = sorted(os.listdir(self.folder))
-        self.assertEqual([f.split("-")[0] for f in files], ["brief", "coworker", "start"])
+        files = sorted(os.listdir(self.node()))
+        self.assertEqual([f.split("-")[0].split(".")[0] for f in files], ["brief", "coworker", "node", "start"])
         self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "sections 1 and 2 are one run")
+        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', ran.stdout, "it runs in the checkout")
         start = next(f for f in files if f.startswith("start-"))
-        with open(os.path.join(self.folder, start), encoding="utf-8") as f:
+        with open(os.path.join(self.node(), start), encoding="utf-8") as f:
             text = f.read()
-        self.assertNotIn("--worktree", text)
+        for word in ("--worktree", "--add-dir", "EXPERIMENTAL_AGENT_TEAMS"):
+            self.assertNotIn(word, text, word)
         self.assertIn("--permission-mode auto", text)
-        self.assertNotIn("EXPERIMENTAL_AGENT_TEAMS", text)
-        before = {f: os.path.getmtime(os.path.join(self.folder, f)) for f in files}
-        again = self.run_phi("--land", "--write", self.folder)
+        before = {f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}
+        again = self.run_phi("--land")
         self.assertEqual(again.returncode, 2)
-        self.assertIn("already started", again.stderr)
-        self.assertEqual(sorted(os.listdir(self.folder)), files)
-        self.assertEqual({f: os.path.getmtime(os.path.join(self.folder, f)) for f in files}, before)
+        self.assertIn("was started already", again.stderr)
+        self.assertIn(self.node().replace(chr(92), "/"), again.stderr, "with its node's folder")
+        self.assertEqual(sorted(os.listdir(self.node())), files)
+        self.assertEqual({f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}, before)
 
-    def test_land_writes_terminals_json_in_the_planners_folder_and_a_second_land_replaces_nothing(self):
+    def test_land_claims_a_worker_node_under_the_planner_and_leaves_names_it(self):
         self.mode("local_plan0001", "auto")
-        ran = self.run_phi("--land", "--write", self.folder)
-        self.assertEqual(ran.returncode, 0, ran.stderr)
-        rows = jload(os.path.join(self.home, "phi", "sessions", "local_plan0001", "terminals.json"))
-        self.assertEqual(len(rows), 1)
-        self.assertEqual((rows[0]["kind"], rows[0]["sections"]), ("worker", ["1", "2"]))
-        self.assertTrue(rows[0]["report"].endswith(f"/report-{rows[0]['name']}.md"))
-        again = self.run_phi("--land", "--write", self.folder)
-        self.assertEqual(again.returncode, 2)
-        self.assertEqual(jload(os.path.join(self.home, "phi", "sessions", "local_plan0001", "terminals.json")), rows)
+        self.assertEqual(self.run_phi("--land").returncode, 0)
+        n = jload(os.path.join(self.node(), relay.NODE))
+        self.assertEqual((n["kind"], n["parent"], n["sections"]), ("worker", "local_plan0001", ["1", "2"]))
+        import node
+        relay.forget(self.home)
+        got = node.leaves(self.home, "local_plan0001")
+        self.assertEqual([(x["level"], x["name"], x["address"], x["state"]) for x in got],
+                         [("terminal", n["id"], "101", "started")])
+        self.assertFalse(os.path.exists(os.path.join(self.home, "phi", "sessions", "local_plan0001",
+                                                     "terminals.json")))
 
-    def test_wait_report_returns_done_where_the_file_is_there(self):
+    def test_wait_report_passes_over_a_report_older_than_the_wait(self):
+        import coworker
         report = os.path.join(self.base, "report-tw-the-exporter-s-m-1-2-abcd.md")
         with open(report, "w", encoding="utf-8") as f:
-            f.write("done\n")
-        ran = self.run_phi("--wait", "--report", report)
-        self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertTrue(ran.stdout.startswith("done"), ran.stdout)
-        import coworker
+            f.write("the first report\n")
+        old = time.time() - 600
+        os.utime(report, (old, old))
         now = [0.0]
-        how = coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
-                                   sleep=lambda s: now.__setitem__(0, now[0] + s))
-        self.assertEqual(how, ("long", 30))
+
+        def sleep(s):
+            now[0] += s
+            if now[0] >= 20:
+                with open(report, "w", encoding="utf-8") as f:
+                    f.write("the second report\n")
+        self.assertEqual(coworker.wait_report(report, longest=60, clock=lambda: now[0], sleep=sleep), ("done", 20))
+        now[0] = 0.0
+        self.assertEqual(coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
+                                              sleep=lambda s: now.__setitem__(0, now[0] + s)), ("long", 30))
 
 
 class CommitCommand(unittest.TestCase):

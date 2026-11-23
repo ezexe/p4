@@ -1276,5 +1276,34 @@ class WorktreeLines(unittest.TestCase):
         self.assertEqual(puppeteer.worktree_lines(tempfile.mkdtemp()), [puppeteer.WORKTREE_LINE, ""])
 
 
+class NodeStores(unittest.TestCase):
+    """The watcher reads the sessions of every store of the tree: a node's as the root's."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = os.path.join(self._tmp.name, "proj", ".claude", "p4")
+        write(os.path.join(self.home, "phi", "sessions", TOP, "session.json"), json.dumps({"sessionId": TOP}))
+        import relay
+        self.store = relay.claim(self.home, self.home, KID, "session", TOP)
+        self.kid = os.path.join(self.store, "phi", "sessions", KID)
+        write(os.path.join(self.kid, "session.json"), json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}))
+
+    def test_the_signature_changes_when_a_nested_session_json_changes(self):
+        before = puppeteer.signature(self.home, TOP, [])
+        self.assertEqual(puppeteer.signature(self.home, TOP, []), before)
+        time.sleep(0.05)
+        write(os.path.join(self.kid, "session.json"),
+              json.dumps({"sessionId": KID, "title": "the kid", "spawnedFrom": {"sessionId": TOP}}))
+        self.assertNotEqual(puppeteer.signature(self.home, TOP, []), before)
+
+    def test_all_routes_reads_a_nested_routes_jsonl(self):
+        row = {"kind": "route", "id": "r1", "session": KID, "issue": "ezexe/demo#7"}
+        write(os.path.join(self.kid, "routes.jsonl"), json.dumps(row) + "\n")
+        got = puppeteer.all_routes(self.home)
+        self.assertEqual(list(got), ["r1"])
+        self.assertTrue(os.path.normcase(got["r1"]["file"]).startswith(os.path.normcase(self.store)))
+
+
 if __name__ == "__main__":
     unittest.main()

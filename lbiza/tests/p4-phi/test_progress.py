@@ -21,6 +21,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, SRC)
 import phi  # noqa: E402
 import progress  # noqa: E402
+import relay  # noqa: E402
 
 TOP, KID, GONE = "local_top00001", "local_kid00001", "local_kid00002"
 TICKS = chr(96) * 3
@@ -209,6 +210,21 @@ class Tree(Store):
         self.assertEqual((kid["workers"], kid["team"]), ([], []))
         self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/")])
 
+    def test_folders_name_each_stores_sessions_and_a_nested_session_is_read(self):
+        self.session(TOP)
+        self.steps(TOP, "in_progress")
+        store = relay.claim(self.home, self.home, KID, "session", TOP)
+        folder = os.path.join(store, "phi", "sessions", KID)
+        os.makedirs(folder)
+        with open(os.path.join(folder, "session.json"), "w", encoding="utf-8") as f:
+            json.dump({"sessionId": KID, "title": "the kid", "spawnedFrom": {"sessionId": TOP}}, f)
+        relay.claim(self.home, self.home, "cw-a", "reader", TOP, ["1"], session="5e55-1")   # a node of no sessions
+        m = progress.build(self.home, TOP)
+        self.assertEqual([n["sessionId"] for n in m["nodes"]], [TOP, KID])
+        self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/"),
+                                        f"{store}/phi/sessions".replace("\\", "/")])
+        self.assertIn(f"{folder}/session.json".replace("\\", "/"), m["sources"])
+
     def test_the_file_is_written_once_and_again_only_when_the_tree_changed(self):
         folder = self.session(TOP)
         self.steps(TOP, "in_progress")
@@ -332,10 +348,12 @@ class Spend(Store):
             self.assertEqual(progress.spend(self.home, "cli-0002")[0]["input"], 9)
             self.assertEqual(progress.transcript_of({"cliSessionIds": ["cli-9999"]}), "")
 
-    def test_a_coworker_with_no_record_is_found_by_the_folder_of_its_worktrees_name(self):
+    def test_a_coworker_with_no_record_is_found_by_the_session_id_of_its_node(self):
         from unittest import mock
         config = os.path.join(self.root, "config")
-        lead = os.path.join(config, "projects", "E--repo--claude-worktrees-cw-move-1", "cli-0003.jsonl")
+        session = "0c0ffee0-0000-4000-8000-000000000003"
+        relay.claim(self.home, self.home, "cw-move-1", "reader", "local_plan0001", ["1"], session=session)
+        lead = os.path.join(config, "projects", "E--repo", session + ".jsonl")
         self.rows(lead, ("m1", "claude-sonnet-5-5", {"input_tokens": 4, "output_tokens": 1}))
         mate = os.path.join(os.path.splitext(lead)[0], "subagents", "agent-afences-1.jsonl")
         self.rows(mate, ("m2", "claude-sonnet-5-5", {"input_tokens": 6, "output_tokens": 2}))
