@@ -86,6 +86,23 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(err.getvalue(), "")
         self.assertEqual(s["phi"]["clear_at"], 9)
 
+    def test_what_a_worktree_shares_is_read_when_set_and_has_its_variables(self):
+        """phi.worktree_python and phi.worktree_lines are a project's own, never written by default."""
+        import contextlib
+        import io
+        for key in ("worktree_python", "worktree_lines"):
+            self.assertNotIn(key, p4conf.DEFAULTS["phi"])
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"phi": {"worktree_python": ".venv/Scripts/python.exe", "worktree_lines": ["a line"]}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            s = p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertEqual(s["phi"]["worktree_python"], ".venv/Scripts/python.exe")
+        self.assertEqual(s["phi"]["worktree_lines"], ["a line"])
+        self.assertIn("phi.worktree_python", p4conf.env_keys())
+        self.assertIn("phi.worktree_lines", p4conf.env_keys())
+
     def test_every_query_setting_p4_reads_has_its_default(self):
         """Each key QUERY_SETTINGS in p4.py maps from recall.query is in DEFAULTS, at the constant's own value."""
         import ast

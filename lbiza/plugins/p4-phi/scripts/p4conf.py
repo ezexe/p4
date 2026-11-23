@@ -154,7 +154,7 @@ OPEN = ("temportal.cache",)
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
 READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude",
-                 "phi.cards")
+                 "phi.cards", "phi.worktree_python", "phi.worktree_lines")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
 # code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
@@ -982,6 +982,7 @@ ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
 ENV_SCHEMA = {
     "phi.home": str, "recall.lookups.threshold": "num", "recall.teacher.cutoff": str,
     "phi.child_levels": "levels", "phi.puppeteer_section": str,
+    "phi.worktree_python": str, "phi.worktree_lines": "strs",
     "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
 }
 # The strings a key's reader knows.
