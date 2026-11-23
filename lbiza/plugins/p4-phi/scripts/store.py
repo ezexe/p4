@@ -21,7 +21,7 @@ The status rule: an entry's own `status:` of SPENT, FREED or EXPIRED stands, and
 a retraction frees the entry in two ways. Its `freed:` text frees the entry when one of that text and the entry's
 head contains the other and the shorter is at least MASK_MIN characters long. Its owner-words free the entry when
 they equal the entry's, unless both are dated and the entry is no older than the retraction. No retraction frees a
-retraction or a message row.
+retraction, a message row or a digest.
 """
 
 import hashlib
@@ -39,6 +39,7 @@ import ranker  # noqa: E402
 STORE_FILES = ("rules.md", "corrections.md", "retractions.md", "facts.md")
 VOCABULARY = "vocabulary.md"
 MESSAGES = "messages"
+DIGESTS = "digests"
 INDEX_VERSION = 7
 HEAD_CHARS = 140              # a corpus entry's head: the characters of its value the head-bm25 feature reads
 MASK_MIN = 24
@@ -69,12 +70,17 @@ HEADERS = {
                "Opened by the prompt hook and completed by the close hook from the reply.",
                "Fields: fingerprint, time, arrival, state, addressed, recommended, match, freed-by, resembles; a "
                "migrated row adds from."),
+    DIGESTS: ("One session that is no longer live: what it was asked, what it reported, decided, found and changed, "
+              "and what it left open.",
+              "Written by digests.py from the session's own records once it is archived, and again when it closes "
+              "again.",
+              "Fields: digest, time, id, asked, done, reported, decided, found, changed, heads, open."),
 }
 
 # the word a retrieval line prints for a document, by the file or folder it comes from: plain words, never the
 # file's name
 KIND_NAMES = {"rules.md": "rule", "corrections.md": "correction", "retractions.md": "retracted", "facts.md": "fact",
-              "memory": "memory", "messages": "earlier message", "src": "saved code"}
+              "memory": "memory", "messages": "earlier message", "digests": "archived session", "src": "saved code"}
 
 # words of the store's own design, which read as riddles to a session: p4.py's query drops a retrieval line that
 # holds one, unless the line's document is plain. A document is plain when its entry has a `plain:` field, and every
@@ -215,7 +221,7 @@ def format_entry(pairs):
 def render(fname, entries_pairs):
     """A whole corpus file: its three header lines from HEADERS, then a blank line and the entries a blank line
     apart. A file HEADERS lacks gets three empty header lines."""
-    key = MESSAGES if fname.startswith(MESSAGES + "/") else fname
+    key = next((k for k in (MESSAGES, DIGESTS) if fname.startswith(k + "/")), fname)
     head = "\n".join(HEADERS.get(key, ("", "", "")))
     body = "\n\n".join(format_entry(p) for p in entries_pairs)
     return head + "\n\n" + body + ("\n" if body else "")
@@ -244,10 +250,18 @@ def message_files(p4):
     return sorted(f"{MESSAGES}/{n}" for n in os.listdir(d) if n.endswith(".md"))
 
 
+def digest_files(p4):
+    d = os.path.join(store_dir(p4), DIGESTS)
+    if not os.path.isdir(d):
+        return []
+    return sorted(f"{DIGESTS}/{n}" for n in os.listdir(d) if n.endswith(".md"))
+
+
 def load_store(p4):
-    """{file: [Entry]} for the four files of STORE_FILES and every session's file of messages, statuses applied."""
+    """{file: [Entry]} for the four files of STORE_FILES, every session's file of messages and every closed
+    session's digest, statuses applied."""
     got = {f: load_file(p4, f) for f in STORE_FILES}
-    for rel in message_files(p4):
+    for rel in message_files(p4) + digest_files(p4):
         got[rel] = load_file(p4, rel)
     apply_status(got)
     return got
@@ -289,7 +303,7 @@ def status_of(fname, value, fields, ms, rule="new"):
     own = (fields.get("status") or "").strip().upper().split(" ")[0] if fields.get("status") else ""
     if own in ("SPENT", "FREED", "EXPIRED"):
         return own, "its own status field"
-    if fname == "retractions.md" or fname.startswith(MESSAGES + "/"):
+    if fname == "retractions.md" or fname.startswith((MESSAGES + "/", DIGESTS + "/")):
         return "LIVE", "never freed"
     hit = mask_hit(value, fields, ms, rule)
     if hit:
@@ -378,6 +392,8 @@ def collapse(s):
 def kind_of(fname, e=None):
     if fname.startswith(MESSAGES + "/"):
         return KIND_NAMES["messages"]
+    if fname == DIGESTS or fname.startswith(DIGESTS + "/"):
+        return KIND_NAMES[DIGESTS]
     if fname == "corrections.md" and e is not None and ("omitted" in e.fields or "asked" in e.fields):
         return "missed detail"
     return KIND_NAMES.get(fname, fname)
@@ -399,6 +415,9 @@ def show_text(fname, e):
         return collapse(f.get("freed", e.value)) + (f"; now: {lesson}" if lesson else "")
     if fname == MESSAGES or fname.startswith(MESSAGES + "/"):
         return f"\"{collapse(f.get('fingerprint', e.value))}\" was answered: {collapse(f.get('addressed', ''))}"
+    if fname == DIGESTS or fname.startswith(DIGESTS + "/"):
+        left = collapse(f.get("done", "")) or collapse(f.get("reported", ""))
+        return f"\"{collapse(e.value)}\" was asked: {collapse(f.get('asked', ''))}" + (f"; it left: {left}" if left else "")
     return collapse(e.value)
 
 
@@ -620,7 +639,7 @@ def held_docs(p4, files=None):
 
 def build_index(p4, write=True):
     """The index retrieval reads: one document for every LIVE entry of the four files of STORE_FILES, every completed
-    row of ezexe's messages, every memory section and every head of saved code, and the documents of the repository
+    row of ezexe's messages, every closed session's digest, every memory section and every head of saved code, and the documents of the repository
     and its dependencies, all tokenized, with BM25's postings; plus the short-turn table, each session's rows for the
     repeat line, and the vocabulary for expansion."""
     files = load_store(p4)
@@ -657,6 +676,9 @@ def build_index(p4, write=True):
                 add(e, "messages", KIND_NAMES["messages"])
             else:
                 excluded["open row"] = excluded.get("open row", 0) + 1
+    for rel in sorted(k for k in files if k.startswith(DIGESTS + "/")):
+        for e in files[rel]:
+            add(e, DIGESTS, KIND_NAMES[DIGESTS])
     for e in memory_entries(p4):
         add(e, "memory", KIND_NAMES["memory"])
     for e in src_entries(p4):
