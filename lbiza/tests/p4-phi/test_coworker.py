@@ -194,5 +194,10 @@ class Coworker(unittest.TestCase):
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(none.returncode, 2)
+        quoted = os.path.join(self.base, "it's")
+        os.makedirs(quoted)
+        waiting = subprocess.run(command + ["--wait", "--checkout", quoted], capture_output=True, text=True,
+                                 timeout=60)
+        self.assertEqual(waiting.returncode, 2, waiting.stderr)
         nobody = subprocess.run(command + ["--for", "cli-9999"], capture_output=True, text=True, timeout=60)
         self.assertEqual(nobody.returncode, 2)

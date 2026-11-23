@@ -4756,7 +4756,11 @@ def main(argv=None):
                 return 0
             if a.wait is not None:                 # a round's wait, which only reads
                 # the names the starter answered with, since a mend can move a section into another group
-                names = a.wait or [one["name"] for one in coworker.drafts(plan, checkout, who) if one["team"]]
+                try:
+                    names = a.wait or [one["name"] for one in coworker.drafts(plan, checkout, who) if one["team"]]
+                except ValueError as e:
+                    print(f"phi: {e}", file=sys.stderr)
+                    return 2
                 how, waited = coworker.watch(names)
                 print({"quiet": f"phi: no coworker wrote a line for {coworker.QUIET} seconds, after {waited} seconds",
                        "silent": f"phi: no coworker wrote a line in {waited} seconds, so the round did not begin: "
