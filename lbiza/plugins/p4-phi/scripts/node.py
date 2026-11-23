@@ -3,12 +3,15 @@
 phi.py imports it whenever it runs. The start background phi.py builds lists the notes of the sessions above and
 the last turns of the siblings in the order `by_overlap` gives: the most content words shared with the session's
 task first. `level`, `addresses`, `leaves` and `record` give the view `phi.py tree` and `phi.py node` print, from
-the store's records alone. node.py uses the standard library; `level` reads controls.py where it can.
+the store's records and the folders of its nodes. node.py uses the standard library and relay.py, which imports no
+node; `level` reads controls.py where it can.
 """
 
 import json
 import os
 import re
+
+import relay
 
 
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -37,9 +40,10 @@ def by_overlap(items, task, key=lambda x: x):
 # --- the node: the level and the address of a session ---------------------------------------------------------------
 # The address rule is ezexe/phi's lbiza/phi_rank/tree.py:99-112, written again here and not imported: the top is "1",
 # a child is its parent's address with one more "0" for each child before it and then a "1", so no address holds "11".
+# A session's address is that of the store that holds its folder, read from the store's path under the root store:
+# the i-th child of a store is `.claude` i times and then `p4` under it, relay.store_of.
 
 SHORT = 32                       # the most characters of an address a line of the tree prints whole
-CHILDREN = "children.jsonl"      # <session folder>/children.jsonl: one {"id"} line for each session the session started
 
 
 def parent(a):
@@ -57,10 +61,6 @@ def short(a, places):
     return a if len(a) <= SHORT else "1/" + "/".join(str(p) for p in places)
 
 
-def _dir(home, sid):
-    return os.path.join(home, "phi", "sessions", re.sub(r"[^A-Za-z0-9_.-]", "_", str(sid or ""))[:80])
-
-
 def _json(path):
     try:
         with open(path, encoding="utf-8") as f:
@@ -68,24 +68,6 @@ def _json(path):
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
-
-
-def _rows(path):
-    """The rows of a .jsonl file, as phi.read_rows gives them: a line that is not a JSON object is passed over."""
-    try:
-        with open(path, "rb") as f:
-            data = f.read()
-    except OSError:
-        return []
-    out = []
-    for line in data.decode("utf-8", "replace").splitlines():
-        try:
-            d = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(d, dict):
-            out.append(d)
-    return out
 
 
 def _parent(s):
@@ -117,49 +99,35 @@ def level(s, sessions):
     return "orchestrator" if any(_parent(v) == sid for v in sessions.values()) else "worker"
 
 
-def ids(home, sid):
-    """The ids in <session folder>/children.jsonl, each once, in the order they first stand: a child's place is its
-    index here from 1."""
-    out = []
-    for r in _rows(os.path.join(_dir(home, sid), CHILDREN)):
-        c = str(r.get("id") or "")
-        if c and c not in out:
-            out.append(c)
-    return out
+def place_of(home, store):
+    """(address, places) of a store from its path under the root store `home`: ("1", []) for the root, and
+    child(a, i) for each step of i `.claude` folders and a `p4`. A path that is no store's under `home` is the root's."""
+    try:
+        rel = os.path.relpath(store, home)
+    except ValueError:
+        return "1", []
+    parts = [] if rel == "." else rel.replace("\\", "/").split("/")
+    address, places, run = "1", [], 0
+    for part in parts:
+        if part == ".claude":
+            run += 1
+        elif part == "p4" and run:
+            address, places, run = child(address, run), places + [run], 0
+        else:
+            return "1", []
+    return (address, places) if not run else ("1", [])
 
 
-def _chain(home, sid, sessions, held):
-    """(address, places) of a session, ("", []) where it or a session above it has no place yet. `held` keeps each
-    parent's list, read once."""
-    up, cur = [], sid
-    while cur in sessions and cur not in up:
-        up.append(cur)
-        if top(sessions[cur], sessions):
-            break
-        cur = _parent(sessions[cur])
-    else:
-        return "", []
-    address, places = "1", []
-    for c in reversed(up[:-1]):
-        above = _parent(sessions[c])
-        if above not in held:
-            held[above] = ids(home, above)
-        if c not in held[above]:
-            return "", []
-        place = held[above].index(c) + 1
-        address, places = child(address, place), places + [place]
-    return address, places
+def _store(home, sid):
+    """The store that holds a session's folder: its node's, else the root."""
+    return relay.nodes(home).get(relay._safe(sid)) or home
 
 
 def addresses(home, sessions):
-    """{sid: address}: every top is "1"; any other session is its parent's address grown by its place in its
-    parent's list. One not yet in that list has no address, and neither has anything under it."""
-    held, out = {}, {}
-    for sid in sessions:
-        a, _ = _chain(home, sid, sessions, held)
-        if a:
-            out[sid] = a
-    return out
+    """{sid: address}: the address of the store that holds each session's folder, so every flat session is "1" and
+    a started session's address is its node's. A reparented session keeps its store, so its address can differ
+    from the line it is printed under."""
+    return {sid: place_of(home, _store(home, sid))[0] for sid in sessions}
 
 
 def _tasks(plan):
@@ -169,21 +137,11 @@ def _tasks(plan):
     yield from plan.get("loose") or []
 
 
-def _terminals(folder):
-    """The entries of <session folder>/terminals.json, a list."""
-    try:
-        with open(os.path.join(folder, "terminals.json"), encoding="utf-8") as f:
-            rows = json.load(f)
-    except (OSError, ValueError):
-        return []
-    return [t for t in rows if isinstance(t, dict) and t.get("name")] if isinstance(rows, list) else []
-
-
 def leaves(home, sid):
     """What works under a session with no session folder, in this order: its subagents, its teammates, its
-    terminal sessions of upkeep.json and those of terminals.json, each {level: "subagent" | "teammate" |
-    "terminal", name, state}."""
-    d = _dir(home, sid)
+    terminal sessions of upkeep.json, and the reading teams and terminal workers whose node names it as parent,
+    each {level: "subagent" | "teammate" | "terminal", name, state}, and a node's with its `address`."""
+    d = relay._dir(home, sid)
     out = []
     for t in _tasks(_json(os.path.join(d, "plan.json"))):
         if isinstance(t, dict) and t.get("agent"):
@@ -197,11 +155,14 @@ def leaves(home, sid):
         if isinstance(t, dict) and t.get("name"):
             out.append({"level": "terminal", "name": str(t["name"]),
                         "state": "removed" if t.get("removed") else "started"})
-    for t in _terminals(d):
-        report = str(t.get("report") or "")
-        out.append({"level": "terminal", "name": str(t["name"]),
-                    "state": "reported" if t.get("kind") == "worker" and report and os.path.isfile(report)
-                    else "started"})
+    safe = relay._safe(sid)
+    for name, store in relay.nodes(home).items() if safe else ():
+        n = relay.node_record(home, name)
+        if n.get("parent") != safe or n.get("kind") not in ("reader", "worker"):
+            continue
+        report = os.path.join(store, "phi", f"report-{name}.md")
+        out.append({"level": "terminal", "name": name, "address": place_of(home, store)[0],
+                    "state": "reported" if n["kind"] == "worker" and os.path.isfile(report) else "started"})
     return out
 
 
@@ -209,7 +170,7 @@ def record(home, sid, sessions):
     """{id, title, level, parent, address, places, paths, leaves} of a session; `paths` is its shard, else its
     fileSet."""
     s = sessions.get(sid) or {}
-    address, places = _chain(home, sid, sessions, {})
+    address, places = place_of(home, _store(home, sid))
     paths = s.get("shard") or s.get("fileSet") or []
     title = s.get("title") or " ".join(str(s.get("task") or "").split())[:60] or str(sid)[:14]
     return {"id": sid, "title": title, "level": level(s, sessions) if s else "",

@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """phi.py: what linked sessions hand each other, kept on the app's own session tree.
 
-Each session has a folder <home>/phi/sessions/<sessionId>/ in the store its tree lives in: the store of its
-orchestrator's project, or the shared store that p4.json's `phi.home` names. The folder holds session.json, the
+Each session has a folder phi/sessions/<sessionId>/ in the tree its store lives in, whose root store is that of its
+orchestrator's project, or the shared store that p4.json's `phi.home` names. A session another session started has
+it in a store of its own nested in its starter's, `.claude/p4` under it, with its phi/node.json; a top session, and
+one whose folder was made before nodes, has it in the root store, relay._dir. The folder holds session.json, the
 app's fields for the session with its task; turns.jsonl, a line for each finished turn; notes.jsonl; reports.jsonl,
 the reports of its workers; log.jsonl, a line for each hook call; and session.md, the session as one page.
 The reports of orchestrators are in <home>/phi/reports.jsonl.
@@ -210,7 +212,8 @@ def safe_id(sid):
 
 
 def session_dir(home, sid):
-    return os.path.join(home, "phi", "sessions", safe_id(sid))
+    """A session's folder: in its node's store where it has one, else the flat folder of the root store."""
+    return relay._dir(home, sid)
 
 
 def reports_path(home, sid):
@@ -770,36 +773,28 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
         if c not in s.setdefault("cliSessionIds", []):
             s["cliSessionIds"].append(c)
             changed = True
-    if changed:
-        save_session(home, s)
     above = spawned_from(s)
     if above and depth < CHAIN_MAX and not load_session(home, above).get("sessionId"):
         ensure_session(home, above, depth=depth + 1)
-    if above and load_session(home, above).get("sessionId"):
-        place(home, sid, above)                      # its place among the sessions its parent started
+    if changed and above and load_session(home, above).get("sessionId"):
+        claim_node(home, sid, above)
+    if changed:
+        save_session(home, s)
     return s
 
 
-def place(home, sid, parent):
-    """`sid` added to <parent's session folder>/children.jsonl where its id is in none of that file's lines: read
-    with no lock, and only where the id is in none, read again and added under relay.locked, one short line at the
-    file's end. A lock that is given up after three seconds is gone on without, and a line lost then is added again
-    at the child's next hook. node.addresses reads a child's place from where its id first stands. True where a line was added."""
-    sid, parent = safe_id(sid), safe_id(parent)
-    path = os.path.join(session_dir(home, parent), nd.CHILDREN)
-    if not sid or not parent or any(r.get("id") == sid for r in read_rows(path)):
-        return False
-    if relay._held(path):                            # this process holds the lock already
-        return _place(path, sid)
-    with relay.locked(path):                         # gives up after three seconds and goes on with no lock
-        return _place(path, sid)
-
-
-def _place(path, sid):
-    if any(r.get("id") == sid for r in read_rows(path)):
-        return False
-    append_line(path, {"id": sid})
-    return True
+def claim_node(home, sid, starter):
+    """The store of a session that `starter` started, claimed in the store that holds the starter's folder where
+    the session has neither a node nor a flat folder yet; a flat starter is in the root, so its child is the root's.
+    A session whose flat folder is there, as one a hook that failed before ensure_session made, stays flat. The
+    folder this process reads the app's answers from follows the session's, where it named the flat one."""
+    if relay.nodes(home).get(sid) or os.path.isdir(relay.flat(home, sid)):
+        return ""
+    store = relay.nodes(home).get(starter) or home
+    made = relay.claim(home, store, sid, "session", starter)
+    if made and APP_AT.get("folder") == relay.flat(home, sid):
+        APP_AT["folder"] = session_dir(home, sid)
+    return made
 
 
 def title_of(s):
@@ -4452,9 +4447,7 @@ def reparent(home, sid, under, source="reparented"):
         return False
     s["spawnedFrom"] = {"sessionId": under, "source": source, "from": old, "time": now()}
     s.pop("backgroundGivenFor", None)
-    save_session(home, s)
-    if under:
-        place(home, sid, under)
+    save_session(home, s)                            # it keeps the store it has: nothing is moved
     append_line(reports_path(home, old), {"time": now(), "left": sid, "to": under})
     turns = load_turns(home, sid)
     if turns:

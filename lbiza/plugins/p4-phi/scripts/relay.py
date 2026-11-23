@@ -121,8 +121,143 @@ def _rows(path):
     return out
 
 
+# --- a node's store: the store each started session, terminal worker and reading team gets ------------------------
+#
+# ezexe/phi's docs/p4/nested-store.md:61-63: a child's store is `.claude/p4` under its parent's store, one more
+# `.claude` for each further child, and nothing makes a `p4` directly inside a `p4`. The home every function is
+# handed stays the tree's root store; a node is found from its id, never from the folder a session runs in, since a
+# session started inside a nested store waits at Claude Code's trust question for every new folder.
+
+NODE = "node.json"               # <store>/phi/node.json: {id, kind, parent, sections, time} of a node's store
+NODE_PATH_MAX = 180              # the longest store path claim makes, so the files under it stay within Windows' 260
+_TREE = {}                       # by the root store: [the stores' paths under it], and {id: (path, node.json)}
+
+
+def store_of(parent, i):
+    """The store of the i-th child, i from 1, of the store `parent`: `.claude/p4`, `.claude/.claude/p4`, ..."""
+    return os.path.join(parent, *([".claude"] * i), "p4")
+
+
+def _key(home):
+    return os.path.normcase(os.path.abspath(home))
+
+
+def _walk(home):
+    """[the stores under `home` as paths relative to it, the root as ""], and {id: (relative path, node.json)}."""
+    rels, held, todo = [], {}, [""]
+    while todo:
+        rel = todo.pop()
+        rels.append(rel)
+        at, kids = os.path.join(home, rel) if rel else home, []
+        while True:
+            at = os.path.join(at, ".claude")
+            if not os.path.isdir(at):
+                break
+            if os.path.isdir(os.path.join(at, "p4")):
+                kids.append(os.path.relpath(os.path.join(at, "p4"), home))
+        todo.extend(reversed(kids))           # depth first, each store's children in their order
+        if rel:
+            d = _read_json(os.path.join(home, rel, "phi", NODE))
+            ident = str(d.get("id") or "")
+            if ident and ident not in held:   # an id that stands in two stores is read at the first
+                held[ident] = (rel, d)
+    return rels, held
+
+
+def _tree(home):
+    """The walk of `home`, kept while <home>/phi is unchanged: a claim in any process makes and removes its lock
+    file there, which changes the folder's time, so a node another process claimed is never missed."""
+    key = _key(home)
+    try:
+        stamp = os.stat(os.path.join(home, "phi")).st_mtime_ns
+    except OSError:
+        stamp = None
+    held = _TREE.get(key)
+    if not held or held[0] != stamp:
+        held = _TREE[key] = (stamp, _walk(home))
+    return held[1]
+
+
+def forget(home):
+    """Drops what stores() and nodes() kept for `home`, so the next call walks the folders again."""
+    _TREE.pop(_key(home), None)
+
+
+def stores(home):
+    """Every store of the tree under the root store `home`, the root first and then depth first: from a store each
+    `.claude` chain under it is followed while the folder is there, and each `p4` on it is a store. Kept for the
+    process while <home>/phi is unchanged, and dropped where claim() adds one."""
+    if not home:
+        return []
+    return [os.path.join(home, rel) if rel else home for rel in _tree(home)[0]]
+
+
+def nodes(home):
+    """{id: store} of every node of the tree, from each store's phi/node.json."""
+    if not home:
+        return {}
+    return {k: os.path.join(home, rel) for k, (rel, _) in _tree(home)[1].items()}
+
+
+def node_record(home, ident):
+    """The node.json of `ident`'s node, {} where it has none."""
+    held = _tree(home)[1].get(str(ident or "")) if home else None
+    return dict(held[1]) if held else {}
+
+
+def claim(home, parent_store, ident, kind, parent, sections=(), session=""):
+    """The store of the node `ident`, made once: kind is "session", "reader" or "worker", and `parent` the id of the
+    session that started it. Under a lock on <home>/phi/nodes.lock, the store nodes() holds for the id; else the
+    first i from 1 whose store_of(parent_store, i) os.mkdir makes, which fails where the folder is there and so
+    gives one place to one caller, with node.json written whole into it. A lock given up after three seconds is
+    gone on without, so two claims for one id can make two stores: each then reads nodes() again and returns the
+    store it names, the first in the walk's order. "" where the store's path would pass NODE_PATH_MAX, and nothing
+    is made."""
+    ident = str(ident or "")
+    if not home or not parent_store or not ident:
+        return ""
+    with locked(os.path.join(home, "phi", "nodes")):
+        have = nodes(home).get(ident)
+        if have:
+            return have
+        i = 0
+        while True:
+            i += 1
+            store = store_of(parent_store, i)
+            if len(os.path.abspath(store)) > NODE_PATH_MAX:
+                return ""
+            try:
+                os.makedirs(os.path.dirname(store), exist_ok=True)
+                os.mkdir(store)
+                break
+            except FileExistsError:
+                continue
+            except OSError:
+                return ""
+        d = {"id": ident, "kind": kind, "parent": str(parent or ""), "sections": list(sections),
+             "time": time.strftime("%Y-%m-%d %H:%M")}
+        if session:
+            d["session"] = session
+        _write_raw(os.path.join(store, "phi", NODE), d)
+        forget(home)
+        return nodes(home).get(ident) or store
+
+
+def flat(home, sid):
+    """The folder a session had before nodes: <home>/phi/sessions/<safe id>, in the root store."""
+    return os.path.join(home, "phi", "sessions", _safe(sid))
+
+
+def session_bases(home):
+    """The phi/sessions folder of each store of the tree, the root's first, whether it is there or not."""
+    return [os.path.join(s, "phi", "sessions") for s in stores(home)]
+
+
 def _dir(home, sid):
-    return os.path.join(home, "phi", "sessions", re.sub(r"[^A-Za-z0-9_.-]", "_", str(sid or ""))[:80])
+    """A session's folder: <its node's store>/phi/sessions/<safe id> where its id has a node, else the flat one."""
+    safe = _safe(sid)
+    store = nodes(home).get(safe) if safe else ""
+    return os.path.join(store, "phi", "sessions", safe) if store else flat(home, sid)
 
 
 def _session(home, sid):
@@ -140,26 +275,32 @@ _SESSION_FILES = {}              # by a session.json's path: its mtime_ns, size 
 def _sessions(home):
     """Every session in the store, as its session.json by its sessionId. One message's hook can ask for this eleven
     times over 75 files, so a file is read again only when its time or size changed; each caller gets its own copy
-    of a session's top level."""
+    of a session's top level. The sessions of every store of the tree are read, the flat ones of the root and those
+    of each node's store; an id whose node holds a folder is read there."""
     out = {}
-    base = os.path.join(home, "phi", "sessions")
-    try:
-        names = os.listdir(base)
-    except OSError:
+    if not home:
         return out
-    for n in names:
-        path = os.path.join(base, n, "session.json")
+    held_at = nodes(home)
+    for base in session_bases(home):
         try:
-            st = os.stat(path)
+            names = os.listdir(base)
         except OSError:
-            _SESSION_FILES.pop(path, None)
             continue
-        held = _SESSION_FILES.get(path)
-        if not held or held[0] != st.st_mtime_ns or held[1] != st.st_size:
-            held = _SESSION_FILES[path] = (st.st_mtime_ns, st.st_size, _read_json(path))
-        d = held[2]
-        if d.get("sessionId"):
-            out[d["sessionId"]] = dict(d)
+        store = os.path.dirname(os.path.dirname(base))
+        for n in names:
+            path = os.path.join(base, n, "session.json")
+            try:
+                st = os.stat(path)
+            except OSError:
+                _SESSION_FILES.pop(path, None)
+                continue
+            held = _SESSION_FILES.get(path)
+            if not held or held[0] != st.st_mtime_ns or held[1] != st.st_size:
+                held = _SESSION_FILES[path] = (st.st_mtime_ns, st.st_size, _read_json(path))
+            d = held[2]
+            sid = d.get("sessionId")
+            if sid and (sid not in out or held_at.get(n) == store):
+                out[sid] = dict(d)
     return out
 
 
@@ -1142,7 +1283,7 @@ def child_paths(home, s):
 # --- phi/ tracked in the store -------------------------------------------------------------------------------------------
 #
 # When the store's p4.json sets phi.track, the session tree reaches the other machines through the store's git, like
-# the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, children.jsonl, plan.json and
+# the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, node.json, plan.json and
 # anchor.json are tracked, and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
 # tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
 # layout hook that seeds the rest of .gitignore runs beside this one at a start.
