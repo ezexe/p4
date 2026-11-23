@@ -40,6 +40,7 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | Runs the readings of an under-determined message as one workflow it ships in `workflows/`, named `p4-phi:readings`, and keeps no explore or merge of its own | `workflows.md`, its opening and "Distribute a workflow in a plugin" | The page names drafting a hard plan from several independent angles as a use of a workflow, and has a script in a `workflows/` folder at the plugin root run as `/<plugin>:<name>`. |
 | Has a reading return its question as data, for the session to ask once after the run | `workflows.md`, "Behavior and limits", and `sub-agents.md`, "Available tools" | A run takes no input from a person while it runs, and `AskUserQuestion` is taken from every subagent. |
 | Tells a session to start a long command with `run_in_background: true` | `tools-reference.md`, "Background commands" | "Claude can set `run_in_background: true` to start the command as a background task and continue working while it runs." |
+| Names a step that asks for one question from several sides for an agent team, in the built-in rule `levels` and in the advice beside a task list, and leaves a step that writes to a worker | `agent-teams.md`, "Compare with subagents" and "When to use agent teams" | "Use agent teams when teammates need to share findings, challenge each other, and coordinate on their own." and "For sequential tasks, same-file edits, or work with many dependencies, a single session or subagents are more effective." |
 | Ships no agent that runs a command, since the session reads the command's output file itself | `interactive-mode.md`, "How backgrounding works" | "Output is written to a file and Claude can retrieve it using the Read tool" |
 | Lets a long foreground command run as sent, an orchestrator's too, since the app moves it to the background at its timeout | `tools-reference.md`, "Foreground commands that move to the background" | "When a foreground command reaches its timeout without finishing, Claude Code moves it to the background instead of stopping it" |
 | Drafts every start of a worker that writes with `use_worktree: true`, so it works in a git worktree and on a branch of its own, and every start of a session that only reads with `false` | `worktrees.md`, its opening, and `desktop.md`, "Run a session in its own worktree" | "Running each Claude Code session in its own worktree gives it a separate copy of the files to edit, so one session can build a feature while a second fixes a bug." and "Worktrees are stored in `<project-root>/.claude/worktrees/` by default." |
@@ -82,6 +83,7 @@ A lead that died leaves its last `team.json`, so its row stays until p4-phi hold
 A teammate's own steps and the task of the shared task list it works are not shown: the list's folder is documented and its files are not, and no hook event tells a task's claim or its start.
 Nothing records which session typed a lead's start line, so a lead no session of the tree started is a row of its own, marked a terminal session, while one of its teammates is not over.
 A teammate in a terminal pane of its own that died keeps its last state in Claude Code's list, and a `/resume` of the lead restores no in-process teammate.
+An orchestrator's ledger lists each team of the store whose teammates are not all over under `## Agent teams`, with each teammate's name, state and task, read from the same `team.json`.
 No team was seen live while this was planned: p4-native's record has the teams switch fail its check in a terminal session once.
 See more: https://code.claude.com/docs/en/agent-teams.md
 See more: https://code.claude.com/docs/en/plugins/mods/interface.md
@@ -288,7 +290,9 @@ A worker's own goal asks for the same round on its own change where `phi.goal_re
 ### A team in a terminal session
 
 Agent teams run in the terminal `claude` command and not in the desktop app, so a desktop session that wants one starts a terminal session to lead it, from the app's Terminal panel, and talks to that lead by message.
-The skill's section "A team in a terminal session" gives the line to type and its conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
+The skill's section "A team in a terminal session" gives the start file the session writes, the one line it types and their conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
+The start file clears the variables a desktop session's shell hands down, as a terminal worker's start script does, so the lead is a session of its own in p4-phi's records.
+The skill `sub-agentic` holds the team as a role, and its rule 12 says when one `p4-phi:check` stays the reader.
 p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
 
 ## The readings of an unclear message
