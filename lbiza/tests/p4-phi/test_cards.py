@@ -34,6 +34,11 @@ def say_yes(p4):
     assert p4conf.cards_yes(p4, session="local_top00001", call="toolu_yes")
 
 
+def yes_of(p4):
+    """The yes kept in the store's phi/cards.json, or None."""
+    return (jload(p4conf.cards_file(p4)) if os.path.exists(p4conf.cards_file(p4)) else {}).get("yes")
+
+
 class TheSet(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -59,7 +64,7 @@ class TheSet(unittest.TestCase):
     def test_the_set_is_in_force_only_by_the_stores_own_file_and_only_as_this_copy_has_it(self):
         """What is settled with no approval card is a permission, so nothing puts the set in force but ezexe's yes:
         `phi.cards` in the store's p4.json names the set as this copy has it, and the store's record holds the yes
-        to that set. No variable stands in for the key, an id of another set is no yes to this one, and a set that
+        to that set, in its phi/cards.json. No variable stands in for the key, an id of another set is no yes to this one, and a set that
         changed has another id."""
         self.assertFalse(p4conf.cards_on(self.p4), "off in a store that says nothing")
         self.assertFalse(p4conf.cards_on(""))
@@ -109,10 +114,10 @@ class TheSet(unittest.TestCase):
         self.assertIn("no yes of ezexe's is kept for it", cards.text(self.p4)[0])
         # a record that is not this store's, and a yes to another set
         yes = {"set": sid, "store": p4conf.fwd(os.path.join(self._tmp.name, "other", ".claude", "p4")), "at": "x"}
-        write(p4conf.record_path(self.p4), json.dumps({**p4conf.read_record(self.p4), p4conf.YES: yes}))
+        write(p4conf.cards_file(self.p4), json.dumps({**jload(p4conf.cards_file(self.p4)), "yes": yes}))
         self.assertFalse(p4conf.cards_on(self.p4), "a yes given for another store")
-        write(p4conf.record_path(self.p4), json.dumps({**p4conf.read_record(self.p4),
-                                                       p4conf.YES: {**yes, "store": p4conf.fwd(self.p4), "set": "0" * 10}}))
+        write(p4conf.cards_file(self.p4), json.dumps({**jload(p4conf.cards_file(self.p4)),
+                                                      "yes": {**yes, "store": p4conf.fwd(self.p4), "set": "0" * 10}}))
         self.assertFalse(p4conf.cards_on(self.p4), "a yes to another set")
         # the yes, as the hook keeps it
         said = cards.kept(self.p4, "local_top00001", "toolu_1")
@@ -120,42 +125,23 @@ class TheSet(unittest.TestCase):
         self.assertIn("the set is in force", said[0])
         self.assertTrue(p4conf.cards_on(self.p4))
         self.assertEqual(sorted(tools()), sorted(p4conf.CARD_TOOLS), "and the keeper ran with it")
-        kept = p4conf.read_record(self.p4)[p4conf.YES]
+        kept = yes_of(self.p4)
         self.assertEqual((kept["set"], kept["session"], kept["call"]), (sid, "local_top00001", "toolu_1"))
         # each yes is one press for one writing of the key
         self.assertEqual(cards.switch(self.p4, False)[0], 0)
-        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "`off` takes the yes out with the key")
+        self.assertIsNone(yes_of(self.p4), "`off` takes the yes out with the key")
         self.assertEqual(tools(), [])
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4), "the key written again after an `off`")
         say_yes(self.p4)
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
         p4conf.keep_settings(self.proj)
-        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "the key taken out by hand: the keeper drops the yes")
+        self.assertIsNone(yes_of(self.p4), "the key taken out by hand: the keeper drops the yes")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4))
         say_yes(self.p4)
         cards.switch(self.p4, True, sid)
         self.assertTrue(p4conf.cards_on(self.p4), "the command run again where the set is in force writes nothing")
-
-    def as_an_older_keeper_left_it(self, in_force):
-        """A store as a keeper from before the record of a yes left it: the key names the set, and where the set was
-        `in_force` then, the local settings file holds the set's six allow rules and the record holds them under
-        `toolRules`. The record holds no yes and nothing of a carry-over, and names the keeper of that time."""
-        sid = p4conf.card_set_id()
-        if in_force:
-            say_yes(self.p4)
-        else:
-            p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
-        p4conf.keep_settings(self.proj)
-        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
-        rec = p4conf.read_record(self.p4)
-        for part in (p4conf.YES, p4conf.CARRIED):
-            rec.pop(part, None)
-        rec["kept"][p4conf.fwd(self.local)]["keeper"] = 10
-        write(p4conf.record_path(self.p4), json.dumps(rec))
-        self.assertEqual("toolRules" in rec, in_force)
-        self.assertNotIn(p4conf.YES, p4conf.read_record(self.p4), "that record holds no yes")
 
     def tools(self):
         return sorted(r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__"))
@@ -185,105 +171,46 @@ class TheSet(unittest.TestCase):
             self.assertFalse(phi.cards_on(me))
             self.assertFalse(p4conf.upkeep_on(me.store))
 
-    def test_a_yes_given_under_the_earlier_rule_is_carried_over_once_with_no_card(self):
-        """Until the keeper knew the record of a yes, `phi.cards` alone put the set in force, and ezexe's yes of
-        2026-11-19 was given under that rule. An upgrade takes no yes back and asks for none again: the first whole
-        check of this keeper finds the set's allow rules that the earlier keeper wrote and recorded, which it wrote
-        only while the set was in force, and with the key still naming the set it keeps the yes itself, marked as
-        carried over with the date. No card is raised, and none of the six rules leaves the file."""
+    def test_the_first_read_carries_the_yes_of_the_record_over_once(self):
+        """A store whose keeper's record holds a yes for this store and set, as one kept before cards.json stood: the
+        first cards_on answers true, cards.json then holds the yes and "carried", and a cardsYes written into the
+        record after that is not read."""
         sid = p4conf.card_set_id()
-        self.as_an_older_keeper_left_it(in_force=True)
-        before = self.rules(p4conf.ALLOW_KEY)
-        self.assertEqual(self.tools(), sorted(p4conf.CARD_TOOLS))
-        p4conf.keep_settings(self.proj)
-        self.assertTrue(p4conf.cards_on(self.p4), "in force across the upgrade")
-        self.assertEqual(self.rules(p4conf.ALLOW_KEY), before, "no rule of the set left the file and came back")
-        rec = p4conf.read_record(self.p4)
-        self.assertEqual((rec[p4conf.YES]["set"], rec[p4conf.YES]["store"]), (sid, p4conf.fwd(self.p4)))
-        self.assertRegex(rec[p4conf.YES]["carried"], r"^\d{4}-\d\d-\d\d$", "marked as carried over, with the date")
-        self.assertNotIn("call", rec[p4conf.YES], "no press is claimed for it")
-        self.assertIs(rec[p4conf.CARRIED]["carried"], True)
-        self.assertIn("in force", cards.text(self.p4)[0])
-        # it is done once: the yes withdrawn, a key written afterwards with no press leaves the set off
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        yes = {"set": sid, "store": p4conf.fwd(self.p4), "at": "2026-11-19 10:00:00"}
+        write(p4conf.record_path(self.p4), json.dumps({"cardsYes": yes}))
+        self.assertFalse(os.path.exists(p4conf.cards_file(self.p4)))
+        self.assertTrue(p4conf.cards_on(self.p4), "the yes of the record, carried at the first read")
+        got = jload(p4conf.cards_file(self.p4))
+        self.assertEqual(got["yes"], yes)
+        self.assertRegex(got["carried"], r"^\d{4}-\d\d-\d\d$")
         self.assertEqual(cards.switch(self.p4, False)[0], 0)
-        self.assertEqual(self.tools(), [])
+        write(p4conf.record_path(self.p4), json.dumps({"cardsYes": yes}))
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
-        for _ in range(2):
-            p4conf.keep_settings(self.proj)
-        self.assertFalse(p4conf.cards_on(self.p4))
-        self.assertEqual(self.tools(), [])
-        # and no record made up afterwards brings the look back
-        rec = p4conf.read_record(self.p4)
-        rec["toolRules"] = {p4conf.fwd(self.local): {"entries": list(p4conf.CARD_TOOLS), "hand": [], "gen": p4conf.GEN}}
-        write(p4conf.record_path(self.p4), json.dumps(rec))
-        p4conf.keep_settings(self.proj)
-        self.assertFalse(p4conf.cards_on(self.p4), "the carry-over was made, so it never runs again")
+        self.assertFalse(p4conf.cards_on(self.p4), "a cardsYes written into the record after the carry is not read")
 
-    def test_a_key_with_no_record_of_the_set_in_force_carries_nothing_over(self):
-        """The carry-over trusts the record and nothing else. A store whose key names the set while its record holds
-        no rule of the set was never in force under the earlier keeper, so it is off, the look is recorded as made,
-        and a key or a record written after that is carried over by no later check. A key that names another set
-        than this copy's carries nothing over either."""
+    def test_a_record_without_a_yes_carries_nothing_and_off_then_a_key_by_hand_leaves_the_set_off(self):
         sid = p4conf.card_set_id()
-        self.as_an_older_keeper_left_it(in_force=False)
-        p4conf.keep_settings(self.proj)
-        self.assertFalse(p4conf.cards_on(self.p4), "the key and no record of the set in force")
-        rec = p4conf.read_record(self.p4)
-        self.assertNotIn(p4conf.YES, rec)
-        self.assertIs(rec[p4conf.CARRIED]["carried"], False, "looked at once, and nothing carried")
-        self.assertEqual(self.tools(), [])
-        rec["toolRules"] = {p4conf.fwd(self.local): {"entries": list(p4conf.CARD_TOOLS), "hand": [], "gen": p4conf.GEN}}
-        write(p4conf.record_path(self.p4), json.dumps(rec))
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
-        p4conf.keep_settings(self.proj)
-        self.assertFalse(p4conf.cards_on(self.p4), "a second key, and a record written after the look")
-        # a store the earlier keeper left in force under another set's name
-        other = os.path.join(self._tmp.name, "other")
-        store = os.path.join(other, ".claude", "p4")
-        os.makedirs(store)
-        p4conf.set_key(store, p4conf.CARDS_KEY, "0123456789")
-        write(p4conf.record_path(store), json.dumps({"toolRules": {"f": {"entries": list(p4conf.CARD_TOOLS),
-                                                                         "hand": [], "gen": p4conf.GEN}}}))
-        p4conf.keep_settings(other)
-        self.assertFalse(p4conf.cards_on(store), "a set that changed is in force nowhere until a new yes")
-        self.assertIs(p4conf.read_record(store)[p4conf.CARRIED]["carried"], False)
-
-    def test_the_first_read_of_the_set_carries_the_yes_over_before_any_whole_check(self):
-        """A guard can read the set before a whole check of this keeper has run for the store, as a session that
-        starts first after the upgrade does. The read makes the one look itself, under the settings lock and with no
-        wait for it, so a set ezexe said yes to is not read as off, and a read made while the lock is held, as one
-        inside the keeper is, changes nothing."""
-        self.as_an_older_keeper_left_it(in_force=True)
-        lock = os.path.join(self.p4, p4conf.SETTINGS_LOCK)
-        open(lock, "w").close()
-        self.assertFalse(p4conf.cards_on(self.p4), "the lock is held, so this read carries nothing")
-        self.assertNotIn(p4conf.CARRIED, p4conf.read_record(self.p4))
-        os.remove(lock)
-        self.assertTrue(p4conf.cards_on(self.p4), "in force at the first read, with no whole check before it")
-        rec = p4conf.read_record(self.p4)
-        self.assertIs(rec[p4conf.CARRIED]["carried"], True)
-        self.assertRegex(rec[p4conf.YES]["carried"], r"^\d{4}-\d\d-\d\d$")
-        self.assertFalse(os.path.exists(lock), "the lock is given back")
-
-    def test_a_read_carries_nothing_over_for_a_store_that_was_never_in_force(self):
-        self.as_an_older_keeper_left_it(in_force=False)
         self.assertFalse(p4conf.cards_on(self.p4))
-        rec = p4conf.read_record(self.p4)
-        self.assertIs(rec[p4conf.CARRIED]["carried"], False, "looked at once, by the read")
-        self.assertNotIn(p4conf.YES, rec)
-
+        self.assertIn("carried", jload(p4conf.cards_file(self.p4)), "looked at once")
+        say_yes(self.p4)
+        self.assertTrue(p4conf.cards_on(self.p4))
+        self.assertEqual(cards.switch(self.p4, False)[0], 0)
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
+        self.assertFalse(p4conf.cards_on(self.p4), "cards off, then the key by hand")
     def test_cards_on_where_the_set_is_in_force_writes_nothing(self):
         """`phi.py cards on` took a standing yes out before it wrote the key, so a second run of it, or one in the
         app's Terminal panel where no hook of p4-phi keeps a yes, left a set that was in force off. Where the set
         is in force the command writes nothing and says so."""
         sid = p4conf.card_set_id()
         say_yes(self.p4)
-        yes = p4conf.read_record(self.p4)[p4conf.YES]
+        yes = yes_of(self.p4)
         status, lines = cards.switch(self.p4, True, sid)
         self.assertEqual(status, 0)
         self.assertIn("in force already", lines[0])
         self.assertEqual(len(lines), 1)
-        self.assertEqual(p4conf.read_record(self.p4)[p4conf.YES], yes, "the standing yes is not taken out")
+        self.assertEqual(yes_of(self.p4), yes, "the standing yes is not taken out")
         self.assertTrue(p4conf.cards_on(self.p4))
         # where the set is off the command asks as before, and runs no keeper of its own: `kept` runs the one
         self.assertEqual(cards.switch(self.p4, False)[0], 0)
@@ -780,7 +707,7 @@ class Guards(unittest.TestCase):
         self.assertIn(f"phi (p4-phi): ezexe's yes to the set {sid} is kept for the store", said)
         self.assertIn("the set is in force", said)
         self.assertTrue(p4conf.cards_on(self.t.p4))
-        kept = p4conf.read_record(self.t.p4)[p4conf.YES]
+        kept = yes_of(self.t.p4)
         self.assertEqual((kept["session"], kept["call"]), (TOP, "toolu_yes1"))
         shown = self.t.cli(A, "cards").stdout
         self.assertIn(f"The set {sid} of what p4-phi settles with no approval card is in force", shown)
@@ -795,10 +722,9 @@ class Guards(unittest.TestCase):
         for tool in ("Bash", "PowerShell"):
             self.assertIn(tool, hook.WAITED, "the yes is kept in the entry the call waits on")
 
-    def test_a_press_is_not_lost_where_the_settings_lock_is_held(self):
-        """Where another run of the keeper held the store's settings lock, the yes was not kept and the hook said
-        nothing, so a press was lost with no word. The yes is tried once more, and where the lock is held through
-        both waits the hook says that the set is not in force and that the command asks again."""
+    def test_a_press_is_kept_while_the_keepers_lock_is_held(self):
+        """The yes is p4-phi's own file, written whole by a rename, so a press is kept while the keeper holds its
+        settings lock, and the hook says the set is in force."""
         sid = p4conf.card_set_id()
         cmd = f'python -I -X utf8 "C:/plugins/p4-phi/scripts/phi.py" cards on {sid}'
         self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_lock")["permissionDecision"], "ask")
@@ -806,18 +732,9 @@ class Guards(unittest.TestCase):
         lock = os.path.join(self.t.p4, p4conf.SETTINGS_LOCK)
         open(lock, "w").close()
         said = self.after(TOP, cmd, "toolu_lock")
-        self.assertIn("ezexe's yes to the set is not kept", said)
-        self.assertIn("The set is not in force", said)
-        self.assertIn("Run the command again", said)
         os.remove(lock)
-        self.assertFalse(p4conf.cards_on(self.t.p4))
-        # the command run again asks once more, and that press is kept
-        self.assertEqual(self.guard("cards-guard", TOP, cmd, call="toolu_lock2")["permissionDecision"], "ask")
-        self.assertEqual(self.t.cli(TOP, "cards", "on", sid).returncode, 0)
-        said = self.after(TOP, cmd, "toolu_lock2")
         self.assertIn(f"ezexe's yes to the set {sid} is kept for the store", said)
         self.assertTrue(p4conf.cards_on(self.t.p4))
-
     def runner(self, name, host, payload):
         """One entry of p4-phi's hooks.json as Claude Code runs it: `sh hooks/recall-hook.sh <name>` with the hook's
         input on stdin, and no P4_RECALL_SYNC, so the runner ends a clean call before python starts as it does in a

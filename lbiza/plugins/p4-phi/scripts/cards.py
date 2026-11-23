@@ -241,11 +241,12 @@ def held_line(store):
 
 
 def switch(store, on, given=""):
-    """`phi.py cards on <id>` and `cards off`. `on` writes `phi.cards` to the store's p4.json and takes out a yes
-    kept before, so the key asks for the set and one press of ezexe's answers one writing of it: the set comes in
+    """`phi.py cards on <id>` and `cards off`. `on` writes `phi.cards` to the store's p4.json and takes out the yes
+    kept before in phi/cards.json, so the key asks for the set and one press of ezexe's answers one writing of it: the set comes in
     force only when `kept` runs for the call that ran the command. `off` takes the key and the kept yes out, and
     the settings keeper then runs for the project the store sits in, so the allow rules of the set go at once. After
-    `on` the keeper runs once, in `kept`, when the yes is in the record. `on` where the set is in force already
+    `on` the keeper runs once, in `kept`, when the yes is in the
+    store's phi/cards.json. `on` where the set is in force already
     writes nothing, so a second run of it, or one where no hook of p4-phi runs, never takes a standing yes out. `on`
     with an id that is not this copy's set writes nothing. Returns (the exit status, the lines to print)."""
     sid = p4conf.card_set_id()

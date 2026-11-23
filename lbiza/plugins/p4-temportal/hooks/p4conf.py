@@ -1119,8 +1119,8 @@ PLANS = LAYOUT["plans"]          # the store's folder of plan files, from the st
 ENV_KEY = "env"                  # where an earlier keeper wrote the P4_* variables, each the dotted key env.<name>, which this one takes out
 # Raised by one whenever the keys this copy writes change, so a store's next start runs the whole check: the record
 # holds the KEEPER of the copy that last ran it. 9 came with LISTS, so a list an earlier keeper emptied is looked at,
-# 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with YES, so the rules of a set whose key
-# has no yes beside it go and a yes given before YES is carried over, by _carry_yes, and 12 with PLANS naming
+# 10 with _drop_strays, so a rule for a copy that does not run is, and 11 with the yes, so the rules of a set whose key
+# has no yes beside it go, and 12 with PLANS naming
 # temportal/plan-planner, so a plansDirectory the keeper wrote for temportal/plans takes the new folder at the next
 # start, and one a person set stays as it is, and 13 with DENY_RULES emptied, so the deny rule on the model tool an
 # earlier keeper wrote goes at the next start.
@@ -1322,10 +1322,6 @@ def read_record(p4):
             rec[k].pop(name)
     if "asked" in rec and not isinstance(rec["asked"], dict):
         rec.pop("asked")
-    if YES in rec and not (isinstance(rec[YES], dict) and isinstance(rec[YES].get("set"), str)):
-        rec.pop(YES)
-    if CARRIED in rec and not isinstance(rec[CARRIED], dict):
-        rec[CARRIED] = {}                               # looked at already, whatever a hand made of the entry
     if "claude" in rec and not isinstance(rec["claude"], dict):
         rec.pop("claude")
     owed = rec.get("changelog")
@@ -1788,23 +1784,24 @@ LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules", "generalRules"), ASK_KEY: ("askR
 # on the archive tool, every one in a session that bypasses permission prompts.
 # What may be settled with no card is a permission, so it is ezexe's to decide. The whole set is CARD_SET, kept here
 # and nowhere else, and it is in force for a store only while two things hold: `phi.cards` in that store's p4.json
-# holds card_set_id(), the name of the set as this copy has it, and the store's record holds ezexe's yes to that
-# set, under YES. `phi.py cards on <id>` writes the key and nothing more: the key is what is asked for. The yes is
+# holds card_set_id(), the name of the set as this copy has it, and the store's phi/cards.json holds ezexe's yes to
+# that set. `phi.py cards on <id>` writes the key and nothing more: the key is what is asked for. The yes is
 # kept by cards_yes, which phi.py's hook runs at the end of the shell call that ran the command, and only for a call
 # p4-phi's guard had raised its approval card for, so the yes is ezexe's own press, in every permission mode, and
 # covers the set whole. No docs page gives a hook a field that says a person approved a call. hooks.md gives
 # PostToolUse as fired "after a tool has already executed successfully", and a call the guard answered `ask` for
 # runs only once the card is pressed, so that hook's run for that call is the press as p4 can know it. A key
 # written any other way, by an edit of p4.json, by set_key, or by the command run where no hook of p4-phi runs,
-# such as the app's Terminal panel, has no yes beside it and leaves the set off. The record is the keeper's,
-# claude-settings.json, which the store's seeded .gitignore keeps on one machine, so a yes is no part of a store's
-# sync, and it names the store it was given for. What this does not close: a session runs with ezexe's own rights
-# on the machine, so one that sets out to write the record of a press ezexe never made can write that file too.
+# such as the app's Terminal panel, has no yes beside it and leaves the set off. The yes is in phi/cards.json, a
+# file of p4-phi's own, which the store's seeded .gitignore keeps on one machine, so a yes is no part of a store's
+# sync, and it names the store it was given for. Each write replaces the whole file by a rename, so no lock is
+# kept. What this does not close: a session runs with ezexe's own rights on the machine, so one that sets out to
+# write the file of a press ezexe never made can write that file too.
 # A copy whose set differs has another id, so a changed set is in force nowhere until ezexe has said yes to it. The
 # key is read from the file alone and has no variable. Nothing in the set lifts a deny rule, and nothing in it
 # touches a credential.
 CARDS_KEY = "phi.cards"
-YES = "cardsYes"
+CARDS_FILE = ("phi", "cards.json")
 CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
               "mcp__p4-temportal__lifetime")
 # The general part of the set: what a session does in every task. permissions.md: a bare tool name matches every use
@@ -1848,18 +1845,43 @@ def card_set_id():
     return hashlib.sha256(json.dumps(CARD_SET, ensure_ascii=False).encode("utf-8")).hexdigest()[:10]
 
 
+def cards_file(p4):
+    """The file in store `p4` that holds ezexe's yes to the set, `phi/cards.json`."""
+    return os.path.join(p4, *CARDS_FILE)
+
+
+def _cards(p4):
+    """The content of cards_file: {"yes": the yes, "carried": the date}. Where it holds no "carried", the keeper's
+    record is read once, and its `cardsYes` taken as the yes where it is an object whose "set" is a text, which is how
+    a yes kept before this file stood; "carried" is set to today's date either way and the file is written, where
+    the store has a folder."""
+    got = read_json(cards_file(p4))
+    got = got if isinstance(got, dict) else {}
+    if "carried" in got:
+        return got
+    rec = read_json(record_path(p4))
+    yes = rec.get("cardsYes") if isinstance(rec, dict) else None
+    if isinstance(yes, dict) and isinstance(yes.get("set"), str):
+        got["yes"] = yes
+    got["carried"] = time.strftime("%Y-%m-%d")
+    if os.path.isdir(p4):
+        _write_cards(p4, got)
+    return got
+
+
+def _write_cards(p4, got):
+    write_whole(cards_file(p4), json.dumps(got, indent=1, ensure_ascii=False) + "\n")
+
+
 def cards_on(p4):
     """True when ezexe's yes to the set stands for the store `p4`: `phi.cards` in its p4.json is this copy's
-    card_set_id(), and the store's record holds the yes to that set, kept for this store by cards_yes. The two
+    card_set_id(), and the store's cards.json holds the yes to that set, kept for this store by cards_yes. The two
     files alone are read, so no variable puts the set in force, and neither does a write of the key by itself."""
     try:
         sid = card_set_id()
         if not p4 or cards_asked(p4) != sid:
             return False
-        rec = read_record(p4)
-        if YES not in rec and CARRIED not in rec:
-            rec = _carry_now(p4)                        # a yes from before YES, at the set's first read
-        yes = rec.get(YES)
+        yes = _cards(p4).get("yes")
         return isinstance(yes, dict) and yes.get("set") == sid and _norm(yes.get("store")) == _norm(p4)
     except Exception:  # noqa: BLE001 — a store that cannot be read has the set off
         return False
@@ -1876,98 +1898,30 @@ def cards_asked(p4):
 
 
 def cards_yes(p4, **by):
-    """Keeps ezexe's yes to the set for the store `p4`, in the store's record under its settings lock, with what
-    `by` says of the press: the session and the call whose approval card ezexe pressed. phi.py's hook after that
-    call is its one caller. The key must already name this copy's set, which the approved command wrote, so a card
-    pressed for a command that wrote nothing keeps no yes. True when the yes is kept."""
+    """Keeps ezexe's yes to the set for the store `p4`, in its cards.json, with what `by` says of the press: the
+    session and the call whose approval card ezexe pressed. phi.py's hook after that call is its one caller. The key
+    must already name this copy's set, which the approved command wrote, so a card pressed for a command that wrote
+    nothing keeps no yes. True when the yes is kept."""
     sid = card_set_id()
     if not p4 or not os.path.isdir(p4) or cards_asked(p4) != sid:
         return False
-    lock = os.path.join(p4, SETTINGS_LOCK)
-    if not _take_lock(lock):
-        return False
-    try:
-        rec = read_record(p4)
-        rec[YES] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    **{k: str(v) for k, v in by.items() if v}}
-        write_record(p4, rec)
-    finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+    got = _cards(p4)
+    got["yes"] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                  **{k: str(v) for k, v in by.items() if v}}
+    _write_cards(p4, got)
     return True
 
 
-# A yes given before YES existed. Until the keeper knew YES, `phi.cards` alone put the set in force, and ezexe's yes
-# of 2026-11-19 was given under that rule: an answer to a question that named the set, on which the key was written
-# with no card. An upgrade neither takes that yes back nor asks for it a second time, so the first whole check of a
-# keeper that knows YES looks at the store's record once, _carry_yes, and keeps what it found under CARRIED, so it
-# never looks again.
-CARRIED = "cardsCarried"
-
-
-def _carry_yes(p4, rec):
-    """The one look at whether the set was in force for the store under a keeper from before YES, and the yes
-    carried over where it was. It was where `phi.cards` names the set as this copy has it and the record holds,
-    under `toolRules`, an allow rule of the set that a keeper wrote: a keeper wrote those rules only while the set
-    was in force, so they show it stood under the rule of that time. What they cannot show is how the key of that
-    time came to be written, since that rule kept no record of it. The yes is written marked `carried` with the
-    date, and CARRIED is written whether one was carried or not, so a key that appears later with no press leaves
-    the set off. True when the record took a yes, which the caller writes at once, since cards_on reads the file."""
-    if CARRIED in rec:
-        return False
-    sid = card_set_id()
-    wrote = [t for v in (rec.get("toolRules") or {}).values() for t in v.get("entries") or [] if t in CARD_TOOLS]
-    was = YES not in rec and bool(wrote) and cards_asked(p4) == sid
-    today = time.strftime("%Y-%m-%d")
-    rec[CARRIED] = {"at": today, "carried": was}
-    if was:
-        rec[YES] = {"set": sid, "store": fwd(p4), "at": time.strftime("%Y-%m-%d %H:%M:%S"), "carried": today}
-    return was
-
-
-def _carry_now(p4):
-    """_carry_yes at the set's first read, for a store no whole check of a keeper that knows YES has looked at yet:
-    a guard can read the set before such a check has run for the store, and would read a set ezexe said yes to as
-    off. It runs under the store's settings lock and does not wait for it, so a read made inside the keeper, which
-    holds the lock and carries the yes itself, changes nothing. Returns the record as it then stands, and the next
-    read looks again where the lock was held."""
-    lock = os.path.join(p4, SETTINGS_LOCK)
-    if not os.path.isdir(p4) or not _take_lock(lock, wait_s=0.0):
-        return read_record(p4)
-    try:
-        rec = read_record(p4)
-        if CARRIED not in rec:
-            _carry_yes(p4, rec)
-            write_record(p4, rec)
-        return rec
-    finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
-
-
 def cards_no(p4):
-    """Takes the kept yes out of the store's record, as the command's `off` does and as its `on` does before it
+    """Takes the kept yes out of the store's cards.json, as the command's `off` does and as its `on` does before it
     writes the key, so each yes is one press for one writing of the key. True when one was there."""
-    if not p4 or not os.path.exists(record_path(p4)):
+    if not p4 or not os.path.isdir(p4):
         return False
-    lock = os.path.join(p4, SETTINGS_LOCK)
-    if not _take_lock(lock):
+    got = _cards(p4)
+    if "yes" not in got:
         return False
-    try:
-        rec = read_record(p4)
-        if YES not in rec:
-            return False
-        rec.pop(YES)
-        write_record(p4, rec)
-    finally:
-        try:
-            os.remove(lock)
-        except OSError:
-            pass
+    got.pop("yes")
+    _write_cards(p4, got)
     return True
 
 
@@ -2256,9 +2210,6 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         if json.dumps(rec, sort_keys=True) != before or not os.path.exists(record_path(p4)):
             write_record(p4, rec)
         return
-    if not owned_only and CARRIED not in rec:
-        _carry_yes(p4, rec)                             # a yes from before YES
-        write_record(p4, rec)                           # in the file, carried or not, before cards_on reads it
     name = fwd(target)
     data = read_json(target)
     if data is None:
@@ -2302,8 +2253,9 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     allow = allow_rules(platform, conf)
     if not owned_only:
         _drop_strays(new, rec, name, allow)             # a rule of p4's shape for a copy that does not run
-        if YES in rec and rec[YES].get("set") != cards_asked(p4):
-            rec.pop(YES)                                # the key no longer names the set the yes was for
+        yes = _cards(p4).get("yes") if os.path.isdir(p4) else None
+        if yes is not None and (not isinstance(yes, dict) or yes.get("set") != cards_asked(p4)):
+            cards_no(p4)                                # the key no longer names the set the yes was for
     _keep_rules(new, rec, name, allow, owned_only)
     phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves p4's entries
     ask = list(ASK_RULES) if phi else []
