@@ -72,15 +72,9 @@ jobs:
       - name: Validate p4-temportal
         if: ${{ !cancelled() }}
         run: claude plugin validate lbiza/plugins/p4-temportal --strict
-      - name: Validate p4-native
-        if: ${{ !cancelled() }}
-        run: claude plugin validate lbiza/plugins/p4-native --strict
       - name: Test p4-phi's hooks module
         if: ${{ !cancelled() }}
         run: claude plugin test lbiza/plugins/p4-phi
       - name: Test p4-temportal's hooks module
         if: ${{ !cancelled() }}
         run: claude plugin test lbiza/plugins/p4-temportal
-      - name: Test p4-native's hooks module
-        if: ${{ !cancelled() }}
-        run: claude plugin test lbiza/plugins/p4-native

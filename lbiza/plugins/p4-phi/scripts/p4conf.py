@@ -1846,7 +1846,7 @@ LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules", "generalRules"), ASK_KEY: ("askR
 CARDS_KEY = "phi.cards"
 YES = "cardsYes"
 CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
-              "mcp__p4-temportal__lifetime", "mcp__p4-native__native")
+              "mcp__p4-temportal__lifetime")
 # The general part of the set: what a session does in every task. permissions.md: a bare tool name matches every use
 # of the tool, and "PowerShell permission rules use the same shape as Bash rules". permission-modes.md:
 # "`permissions.allow` rules in settings files do not pre-approve protected-path writes", so no rule here covers a

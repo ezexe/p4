@@ -89,7 +89,7 @@ class Coworker(unittest.TestCase):
                          [{"sections": ["1"], "fences": 1, "team": False}])
         self.assertEqual(coworker.land(self.path, self.base, WHO), [])
 
-    def test_the_files_are_written_with_p4s_three_plugins_off_and_no_other_setting(self):
+    def test_the_files_are_written_with_p4s_two_plugins_off_and_no_other_setting(self):
         folder = os.path.join(self.base, "notes", "terminal-workers")
         found = coworker.drafts(self.path, "E:/repo", WHO, "auto", folder, windows=True)
         wrote = coworker.write(folder, found)
@@ -100,7 +100,7 @@ class Coworker(unittest.TestCase):
             settings = json.load(f)
         self.assertEqual(list(settings), ["enabledPlugins"])
         self.assertEqual(sorted(settings["enabledPlugins"]),
-                         ["p4-native@p4-marketplace", "p4-phi@p4-marketplace", "p4-temportal@p4-marketplace"])
+                         ["p4-phi@p4-marketplace", "p4-temportal@p4-marketplace"])
         self.assertEqual(set(settings["enabledPlugins"].values()), {False})
         with open(os.path.join(folder, found[0]["file"]), encoding="utf-8") as f:
             self.assertEqual(f.read().rstrip("\n").split("\n"), found[0]["lines"])

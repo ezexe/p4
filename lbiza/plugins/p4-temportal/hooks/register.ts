@@ -175,10 +175,6 @@ const SOURCES = ['user', 'project', 'local', 'policy'] as const
 const WHOLE = ['autoMemoryDirectory', 'plansDirectory', 'autoMemoryEnabled'] as const
 const PERMISSIONS = ['blockWritesOutsideWorkingDirectories', 'additionalDirectories'] as const
 
-// p4-native's capability map, from the project's root: the file that plugin's README gives as the one way to read
-// what the host is.
-const MAP = '.claude/p4/native/host.json'
-
 // The option after which each run of lifetime.py is handed Claude Code's own retention period, which is
 // lifetime.py's HANDED_DAYS, and the setting that holds it.
 const HANDED_DAYS = '--cleanup-days'
@@ -301,55 +297,11 @@ async function keptPython($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
-// The folders whose store may hold p4-native's map for this session: the main checkout's first, where the session
-// runs in a git worktree, and then the session's own root. p4-native keeps the map in the main checkout's store
-// for a worktree session, since what a host can do is no fact about one checkout and a worktree's store goes with
-// the worktree. `$.session.repo` gives the main checkout: its `root` is, by the API types, "The repository's
-// root, absolute: the main working tree's for a worktree". A session in no repository, and a Claude Code that
-// lacks the call, read the session's own root alone.
-async function roots($: EngineInterface): Promise<string[]> {
-  const own = slashed(await $.session.root())
-  let main: string | undefined
-  try {
-    main = slashed((await $.session.repo())?.root ?? '') || undefined
-  } catch {
-    main = undefined
-  }
-
-  return main === undefined || main === own ? [own] : [main, own]
-}
-
-// The operating system of this session as p4-native's capability map holds it, which that plugin asks of the
-// engine by `$.session.info`: `windows`, `macos`, `linux` or `wsl`. The map is the file MAP in the project's store,
-// with this session's entry under `sessions.<session id>`. None where p4-native is not installed, where the project
-// has no store, where the entry is not written yet, since that plugin's start does not wait for it, and where the
-// entry says `unknown`. Another session's entry is never read: one folder can be open on Windows and under WSL.
-async function mappedPlatform($: EngineInterface): Promise<string | undefined> {
-  try {
-    const id = await $.session.id()
-    for (const root of await roots($)) {
-      const text = await $.fs.read(`${root}/${MAP}`).catch(() => undefined)
-      if (text === undefined) continue
-      const map: unknown = JSON.parse(text)
-      const sessions = isRecord(map) ? map.sessions : undefined
-      const entry = isRecord(sessions) ? sessions[id] : undefined
-      const platform = isRecord(entry) ? entry.platform : undefined
-      if (typeof platform === 'string' && platform !== '' && platform !== 'unknown') return platform
-    }
-
-    return undefined
-  } catch {
-    return undefined
-  }
-}
-
 // With nothing kept, the search of find-python.sh: the launcher first on Windows, where `python3` can be the Store's
 // stub, and `python3` first elsewhere. Each candidate is proven by one run, since a module has no `command -v`.
-// Whether this is Windows is read from p4-native's capability map first, and from the shape of the plugin's own
-// folder where the map has no entry for this session.
+// Whether this is Windows is read from the shape of the plugin's own folder.
 async function provenPython($: EngineInterface): Promise<string | undefined> {
-  const mapped = await mappedPlatform($)
-  const isWindows = mapped === undefined ? /^[A-Za-z]:[\\/]/.test($.plugin.root) : mapped === 'windows'
+  const isWindows = /^[A-Za-z]:[\\/]/.test($.plugin.root)
   const order = isWindows ? [['py', '-3'], ['python'], ['python3']] : [['python3'], ['python'], ['py', '-3']]
   for (const head of order) {
     try {

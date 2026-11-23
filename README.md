@@ -75,7 +75,7 @@ _"Puppeteer... the final frontier. These are the operations of Prompty Enterpris
 
 - Ask a question in the [discussions](https://github.com/ezexe/p4/discussions) of this repository, and report a problem in its [issues](https://github.com/ezexe/p4/issues).
 - The [wiki](https://github.com/ezexe/p4/wiki) holds the readable documentation: [how it works](https://github.com/ezexe/p4/wiki/How-it-works), how to [install](https://github.com/ezexe/p4/wiki/Install), where each plugin keeps its [files and settings](https://github.com/ezexe/p4/wiki/Files-and-settings), p4-temportal's [retention and compaction](https://github.com/ezexe/p4/wiki/Retention-and-compaction), how to [contribute](https://github.com/ezexe/p4/wiki/Contributing) and how a [release](https://github.com/ezexe/p4/wiki/Releasing) is cut.
-- The marketplace holds three plugins, each with a page beside its code: p4-phi's [README](lbiza/plugins/p4-phi/README.md), p4-temportal's [skill](lbiza/plugins/p4-temportal/skills/temportal/SKILL.md) and p4-native's [README](lbiza/plugins/p4-native/README.md).
+- The marketplace holds two plugins, each with a page beside its code: p4-phi's [README](lbiza/plugins/p4-phi/README.md) and p4-temportal's [skill](lbiza/plugins/p4-temportal/skills/temportal/SKILL.md).
 - The interactive docs are published at [ezexe.github.io/p4](https://ezexe.github.io/p4/), where [the session tree](https://ezexe.github.io/p4/session-tree.html) lets you make each move on a live tree.
 - [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
 - [CITATION.cff](CITATION.cff), which GitHub shows as "Cite this repository".

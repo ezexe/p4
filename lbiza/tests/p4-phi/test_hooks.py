@@ -473,29 +473,6 @@ class Agent(Base):
         self.bound("a_31", "toolu_31")
         self.assertEqual(hook.launch_of({"session_id": SESSION, "cwd": self.proj, "agent_id": "a 31"}), "toolu_31")
 
-    def test_the_hooks_module_reads_p4_natives_map_before_its_own_reading_of_the_host(self):
-        """p4-native's README gives `<project>/.claude/p4/native/host.json` as the one way to read what the host is,
-        with a session's entry under `sessions.<session id>`. p4-phi's module holds that path as a literal and reads
-        the entry first in its two places that worked the host out by themselves: whether this is Windows, for the
-        search for a python, and whether a tool of the desktop app answers, before the first call of one. Its own
-        reading stays in both, which hooks/register.test.ts holds with the map present and with it absent."""
-        with open(os.path.join(ROOT, "hooks", "register.ts"), encoding="utf-8") as f:
-            module = f.read()
-        self.assertIn("const MAP = '.claude/p4/native/host.json'", module)
-        with open(os.path.join(os.path.dirname(ROOT), "p4-native", "README.md"), encoding="utf-8") as f:
-            native = f.read()
-        self.assertIn("`<project>/.claude/p4/native/host.json`", native)
-        search = module.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("const isWindows = await onWindows($)", search)
-        windows = module.split("async function onWindows", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("(await mapped($))?.platform", windows)
-        self.assertIn("isMapped ? platform === 'windows' : /^[A-Za-z]:", windows, "the folder's shape is the fallback")
-        asked = module.split("async function askApp", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("if (await isMappedOffTheApp($)) {", asked)
-        off = module.split("async function isMappedOffTheApp", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("host !== 'desktop' && Array.isArray(tools) && tools.length === 0", off,
-                      "an entry that reads desktop with no tool listed decides nothing")
-
     def test_a_start_no_launch_is_bound_to_gets_no_lines(self):
         """A launch whose Agent call failed or was denied starts no subagent, so no start is bound to it and a later
         start of the same type gets none of its lines; neither does a start the hooks module bound to another call,

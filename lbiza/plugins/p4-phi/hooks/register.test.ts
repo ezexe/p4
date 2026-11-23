@@ -426,67 +426,18 @@ test('with none kept, the search of find-python.sh proves the first python that 
   expect(seen.calls[0]?.argv[0]).toBe(KEPT)
 })
 
-// p4-native's capability map, as that plugin writes it into the project's store: this session's entry, which the
-// fake engine names `cli-0001` in the project `/work/project`, and another session's, which is never read.
-const MAP_FILE = '/work/project/.claude/p4/native/host.json'
-function mapOf(entry: Record<string, unknown>): string {
-  const other = { host: 'desktop', run: 'interactive', platform: 'macos', tools: { app: ['mcp__ccd_x'], native: [], servers: {} } }
-
-  return JSON.stringify({ sessions: { 'another-session': other, 'cli-0001': entry } })
-}
-
-test("the python search asks p4-native's map whether this is Windows, and the plugin's folder where it does not say", async ($, on) => {
+test("the plugin's own folder tells the python search whether this is Windows", async ($, on) => {
   mock.env(on, {})
   const clock = mock.clock(on)
-  // The map says Windows: the launcher is tried first, whatever the folder the plugin runs from looks like.
-  const windows = machine(on, { files: { [MAP_FILE]: mapOf({ platform: 'windows' }) }, pythons: { python: KEPT } })
+  // No python is found, so the search runs at each look and its order is the one the plugin's own folder tells on
+  // the machine the test runs on.
+  const seen = machine(on, { files: {}, pythons: {} })
+
   await $.session.start(START)
   await clock.settle()
-  expect(windows.tried.map(argv => argv[0])).toEqual(['py', 'python'])
-  expect(windows.read).toContain(MAP_FILE)
+  const own = seen.tried.slice(0, 3).map(argv => argv[0])
+  expect([['py', 'python', 'python3'], ['python3', 'python', 'py']]).toContainEqual(own)
 })
-
-test("where the map says Linux the search tries python3 first, and another session's entry is not read", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const linux = machine(on, { files: { [MAP_FILE]: mapOf({ platform: 'linux' }) }, pythons: { python: KEPT } })
-  await $.session.start(START)
-  await clock.settle()
-  expect(linux.tried.map(argv => argv[0])).toEqual(['python3', 'python'])
-})
-
-// The map absent, or saying nothing of this session's platform: p4-phi's own reading stays, the shape of the folder
-// the plugin runs from. Another session's entry says the other system each time, and is never taken for this one.
-const UNMAPPED: [string, (own: boolean) => string][] = [
-  ['no entry for the session', own => JSON.stringify({ sessions: { 'another-session': { platform: own ? 'linux' : 'windows' } } })],
-  ['an entry that says unknown', () => mapOf({ platform: 'unknown' })],
-  ['an entry with no platform', () => mapOf({ host: 'terminal' })],
-  ['a map cut short', () => '{"sessions":'],
-  ['a map that is a list', () => '[]'],
-]
-for (const [name, mapFor] of UNMAPPED) {
-  test(`with no map, and then with ${name}, the plugin's own folder tells the python search whether this is Windows`, async ($, on) => {
-    mock.env(on, {})
-    const clock = mock.clock(on)
-    // No python is found, so each look searches again: first with no map, which gives the order the plugin's own
-    // folder tells on the machine the test runs on, then with the map, which must leave that order as it is.
-    const seen = machine(on, { files: {}, pythons: {} })
-
-    await $.session.start(START)
-    await clock.settle()
-    const before = seen.tried.length
-    const own = seen.tried.slice(0, 3).map(argv => argv[0])
-    expect([['py', 'python', 'python3'], ['python3', 'python', 'py']]).toContainEqual(own)
-
-    seen.files[MAP_FILE] = mapFor(own[0] === 'py')
-    await $.turn.complete(TURN)
-    await clock.advance(700_000)
-    const later = seen.tried.slice(before).map(argv => argv[0])
-    expect(later.length).toBeGreaterThanOrEqual(3)
-    expect(later.slice(0, 3)).toEqual(own)
-    expect(seen.read).toContain(MAP_FILE)
-  })
-}
 
 test('with no python at all no look runs, and the debug log says so once', async ($, on) => {
   mock.env(on, {})
@@ -2831,53 +2782,6 @@ test('a session with no such tool is asked once, the debug log says so, and noth
   expect(seen.looks.length).toBeGreaterThan(2)
 })
 
-test("where p4-native's map reads a terminal with no tool of the app, none is called, and the debug log says so once", async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  const entry = { host: 'terminal', run: 'scripted', platform: 'linux', tools: { app: [], native: ['Bash'], servers: {} } }
-  const seen = machine(on, { files: { ...STORE, [MAP_FILE]: mapOf(entry) }, look: () => ({ ...APP_ON, app_sections: true }) })
-  const calls = app(on)
-
-  await $.session.start(START)
-  await clock.advance(600_000)
-
-  expect(calls).toEqual([])
-  expect(kept(seen)).toEqual([])
-  expect(seen.logged.filter(line => line.includes("p4-native's map reads no tool of the desktop app")).length).toBe(1)
-  expect(seen.logged.filter(line => line.includes('is no tool of this session'))).toEqual([])
-  expect(seen.read.filter(path => path === MAP_FILE).length).toBe(1)
-})
-
-test("where the map reads the desktop app, with its tools listed or not yet connected, the app's tools are asked as before", async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  // An entry read before the app's tool server connected lists no tool of the app, and decides nothing.
-  const entry = { host: 'desktop', run: 'interactive', platform: 'windows', tools: { app: [], native: [], servers: {} } }
-  const seen = machine(on, { files: { ...STORE, [MAP_FILE]: mapOf(entry) }, look: () => APP_ON })
-  const calls = app(on)
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(calls.map(call => call.tool)).toEqual(['mcp__ccd_session_mgmt__get_session', 'mcp__ccd_session_mgmt__list_sessions'])
-  expect(kept(seen).length).toBe(1)
-  expect(seen.logged).toEqual([])
-})
-
-test("with no map for the session the first call's own answer tells, as before p4-native", async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  const other = JSON.stringify({ sessions: { 'another-session': { host: 'terminal', tools: { app: [] } } } })
-  const seen = machine(on, { files: { ...STORE, [MAP_FILE]: other }, look: () => APP_ON })
-  const calls = app(on)
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(calls.length).toBe(2)
-  expect(kept(seen).length).toBe(1)
-})
-
 test("a refusal ends the asking too, and an answer that is an error or no JSON is not kept", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
@@ -3098,63 +3002,6 @@ test("what the module keeps for python in a worktree session lands in the main c
   const project = seen.envs > 0 ? MAIN : WORKTREE
   const kept = seen.wrote.map(write => write.path).filter(path => path.endsWith('/origin.json'))
   expect(kept).toEqual([`${project}/.claude/p4/phi/models/served/start-cli-0001/origin.json`])
-})
-
-// p4-native keeps its map in the main checkout's store for a session in a git worktree, and in the worktree's own
-// where the main checkout has no store. Each machine below finds no python, so the search runs, and its order says
-// which entry the module read: the launcher first for Windows, `python3` first for Linux.
-const MAIN_MAP = `${MAIN}/.claude/p4/native/host.json`
-const WORKTREE_MAP = `${WORKTREE}/.claude/p4/native/host.json`
-
-test("in a worktree session p4-native's map is read from the main checkout's store, where that plugin keeps it", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  // The worktree's own store holds an entry of this session that says the other system: one a build before
-  // p4-native kept the map in the main checkout left there. The main checkout's is the one read.
-  const seen = machine(on, {
-    files: { [MAIN_MAP]: mapOf({ platform: 'windows' }), [WORKTREE_MAP]: mapOf({ platform: 'linux' }) },
-    pythons: { python: KEPT },
-    root: WORKTREE,
-    main: MAIN,
-  })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(['py', 'python'])
-  expect(seen.read).toContain(MAIN_MAP)
-  expect(seen.read).not.toContain(WORKTREE_MAP)
-})
-
-test("where the main checkout's store holds no entry of the session, the worktree's own map is read", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const other = JSON.stringify({ sessions: { 'another-session': { platform: 'windows' } } })
-  const seen = machine(on, {
-    files: { [MAIN_MAP]: other, [WORKTREE_MAP]: mapOf({ platform: 'linux' }) },
-    pythons: { python: KEPT },
-    root: WORKTREE,
-    main: MAIN,
-  })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(['python3', 'python'])
-  expect(seen.read).toContain(MAIN_MAP)
-  expect(seen.read).toContain(WORKTREE_MAP)
-})
-
-test("a session whose root is the main checkout reads the map once, there", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { [MAIN_MAP]: mapOf({ platform: 'linux' }) }, pythons: { python: KEPT }, root: MAIN, main: MAIN })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(['python3', 'python'])
-  expect(seen.read.filter(path => path === MAIN_MAP).length).toBe(1)
 })
 
 test('where the engine gives no such variables the module names the session and its root, as before', async ($, on) => {

@@ -788,11 +788,10 @@ class ClaudeSettings(unittest.TestCase):
 
     def test_the_keeper_reads_the_managed_settings_by_the_method_and_name_the_hooks_module_uses(self):
         """The keeper takes the managed settings from the hooks module by the method and under the name the code
-        uses, and the settings page's link to the temportal page has its anchor."""
+        uses."""
         module = (PLUGINS / "p4-temportal" / "hooks" / "register.ts").read_text(encoding="utf-8")
         self.assertIn("$.settings.read({ source })", module)
         self.assertIn(f"const HANDED = '{p4conf.HANDED_KEY}'", module)
-        self.assertIn('id="row-memory"', (PLUGINS.parents[1] / "docs" / "temportal-native.html").read_text("utf-8"))
 
     def test_another_folder_named_by_the_user_is_left_to_win(self):
         """A user file naming another folder: no local key, which would override that choice."""

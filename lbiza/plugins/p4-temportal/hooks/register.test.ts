@@ -1476,71 +1476,11 @@ test('where no settings source holds cleanupPeriodDays nothing is handed, and a 
   expect(seen.ran[1]).toEqual(['--cleanup-days', '"a month"', 'list'])
 })
 
-// p4-native's capability map in the store of the machine's project, with one entry for each session id given.
-const MAP = '/work/project/.claude/p4/native/host.json'
-function mapOf(sessions: Record<string, { platform?: string }>): string {
-  const entry = { at: '2026-11-19T14:37:03.384Z', host: 'terminal', run: 'scripted', claude: '2.1.328' }
-  const entries = Object.entries(sessions).map(([id, more]) => [id, { ...entry, ...more }])
-
-  return JSON.stringify({ sessions: Object.fromEntries(entries) })
-}
-
 // The order in which the search of a python tries its names on Windows, and anywhere else.
 const WINDOWS_FIRST = ['py', 'python', 'python3']
 const ELSEWHERE_FIRST = ['python3', 'python', 'py']
 
-test("with p4-native's map holding this session as windows, the search tries the launcher first", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { [MAP]: mapOf({ 'cli-0001': { platform: 'windows' } }) }, pythons: {} })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
-  expect(seen.read).toContain(MAP)
-})
-
-test("in a git worktree the map is read from the main checkout's store, where p4-native keeps it", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const kept = '/work/main/.claude/p4/native/host.json'
-  const seen = machine(on, { main: '/work/main', files: { [kept]: mapOf({ 'cli-0001': { platform: 'windows' } }) }, pythons: {} })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
-  expect(seen.read).toContain(kept)
-})
-
-test("where the main checkout's store holds no entry of this session, the map of the session's own root is read", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const files = {
-    '/work/main/.claude/p4/native/host.json': mapOf({ 'cli-0002': { platform: 'linux' } }),
-    [MAP]: mapOf({ 'cli-0001': { platform: 'windows' } }),
-  }
-  const seen = machine(on, { main: '/work/main', files, pythons: {} })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(WINDOWS_FIRST)
-})
-
-test("with p4-native's map holding this session as wsl, as linux or macos, the search tries python3 first", async ($, on) => {
-  mock.env(on, {})
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { [MAP]: mapOf({ 'cli-0001': { platform: 'wsl' } }) }, pythons: {} })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(seen.tried.map(argv => argv[0])).toEqual(ELSEWHERE_FIRST)
-})
-
-test('with no map the search reads the shape of its own folder, as it did before', async ($, on) => {
+test("the search reads the shape of the plugin's own folder", async ($, on) => {
   mock.env(on, {})
   const clock = mock.clock(on)
   const seen = machine(on, { files: {}, pythons: {} })
@@ -1548,35 +1488,8 @@ test('with no map the search reads the shape of its own folder, as it did before
   await $.session.start(START)
   await clock.settle()
 
-  expect(seen.read).toContain(MAP)
   expect([WINDOWS_FIRST, ELSEWHERE_FIRST]).toContainEqual(seen.tried.map(argv => argv[0]))
 })
-
-// A map that holds no platform for this session: each leaves the module's own reading, which the map of the test
-// would turn round if it were read.
-for (const [what, map] of [
-  ['an entry of another session', (other: string) => mapOf({ 'cli-0002': { platform: other } })],
-  ['an entry that says unknown', () => mapOf({ 'cli-0001': { platform: 'unknown' } })],
-  ['an entry with no platform', () => mapOf({ 'cli-0001': {} })],
-  ['a map that is no JSON', () => '{"sessions": '],
-] as const) {
-  test(`${what} leaves the search its own reading of the folder`, async ($, on) => {
-    mock.env(on, {})
-    const clock = mock.clock(on)
-    const files: Record<string, string> = {}
-    const seen = machine(on, { files, pythons: {} })
-    await $.session.start(START)
-    await clock.settle()
-    const own = seen.tried.map(argv => argv[0])
-    expect(own.length).toBe(3)
-
-    // The timer's next search, with the map in place.
-    files[MAP] = map(own[0] === 'py' ? 'linux' : 'windows')
-    await clock.advance(600_000)
-
-    expect(seen.tried.map(argv => argv[0]).slice(3, 6)).toEqual(own)
-  })
-}
 
 // A tool call that wrote a file, as a PostToolUse hook is handed it: what the Write tool answers names the file and
 // says whether it made it, and what Edit answers names the file.

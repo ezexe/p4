@@ -600,7 +600,7 @@ class Module(unittest.TestCase):
         for word in ("atom({ plugin: 'p4-phi', key: 'tree' } as const", "ask($, ['progress'], PROGRESS_MS)",
                      "$.clock.every(PANE_MS", "e.tool_name === STEP_TOOL"):
             self.assertIn(word, text, word)
-        self.assertNotIn("$.fs.stat(", text, "a file's time is read from its folder's list, which p4-native records")
+        self.assertNotIn("$.fs.stat(", text, "a file's time is read from its folder's list, which the list holds")
         self.assertTrue(os.path.isfile(os.path.join(SCRIPTS, "progress.py")))
         render = text.split("on('ui.render'", 1)[1].split("on('tool.check'", 1)[0]
         for write in ("update(", "$.state.set", "$.fs.write", "$.ui.open"):

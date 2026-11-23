@@ -29,7 +29,7 @@ import upkeep
 
 SETTINGS_FILE = "coworker-settings.json"
 SETTINGS = ('{"enabledPlugins": {' + ", ".join(f'"{n}@{p4conf.MARKET}": false'
-                                               for n in ("p4-phi", "p4-temportal", "p4-native")) + "}}")
+                                               for n in ("p4-phi", "p4-temportal")) + "}}")
 TEAMS = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 PLAIN = re.compile(r"[^\w .,:#/-]")               # a task line holds no quote of any kind and no shell character
 

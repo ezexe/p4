@@ -1,8 +1,11 @@
 # a virtual environment at the root, where lbiza/scripts/make_venv.py built one before the store held it in .claude/p4/.venv
 .venv/
 
-# what Claude Code and the plugins write for a session started in this checkout: its settings and its store
-.claude/
+# what Claude Code and the plugins write for a session started in this checkout: its settings and its store, less
+# the project's own skills, which are committed. A file cannot be re-included under an excluded folder, so the
+# folder's contents are excluded and not the folder.
+.claude/*
+!.claude/skills/
 
 # compiled Python files, and what pytest keeps between runs
 __pycache__/

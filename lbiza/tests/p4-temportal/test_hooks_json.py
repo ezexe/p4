@@ -87,18 +87,6 @@ class ModuleTest(unittest.TestCase):
             self.assertIn("p4conf.hand_settings(payload, p4conf.settings_file(project_root(payload)))",
                           (SRC / script).read_text(encoding="utf-8"), script)
 
-    def test_the_module_reads_p4_natives_map_before_its_own_reading_of_the_host(self):
-        """p4-native's README gives `<project>/.claude/p4/native/host.json` as the one way to read what the host is,
-        with a session's entry under `sessions.<session id>`. The module's search for a python asks it whether this
-        is Windows, and keeps its own reading for a session the map has no entry for."""
-        text = (SRC / "register.ts").read_text(encoding="utf-8")
-        self.assertIn("const MAP = '.claude/p4/native/host.json'", text)
-        native = (SRC.parents[1] / "p4-native" / "README.md").read_text(encoding="utf-8")
-        self.assertIn("`<project>/.claude/p4/native/host.json`", native)
-        search = text.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
-        self.assertIn("const mapped = await mappedPlatform($)", search)
-        self.assertIn("mapped === undefined ? /^[A-Za-z]:", search)
-
     def test_the_module_names_the_plan_files_a_session_wrote_to_the_last_sweep(self):
         """settings-reference.md, `plansDirectory`: unset, "Claude Code uses `~/.claude/plans`". The key the keeper
         writes holds from the next session, so the module notes the plan files written in a folder named plans at
