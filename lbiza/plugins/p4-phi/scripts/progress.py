@@ -50,7 +50,7 @@ NAMED = re.compile(r"`([^`\n]*[\\/]plan-planner[\\/][^`\\/\n]+\.md)`")
 # has ended, the log closes with `- Ended: <the groups that stopped and the groups that ended clean>`.
 ENDED = re.compile(r"(?im)^[ \t]*[-*][ \t]+Ended[ \t]*:[ \t]*(.+?)[ \t]*$")
 # A round read by groups holds one indented line for each, `  - group <name>: <k> held, <m> minutes`.
-GROUP = re.compile(r"(?im)^[ \t]+[-*][ \t]+group[ \t]+\S")
+GROUP = re.compile(r"(?im)^[ \t]+[-*][ \t]+group[ \t]+\S+[ \t]*:[ \t]*(?:\d+[ \t]+held|clean)\b")
 
 
 def goal_of(s):

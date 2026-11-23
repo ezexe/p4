@@ -154,6 +154,10 @@ class Plan(Store):
         self.assertEqual(progress.loop_of(more)["state"], "", "a sum over groups that grew ends no loop")
         ended = progress.loop_of(log + "- Ended: group cw-a stopped, group cw-b ended clean.\n")
         self.assertEqual((ended["round"], ended["held"], ended["state"], ended["ended"]), (2, 3, "stopped", True))
+        single = ("## Loop log\n\n- Round 1: 2 held, 9 minutes: mended.\n"
+                  "  - group of tests: a check names no file: mended.\n")
+        self.assertEqual(progress.loop_of(single + "- Round 2: 3 held, 4 minutes: more.\n")["state"], "stopped",
+                         "a finding that opens with group is no group's line")
         path = self.plan(text=PLAN + "- Ended: the one group stopped.\n")
         self.assertEqual(progress.plan_of({"planFile": path})["loop"]["state"], "stopped", "as the pane is handed it")
 
