@@ -681,7 +681,7 @@ def _save_session(home, s):
             s[k] = {**disk[k], **(s.get(k) or {})}
     for k in ("rootStep", "rootLeft", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
-              "handedFrom", "effort", "kidCommits", "planMode"):
+              "handedFrom", "effort", "kidCommits", "planMode", "planFile"):
         if k in disk and k not in s:
             s[k] = disk[k]
     if not s.pop("_controlsSet", None) and isinstance(disk.get("controls"), list):
@@ -2351,6 +2351,30 @@ def h_nudge(payload):
             f"step.")
 
 
+def keep_plan_file(me, path, payload=None):
+    """The first file a session's own Write or Edit writes directly in the store's folder of plan files is the plan
+    it works: its path is kept on session.json as `planFile`, where progress.py reads the plan's sections and its
+    loop log for the pane, and stays kept while that file is there. A subagent's call is not the session's, and a
+    file of one of that folder's subfolders is a sorted plan. True when a path was kept anew."""
+    if (payload or {}).get("agent_id"):
+        return False
+    try:
+        folder = os.path.normcase(os.path.realpath(os.path.join(me.store, *PLANS_DIR.split("/"))))
+        full = os.path.realpath(path)
+        if os.path.normcase(os.path.dirname(full)) != folder or not full.lower().endswith(".md"):
+            return False
+        kept = full.replace("\\", "/")
+        s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
+        held = str(s.get("planFile") or "")
+        if held == kept or (held and os.path.isfile(held)):
+            return False
+        s["planFile"] = kept
+        save_session(me.home, s)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def h_memory_gap(payload):
     """PostToolUse on Write and Edit: a feedback memory written into the project's store whose rule describes
     session or plugin behaviour gets the line of gaps.py that writes that plugin gap into this turn's report as a
@@ -2362,6 +2386,7 @@ def h_memory_gap(payload):
     path = str(inp.get("file_path") or "")
     if not path:
         return None
+    keep_plan_file(me, path, payload)
     import gaps
     s = load_session(me.home, me.id) or ensure_session(me.home, me.id, me.rec, me.cli)
     text = gaps.advice(me.home, me.store, s, path,
@@ -4355,7 +4380,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "sections"):
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "sections",
+                 "progress"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
         p.add_argument("--session", default="", help="the sessionId, this session's when left out")
@@ -4477,6 +4503,11 @@ def main(argv=None):
             return 0
         if a.cmd in puppeteer.COMMANDS:
             return puppeteer.command(a, me)
+        if a.cmd == "progress":                    # the pane's data, which the hooks module asks for while it is open
+            import progress
+            sys.stdout.write(json.dumps(progress.write(me.home, safe_id(me.id)), ensure_ascii=False, sort_keys=True)
+                             + "\n")
+            return 0
         if a.cmd == "tree":
             print(tree_text(me.home) or "no sessions yet")
             return 0
