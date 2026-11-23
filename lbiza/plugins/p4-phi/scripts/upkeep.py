@@ -787,7 +787,8 @@ def removals(home, s, trees, skip_own=False, but=(), kept=None):
 
 
 LEAVE = ("Each is git's own command with no force, and `-d` is never `-D`: where git refuses one, leave it and say "
-         "so in one line.")
+         "so in one line. Run each from a folder outside the worktree it removes: Windows deletes no folder a shell "
+         "stands in, and git then drops its record of the worktree and leaves the folder half removed.")
 
 
 # A session that made no commit has nothing to land, so "every commit of it on the default branch" holds for it
@@ -1199,7 +1200,9 @@ def agent_trees(home, s):
             key = relay.norm(m.group(1)) if m else ""
             if key and any(o == key or o.startswith(key + "/") for o in mine):
                 continue
-            if m and key not in seen and os.path.isdir(m.group(1)) and linked(m.group(1)):
+            # a folder with no `.git` entry of its own is what a removed worktree leaves where Windows kept it: git
+            # lists no worktree there and refuses its removal, so it is no worktree of a subagent, as trees_of reads it
+            if m and key not in seen and os.path.isdir(m.group(1)) and linked(m.group(1))                     and os.path.exists(os.path.join(m.group(1), ".git")):
                 r = _out(m.group(1), "rev-parse", "--abbrev-ref", "HEAD") or ""
                 seen[relay.norm(m.group(1))] = {"path": m.group(1), "first": "", "last": "", "there": True,
                                                 "own": False, "linked": True, "branch": r}

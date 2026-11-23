@@ -926,6 +926,24 @@ class Leftovers(Base):
         git(self.repo, "worktree", "lock", tree)       # an agent that still runs holds its worktree locked
         self.assertEqual(self.lines(self.said(), "leftovers of a subagent"), [])
 
+    def test_a_folder_a_removed_subagents_worktree_left_is_handed_no_removal(self):
+        """A removal run from a shell that stands in the worktree leaves its folder half removed on Windows, with
+        no `.git` entry. git lists no worktree there, and until 0.11.147 upkeep handed its removal at every message."""
+        self.turn_on()
+        tree = os.path.join(self.repo, ".claude", "worktrees", "agent-a1")
+        self.assertEqual(git(self.repo, "worktree", "add", "-q", tree, "-b", "worktree-agent-a1",
+                             "origin/main").returncode, 0)
+        plan = os.path.join(self.t.dir(TOP), "plan.json")
+        write(plan, json.dumps({"steps": [], "loose": [{"id": "a1", "agent": "a1", "status": "completed",
+                                                         "wrote": [os.path.join(tree, "exporter.py")]}]}))
+        self.assertEqual(git(self.repo, "worktree", "remove", "--force", tree).returncode, 0)
+        os.makedirs(os.path.join(tree, "src"))                  # what Windows left of it
+        write(os.path.join(tree, "README.md"), "left")
+        got = self.said()
+        self.assertEqual(self.lines(got, "leftovers of a subagent"), [])
+        self.assertNotIn("worktree remove", flat(got))
+        self.assertTrue(os.path.isdir(tree), "the folder is left as it is")
+
     def test_the_sessions_own_worktree_a_subagent_wrote_in_is_no_leftover_of_it(self):
         """A subagent with no isolation writes in the session's own folder, which can be a worktree under
         `.claude/worktrees`. The app's record keeps the folder the session began in, so p4-phi's record of its cwd
