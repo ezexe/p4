@@ -496,6 +496,8 @@ def signature(home, top, roots):
     except OSError:
         names = []
     parts += [_stat(os.path.join(base, n, "session.json")) for n in names]
+    import progress                                # it imports this module at its head, so it is read here
+    parts += [_stat(os.path.join(base, n, progress.TEAM)) for n in names]   # a lead can stand outside the subtree
     ids = set()
     for sid, _, _ in subtree(home, top):
         ids.add(sid)
@@ -602,9 +604,18 @@ def build(home, top, net=False):
              "items": list(s["unfinishedAtArchive"].get("items") or [])}
             for sid, depth, s in tree if depth and isinstance(s.get("unfinishedAtArchive"), dict)
             and not s["unfinishedAtArchive"].get("settled")]            # read from the records, with no git here
+    import progress                                # it imports this module at its head, so it is read here
+    teams = []
+    for sid, s in sorted(every.items()):           # a lead typed into a terminal is under no session of the tree
+        mates = [] if closed(s) else progress.team_of(home, sid)
+        if any(x["state"] not in progress.OVER for x in mates):
+            where = ("" if sid in ids else "in another tree" if relay._parent(s)
+                     else "a terminal session outside this tree")
+            teams.append({"sessionId": sid, "title": phi.title_of(s), "where": where,
+                          "teammates": [{"name": x["name"], "state": x["state"], "task": x["task"]} for x in mates]})
     return {"top": top, "title": phi.title_of(every.get(top, {})), "parent": relay._parent(every.get(top, {})),
             "reconcile": reconcile, "rows": rows, "closed": shut, "tasks": tasks, "misses": misses, "requests": asked,
-            "issues": tied, "unfinished": left}
+            "issues": tied, "unfinished": left, "teams": teams}
 
 
 def render(m):
@@ -657,6 +668,13 @@ def render(m):
         out += [f"- subagent {x['id']} of \"{x['title']}\" `{x['sessionId']}`"
                 + (f" under step {x['step']}" if x["step"] else "") + " wrote " + ", ".join(x["wrote"])
                 + ": a part that writes files runs in a session of its own, never in a subagent" for x in m["misses"]]
+    if m.get("teams"):
+        out += ["", "## Agent teams", ""]
+        for t in m["teams"]:
+            out.append(f"- led by \"{t['title']}\" `{t['sessionId']}`"
+                       + (f", {t['where']}" if t["where"] else "") + ":")
+            out += [f"  - teammate {x['name']}, {x['state']}" + (f": {x['task']}" if x["task"] else "")
+                    for x in t["teammates"]]
     if m["requests"]:
         out += ["", "## Start requests", ""]
         out += [f"- {r['id']} \"{r['title']}\" for {r['requester']}: {r['state']}" for r in m["requests"]]

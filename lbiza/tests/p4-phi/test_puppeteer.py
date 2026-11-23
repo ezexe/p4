@@ -114,6 +114,22 @@ class Linear(Base):
         self.assertIn("reported \"Ported; the suite passes.\"", text3)
         self.assertTrue(os.path.exists(self.path(TOP, "ledger.json")))
 
+    def test_a_live_agent_team_is_a_part_of_the_ledger_and_one_that_is_over_is_not(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer."))
+        self.assertNotIn("## Agent teams", self.ledger()[0])
+        write(self.path(KID, "team.json"), json.dumps({"teammates": [
+            {"name": "scout", "task": "Read the exporter", "state": "idle", "doing": ""},
+            {"name": "critic", "task": "Argue against the plan", "state": "running", "doing": "reading flush.py"}]}))
+        part = self.ledger()[0].split("## Agent teams")[1]
+        self.assertIn(f"`{KID}`:", part)
+        for word in ("scout", "idle", "Read the exporter", "critic", "running", "Argue against the plan"):
+            self.assertIn(word, part, word)
+        write(self.path(KID, "team.json"), json.dumps({"teammates": [
+            {"name": "scout", "task": "Read the exporter", "state": "completed", "doing": ""}]}))
+        self.assertNotIn("## Agent teams", self.ledger()[0])
+
     def test_a_divergence_between_p4_phi_and_the_app_is_a_reconcile_line_before_the_sessions(self):
         t = self.t
         t.say(TOP, TASK)
