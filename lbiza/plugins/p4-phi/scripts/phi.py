@@ -1502,8 +1502,8 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
                 "more than the round before, and ends its turn with "
                 "`ExitPlanMode`, whose approval card ezexe answers in this "
                 "session. Once that returns approved, it has a terminal worker land its sections, which "
-                "`phi.py coworkers \"<its plan file>\" --land --write \"<a folder>\"` writes the start file, the "
-                "brief and the report's name of, and prints the terminal call that starts, from a session in auto or "
+                "`phi.py coworkers \"<its plan file>\" --land` writes the start file, the brief and the report's name "
+                "of into the worker's node, and prints the terminal call that starts, from a session in auto or "
                 "bypass mode: it makes that call, and reads the report file the worker writes, which `phi.py "
                 "coworkers \"<its plan file>\" --wait --report <that file>` waits for, in place of an answer by "
                 "message. Where that command says it starts none, it runs `phi.py sections \"<its plan "
@@ -2122,7 +2122,7 @@ def approved_runs_text(payload, s):
     if spawned_from(s):
         return (head + " Another session started this one, so this session lands the plan itself, in this turn. "
                        f"Where this session is in auto or bypass permissions mode, `{commands()} coworkers \"{shown}\" "
-                       "--land --write <folder>` writes the start file, the brief and the report's name of one "
+                       "--land` writes the start file, the brief and the report's name of one "
                        "terminal worker for each group not landed and prints the terminal call that starts it: make "
                        "that call, and take the report file the worker writes, which the same command with `--wait "
                        "--report <that file>` waits for, as that group's report, with no message. Where the command "
@@ -4631,15 +4631,16 @@ def main(argv=None):
             p.add_argument("--for", dest="planner", default="",
                            help="the session id of the planner the coworkers send their lists to, this session's "
                                 "when left out")
-            p.add_argument("--checkout", default="", help="the repository the coworkers' worktrees are made in, "
-                                                          "the folder this is run from when left out")
-            p.add_argument("--write", default="", metavar="FOLDER",
-                           help="write the settings file and each coworker's start file into this folder, and "
-                                "print the terminal call that starts each")
+            p.add_argument("--checkout", default="", help="the repository the coworkers and workers run in, the "
+                                                          "folder this is run from when left out")
+            p.add_argument("--start", action="store_true",
+                           help="give each coworker a node, a store nested in the planner's, write its settings "
+                                "file and start file there, and print the terminal call that starts each")
             p.add_argument("--land", action="store_true",
-                           help="write the start file, the brief and the report's name of the terminal worker that "
-                                "lands each group not landed, with --write, and print the terminal call that starts "
-                                "each: for after the approval, from a session in auto or bypass mode")
+                           help="give the terminal worker that lands each group not landed a node, write its start "
+                                "file, brief and settings file there with its report's name, and print the "
+                                "terminal call that starts each: for after the approval, from a session in auto or "
+                                "bypass mode")
             p.add_argument("--report", default="", metavar="FILE",
                            help="with --wait: wait for this terminal worker's report file instead of for coworkers")
             p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
@@ -4861,20 +4862,29 @@ def main(argv=None):
                       "nobody to send their lists to", file=sys.stderr)
                 return 2
             mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
+            # each terminal session is a node nested in the store that holds the planner's folder
+            node_of = {"home": me.home, "starter": planner_sid,
+                       "store": relay.nodes(me.home).get(planner_sid) or me.home}
+
+            def started(found):
+                """Writes each new node's files and prints the call that starts it, and for a name that has a node
+                already, that its session was started; the entries written."""
+                new = [one for one in found if one.get("folder")]
+                coworker.write(new, checkout)
+                for one in found:
+                    if one.get("started"):
+                        print(f"phi: a session named `{one['name']}` was started already, from its node "
+                              f"{one['started']}, so nothing is written for it", file=sys.stderr)
+                return new
             if a.land:                             # a terminal worker for each group not landed
-                if not a.write:
-                    print("phi: `--land` needs `--write <folder>`, where each worker's start file, brief and report "
-                          "go", file=sys.stderr)
-                    return 2
                 if mode not in upkeep.NO_ASK:
                     print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so an "
                           "unattended tab would stop at its first question, and nothing is written: "
                           f"`{commands()} sections \"{plan}\"` prints a start for a session in a worktree of its "
                           "own", file=sys.stderr)
                     return 2
-                folder = os.path.abspath(a.write).replace("\\", "/")
                 try:
-                    found = coworker.land(plan, checkout, folder, who, mode)
+                    found = coworker.land(plan, checkout, who, mode, claim=True, **node_of)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
@@ -4882,15 +4892,10 @@ def main(argv=None):
                     print("phi: no section of that plan is left to land: each names no files or holds its "
                           "`Evidence:`", file=sys.stderr)
                     return 2
-                there = [one["name"] for one in found
-                         if os.path.exists(one["brief_file"]) or os.path.exists(one["report"])]
-                if there:
-                    print(f"phi: a worker for those sections was already started in {folder}: {', '.join(there)} "
-                          "has its brief or its report there, so nothing is written", file=sys.stderr)
+                new = started(found)
+                if not new:
                     return 2
-                coworker.write(folder, found)
-                coworker.note(me.home, planner_sid, found)
-                for one in found:
+                for one in new:
                     print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
                           f"{one['report']}")
                     print("`mcp__terminal__run_in_terminal` with " + json.dumps(
@@ -4910,24 +4915,23 @@ def main(argv=None):
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
-                how, waited = coworker.watch(names)
+                how, waited = coworker.watch(names, me.home, checkout)
                 print({"quiet": f"phi: no coworker wrote a line for {coworker.QUIET} seconds, after {waited} seconds",
                        "silent": f"phi: no coworker wrote a line in {waited} seconds, so the round did not begin: "
                                  "ask each coworker once for its list",
                        "long": f"phi: a coworker still writes after {waited} seconds, so the watch ends"}[how])
                 for name in names:
-                    if coworker.stopped(name):
+                    if coworker.stopped(name, me.home, checkout):
                         print(f"phi: an error of the API stopped `{name}`: send it one message to carry on with "
                               "its round from where it stopped")
                 for name in names:                 # a message held between two modes loses nothing
-                    said = coworker.last_list(name, who)
+                    said = coworker.last_list(name, who, me.home, checkout)
                     if said:
                         head, _, body = said.partition("\n")
                         print(f"phi: the last list `{name}` sent, at {head}:\n{body}")
                 return 0
             try:
-                found = coworker.drafts(plan, checkout, who, mode,
-                                        os.path.abspath(a.write).replace("\\", "/") if a.write else "<folder>")
+                found = coworker.drafts(plan, checkout, who, mode, claim=a.start, **node_of)
             except ValueError as e:
                 print(f"phi: {e}", file=sys.stderr)
                 return 2
@@ -4935,15 +4939,9 @@ def main(argv=None):
                 print("phi: no section of that plan names files on a `Files:` line, so it has no group to read",
                       file=sys.stderr)
                 return 2
-            if a.write:
-                there = [one["name"] for one in found if one["team"]
-                         and os.path.isdir(os.path.join(checkout, ".claude", "worktrees", one["name"]))]
-                if there:                          # worktrees.md: a name that is there is opened, with what it holds
-                    print(f"phi: a worktree named {', '.join(there)} is already in {checkout}/.claude/worktrees, so "
-                          "nothing is written: a plan's coworkers are started once", file=sys.stderr)
+            if a.start:
+                if not started(found) and any(one.get("started") for one in found):
                     return 2
-                coworker.write(os.path.abspath(a.write), found)
-                coworker.note(me.home, planner_sid, found)
                 if mode not in upkeep.NO_ASK:      # a mode that asks, or none the app's record names
                     print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so each "
                           "coworker may ask in its tab before an edit or a command: these coworkers only read, so "
@@ -4955,7 +4953,7 @@ def main(argv=None):
                           "which the planner starts")
                     continue
                 print(f"coworker `{one['name']}`: sections {nums}, {one['fences']} fences, a team of three")
-                if a.write:
+                if one.get("folder"):
                     print("`mcp__terminal__run_in_terminal` with " + json.dumps(
                         {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
             return 0

@@ -265,28 +265,20 @@ def transcript_of(s):
     return found[0] if found else ""
 
 
-def worktree_transcripts(who):
-    """The transcripts Claude Code keeps for the sessions of the worktree named `who`, as a coworker's is: it names
-    a session's folder under `projects` by the session's own folder with every character that is no letter or digit
-    turned to a hyphen, so a worktree `.claude/worktrees/<who>` ends in `-worktrees-<who>`. [] for a name that
-    could be no worktree's."""
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", str(who or "")):
-        return []
-    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    return sorted(glob.glob(os.path.join(base, "projects", f"*-worktrees-{who}", "*.jsonl")))
-
-
 def spend(home, who):
     """What a session and each agent under it spent, for `phi.py spend`: a row for the session itself, one for each
     transcript in the `subagents` folder beside its own, a teammate's or a subagent's by the `.meta.json` beside
     it, and a last row for all of them. `who` is a session id of the store, or a session's title, as the name a
-    terminal lead was started under is, where the newest session of that title is taken. [] for a session with no
-    transcript, and for no name at all."""
+    terminal lead was started under is, where the newest session of that title is taken, or a reading team's name,
+    whose transcript coworker.kept finds by its node. [] for a session with no transcript, and for no name at all."""
     held = relay._sessions(home) if who else {}
     s = held.get(who) or max((x for x in held.values() if x.get("title") == who),
                              key=lambda x: str(x.get("createdAt") or ""), default={})
     main = transcript_of(s)
-    mains = [main] if main else worktree_transcripts(who)
+    if not main:                                   # a reading team's lead, by the session id of its node
+        import coworker
+        main = (coworker.kept(who, home, "") or [""])[-1]
+    mains = [main] if main else []
     if not mains:
         return []
     rows = []

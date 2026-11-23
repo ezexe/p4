@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """coworker.py: a plan's groups of sections as the coworkers that read and land them, for `phi.py coworkers`.
 
-A coworker is a terminal session that leads an agent team for one group of a plan's sections, sections.groups, in a
-git worktree of its own, and lands that group there once ezexe approved the plan. The pages, read on 2026-11-23:
+A coworker is a terminal session that leads an agent team for one group of a plan's sections, sections.groups, and
+reads that group in the checkout; a terminal worker lands a group there once ezexe approved the plan. Each is a node:
+relay.claim makes it a store nested in its starter's, where its start file, settings file, brief and report are, and
+it runs in the checkout and reaches them by their whole paths. The pages, read on 2026-11-23:
 - agent-teams.md: "In non-interactive mode with the `-p` flag, including Agent SDK sessions, Claude doesn't spawn
   teammates", so the run is interactive, and a team is enabled by "setting the
   `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` environment variable to `1`", which the start file does in its own shell.
-- worktrees.md: `--worktree <name>` makes `.claude/worktrees/<name>/` "at your repository root, on a new branch
-  named `worktree-<name>`", branched "from the repository's default branch on the remote".
+- `claude --help`: `--session-id <uuid>`, "Use a specific session ID for the conversation", which finds a reading
+  team's transcripts.
 - cli-reference.md: `--settings` takes "Path to a settings JSON file or an inline JSON string".
 The settings file turns p4's three plugins off, as the terminal worker's turns off two, upkeep.WORKER_SETTINGS, so
-no hook of p4 runs in the coworker and none sets up a store in its worktree. The lead of the first read run this
-way, on 2026-11-23 with p4-phi and p4-temportal off, led three teammates in its worktree, where no `.claude` folder
-appeared.
+no hook of p4 runs in the coworker and none sets up a store. The lead of the first read run this way, on 2026-11-23
+with p4-phi and p4-temportal off, led three teammates, where no `.claude` folder appeared. Neither has `--add-dir`:
+for a folder Claude Code has not seen it asks whether the folder is trusted, and a `claude -p` in auto mode read and
+wrote a file of another folder's nested store by its whole path with none, on 2026-11-23.
 """
 
 import glob
@@ -21,18 +24,45 @@ import json
 import os
 import re
 import time
+import uuid
 
 import p4conf
 import plans
+import relay
 import sections
 import transcript
 import upkeep
 
 SETTINGS_FILE = "coworker-settings.json"
-SETTINGS = ('{"enabledPlugins": {' + ", ".join(f'"{n}@{p4conf.MARKET}": false'
-                                               for n in ("p4-phi", "p4-temportal")) + "}}")
 TEAMS = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 PLAIN = re.compile(r"[^\w .,:#/-]")               # a task line holds no quote of any kind and no shell character
+
+
+def settings(checkout):
+    """The settings file's text: p4-phi and p4-temportal off, and `claudeMdExcludes` naming, with forward slashes,
+    each CLAUDE.local.md in a folder above `checkout` that holds the line p4conf.LINE, the key left out where there
+    is none. Such a file's import resolves outside the checkout, and Claude Code then asks "Allow external CLAUDE.md
+    file imports?" and starts nothing; with the file excluded an interactive `claude` asked nothing, on 2026-11-23.
+    memory.md's "Exclude specific CLAUDE.md files" is the key; no setting approves the import, and the session has
+    the p4 plugins off, so it needs no store text."""
+    d = {"enabledPlugins": {f"{n}@{p4conf.MARKET}": False for n in ("p4-phi", "p4-temportal")}}
+    out, at = [], os.path.abspath(checkout)
+    while True:
+        up = os.path.dirname(at)
+        if up == at:
+            break
+        at = up
+        path = os.path.join(at, "CLAUDE.local.md")
+        try:
+            with open(path, encoding="utf-8") as f:
+                held = p4conf.LINE in [x.strip() for x in f.read().splitlines()]
+        except OSError:
+            continue
+        if held:
+            out.append(path.replace("\\", "/"))
+    if out:
+        d["claudeMdExcludes"] = out
+    return json.dumps(d)
 
 
 def plain(text):
@@ -70,13 +100,12 @@ def level():
 
 def task(path, group, who):
     """A coworker's task, one line with no quote and no shell character: the team, the sections, what each lens
-    judges, where the list goes and that it stays open."""
+    judges, where the list goes and that it stays open. The team reads in the checkout, with no worktree."""
     nums = ", ".join(s["n"] for s in group)
     part = f"section{'s' if len(group) > 1 else ''} {nums}"
     return (f"Form an agent team of three teammates named fences, sources and checks. Each teammate runs on the "
             f"model of this session and only reads files. All three read the Context and {part} of the plan file "
-            f"{plain(path)} and judge them against this folder, a git worktree of the checkout at its remote "
-            f"default branch. They open no file under the folders complete, todo or unplanned. The teammate fences "
+            f"{plain(path)} and judge them against this folder, the checkout. They open no file under the folders complete, todo or unplanned. The teammate fences "
             f"checks that each fenced edit applies to the file it names as that file stands here. The teammate "
             f"sources checks each Documented line and each Observed line against the source it names, a file and "
             f"line here or a live page, tries to show each Assumed line from the code or a page, and sends you each "
@@ -93,12 +122,13 @@ def task(path, group, who):
             f"teammate down, since later rounds and the word to land come by message from that session.")
 
 
-def script(name, checkout, mode, said, folder, windows=None, worktree=True, team=True, extra=()):
+def script(name, checkout, mode, said, folder, windows=None, worktree=True, team=True, extra=(), session=""):
     """A coworker's start script, as (its file's name, its lines, the line typed into the tab): what a desktop
-    session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout with a
-    worktree of the coworker's name and the settings file of `folder`. A terminal worker's has `worktree` and `team`
-    off and its `extra` flags, each a word spelled as the shell reads it, right after the name. A quote in the
-    prompt `said` is refused as one in a path is, since the prompt stands between quotes."""
+    session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout, with a
+    worktree of the coworker's name where `worktree` is on, and the settings file of `folder`. `session` adds
+    `--session-id <uuid>` right after the name. A terminal worker's has `worktree` and `team` off and its `extra`
+    flags, each a word spelled as the shell reads it, after those. A quote in the prompt `said` is refused as one in
+    a path is, since the prompt stands between quotes."""
     windows = upkeep.WINDOWS if windows is None else windows
     sep = "\\" if windows else "/"
     here, at = checkout.replace("\\", "/").replace("/", sep), folder.replace("\\", "/").replace("/", sep)
@@ -107,7 +137,8 @@ def script(name, checkout, mode, said, folder, windows=None, worktree=True, team
             raise ValueError(f"a start file's paths hold no quote: {path}")
     lv = level()
     flags = "".join(f" --{k} {lv[k]}" for k in ("model", "effort") if str(lv.get(k) or "inherit") != "inherit")
-    run = (f"claude --name {name}" + (f" --worktree {name}" if worktree else "") + "".join(f" {x}" for x in extra)
+    run = (f"claude --name {name}" + (f" --session-id {session}" if session else "")
+           + (f" --worktree {name}" if worktree else "") + "".join(f" {x}" for x in extra)
            + flags + (f" --permission-mode {mode}" if mode else "")
            + f" --settings '{at}{sep}{SETTINGS_FILE}' '{said}'")
     if windows:
@@ -120,10 +151,31 @@ def script(name, checkout, mode, said, folder, windows=None, worktree=True, team
                                  f"cd '{here}'", run], f"sh '{at}/start-{name}.sh'")
 
 
-def drafts(path, checkout, who, mode="", folder="<folder>", windows=None):
+def _quoted(*paths):
+    for path in paths:
+        if re.search(r"['\"`]", str(path)):
+            raise ValueError(f"a start file's paths hold no quote: {path}")
+
+
+def _node(home, store, name, kind, starter, nums, session=""):
+    """(the folder `<node>/phi` of a new node `name`, ""), or (None, its folder) where the name has a node already,
+    whose session was started once. Raises ValueError where no store could be made."""
+    have = relay.nodes(home).get(name)
+    if have:
+        return None, os.path.join(have, "phi").replace("\\", "/")
+    made = relay.claim(home, store, name, kind, starter, nums, session=session)
+    if not made:
+        raise ValueError(f"no store could be made for {name} under {store}: its path would be too long")
+    return os.path.join(made, "phi").replace("\\", "/"), ""
+
+
+def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=False, windows=None):
     """One entry for each group of the plan at `path`, in the plan's order: its sections, its fences and whether it
-    earns a team, and for a group that does, the coworker's name, its start file's name and lines, and the line
-    typed into its tab. `who` is the planner's title, where the lists go."""
+    earns a team, and for a group that does, the coworker's name. `who` is the planner's title, where the lists go.
+    With `claim`, each such group gets a node, relay.claim in the store `store` of its starter `starter`, and its
+    entry the node's folder, the session id, the start file's name and lines and the line typed into its tab; a
+    name that has a node already gets `started`, its node's folder, and nothing else. Without it nothing is made."""
+    _quoted(checkout)
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
     out = []
@@ -131,45 +183,40 @@ def drafts(path, checkout, who, mode="", folder="<folder>", windows=None):
         one = {"sections": [s["n"] for s in group], "fences": sections.fences(group), "team": sections.team(group)}
         if one["team"]:
             one["name"] = name_of(title, group, path)
-            one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, task(path, group, who),
-                                                             folder, windows)
+            if claim:
+                said = task(path, group, who)
+                folder, there = _node(home, store, one["name"], "reader", starter, one["sections"],
+                                      str(uuid.uuid4()))
+                if there:
+                    one["started"] = there
+                else:
+                    one["folder"] = folder
+                    one["session"] = str(relay.node_record(home, one["name"]).get("session") or "")
+                    one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, said, folder,
+                                                                     windows, worktree=False,
+                                                                     session=one["session"])
         out.append(one)
     return out
 
 
-def write(folder, found):
-    """The settings file, each coworker's or worker's start file and each worker's brief, written into `folder`, which
-    is made where it is not there. The paths written."""
-    os.makedirs(folder, exist_ok=True)
-    files = {SETTINGS_FILE: SETTINGS}
+def write(found, checkout):
+    """The settings file, settings(checkout), each coworker's or worker's start file and each worker's brief,
+    written into the node folder of each entry that has one. The paths written."""
+    text, wrote = settings(checkout), []
     for one in found:
+        if not one.get("folder"):
+            continue
+        files = {SETTINGS_FILE: text}
         if one.get("file"):
             files[one["file"]] = "\n".join(one["lines"])
         if one.get("brief"):
             files[os.path.basename(one["brief_file"])] = one["brief"]
-    for name, text in files.items():
-        with open(os.path.join(folder, name), "w", encoding="utf-8", newline="\n") as f:
-            f.write(text + "\n")
-    return [os.path.join(folder, name).replace("\\", "/") for name in files]
-
-
-def note(home, sid, entries):
-    """One entry for each start file written, {name, kind: "reader" | "worker", sections, report, time}, added to
-    <home>/phi/sessions/<sid>/terminals.json, a list, which node.leaves reads; `report` is "" for a reading team.
-    A name that is already there is replaced. Nothing is written for a session with no id."""
-    sid = re.sub(r"[^A-Za-z0-9_.-]", "_", str(sid or ""))[:80]
-    if not sid:
-        return []
-    path = os.path.join(home, "phi", "sessions", sid, "terminals.json")
-    held, _ = p4conf.load_json(path)
-    held = held if isinstance(held, list) else []
-    made = [{"name": one["name"], "kind": "worker" if one.get("report") else "reader",
-             "sections": list(one.get("sections") or []), "report": one.get("report") or "",
-             "time": time.strftime("%Y-%m-%d %H:%M")} for one in entries if one.get("name")]
-    mine = {m["name"] for m in made}
-    rows = [r for r in held if isinstance(r, dict) and r.get("name") not in mine] + made
-    p4conf.write_whole(path, json.dumps(rows, ensure_ascii=False, indent=1) + "\n")
-    return made
+        os.makedirs(one["folder"], exist_ok=True)
+        for name, body in files.items():
+            with open(os.path.join(one["folder"], name), "w", encoding="utf-8", newline="\n") as f:
+                f.write(body + "\n")
+            wrote.append(os.path.join(one["folder"], name).replace("\\", "/"))
+    return wrote
 
 
 QUIET = 90                       # seconds with no line written by a coworker or an agent under it
@@ -177,19 +224,23 @@ FIRST = 300                      # the most a watch waits for a round's first li
 LONGEST = 3600                   # the most one watch waits, in seconds
 
 
-def kept(name, deep=False):
+def kept(name, home, checkout, deep=False):
     """The transcripts Claude Code keeps for the coworker `name`, its own and with `deep` those of the agents under
-    it: the files of the folder under `projects` that ends in `-worktrees-<name>`, as a worktree of that name is
-    kept. [] for a name that could be no worktree's."""
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", str(name or "")):
+    it, by the session id of its node.json: `<session>.jsonl` and the files under the folder `<session>`, in the
+    folder of `projects` Claude Code names after the checkout, with each character that is no letter or digit as
+    "-", or in any folder of `projects` where `checkout` is "". [] where the name has no node or no session id."""
+    session = str(relay.node_record(home, name).get("session") or "") if home else ""
+    if not re.fullmatch(r"[A-Za-z0-9-]+", session):
         return []
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
-    folder = os.path.join(base, "projects", f"*-worktrees-{name}")
-    return sorted(glob.glob(os.path.join(folder, "**", "*.jsonl"), recursive=True) if deep
-                  else glob.glob(os.path.join(folder, "*.jsonl")))
+    folder = os.path.join(base, "projects", re.sub(r"[^A-Za-z0-9]", "-", checkout) if checkout else "*")
+    found = glob.glob(os.path.join(folder, session + ".jsonl"))
+    if deep:
+        found += glob.glob(os.path.join(folder, session, "**", "*.jsonl"), recursive=True)
+    return sorted(found)
 
 
-def watch(names, quiet=QUIET, longest=LONGEST, first=FIRST, clock=time.time, sleep=time.sleep):
+def watch(names, home, checkout, quiet=QUIET, longest=LONGEST, first=FIRST, clock=time.time, sleep=time.sleep):
     """A round's wait, as (how it ended, the seconds waited). `quiet`: a coworker of `names`, or an agent under one,
     wrote a line of its transcript after the watch began, and then none did for `quiet` seconds. `silent`: none
     wrote a line in the first `first` seconds, as where the round's message did not arrive or a name is no
@@ -198,7 +249,8 @@ def watch(names, quiet=QUIET, longest=LONGEST, first=FIRST, clock=time.time, sle
     idle notice from each coworker."""
     start = clock()
     while clock() - start < longest:
-        last = max((os.path.getmtime(p) for name in names for p in kept(name, deep=True)), default=0.0)
+        last = max((os.path.getmtime(p) for name in names for p in kept(name, home, checkout, deep=True)),
+                   default=0.0)
         now = clock()
         if last < start and now - start >= first:
             return "silent", int(now - start)
@@ -208,10 +260,10 @@ def watch(names, quiet=QUIET, longest=LONGEST, first=FIRST, clock=time.time, sle
     return "long", int(clock() - start)
 
 
-def stopped(name):
+def stopped(name, home, checkout):
     """True where an error of the API ended the last turn of the coworker `name`: the last row of type `assistant`
     in its newest transcript is marked `isApiErrorMessage`, as Claude Code marks `API Error: 529 Overloaded`."""
-    mains = sorted(kept(name), key=os.path.getmtime)
+    mains = sorted(kept(name, home, checkout), key=os.path.getmtime)
     rows = [r for r in transcript.read_lines(mains[-1]) if r.get("type") == "assistant"] if mains else []
     return bool(rows) and bool(rows[-1].get("isApiErrorMessage"))
 
@@ -222,24 +274,31 @@ AGENT_ID = re.compile(r"a[0-9a-f]{6,}(?:-[0-9a-z]+)*|local_[0-9a-f-]+")
 TURNS = 60                                     # the goal page: a goal with no turn or time clause has no cap
 
 
-def land(path, checkout, folder, who, mode, windows=None):
+def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None):
     """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
-    that lands it, started once ezexe approved the plan. `name`, `sections`, the `brief` text and its file, the
-    `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in its tab.
-    The worker has no worktree, no team and no p4 plugin: its goal is its prompt, since no hooks module sets one."""
+    that lands it, started once ezexe approved the plan. `name` and `sections`, and with `claim` the node relay.claim
+    makes for it in the store `store` of its starter `starter`, and in the node's folder the `brief` text and its
+    file, the `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in
+    its tab; a name that has a node already gets `started`, its node's folder, and nothing else. The worker has no
+    worktree, no team, no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one."""
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
-    # A folder written with a drive letter is whole on every machine, where os.path.abspath takes it as whole only
-    # on Windows and puts the working directory before it elsewhere.
-    folder = (folder if re.match(r"^(?:[A-Za-z]:[\\/]|/)", folder) else os.path.abspath(folder)).replace("\\", "/")
+    _quoted(plan, checkout)
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
-    sep = "\\" if windows else "/"
     out = []
     for group in sections.groups(found):
         nums = [s["n"] for s in group]
-        name = worker_name(path, nums)
+        one = {"name": worker_name(path, nums), "sections": nums}
+        out.append(one)
+        if not claim:
+            continue
+        name = one["name"]
+        folder, there = _node(home, store, name, "worker", starter, nums)
+        if there:
+            one["started"] = there
+            continue
         brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
         where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
                  "Commit only with this command, one commit for each section, naming every path the section "
@@ -252,33 +311,37 @@ def land(path, checkout, folder, who, mode, windows=None):
                 f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
                 f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
                 "with what is done and what is not.")
-        at = folder.replace("/", sep)
-        file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False,
-                                    extra=(f"--add-dir='{at}'",))
-        out.append({"name": name, "sections": nums, "brief": sections.brief(plan, title, group, checkout, where),
-                    "brief_file": brief_file, "report": report, "goal": goal, "file": file, "lines": lines,
-                    "typed": typed})
+        file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False)
+        one.update(folder=folder, brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
+                   report=report, goal=goal, file=file, lines=lines, typed=typed)
     return out
 
 
 def wait_report(report, longest=LONGEST, clock=time.time, sleep=time.sleep):
-    """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there,
-    `long` after `longest` seconds. It reads no transcript, since the worker has no worktree to find one by."""
-    start = clock()
+    """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there
+    and was written after the wait began, so a second report of one worker is waited for; `long` after `longest`
+    seconds. It reads no transcript."""
+    began, start = time.time(), clock()
+
+    def written():
+        try:
+            return os.path.getmtime(report) >= began - 1      # a file system's times can be a second coarse
+        except OSError:
+            return False
     while clock() - start < longest:
-        if os.path.isfile(report):
+        if written():
             return "done", int(clock() - start)
         sleep(10)
-    return ("done" if os.path.isfile(report) else "long"), int(clock() - start)
+    return ("done" if written() else "long"), int(clock() - start)
 
 
-def last_list(name, who):
+def last_list(name, who, home, checkout):
     """The last list the reading team `name` sent, read from the newest transcript `kept` finds for it: the `message`
     of the lead's last tool call whose name ends `SendMessage` and whose `to` is `who`, the title of the session that
     holds the plan; where no call names `who`, since the lead may send under the nearest name ListAgents shows, the
     last such call whose `to` is none of the teammates and no agent's id. The row's time and the `to`, on one line,
     then the message whole; "" where there is none."""
-    mains = sorted(kept(name), key=os.path.getmtime)
+    mains = sorted(kept(name, home, checkout), key=os.path.getmtime)
     sent = []
     for row in transcript.read_lines(mains[-1]) if mains else []:
         content = (row.get("message") or {}).get("content") if row.get("type") == "assistant" else None
