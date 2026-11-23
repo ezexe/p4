@@ -67,7 +67,7 @@ The evidence links below are written from `plan-planner/`, where `../../../../` 
 
 A plan is looped until it holds the whole development, and nothing is built before that.
 
-- **A round takes each section in turn:** it researches the section first, in both places every time, the checkout and the upstream pages read live on the web, and then writes what it found into that section as its intents, its fences and each fence's Documented and Derivation.
+- **A round takes each section in turn:** it researches the section first, in both places every time, the checkout and the upstream pages read live on the web, and then writes what it found into that section as its intents, its Research, its fences and each fence's Documented and Derivation.
 - **The web research is an agent's own step:** each round sends a research agent to the upstream pages for the section's subject, read live, beside the read of the checkout, and a section whose subject has an upstream page holds a Documented from that page, never from the checkout's docs alone.
 - **Where the two speak of the same thing, the upstream page wins:** it holds the latest recommended approach, so the fence follows it, and the section gains a fence that brings the checkout's doc in step with it.
 - **The checkout's docs say only what is this code's own:** a fence that writes a doc restates nothing an upstream page says, writes what the code does and why, and links the upstream page as `See more: <url>` where the subject is upstream's.
@@ -93,6 +93,7 @@ A plan is looped until it holds the whole development, and nothing is built befo
 ## What every section of a plan holds
 
 - **Intents:** the section opens by listing what it means to change, one line each.
+- **Research:** after the intents and before any fence, the references the round's research found for each intent and what each recommends, one line each: the upstream page read live on the web with its link, then the file and line in the checkout, and the recommendation learned from them.
 - **Fences:** every edit is a fenced code block, and above it, its intent:
   - **Documented:** the source in detail: the upstream page or file and line, read live or in the checkout, quoted where a quote fits.
   - **Derivation:** in prose, how the approach follows from that source, and why this approach rather than another.

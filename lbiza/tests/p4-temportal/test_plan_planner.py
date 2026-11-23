@@ -28,11 +28,13 @@ import lifetime  # noqa: E402
 
 DAY = 86400
 
-# The source skill's section rules, word for word, with ezexe where it says the boss, and with the evidence rule's
-# last sentence holding back only a section that depends on the one implemented, since runs land side by side.
+# The source skill's section rules, word for word, with ezexe where it says the boss, with the evidence rule's
+# last sentence holding back only a section that depends on the one implemented, since runs land side by side, and
+# with the Research rule, which is this skill's own.
 SECTION = """## What every section of a plan holds
 
 - **Intents:** the section opens by listing what it means to change, one line each.
+- **Research:** after the intents and before any fence, the references the round's research found for each intent and what each recommends, one line each: the upstream page read live on the web with its link, then the file and line in the checkout, and the recommendation learned from them.
 - **Fences:** every edit is a fenced code block, and above it, its intent:
   - **Documented:** the source in detail: the upstream page or file and line, read live or in the checkout, quoted where a quote fits.
   - **Derivation:** in prose, how the approach follows from that source, and why this approach rather than another.
