@@ -174,7 +174,7 @@ class Plan(Store):
         self.assertEqual(got["sections"], [{"head": "Context", "lands": False, "done": False},
                                            {"head": "1. The writer", "lands": True, "done": True},
                                            {"head": "2. The flush", "lands": True, "done": False}])
-        self.assertEqual(got["loop"], {"round": 2, "of": 4, "held": 1, "state": "", "ended": False,
+        self.assertEqual(got["loop"], {"round": 2, "of": 2, "held": 1, "state": "", "ended": False,
                                        "last": "1 held, 4 minutes: one check was narrowed."})
 
     def test_a_worker_reads_the_plan_its_brief_names_and_a_plan_that_is_gone_reads_as_none(self):
