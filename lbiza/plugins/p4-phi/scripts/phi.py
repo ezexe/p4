@@ -1342,8 +1342,13 @@ BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task,
             "`AskUserQuestion`, or in the reply of a session that has neither tool: permissions or security "
             "settings, credentials, spending, and actions that cannot be "
             "undone or publish outward, but for the push of green issue-closing commits, which p4-phi orders at "
-            "once. A child asks its parent "
-            "session with SendMessage, and never ends its turn waiting on a question the session tree can settle. "
+            "once. A step only a turn of ezexe's can make is that one question with its button, never a sentence "
+            "about ezexe's next message. ezexe is asked to type no command this session can run, and a setting "
+            "ezexe settled is written into its file in that turn and read back, by `phi.py conf` for a key of "
+            "p4.json. A started session's turn note goes on to ezexe only where ezexe must act on it or it changes "
+            "what ezexe knows, and a message goes to a session only for what that session needs. A child asks its "
+            "parent session with SendMessage, and never ends its turn waiting on a question the session tree can "
+            "settle. "
             "Where the project's rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is "
             "ezexe's to give, by a button: wait for it on those steps, and act on the rest.")
 ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project

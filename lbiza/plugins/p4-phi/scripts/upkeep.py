@@ -946,6 +946,10 @@ def whole():
             f"no force and deletes its landed branch.")
 
 
+TELL = (" Where a live session waits on this act, send it the tool's answer as it stands, by SendMessage, in this "
+        "turn.")
+
+
 # A session that made no commit has nothing to land, so "every commit of it on the default branch" holds for it
 # with no work behind the words, and "finished" is read off its task list alone. A probe is such a session: it waits
 # for its next step from whoever drives it, and that need not be its starter. On 2026-11-19 the archive of a probe
@@ -1036,8 +1040,9 @@ def archive_acts(home, s, d, hand):
                         f"land first: {name} is finished and its work is not landed: {'; '.join(why)}. An "
                         f"uncommitted change is its own to commit, so ask it by `SendMessage` to `{k}`. A commit "
                         f"that is not on the default branch is landed as the push line says: its branch merged into "
-                        f"the default branch, {run}. It is "
-                        f"archived at the turn after."))
+                        f"the default branch, {run}. Before the push, read each live worker's branch with `git "
+                        f"log`: a message of a worker reaches this session only when this turn ends, and a new "
+                        f"commit is the one sign of it. It is archived at the turn after."))
             continue
         key = f"archive:{k}"
         n = int(d["tried"].get(key) or 0)
@@ -1055,7 +1060,7 @@ def archive_acts(home, s, d, hand):
         out.append((key, "archive", True,
                     f"archive: {name} is finished and landed: no open step, no background task, its last report "
                     f"handed, and every commit of it on its repository's default branch on the remote. Call "
-                    f"`{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and landed\" now.{card}{after}"
+                    f"`{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and landed\" now.{card}{after}{TELL}"
                     f"{last}"))
     return out
 
