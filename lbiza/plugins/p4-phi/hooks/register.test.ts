@@ -2551,7 +2551,24 @@ test('the tree is lines: a session, its goal, its steps with a bar, and its plan
   ])
   // A loop that has ended is drawn as a bar, whose text says how it ended.
   const ended = (state: string, held: number) =>
-    treeLines([{ ...NODES[1], plan: { ...NODES[1].plan, loop: { round: 2, of: 2, held, last: '', state, ended: true } } }])
+    treeLines([
+      {
+        sessionId: 'local_kid00002',
+        depth: 1,
+        title: 'Plan the read',
+        working: false,
+        done: false,
+        goal: null,
+        current: '',
+        steps: [],
+        plan: {
+          path: '/work/plan.md',
+          title: 'A plan',
+          sections: [],
+          loop: { round: 2, of: 2, held, last: '', state, ended: true },
+        },
+      },
+    ])
   expect(ended('clean', 0)).toContainEqual({ kind: 'bar', label: '  loop', value: 2, max: 2, text: 'round 2, clean' })
   expect(ended('stopped', 4)).toContainEqual({
     kind: 'bar', label: '  loop', value: 2, max: 2, text: 'round 2, 4 held, stopped',
