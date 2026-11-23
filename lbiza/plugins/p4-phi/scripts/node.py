@@ -171,7 +171,7 @@ def record(home, sid, sessions):
     fileSet."""
     s = sessions.get(sid) or {}
     address, places = place_of(home, _store(home, sid))
-    paths = s.get("shard") or s.get("fileSet") or []
+    paths = relay.paths_of(s)
     title = s.get("title") or " ".join(str(s.get("task") or "").split())[:60] or str(sid)[:14]
     return {"id": sid, "title": title, "level": level(s, sessions) if s else "",
             "parent": "" if top(s, sessions) else _parent(s), "address": address, "places": places,

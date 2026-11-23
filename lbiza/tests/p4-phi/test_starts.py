@@ -5,9 +5,8 @@ the app's suggested task card cannot hold, run through phi.py's hooks.
     python -m pytest tests/p4-phi/test_starts.py
 
 The tree: two orchestrators and a child of the first. Every session works in the one checkout, on the paths of its
-`Files:` line; section 2 of the plan is what refuses and holds a start for those paths, so today no start is refused
-for the files its brief names, none is held while a live session covers one of them, none is
-queued behind a busy writer, and no command narrows or releases what a session covers. A start the child may not
+`Files:` line. A start is refused where a writer's brief names none or names a path a running session that is not above
+the starter holds; none is queued behind a busy writer, and no command narrows or releases what a session covers. A start the child may not
 make is the app's suggested task card, desktop.md, "Start a task that Claude suggests", so `phi.py request` keeps
 only a request to a puppeteer. A brief's `Files:` line is read as what the session covers, a withdrawn request is
 handed to no session, and a request is dropped after a day.
@@ -121,36 +120,44 @@ class StartRequests(unittest.TestCase):
         out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
         return out.get("permissionDecision", ""), out.get("permissionDecisionReason", "")
 
-    def test_no_start_is_refused_for_a_brief_that_names_no_files(self):
-        """The refusal of a start whose brief declares no write set is gone, with its key phi.file_sets, and a brief
-        with no `Files:` line starts today. # section 2: the start refusal of the plan's fence 2.2 comes back for a
-        writer's brief with no `Files:` line, so the first and third calls below, which name none, are what section 2
-        turns to a refusal; the `Files: none` and reader cases stay as they are."""
+    def test_a_writers_start_with_no_files_line_is_refused_and_a_readers_is_not(self):
+        """A writer's brief with no `Files:` line is refused, with no key to switch it off; a reader's brief and one
+        that says `Files: none` start."""
         t = self.t
-        # a reader's brief and one that says `Files: none` start, as they will after section 2
+        # a reader's brief and one that says `Files: none` start
         self.assertEqual(self.start(TOP, "Check what the exporter's flush does and report it.\nFiles: none"), ("", ""))
-        # section 2: a writer's brief with no `Files:` line is refused here, and in the retired-key case below
-        self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""))
+        # a writer's brief with no `Files:` line is refused here, and in the retired-key case below
+        self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done.")[0], "deny")
         self.assertEqual(self.start(TOP, "Port the exporter's flush. Report when done.\nFiles: src/flush.py"),
                          ("", ""))
         import p4conf
         self.assertNotIn("file_sets", p4conf.DEFAULTS["phi"])
         with open(os.path.join(t.p4, "p4.json"), "w", encoding="utf-8") as f:
             json.dump({"phi": {"file_sets": True}}, f)
-        self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done."), ("", ""),
+        self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done.")[0], "deny",
                          "the retired key switches nothing")
         import plans
         self.assertIn("`use_worktree: false`", plans.CARD_EACH)
 
-    def test_no_start_is_held_while_a_live_session_covers_its_files(self):
-        """The held start is gone, with starts.held_by, starts.writers and starts.files_overlap: a start whose brief
-        names a file a live writer covers goes through today. # section 2: the partition of fence 2 turns the two
-        starts below to a refusal for a path another live session covers."""
+    def test_a_start_whose_files_a_live_writer_covers_is_denied_with_its_id_until_the_writer_is_archived(self):
+        """The start is refused, with the writer's id in its reason, for the same orchestrator's start and for
+        another's, and goes through once the writer is archived. The held start and its helpers, starts.held_by,
+        starts.writers and starts.files_overlap, are gone."""
         w = self.writer()
         self.assertEqual(self.t.session(w)["fileSet"], [relay.norm("src/flush.py", self.t.proj)])
-        # section 2: both of these are refused once a start's paths are partitioned
-        self.assertEqual(self.start(TOP, BRIEF), ("", ""), "a live writer of src/flush.py holds no start")
-        self.assertEqual(self.start(TOP2, BRIEF), ("", ""), "nor another orchestrator's")
+        for host in (TOP, TOP2):
+            decision, reason = self.start(host, BRIEF)
+            self.assertEqual(decision, "deny", host)
+            self.assertIn(w, reason, "a live writer of src/flush.py holds the path")
+        path = os.path.join(self.t.dir(w), "session.json")
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+        s["archived"] = True
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(s, f)
+        relay.forget(self.t.p4)
+        self.assertEqual(self.start(TOP, BRIEF)[0], "")
+        self.assertEqual(self.start(TOP2, BRIEF)[0], "")
         with open(phi.__file__, encoding="utf-8") as f:
             self.assertNotIn("this start is held", f.read())
 

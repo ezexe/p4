@@ -2753,6 +2753,8 @@ def h_user_prompt_submit(payload):
         if declared is not None:                   # the files its brief says it covers, kept and shown on its page
             s["fileSet"] = declared
             RAN["files"] = len(declared)
+            save_session(me.home, s)
+            relay.mark_paths(me.home, me.store or me.home)
     if "pushes" not in s and spawned_from(s) and not load_turns(me.home, s["sessionId"]):
         s["pushes"] = cards.brief_pushes(payload.get("prompt"))   # its brief, whole: the branch guard reads it
         RAN["pushes"] = s["pushes"]
@@ -2949,6 +2951,7 @@ def h_stop(payload):
     if not me.home or not me.id:
         return None
     configure(me.home)
+    relay.mark_paths(me.home, me.store or me.home)
     if isinstance(payload.get("background_tasks"), list):   # hooks.md, Stop input: kept before any return
         kept = ensure_session(me.home, me.id, me.rec, me.cli)
         if plans.keep_in_flight(kept, payload):
@@ -3125,6 +3128,7 @@ def h_turn_end(payload):
         return None
     RAN.update(home=me.home, session=me.id, cli=me.cli, event=clean(payload.get("hook_event_name")),
                ended=clean(payload.get("error") or payload.get("reason"))[:40])
+    relay.mark_paths(me.home, me.store or me.home)
     return None
 
 
@@ -3731,6 +3735,29 @@ def h_start_advice(payload):
     if starts.claim(me.home, inp.get("prompt"), me.id, card=card):
         RAN["claimed"] = "card" if card else True   # a start request's call, given exactly: the asker decided it
         return None
+    base = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
+    here = str(inp.get("target") or "local") == "local" and not any(inp.get(k) for k in relay.ELSEWHERE)
+    brief = str(inp.get("prompt") or "")
+    if brief and here and not NEW_TOP.search(brief) and starts.writes(brief, base):
+        files = starts.files_of(brief, base)
+        if not files:
+            RAN["partition"] = "no files"
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": (
+                                               "phi (p4-phi): this start is refused: its brief changes files and "
+                                               "names none. Give it a line `Files: <path>, <path>` with the paths or "
+                                               "globs it alone may change, since every session works in the one "
+                                               "checkout and is held to its paths.")}}
+        ups = set(relay.above(me.home, me.id)) | {me.id}
+        held = [h for h in relay.holders(me.home, "", files, base) if h[0] not in ups]
+        if held:
+            oid, title, theirs, _ = held[0]
+            RAN["partition"] = oid
+            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                           "permissionDecisionReason": (
+                                               f"phi (p4-phi): this start is refused: `{theirs}` is held by "
+                                               f"\"{title}\" `{oid}`, which is still running. Narrow the `Files:` "
+                                               f"line, or start this once that session has ended.")}}
     mine = load_session(me.home, me.id)
     parent, on = spawned_from(mine), cards_on(me)
     if on and parent:                               # the step before a start: nothing left for its session to ask
@@ -3740,7 +3767,6 @@ def h_start_advice(payload):
             RAN["before_start"] = True
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": why}}
-    brief = str(inp.get("prompt") or "")
     if brief and NEW_TOP.search(brief):
         mine = load_session(me.home, me.id)
         if not spawned_from(mine) and controls.ask_text(mine) and controls.puppeteer_of(mine, me.store)[0]:
@@ -3918,6 +3944,98 @@ def h_branch_guard(payload):
     RAN["branch_guard"] = what
     return cards.raised(on, parent, f"phi (p4-phi): this session is a child, and {what} is asked first: this "
                                     f"session works in the checkout of the session that started it.")
+
+
+def _deny(why, key):
+    RAN["path_guard"] = key
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                   "permissionDecisionReason": why}}
+
+
+def h_path_guard(payload):
+    """PreToolUse on Edit, Write and NotebookEdit: an edit outside the paths a started session holds is refused
+    before it runs, as is an edit in a repository where a session this one started holds paths and still runs, and
+    one on a path another running session holds. hooks.md, "PreToolUse decision control": `deny` prevents the tool
+    call. A path under `.claude/` and a file in no git repository are let through."""
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    raw = inp.get("notebook_path") if str(payload.get("tool_name") or "") == "NotebookEdit" else inp.get("file_path")
+    if not raw:
+        return None
+    cwd = relay.norm(str(payload.get("cwd") or s.get("cwd") or ""))
+    file = relay.norm(str(raw), cwd)
+    repo = relay.repo_of(file) if file else ""
+    if not repo or file[len(repo):].lstrip("/").startswith(".claude/"):
+        return None
+    for kid, k in relay.running_children(me.home, me.id):
+        theirs = [relay.norm(p, k.get("cwd") or cwd) for p in relay.paths_of(k)]
+        if any(t and relay.repo_of(t) == repo for t in theirs):
+            return _deny(f"phi (p4-phi): this edit is refused: \"{k.get('title') or kid}\" `{kid}`, which this "
+                         f"session started, is still running in this checkout and holds {', '.join(theirs)}. A "
+                         f"session edits nothing here while a session it started works. Send it the change by "
+                         f"SendMessage, or make it once it has ended.", "child")
+    mine = relay.paths_of(s)
+    if spawned_from(s) and mine and not any(relay.overlap(file, relay.norm(m, cwd)) for m in mine):
+        return _deny(f"phi (p4-phi): this edit is refused: {file} is outside this session's paths, "
+                     f"{', '.join(mine)}. Ask the session that started it, {spawned_from(s)}, by SendMessage: it "
+                     f"holds the path or gives it.", "outside")
+    held = relay.holders(me.home, me.id, [file], cwd)
+    if held:
+        oid, title, _, _ = held[0]
+        return _deny(f"phi (p4-phi): this edit is refused: {file} is held by \"{title}\" `{oid}`, which is still "
+                     f"running.", "held")
+    return None
+
+
+def _commit_paths_of(cmd):
+    """The paths a `phi.py commit` line names after its `--`: that command changes no file."""
+    if not re.search(r"phi\.py\b.*\bcommit\b", cmd) or " -- " not in cmd:
+        return []
+    return [x.strip("'\"") for x in cmd.split(" -- ", 1)[1].split("&&")[0].split()]
+
+
+def h_path_seen(payload):
+    """PostToolUse on a shell call: the paths Claude Code listed as changed by it, `tool_response.bashEditDiff.
+    changedFiles`, absolute, which lie outside the paths a started session holds, are named to it beside the result.
+    hooks.md: the list is best effort, to find what to review and no policy to enforce, so it is said and not
+    enforced. A PowerShell call has no such field, and a path under `.claude/` or one a `phi.py commit` line names is
+    left out."""
+    resp = payload.get("tool_response")
+    diff = resp.get("bashEditDiff") if isinstance(resp, dict) else None
+    changed = diff.get("changedFiles") if isinstance(diff, dict) else None
+    if not isinstance(changed, list) or not changed:
+        return None
+    me = Me(payload)
+    if not me.home or not me.id:
+        return None
+    s = load_session(me.home, me.id)
+    mine = relay.paths_of(s)
+    if not spawned_from(s) or not mine:
+        return None
+    cwd = relay.norm(str(payload.get("cwd") or s.get("cwd") or ""))
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    named = {relay.norm(p, cwd) for p in _commit_paths_of(str(inp.get("command") or ""))}
+    top = relay.repo_of(cwd) if cwd else ""
+    stray = []
+    for f in changed:
+        n = relay.norm(str(f))
+        if not n or n in named or any(relay.overlap(n, relay.norm(m, cwd)) for m in mine):
+            continue
+        if (n[len(top):] if top and n.startswith(top + "/") else n).lstrip("/").startswith(".claude/"):
+            continue
+        stray.append(n)
+    if not stray:
+        return None
+    RAN["path_seen"] = len(stray)
+    shown = ", ".join(stray[:12]) + (f" and {len(stray) - 12} more" if len(stray) > 12 else "")
+    return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": (
+        f"phi (p4-phi): that command changed {shown}, outside this session's paths, {', '.join(mine)}. Put each "
+        f"back unless a session beside this one changed it at the same moment: `git restore -- <path>` for a file "
+        f"git tracks, and delete one that is new. `phi.py commit` takes none of them. A file the job must change "
+        f"beyond its paths is asked of {spawned_from(s)} by SendMessage.")}}
 
 
 STORE_MOVE = re.compile(r"(?:^|&&|\|\||;|\||\n)\s*git\b([^\n|;&]*?)\b(push|pull)(?![\w-])([^\n|;&]*)")
@@ -4353,6 +4471,8 @@ HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
+HOOKS["path-guard"] = ROUTED["path-guard"] = ("PreToolUse", h_path_guard)
+HOOKS["path-seen"] = ROUTED["path-seen"] = ("PostToolUse", h_path_seen)
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 HOOKS["force-guard"] = ROUTED["force-guard"] = ("PreToolUse", h_force_guard)
 HOOKS["issue-tie"] = ROUTED["issue-tie"] = ("PostToolUse", h_issue_tie)
@@ -4582,7 +4702,21 @@ def commit_main(argv):
     ap.add_argument("--checkout", default="")
     ap.add_argument("paths", nargs="*")
     a = ap.parse_args(argv)
-    status, lines = commit_paths(os.path.abspath(a.checkout or os.getcwd()), a.message, a.paths)
+    checkout = os.path.abspath(a.checkout or os.getcwd())
+    if os.environ.get("CLAUDE_CODE_HOST_SESSION_ID") and a.paths:
+        try:
+            me = Me()
+            rec = load_session(me.home, me.id) if me.home and me.id else {}
+            mine = relay.paths_of(rec) if spawned_from(rec) else []
+        except Exception:  # noqa: BLE001
+            mine = []
+        for p in a.paths if mine else ():
+            n = relay.norm(p, relay.norm(checkout))
+            if not any(relay.overlap(n, relay.norm(m, relay.norm(checkout))) for m in mine):
+                print(f"phi: {p} is outside this session's paths, {', '.join(mine)}: nothing is committed",
+                      file=sys.stderr)
+                return 2
+    status, lines = commit_paths(checkout, a.message, a.paths)
     for line in lines:
         print(line, file=sys.stderr if status else sys.stdout)
     return status
@@ -4988,7 +5122,12 @@ def main(argv=None):
             if not a.paths:
                 print("\n".join(relay.shard_of(s)) or "this session declared no owned paths")
                 return 0
-            relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
+            try:
+                relay.set_shard(me.home, s["sessionId"], a.paths, os.getcwd())
+            except ValueError as e:
+                print(f"phi: {e}", file=sys.stderr)
+                return 2
+            relay.mark_paths(me.home, me.store or me.home)
             print("kept as this session's owned paths: "
                   + ", ".join(relay.shard_of(load_session(me.home, s["sessionId"]))))
             return 0

@@ -1052,17 +1052,20 @@ class ThreeSessions(unittest.TestCase):
         with mock.patch.dict(os.environ, self.t.env(host)), mock.patch.dict(phi.RECORDS, clear=True):
             return [e["id"] for e, _ in book.holders(self.t.p4, self.t.session(host), text)]
 
-    def test_owned_paths_are_kept_for_the_address_book_and_no_sibling_is_told_of_an_overlap(self):
-        """`phi.py shard` keeps a session's owned paths, which the address book lists and routes by. The warning to
-        both sides of an overlap is gone: two sessions' owned paths lie in two worktrees and name different files."""
+    def test_owned_paths_are_kept_for_the_address_book_and_a_path_a_running_sibling_holds_is_refused(self):
+        """`phi.py shard` keeps a session's owned paths, which the address book lists and routes by, and refuses a
+        path a running sibling holds, with the return value 2; no sibling is told of an overlap."""
         t = self.t
         r = t.cli(A, "shard", self.x("lib"))
         self.assertIn("kept as this session's owned paths", r.stdout)
         r = t.cli(B, "shard", self.x("lib", "x.py"), self.x("docs"))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("is held by", r.stderr)
+        r = t.cli(B, "shard", self.x("docs"))
         self.assertIn("kept as this session's owned paths", r.stdout)
         self.assertNotIn("overlap", r.stdout)
         self.assertNotIn("overlap", context(t.say(A, "next")), "the sibling is told nothing")
-        self.assertEqual(relay.shard_of(t.session(B)), [relay.norm(self.x("lib", "x.py")), relay.norm(self.x("docs"))])
+        self.assertEqual(relay.shard_of(t.session(B)), [relay.norm(self.x("docs"))])
         anchor = json.load(open(relay.anchor_path(t.p4, TOP), encoding="utf-8"))
         self.assertEqual(anchor["nodes"][A]["shard"], [relay.norm(self.x("lib"))], "the anchor still holds them")
         self.assertIsNone(relay.set_shard(t.p4, A, [self.x("lib")], t.proj))
@@ -2071,6 +2074,98 @@ class Nodes(unittest.TestCase):
                 elif x.startswith("!phi/"):
                     self.assertEqual(lines[k + 1], "!.claude/**/" + x[1:])
         self.assertEqual(relay.ATTRS[2:], (".claude/**/phi/** filter=p4path", ".claude/**/phi/archive/** -filter"))
+
+
+class Partition(unittest.TestCase):
+    """A session's paths and who holds a path: paths_of, above, holders, running_children, set_shard and mark_paths,
+    on session records written into a store."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.join(self._tmp.name, "proj")
+        self.home = os.path.join(self.base, ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi", "sessions"))
+
+    def put(self, sid, above="", **more):
+        s = {"sessionId": sid, "title": "title of " + sid, "cwd": self.base,
+             **({"spawnedFrom": {"sessionId": above}} if above else {}), **more}
+        write(os.path.join(self.home, "phi", "sessions", sid, "session.json"), json.dumps(s))
+        relay.forget(self.home)
+        return s
+
+    def x(self, *parts):
+        return relay.norm(os.path.join(self.base, *parts))
+
+    def test_paths_of_gives_shard_else_fileset_else_nothing(self):
+        self.assertEqual(relay.paths_of({"shard": ["a/"], "fileSet": ["b/"]}), ["a/"])
+        self.assertEqual(relay.paths_of({"fileSet": ["b/", 3, ""]}), ["b/"])
+        self.assertEqual(relay.paths_of({"shard": [], "fileSet": ["b/"]}), ["b/"])
+        self.assertEqual(relay.paths_of({}), [])
+        self.assertEqual(relay.paths_of(None), [])
+
+    def test_above_gives_the_chain_nearest_first_and_ends_on_a_loop_or_a_parent_with_no_record(self):
+        self.put("top")
+        self.put("mid", "top")
+        self.put("leaf", "mid")
+        self.assertEqual(relay.above(self.home, "leaf"), ["mid", "top"])
+        self.assertEqual(relay.above(self.home, "top"), [])
+        self.put("orphan", "missing")
+        self.assertEqual(relay.above(self.home, "orphan"), ["missing"])
+        self.put("p", "q")
+        self.put("q", "p")
+        self.assertEqual(relay.above(self.home, "p"), ["q"], "a loop is cut where an id comes twice")
+
+    def test_holders_names_a_running_sibling_whose_glob_overlaps_and_no_other_session(self):
+        self.put("top")
+        self.put("me", "top", fileSet=[self.x("lib", "x.py")])
+        self.put("sib", "top", fileSet=[self.x("lib", "**")])
+        self.put("far", "other", fileSet=[self.x("lib")])
+        self.put("quiet", "top")
+        self.put("elsewhere", "top", fileSet=[self.x("docs")])
+        self.put("done", "top", fileSet=[self.x("lib")], archived=True)
+        self.put("othertop", "", fileSet=[self.x("lib")])
+        self.put("below", "me", fileSet=[self.x("lib", "x.py")])
+        self.put("top2", fileSet=[self.x("lib")])
+        got = {h[0] for h in relay.holders(self.home, "me", [self.x("lib", "x.py")], self.base)}
+        self.assertEqual(got, {"sib", "far", "othertop", "top2"}, "none above, below, gone or with no paths")
+        self.assertEqual({h[0] for h in relay.holders(self.home, "", [self.x("docs")], self.base)}, {"elsewhere"},
+                         "with no id, a session about to be started")
+
+    def test_running_children_are_the_live_children_that_hold_paths(self):
+        self.put("top")
+        self.put("a", "top", fileSet=["a/"])
+        self.put("b", "top")
+        self.put("c", "top", fileSet=["c/"], archived=True)
+        self.put("d", "a", fileSet=["d/"])
+        self.assertEqual([k for k, _ in relay.running_children(self.home, "top")], ["a"])
+
+    def test_set_shard_refuses_a_path_a_running_sibling_holds_and_one_outside_its_parents_and_takes_one_inside(self):
+        self.put("top", shard=[self.x("lib"), self.x("docs")])
+        self.put("sib", "top", shard=[self.x("lib", "a.py")])
+        self.put("me", "top")
+        with self.assertRaises(ValueError) as held:
+            relay.set_shard(self.home, "me", [self.x("lib", "a.py")], self.base)
+        self.assertIn("held", str(held.exception))
+        self.assertIn("sib", str(held.exception))
+        with self.assertRaises(ValueError) as outside:
+            relay.set_shard(self.home, "me", [self.x("src")], self.base)
+        self.assertIn("outside", str(outside.exception))
+        relay.set_shard(self.home, "me", [self.x("docs", "a.md")], self.base)
+        relay.forget(self.home)
+        self.assertEqual(relay.shard_of(relay._session(self.home, "me")), [self.x("docs", "a.md")])
+
+    def test_mark_paths_makes_the_marker_while_a_live_session_holds_paths_and_removes_it_once_none_does(self):
+        marker = os.path.join(self.home, *relay.PATHS_ON.split("/"))
+        self.put("top")
+        relay.mark_paths(self.home, self.home)
+        self.assertFalse(os.path.exists(marker))
+        self.put("kid", "top", fileSet=["a/"])
+        relay.mark_paths(self.home, self.home)
+        self.assertTrue(os.path.exists(marker))
+        self.put("kid", "top", fileSet=["a/"], archived=True)
+        relay.mark_paths(self.home, self.home)
+        self.assertFalse(os.path.exists(marker))
 
 
 if __name__ == "__main__":

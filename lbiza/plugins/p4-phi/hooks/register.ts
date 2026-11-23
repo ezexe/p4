@@ -1168,6 +1168,8 @@ async function isChecked(
   if (!isEdit && !isShell) return true
   if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
   if (isShell && CARDS_ON.test(text)) return true
+  // A session some session's paths are held against, whose edit phi.py's path guard reads.
+  if (isEdit && (await $.fs.exists(`${phi}/.paths/on`).catch(() => false))) return true
   // A top-level session that owes a nudge, and a puppeteer, whose every edit and shell call phi.py reads.
   if ((await isMarked($, `${phi}/.nudge`, sessionId)) || (await isMarked($, `${phi}/.puppeteers`, sessionId))) return true
 

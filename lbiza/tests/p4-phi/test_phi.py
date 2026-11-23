@@ -2875,7 +2875,7 @@ class TerminalWorker(unittest.TestCase):
             text = f.read()
         for word in ("--worktree", "--add-dir", "EXPERIMENTAL_AGENT_TEAMS"):
             self.assertNotIn(word, text, word)
-        self.assertIn("--permission-mode auto", text)
+        self.assertIn("--permission-mode bypassPermissions", text)
         before = {f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}
         again = self.run_phi("--land")
         self.assertEqual(again.returncode, 2)
@@ -3107,6 +3107,136 @@ class SharedCheckout(unittest.TestCase):
         self.assertIsNotNone(self.guard(kid, "git push origin HEAD", cwd=own), "landing stays the orchestrator's")
         out = self.guard(kid, f"cd {self.t.proj} && git commit -m x", cwd=own)
         self.assertEqual(out["permissionDecision"], "deny", "a command aimed at the shared checkout is refused")
+
+
+class Partition(unittest.TestCase):
+    """Two running sessions never hold the same path: a writer's start is refused where its brief names no file or a
+    path a running session that is not above the starter holds, an edit outside a started session's paths is refused
+    before it runs, and `phi.py commit` takes no path outside them."""
+
+    def setUp(self):
+        SharedCheckout.setUp(self)
+        self.git("config", "user.name", "t")
+        self.git("config", "user.email", "t@t")
+        self.t.record(KID2, TOP, title="the docs child")
+        self.t.say(KID2, "Task:\nWrite the docs.\nFiles: docs.md")
+        self.t.record(GRAND, "", title="the other top")
+        self.t.say(GRAND, "Build another thing")
+
+    git = SharedCheckout.git
+
+    def deny(self, out):
+        return out is not None and out["permissionDecision"] == "deny"
+
+    def start(self, host, prompt):
+        path = os.path.join(self._tmp.name, "transcript.jsonl")
+        write(path, "x")
+        r = self.t.hook("start-advice", host, {
+            "hook_event_name": "PreToolUse", "tool_name": "mcp__ccd_session__start_session",
+            "transcript_path": path, "tool_input": {"initiation": "user_asked", "context": "fresh", "title": "the part",
+                                                    "use_worktree": False, "prompt": prompt}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def edit(self, host, path, tool="Edit", cwd=None):
+        key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+        r = self.t.hook("path-guard", host, {"tool_name": tool, "tool_input": {key: path},
+                                             **({"cwd": cwd} if cwd else {})})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+
+    def archive(self, host):
+        path = os.path.join(self.t.dir(host), "session.json")
+        with open(path, encoding="utf-8") as f:
+            s = json.load(f)
+        s["archived"] = True
+        write(path, json.dumps(s))
+        relay.forget(self.t.p4)
+
+    def mine(self, *names):
+        return [os.path.join(self.t.proj, n) for n in names]
+
+    WRITE = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: "
+
+    def test_a_writers_start_with_no_files_line_is_denied(self):
+        out = self.start(KID2, "Port the exporter's flush to the new writer and run its suite. Report when done.")
+        self.assertTrue(self.deny(out), out)
+        self.assertIn("Files:", out["permissionDecisionReason"])
+
+    def test_a_start_whose_path_a_running_sibling_of_the_starter_holds_is_denied_with_its_id(self):
+        out = self.start(KID2, self.WRITE + "a.py")
+        self.assertTrue(self.deny(out), out)
+        self.assertIn(KID, out["permissionDecisionReason"])
+        self.assertFalse(self.deny(self.start(KID2, self.WRITE + "b.py")), "a path nobody holds")
+
+    def test_a_start_whose_path_only_the_starter_holds_is_not_denied(self):
+        relay.set_shard(self.t.p4, TOP, ["b.py"], self.t.proj)
+        self.assertFalse(self.deny(self.start(TOP, self.WRITE + "b.py")))
+
+    def test_a_readers_start_and_a_new_orchestrators_are_not_read(self):
+        reader = "Check what the exporter's flush does and report it.\nFiles: none"
+        self.assertFalse(self.deny(self.start(KID2, reader)))
+        self.assertFalse(self.deny(self.start(KID2, phi.NEW_TOP_BRIEF + "\nFiles: a.py")))
+
+    def test_the_same_start_after_the_sibling_is_archived_is_not_denied(self):
+        self.assertTrue(self.deny(self.start(KID2, self.WRITE + "a.py")))
+        self.archive(KID)
+        self.assertFalse(self.deny(self.start(KID2, self.WRITE + "a.py")))
+
+    def test_an_edit_outside_a_started_sessions_paths_is_denied_and_one_inside_them_is_not(self):
+        out = self.edit(KID, self.mine("b.py")[0])
+        self.assertTrue(self.deny(out), out)
+        self.assertIn("outside", out["permissionDecisionReason"])
+        self.assertIsNone(self.edit(KID, self.mine("a.py")[0]))
+
+    def test_a_path_under_dot_claude_and_a_file_in_no_repository_are_let_through(self):
+        self.assertIsNone(self.edit(KID, os.path.join(self.t.proj, ".claude", "p4", "note.md")))
+        with tempfile.TemporaryDirectory() as loose:
+            self.assertIsNone(self.edit(KID, os.path.join(loose, "x.py")))
+
+    def test_notebook_edit_is_read_by_its_notebook_path(self):
+        self.assertTrue(self.deny(self.edit(KID, self.mine("b.ipynb")[0], tool="NotebookEdit")))
+        self.assertIsNone(self.edit(KID, self.mine("a.py")[0], tool="NotebookEdit"))
+
+    def test_a_parents_write_is_denied_while_its_child_holds_paths_there_and_let_through_once_it_is_gone(self):
+        out = self.edit(TOP, self.mine("c.py")[0], tool="Write")
+        self.assertTrue(self.deny(out), out)
+        self.assertIn(KID, out["permissionDecisionReason"])
+        self.archive(KID)
+        self.archive(KID2)
+        self.assertIsNone(self.edit(TOP, self.mine("c.py")[0], tool="Write"))
+
+    def test_a_top_sessions_edit_of_a_path_another_tops_running_child_holds_is_denied(self):
+        out = self.edit(GRAND, self.mine("a.py")[0])
+        self.assertTrue(self.deny(out), out)
+        self.assertIn(KID, out["permissionDecisionReason"])
+        self.assertIsNone(self.edit(GRAND, self.mine("c.py")[0]), "a path nobody holds")
+        self.archive(KID)
+        self.assertIsNone(self.edit(GRAND, self.mine("a.py")[0]), "once the child is gone")
+
+    def commit(self, host, *paths):
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "commit",
+                               "--checkout", self.t.proj, "-m", "change", "--", *paths], capture_output=True,
+                              text=True, timeout=60, cwd=self.t.proj, env=self.t.env(host))
+
+    def test_commit_by_a_started_session_takes_no_path_outside_its_own(self):
+        write(os.path.join(self.t.proj, "a.py"), "a = 2\n")
+        write(os.path.join(self.t.proj, "b.py"), "b = 1\n")
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.t.proj, capture_output=True, text=True).stdout
+        ran = self.commit(KID, "a.py", "b.py")
+        self.assertEqual(ran.returncode, 2, ran.stdout)
+        self.assertIn("b.py", ran.stderr)
+        self.assertEqual(subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.t.proj, capture_output=True,
+                                        text=True).stdout, head, "nothing is committed")
+        ran = self.commit(KID, "a.py")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(subprocess.run(["git", "show", "--name-only", "--format=", "HEAD"], cwd=self.t.proj,
+                                        capture_output=True, text=True).stdout.split(), ["a.py"])
+
+    def test_commit_with_no_session_in_the_environment_takes_any_path_as_before(self):
+        write(os.path.join(self.t.proj, "b.py"), "b = 1\n")
+        ran = self.commit("", "b.py")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
 
 
 if __name__ == "__main__":

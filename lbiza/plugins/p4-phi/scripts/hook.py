@@ -322,8 +322,8 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
                       "nudge", "puppeteer-tool"),
              "PowerShell": ("cards-guard", "issue-guard", "store-guard", "force-guard", "branch-guard",
                             "restart-check", "nudge", "puppeteer-tool"),
-             "Edit": ("nudge", "puppeteer-tool"), "Write": ("nudge", "puppeteer-tool"),
-             "NotebookEdit": ("nudge", "puppeteer-tool")}
+             "Edit": ("path-guard", "nudge", "puppeteer-tool"), "Write": ("path-guard", "nudge", "puppeteer-tool"),
+             "NotebookEdit": ("path-guard", "nudge", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",
               "Edit": "memory-gap", "TaskStop": "task-stop", "EnterPlanMode": "plan-mode",
               "ExitPlanMode": "plan-mode"}
@@ -342,6 +342,9 @@ PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
 # for the call its `cards-guard` raised the card for, and says how the set stands. It runs in the entry the call
 # waits on, so the next call reads the set as it stands, and for no call that failed.
 PHI_YES = {"Bash": "cards-yes", "PowerShell": "cards-yes"}
+# After a shell call that Claude Code listed changed files for, `tool_response.bashEditDiff.changedFiles`: phi.py names
+# those outside the session's paths. A PowerShell call has no such field and gets nothing.
+PHI_SEEN = {"Bash": "path-seen", "PowerShell": "path-seen"}
 
 # A call a plugin's hooks module made itself, with `$.tool.call`, carries an id that begins so. Seen with a probe mod
 # on Claude Code 2.1.326 in the desktop app and on 2.1.328 in a scripted run: the PreToolUse and PostToolUse command
@@ -436,7 +439,8 @@ def h_lookup_record(payload):
     """After a tool ran or failed, phi.py's records that PHI_RECORD names for the tool run, such as the task list
     with its step boundary and a background task under its step; their answer is returned for `update_plan`,
     `wrap_up`, Write, Edit and `ExitPlanMode`. Then the yes to the set of what p4-phi settles with no approval card,
-    for the one command it is kept for. A call a plugin's hooks module made itself gets none of it."""
+    for the one command it is kept for, and the paths a shell call changed outside the session's, which PHI_SEEN
+    names, in one answer with it. A call a plugin's hooks module made itself gets none of it."""
     if plugins_own(payload):
         return None
     phi_route(payload, PHI_TIE)                    # as h_lookup_batch does behind a clean call, and a tie is made once
@@ -448,7 +452,9 @@ def h_lookup_record(payload):
     cmd = str(inp.get("command") or "")                 # the one command the yes is kept for, read before any route
     asks = payload.get("hook_event_name") == "PostToolUse" and "phi.py" in cmd and "cards" in cmd
     yes = phi_route(payload, PHI_YES) if asks else None
-    said = ((yes or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
+    seen = phi_route(payload, PHI_SEEN) if payload.get("hook_event_name") == "PostToolUse" else None
+    said = "\n\n".join(x for x in (((seen or {}).get("hookSpecificOutput") or {}).get("additionalContext"),
+                                   ((yes or {}).get("hookSpecificOutput") or {}).get("additionalContext")) if x)
     if not said:
         return None
     return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name") or "PostToolUse",

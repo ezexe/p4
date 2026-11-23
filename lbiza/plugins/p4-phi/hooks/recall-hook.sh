@@ -51,6 +51,7 @@ elif [ "$name" = lookup-record ]; then
       *phi.py*[!A-Za-z0-9]cards[!A-Za-z0-9]on[!A-Za-z0-9]*) ;;
       *phi.py*[!A-Za-z0-9]cards[!A-Za-z0-9]*[!A-Za-z0-9]on[!A-Za-z0-9]*) ;;
       *temportal*memory*) ;;                      # a memory written: phi.py's plugin-gap check answers
+      *'"changedFiles"'*) ;;                      # a shell call that changed files: phi.py names those outside the session's paths
       *PostToolUseFailure*|*Traceback*|*Error*|*Exception*|*"not found"*|*"not recognized"*|*"No such file"*) ;;
       *fatal:*|*denied*|*ENAMETOOLONG*|*"unexpected EOF"*|*"cannot access"*|*unterminated*) ;;
       *) clean=1 ;;

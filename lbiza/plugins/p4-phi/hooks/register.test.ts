@@ -1794,6 +1794,25 @@ test('a session that owes a nudge and a puppeteer are checked at each edit and s
   expect(seen.checks.length).toBe(5)
 })
 
+test("an edit is checked in a project whose store holds the paths marker, and not in one with no marker", async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+  const edit = (): never => call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' })
+
+  // No marker and no nudge: python is not started for an edit.
+  await $.tool.check(edit())
+  expect(seen.checks).toEqual([])
+
+  // The marker phi.py keeps while a live session holds paths opens the check for an edit, and not for a plain shell call.
+  seen.files[`${PHI}/.paths/on`] = ''
+  await $.tool.check(edit())
+  await $.tool.check(call('NotebookEdit', { notebook_path: 'a.ipynb', new_source: 'x' }))
+  await $.tool.check(bash('ls'))
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Edit', 'NotebookEdit'])
+})
+
 test("only a subagent's own marker opens the check for it, at any tool, with its id in the input", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   mock.clock(on)

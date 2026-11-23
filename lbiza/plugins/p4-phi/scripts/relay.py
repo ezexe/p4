@@ -630,10 +630,83 @@ def shard_of(s):
     return [x for x in (s.get("shard") or []) if isinstance(x, str) and x]
 
 
+def paths_of(s):
+    """A session's paths, in one place: its `shard`, else the strings of its `fileSet`, else []."""
+    if not isinstance(s, dict):
+        return []
+    got = shard_of(s)
+    if got:
+        return got
+    files = s.get("fileSet")
+    return [x for x in files if isinstance(x, str) and x] if isinstance(files, list) else []
+
+
+def above(home, sid):
+    """The ids of the sessions above `sid`, nearest first, by _parent, ending at a top or at a parent with no record;
+    a loop is cut at an id seen twice."""
+    out, seen, cur = [], {sid}, sid
+    while True:
+        up = _parent(_session(home, cur))
+        if not up or up in seen:
+            return out
+        out.append(up)
+        seen.add(up)
+        cur = up
+        if not _session(home, cur):
+            return out
+
+
+def holders(home, sid, paths, base):
+    """[(other id, its title, its path, the path of `paths` it overlaps)] for every running session but `sid` that is
+    in neither above(home, sid) nor has `sid` in its own above(), and has a path that overlaps one of `paths`."""
+    mine = [n for n in (norm(p, base) for p in paths) if n]
+    ups = set(above(home, sid)) if sid else set()
+    out = []
+    for oid, o in _sessions(home).items():
+        if oid == sid or oid in ups or gone(home, o):
+            continue
+        if sid and sid in above(home, oid):
+            continue
+        for theirs in paths_of(o):
+            n = norm(theirs, o.get("cwd") or base)
+            hit = next((m for m in mine if n and overlap(n, m)), None)
+            if hit:
+                title = o.get("title") or " ".join(str(o.get("task") or "").split())[:60] or str(oid)[:14]
+                out.append((oid, title, n, hit))
+                break
+    return out
+
+
+def running_children(home, sid):
+    """The sessions whose _parent is `sid`, that are not gone and whose paths_of is not empty, as (id, session)."""
+    return [(k, v) for k, v in _sessions(home).items() if k != sid and _parent(v) == sid and not gone(home, v)
+            and paths_of(v)]
+
+
+PATHS_ON = "phi/.paths/on"
+
+
+def mark_paths(home, store):
+    """Makes the empty file <store>/phi/.paths/on where a session of the store is not gone and has paths_of, and
+    removes it where none has: the hooks module sends an edit to python only where the file is. A marker left behind
+    costs one python start for each edit and refuses nothing."""
+    path = os.path.join(store or home, *PATHS_ON.split("/"))
+    live = any(paths_of(v) and not gone(home, v) for v in _sessions(home).values())
+    try:
+        if live:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path):
+                open(path, "w").close()
+        elif os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
+
+
 def set_shard(home, sid, paths, base):
     """Keeps `paths` as the session's owned paths, which the address book lists and routes a message by, and makes
-    its parent's anchor again. No sibling is told of an overlap: each session that writes works in a git worktree
-    of its own, so two sessions' owned paths name different files on disk."""
+    its parent's anchor again. A path a running session holds that is not above this one is refused, and where a
+    session above has paths, a path outside the nearest such session's is refused: it is asked of that session."""
     path = os.path.join(_dir(home, sid), "session.json")
     s = _read_json(path)
     if not s:
@@ -641,6 +714,16 @@ def set_shard(home, sid, paths, base):
     shard = [n for n in (norm(p, base) for p in paths) if n]
     if not shard:
         raise ValueError("name the paths or globs this session alone may change")
+    for oid, title, theirs, _ in holders(home, sid, shard, base):
+        raise ValueError(f"{theirs} is held by {title} {oid}, which is still running")
+    for up in above(home, sid):
+        held = paths_of(_session(home, up))
+        if held:
+            for p in shard:
+                if not any(overlap(p, h) for h in held):
+                    raise ValueError(f"{p} is outside what {_session(home, up).get('title') or up} {up} holds: "
+                                     f"ask it for the path")
+            break
     s["shard"] = shard
     _write_json(path, s)
     make_anchor(home, _parent(s), time.strftime("%Y-%m-%d %H:%M"))
@@ -1331,7 +1414,7 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            # the archive a layout move or a migration keeps verbatim is tracked whole, whatever its files are named;
            # these come after the two lines above, which they except it from
            "!phi/archive/**/*.tmp", "!phi/archive/**/*.lock",
-           "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/",
+           "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", "phi/.paths/",
            # the watcher's pages are made again from the records; routes.jsonl is kept
            "phi/sessions/*/ledger.md", "phi/sessions/*/ledger.json", "phi/sessions/*/ledger.sig",
            "phi/sessions/*/watcher.json", "phi/meta-ledger.md", "phi/.issue-states.json", "phi/.routes-checked",

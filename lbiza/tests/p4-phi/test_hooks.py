@@ -390,6 +390,81 @@ class AgentPre(unittest.TestCase):
         self.assertEqual(out, {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": self.NEWS}})
 
 
+class PathChecks(unittest.TestCase):
+    """A started session's paths through hook.py's routing: an edit outside them is refused by `lookup-check`, and a
+    shell call whose `tool_response.bashEditDiff` lists a changed file outside them is named by `lookup-record`."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        from test_phi import KID, TOP, Tree
+        self.KID = KID
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.t = t = Tree(os.path.realpath(self._tmp.name))
+        git(t.proj, "init", "-q", ".")
+        t.record(TOP, title="the exporter top")
+        t.record(KID, TOP, title="the flush child")
+        t.say(TOP, "Build the exporter")
+        t.say(KID, "Task:\nPort the flush.\nFiles: a.py")
+
+    def run_recall(self, name, payload, root=None, **env):
+        payload = {"session_id": __import__("test_phi").CLI[self.KID], "cwd": self.t.proj, **payload}
+        env = {**self.t.env(self.KID, **env), "CLAUDE_PLUGIN_ROOT": root or ROOT}
+        return subprocess.run(["sh", os.path.join(root or ROOT, "hooks", "recall-hook.sh"), name],
+                              input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
+
+    def mine(self, name):
+        return os.path.join(self.t.proj, name)
+
+    def test_lookup_check_refuses_an_edit_a_write_and_a_notebook_edit_outside_the_paths(self):
+        for tool, key in (("Edit", "file_path"), ("Write", "file_path"), ("NotebookEdit", "notebook_path")):
+            r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": tool,
+                                                 "tool_input": {key: self.mine("b.py")}})
+            hso = json.loads(r.stdout)["hookSpecificOutput"]
+            self.assertEqual(hso["permissionDecision"], "deny", tool)
+            self.assertIn("outside", hso["permissionDecisionReason"], tool)
+            r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": tool,
+                                                 "tool_input": {key: self.mine("a.py")}})
+            self.assertNotIn("deny", r.stdout, tool)
+
+    def test_the_path_guard_stands_ahead_of_the_nudge_in_the_check_of_each_edit_tool(self):
+        import hook
+        for tool in ("Edit", "Write", "NotebookEdit"):
+            self.assertEqual(hook.PHI_CHECK[tool][0], "path-guard", tool)
+            self.assertIn("nudge", hook.PHI_CHECK[tool], tool)
+
+    def bash(self, *changed, diff=True):
+        resp = {"stdout": "", "stderr": ""}
+        if diff:
+            resp["bashEditDiff"] = {"files": [], "moreFiles": 0, "changedFiles": list(changed)}
+        return {"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "make"},
+                "tool_response": resp}
+
+    def test_lookup_record_names_the_changed_path_outside_the_session_and_not_the_one_inside(self):
+        inside, outside = self.mine("a.py"), self.mine("b.py")
+        r = self.run_recall("lookup-record", self.bash(inside, outside))
+        said = json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("b.py", said)
+        self.assertNotIn("a.py", said.split("outside")[0], "the path inside is not named as changed")
+        self.assertEqual(self.run_recall("lookup-record", self.bash(inside)).stdout.strip(), "", "all inside")
+        self.assertEqual(self.run_recall("lookup-record", self.bash(diff=False)).stdout.strip(), "", "no field")
+
+    def test_the_shell_hook_starts_python_for_a_clean_bash_payload_that_lists_changed_files_and_for_none_else(self):
+        root = os.path.join(self._tmp.name, "root")
+        os.makedirs(os.path.join(root, "scripts"))
+        os.makedirs(os.path.join(root, "hooks"))
+        for name in ("recall-hook.sh", "find-python.sh"):
+            shutil.copy(os.path.join(ROOT, "hooks", name), os.path.join(root, "hooks", name))
+        mark = os.path.join(root, "started")
+        write(os.path.join(root, "scripts", "hook.py"), f"open({mark!r}, 'a').close()\n")
+        env = {"P4_RECALL_SYNC": ""}
+        self.run_recall("lookup-record", self.bash(diff=False), root=root, **env)
+        self.assertFalse(os.path.exists(mark), "a clean call with no list starts none")
+        self.run_recall("lookup-record", self.bash(self.mine("b.py")), root=root, **env)
+        self.assertTrue(os.path.exists(mark), "a clean call that changed files starts python")
+
+
 TEMPORTAL_HOOKS = os.path.join(os.path.dirname(ROOT), "p4-temportal", "hooks")
 
 

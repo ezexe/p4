@@ -105,6 +105,12 @@ class Address(unittest.TestCase):
         self.assertEqual(node.record(self.home, "kid", sessions)["paths"], ["a.py"], "shard before fileSet")
         self.assertEqual(sorted(r), ["address", "id", "leaves", "level", "parent", "paths", "places", "title"])
 
+    def test_a_records_paths_are_what_relay_paths_of_gives(self):
+        for s in (rec("a", "top", shard=["a.py"], fileSet=["b.py"]), rec("b", "top", fileSet=["b.py", 3, ""]),
+                  rec("c", "top", shard=[], fileSet=[]), rec("d", "top")):
+            sessions = {"top": rec("top"), s["sessionId"]: s}
+            self.assertEqual(node.record(self.home, s["sessionId"], sessions)["paths"], relay.paths_of(s))
+
 
 class Level(unittest.TestCase):
     def setUp(self):
