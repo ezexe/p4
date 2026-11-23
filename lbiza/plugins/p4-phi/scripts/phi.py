@@ -4644,9 +4644,13 @@ def main(argv=None):
             import conf
             store = a.p4 or me.store or me.home
             if a.value is None and not a.unset:
-                for line in conf.show(store, a.key):
+                lines = conf.show(store, a.key)
+                for line in lines:
                     print(line)
-                return 0
+                if not lines:
+                    print(f"phi: {a.key} is no setting of p4.json that p4 reads: `phi.py conf` lists them",
+                          file=sys.stderr)
+                return 0 if lines else 2
             if spawned_from(load_session(me.home, safe_id(me.id)) if me.id else {}):
                 print("phi: a setting is written by the top session, where ezexe is: ask it with SendMessage",
                       file=sys.stderr)

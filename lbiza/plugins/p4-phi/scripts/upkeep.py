@@ -835,7 +835,8 @@ def _inside(p, tree):
 
 def _free(tree):
     """On Windows, whether the folder can go: a folder a process stands in, or holds a file of open, cannot be
-    renamed there, so it is renamed and renamed back, which changes nothing where it works. True elsewhere."""
+    renamed there, so it is renamed and renamed back, which changes nothing where it works. True elsewhere, and
+    None where the folder could not be renamed back."""
     if os.name != "nt":
         return True
     probe = tree + ".p4-remove"
@@ -843,7 +844,10 @@ def _free(tree):
         os.rename(tree, probe)
     except OSError:
         return False
-    os.rename(probe, tree)
+    try:
+        os.rename(probe, tree)
+    except OSError:
+        return None                                # the folder now stands under the probe's name
     return True
 
 
@@ -877,8 +881,11 @@ def _residue(tree, here):
         tied = [os.path.join(folder, x) for x in dirs + files if shared.is_link(os.path.join(folder, x))]
         if tied:
             return 2, [f"phi: {name} is left as it is, since it holds a link, {spelled(tied[0])}"]
-    if not _free(tree):
-        return 2, [f"phi: {name} is left as it is, since a process stands in it or holds a file of it open"]
+    free = _free(tree)
+    if not free:
+        return 2, [f"phi: {name} is left as it is, since " + (
+            "a process stands in it or holds a file of it open" if free is False else
+            f"it could not be renamed back from {tree}.p4-remove, where it now stands")]
     try:
         shutil.rmtree(tree)
     except OSError as e:
@@ -914,8 +921,10 @@ def remove(tree, here=""):
     if tied is None or tied:
         why = ("git could not list what it ignores there" if tied is None else
                f"it holds a link, {tied[0]}, which `phi.py unlink` takes away first")
-    if not why and not _free(tree):
-        why = "a process stands in it or holds a file of it open"
+    free = _free(tree) if not why else True
+    if not free:
+        why = ("a process stands in it or holds a file of it open" if free is False else
+               f"it could not be renamed back from {tree}.p4-remove, where it now stands")
     if why:
         return 2, [f"phi: {name} is left as it is, since {why}"]
     r = relay._git(main, "worktree", "remove", tree)
