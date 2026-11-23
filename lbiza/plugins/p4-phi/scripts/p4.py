@@ -35,6 +35,10 @@
       Print the store's health: the corpus files' entries by state, the message rows, the vocabulary, the labels
       that name no indexed document, the counts of repo.py, deps.py, view.py and said.py, and the jargon rate of
       what retrieval would print.
+  venv [--check] [--no-torch] [--phi P] [--cuda]
+      Create or top up the store's Python environment, `.claude/p4/.venv` in the repository's main checkout,
+      through storeenv.py, which no hook runs: ezexe/phi's packages, torch and the anthropic SDK. --check only
+      reports what it has, --no-torch leaves torch out, and a git worktree builds the main checkout's.
   teacher edit-labels|dictionary|facts [--limit N] [--re-edit] [--second-opinion N] [--max-usd X] [--estimate]
           [--fake]
       Run a paid batch of teacher.py, which no hook runs. edit-labels has the teacher model keep, drop or add the
@@ -715,6 +719,9 @@ def main(argv=None):
     if argv and argv[0] == "teacher":
         import teacher
         return teacher.main(argv[1:])
+    if argv and argv[0] == "venv":
+        import storeenv
+        return storeenv.main(argv[1:])
     ap = argparse.ArgumentParser(prog="p4.py", description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd")
     p = sub.add_parser("index")
@@ -767,6 +774,7 @@ def main(argv=None):
     p = sub.add_parser("check")
     p.add_argument("--p4")
     sub.add_parser("teacher", help="the paid batches: p4.py teacher edit-labels|dictionary|facts [--fake] [--max-usd X]")
+    sub.add_parser("venv", help="the store's Python environment: p4.py venv [--check] [--no-torch] [--phi P] [--cuda]")
     args = ap.parse_args(argv)
     if args.cmd == "index":
         return cmd_index(args)

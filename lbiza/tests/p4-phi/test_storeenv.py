@@ -1,8 +1,8 @@
-"""Offline tests for make_venv.py: where it looks for ezexe/phi, which interpreter it names, --check without a .venv,
-a build on a machine with no torch, and the oldest Python ezexe/phi installs on. Each test's tree is removed
-after it.
+"""Offline tests for storeenv.py: where the environment of a repository's store is, where it looks for ezexe/phi,
+which interpreter it names, --check without an environment, a build with no torch, and the oldest Python ezexe/phi
+installs on. Each test's tree is removed after it.
 
-    python -m pytest tests/scripts/test_make_venv.py
+    python -m pytest tests/p4-phi/test_storeenv.py
 """
 
 import contextlib
@@ -16,10 +16,15 @@ import types
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-import make_venv as v  # noqa: E402
+# the folder of the code these tests run
+SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                                    "plugins", "p4-phi", "scripts"))
+sys.path.insert(0, SRC)
+import deps  # noqa: E402
+import p4 as cli  # noqa: E402
+import storeenv as v  # noqa: E402
 
-ROOT, VENV = v.ROOT, v.VENV     # the script's own, read before any test puts a temp folder in their place
+REPO = Path(__file__).resolve().parents[3]      # this checkout's root, which holds lbiza/
 
 
 class Venv(unittest.TestCase):
@@ -28,8 +33,10 @@ class Venv(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.root = self.tmp / "p4"
         self.root.mkdir()
+        os.environ["CLAUDE_PROJECT_DIR"] = str(self.root)       # the repository place() takes when none is named
+        self.addCleanup(os.environ.pop, "CLAUDE_PROJECT_DIR", None)
         self._root, self._venv = v.ROOT, v.VENV
-        v.ROOT, v.VENV = self.root, self.root / ".venv"
+        v.ROOT, v.VENV = v.place()
 
     def tearDown(self):
         v.ROOT, v.VENV = self._root, self._venv
@@ -41,12 +48,90 @@ class Venv(unittest.TestCase):
         (folder / "pyproject.toml").write_text('[project]\nname = "phi-prune"\n', encoding="utf-8")
         return folder
 
-    def test_the_venv_is_built_at_the_checkouts_root(self):
-        """The script is in lbiza/scripts/, and its ROOT is the checkout's root, the folder that holds the catalog
-        .claude-plugin/marketplace.json, so .venv/ is built there and ezexe/phi is looked for beside the checkout."""
-        self.assertTrue((ROOT / ".claude-plugin" / "marketplace.json").is_file(), ROOT)
-        self.assertEqual(Path(v.__file__).resolve(), ROOT / "lbiza" / "scripts" / "make_venv.py")
-        self.assertEqual(VENV, ROOT / ".venv")
+    def test_the_environment_is_in_the_stores_folder(self):
+        """.venv is in the .claude/p4 of the repository, whether the repository or its store is named, and with no
+        name the repository is CLAUDE_PROJECT_DIR."""
+        want = (self.root, self.root / ".claude" / "p4" / ".venv")
+        self.assertEqual(v.place(str(self.root)), want)
+        self.assertEqual(v.place(str(self.root / ".claude" / "p4")), want)
+        self.assertEqual(v.place(), want)
+        self.assertEqual((v.ROOT, v.VENV), want)
+        self.assertEqual(Path(v.__file__).resolve(), REPO / "lbiza" / "plugins" / "p4-phi" / "scripts" / "storeenv.py")
+
+    def worktree(self):
+        """A main checkout and a linked worktree of it, as git writes the one's .git folder and the other's .git
+        file."""
+        main, wt = self.tmp / "main", self.tmp / "wt"
+        admin = main / ".git" / "worktrees" / "wt"
+        admin.mkdir(parents=True)
+        (admin / "commondir").write_text("../..\n", encoding="utf-8")
+        (wt / "sub").mkdir(parents=True)
+        (wt / ".git").write_text(f"gitdir: {admin}\n", encoding="utf-8")
+        return main, wt
+
+    def test_a_worktree_resolves_to_the_main_checkouts_store(self):
+        """A worktree, a folder in it and its own store all give the main checkout's environment, so a worktree
+        builds no second copy."""
+        main, wt = self.worktree()
+        want = (main, main / ".claude" / "p4" / ".venv")
+        for given in (wt, wt / "sub", wt / ".claude" / "p4", wt / ".claude" / "p4" / "phi" / "models", main,
+                      main / ".claude" / "p4" / "phi"):
+            self.assertEqual(v.place(str(given)), want, given)
+
+    def test_the_command_is_whole(self):
+        p4py = os.path.join(SRC, "p4.py").replace("\\", "/")
+        self.assertEqual(v.command(self.root), f'python -I -X utf8 "{p4py}" venv --p4 "{self.root}"'.replace("\\", "/"))
+
+    def test_p4_py_runs_it_as_venv(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(cli.main(["venv", "--check", "--p4", str(self.root)]), 1)
+        self.assertIn("no environment at", out.getvalue())
+        self.assertIn(v.command(self.root), out.getvalue())
+        self.assertFalse(v.VENV.exists(), "--check never creates the environment")
+
+    def test_the_environment_ignores_itself_in_git(self):
+        """Python 3.13's venv writes a .gitignore holding `*` into an environment, and ignore() writes it where an
+        older Python wrote none, leaves a file there as it is, and writes nothing where no environment is."""
+        v.ignore(v.VENV)
+        self.assertFalse(v.VENV.exists())
+        v.VENV.mkdir(parents=True)
+        v.ignore(v.VENV)
+        self.assertEqual((v.VENV / ".gitignore").read_text(encoding="utf-8").splitlines()[-1], "*")
+        (v.VENV / ".gitignore").write_text("mine\n", encoding="utf-8")
+        v.ignore(v.VENV)
+        self.assertEqual((v.VENV / ".gitignore").read_text(encoding="utf-8"), "mine\n")
+
+    def test_retrieval_never_reads_the_stores_environment_as_dependencies(self):
+        """deps.py enters no folder whose name starts with a dot but .venv and venv, so it never enters .claude."""
+        (self.root / ".claude" / "p4" / ".venv" / "Lib" / "site-packages").mkdir(parents=True)
+        self.assertEqual(deps.auto_roots(str(self.root)), [])
+
+    def test_no_torch_on_request_asks_for_none(self):
+        """--no-torch takes the path of a machine with no torch build: no torch is asked for, ezexe/phi goes in with
+        --no-deps beside numpy, and the run ends ready."""
+        v.python_of(v.VENV).parent.mkdir(parents=True)
+        v.python_of(v.VENV).write_text("")
+        self.phi(self.tmp / "phi")
+        calls = []
+        real = (v.run, v.missing, v.subprocess, v.platform)
+        v.run = lambda *cmd: calls.append([str(c) for c in cmd]) or 0
+        v.missing = lambda py: ["torch", "phi_prune", "phi_rank"]
+        v.subprocess = types.SimpleNamespace(run=lambda *a, **k: types.SimpleNamespace(stdout="3 12 7"))
+        v.platform = types.SimpleNamespace(system=lambda: "Linux", machine=lambda: "x86_64")   # no Intel Mac
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                self.assertEqual(v.main(["--no-torch"]), 0)
+        finally:
+            v.run, v.missing, v.subprocess, v.platform = real
+        self.assertEqual([c for c in calls if "torch" in c], [], "no torch is asked for")
+        self.assertIn("--no-deps", [c for c in calls if "-e" in c][0])
+        self.assertTrue(any(c[-1] == "numpy" for c in calls))
+        self.assertIn("--no-torch, so no torch is asked for", out.getvalue())
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                v.main(["--no-torch", "--cuda"])
 
     def test_phi_from_the_sibling_checkout_else_github(self):
         self.assertEqual(v.phi_source(None), (v.PHI_GIT, False))
@@ -297,7 +382,7 @@ class Venv(unittest.TestCase):
         self.assertEqual(calls, [], "nothing ran, so no .venv was made")
 
     def test_the_known_floor_is_that_of_the_ezexe_phi_beside_this_checkout(self):
-        phi = self._root.parent / "phi" / v.PHI_FOLDER
+        phi = v.place(str(REPO))[0].parent / "phi" / v.PHI_FOLDER
         if not (phi / "pyproject.toml").is_file():
             self.skipTest(f"no ezexe/phi checkout at {phi}")
         self.assertEqual(v.python_floor(phi, True), v.PHI_PYTHON)
