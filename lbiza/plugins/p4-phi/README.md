@@ -331,7 +331,7 @@ With it on, beside every message such a session gets, p4-phi hands the acts that
 - Steps that fall due when no session is open: a step that waits on a time, and not on a session, is kept by `upkeep wait "<the step>" --at "<when>"`, which prints the scheduled run of Claude Code that fits it with the prompt written, and p4-phi makes none, since making one starts sessions later and is ezexe's. A step that needs only the repository gets `/schedule <when>, <prompt>` on a line of its own, for ezexe to type: a cloud scheduled task, which works in a fresh clone with this machine on or off, and whose own flow asks ezexe for the repository and confirms the time. With `--local`, a step that needs the project's local store, which no clone holds, gets a Desktop scheduled task's instructions: the session puts it to ezexe once and, on ezexe's yes alone, makes it with `mcp__scheduled-tasks__create_scheduled_task`, or ezexe makes it under Scheduled, New task. Such a wait is handed as due by no line, `upkeep` lists it until `upkeep close` closes it, and `/loop` is no answer to it, since a loop needs an open session.
 - The sweep's wake-ups: what brings a session back to the workers it has out is an event wherever Claude Code has one, and p4-phi hands no `/loop`. A session the desktop app started is told of by the app's own note of its turn end. A worker in the Terminal panel, of whose end the app sends no note, is asked for an idle notice: the session is handed, once for each worker whose run still works and again after each notice, the call `SendMessage` with `to` the worker's name, `notify_when_idle` true and no message, and one `[Cross-session idle notice]` then begins a turn once that worker goes idle or exits. The worker runs in its starter's own permission mode, which is what lets its notice through, and under the name upkeep gave it with `--name`, which is what the call addresses.
 - The sweep's schedule: for what no event tells, a session that stalls with no turn's end and a worker that was stopped or whose notice did not come, a session with any worker out and no schedule kept is handed one line, once: read the tasks with `CronList`, and where none holds the sweep's words, call `CronCreate` with the expression `upkeep.CRON`, each half hour off the marks 0 and 30, `recurring` true and the words `upkeep.SWEEP`, which no session writes by hand. Each sweep reads the live sessions and the workers in the Terminal panel, sends on one that stopped with work left and verifies one that reports done. A session a puppeteer controls and did not start counts as out while it is inside a turn: the app's note of a turn's end and the report a session's hooks module sends both go to the session that started it, and no idle notice can be asked of a session the app runs, so the schedule is what brings its puppeteer back. Once no session and no terminal worker is live the session is handed, once, the end: `CronList`, and `CronDelete` with the id of the task that holds those words, which the line gives where the session's own `CronCreate` call answered with one.
-- Leftovers on disk: after an archive, a clean worktree and its merged branch are named for removal by `git worktree remove` with no force and `git branch -d`, never `-D`, and so is the worktree of a subagent whose branch is merged. Anything dirty or unmerged is named to ezexe once and left, and so is a worktree that holds another checkout, while one a live session still works in is passed over until that session is archived.
+- Leftovers on disk: after an archive, a clean worktree and its merged branch are named for removal by `git worktree remove` with no force and `git branch -d`, never `-D`, and so is the worktree of a subagent whose branch is merged. Anything dirty or unmerged is named to ezexe once and left, and so is a worktree that holds another checkout or a link, while one a live session still works in is passed over until that session is archived.
 
 What the app and Claude Code already do is configured or called, and p4-phi builds only the rest:
 
@@ -481,6 +481,8 @@ Every key is optional.
 | `act_dont_wait` | `true` | `false`: the built-in act-don't-wait rule is left out |
 | `plan_mode` | `true` | `false`: the built-in plan rule, which hands plan mode, is left out |
 | `goal_review` | `true` | `false`: the goal p4-phi sets for a worker whose work changes files asks for no review of that change by a reader that has not seen the conversation |
+| `worktree_python` | none | the project's Python interpreter, a path from the main checkout's root: each worker's brief and each session that starts in a worktree is told to run Python and the tests with it by its full path and to build no environment in the worktree; left out where that file is not on disk |
+| `worktree_lines` | none | a list of the project's own sentences on what its worktrees share, such as how `node_modules` is filled from the shared store, each said after the interpreter's line, with `{main}` for the main checkout's root |
 | `top_orchestrates` | `true` | `false`: an orchestrator does its own task list's work |
 | `issues` | `true` | `false`: no issue loop: a worker takes no open issue its brief names, gets no line on a commit that closes no issue, runs no regression test at Stop and is given no push line |
 | `puppeteer_section` | `puppeteers` | another name for the sidebar section; an empty string makes no session a puppeteer |
@@ -503,6 +505,21 @@ Every key is optional.
 A cap's value of another type or out of its range keeps the default.
 
 The `recall` section's keys and defaults are listed in `scripts/p4conf.py`, each beside its meaning.
+
+### What a worktree shares with its main checkout
+
+A fresh git worktree holds nothing git ignores, and with neither key set p4-phi says nothing of it, so a worktree's session installs there as Claude Code's own page has it.
+See more: https://code.claude.com/docs/en/worktrees.md, "Set up the worktree environment".
+A project that sets a key chooses to share instead: p4-phi then tells a worktree's session what to run on, and makes nothing in the worktree.
+`shared.py` reads `worktree_python` and `worktree_lines` from the main checkout's store and returns the lines.
+A worker's drafted brief carries them after the line on its worktree, a session that starts in a linked worktree is told them whichever tool made the worktree, and `phi.py shared` prints them for a brief written by hand.
+p4-phi copies no file and makes no link, since Claude Code has its own mechanism for each, and it sets no variable of a build tool, which is a project's own to set under `env`.
+See more: https://code.claude.com/docs/en/worktrees.md for `.worktreeinclude` and what a worktree shares.
+See more: https://code.claude.com/docs/en/settings-reference.md for `worktree.symlinkDirectories` and `env`.
+See more: https://code.claude.com/docs/en/desktop.md for which of them a desktop session's worktree uses.
+Upkeep holds a worktree that holds a link among what git does not track and names `phi.py unlink "<worktree>"`, which takes each link away, leaves its target and prints the removal to run, since Git for Windows before 2.54.0 empties a junction's target at a removal.
+`phi.py shared` and `phi.py unlink` read the main checkout's store and need none in the worktree.
+See more: https://github.com/git-for-windows/git/pull/6151
 
 ### `phi/phi.json`
 
