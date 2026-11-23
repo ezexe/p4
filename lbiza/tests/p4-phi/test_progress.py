@@ -141,6 +141,7 @@ class Plan(Store):
         self.assertEqual((stopped["state"], stopped["ended"]), ("stopped", True))
         self.assertEqual(progress.loop_of("## Loop log\n"),
                          {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False})
+        self.assertEqual(progress.loop_of("## Loop log\n\n- Round 2 of 5: dry\n")["round"], 2, "the earlier shape")
         self.assertIsNone(progress.loop_of("# A plan\n\n## 1. A section\n"))
 
     def test_a_plans_sections_say_which_land_files_and_which_hold_their_evidence(self):
@@ -263,7 +264,7 @@ class Spend(Store):
         self.rows(path, ("m1", "claude-sonnet-5-5", {"input_tokens": 3, "output_tokens": 1}),
                   ("m1", "claude-sonnet-5-5", {"input_tokens": 3, "cache_read_input_tokens": 10, "output_tokens": 7}),
                   ("m2", "<synthetic>", {"input_tokens": 0, "output_tokens": 0}))
-        self.assertEqual(progress.spend_of(path), {"calls": 2, "models": ["claude-sonnet-5-5"], "input": 3,
+        self.assertEqual(progress.spend_of(path), {"calls": 1, "models": ["claude-sonnet-5-5"], "input": 3,
                                                    "cache_write": 0, "cache_read": 10, "output": 7})
         self.assertEqual(progress.spend_of(os.path.join(self.root, "none.jsonl"))["calls"], 0)
 
@@ -287,6 +288,8 @@ class Spend(Store):
         self.assertEqual(got[-1]["models"], ["claude-fable-5-2", "claude-haiku-5-5", "claude-sonnet-5-5"])
         self.assertEqual(progress.spend(self.home, "cli-lead-0001")[0]["input"], 5, "and by its session id")
         self.assertEqual(progress.spend(self.home, "no-such-name"), [])
+        self.session("cli-blank-0001", title="", transcript=lead)
+        self.assertEqual(progress.spend(self.home, ""), [], "no name names no session")
         # the command itself, in a process of its own as the case of `phi.py progress` runs it
         command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "spend", "--p4", self.home,
                    "--session", "cli-lead-0001"]
@@ -301,7 +304,7 @@ class Spend(Store):
         config = os.path.join(self.root, "config")
         self.rows(os.path.join(config, "projects", "E--proj", "cli-0002.jsonl"),
                   ("m1", "claude-sonnet-5-5", {"input_tokens": 9, "output_tokens": 1}))
-        self.session("cli-0002", cliSessionIds=["cli-0001", "cli-0002"])
+        self.session("cli-0002", cliSessionIds=["cli-0001", "cli-0002"], transcript=os.path.join(config, "gone.jsonl"))
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             self.assertEqual(progress.spend(self.home, "cli-0002")[0]["input"], 9)
             self.assertEqual(progress.transcript_of({"cliSessionIds": ["cli-9999"]}), "")

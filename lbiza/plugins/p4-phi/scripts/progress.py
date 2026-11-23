@@ -38,8 +38,9 @@ LOCK_PID = re.compile(r"\(pid (\d+)\)")
 # plan-planner, "The plan loop": "under a last heading `## Loop log`, one line a round as
 # `- Round <n>: <k> held, <m> minutes: <what the mends changed>`", and a clean round as
 # `- Round <n>: clean, <m> minutes`. The indented lines beneath a round, one a finding, open with no `Round`.
+# A line of the earlier shape, `- Round <n> of 5: ...`, still gives its round.
 LOG = re.compile(r"(?im)^## +Loop log[ \t]*$")
-ROUND = re.compile(r"(?im)^[ \t]*[-*][ \t]+Round[ \t]+(\d+)[ \t]*:[ \t]*(.+?)[ \t]*$")
+ROUND = re.compile(r"(?im)^[ \t]*[-*][ \t]+Round[ \t]+(\d+)(?:[ \t]+of[ \t]+\d+)?[ \t]*:[ \t]*(.+?)[ \t]*$")
 HELD = re.compile(r"(?i)^(\d+)[ \t]+held\b")
 CLEAN = re.compile(r"(?i)^clean\b")
 EVIDENCE = re.compile(sections.LINE % r"evidence")
@@ -230,11 +231,12 @@ SPENT = (("input", "input_tokens"), ("cache_write", "cache_creation_input_tokens
 def spend_of(path):
     """What the API calls of one transcript spent: `calls`, the tokens of `input`, `cache_write`, `cache_read` and
     `output`, and the `models` named. An assistant message is written one line per content block, so each is
-    counted once, by the last line that carries its id. Zeros for a file that is not there."""
+    counted once, by the last line that carries its id. A message Claude Code wrote itself, whose model is `<synthetic>`,
+    is no API call and is left out. Zeros for a file that is not there."""
     last = {}
     for d in transcript.read_lines(path):
         m = d.get("message") or {}
-        if d.get("type") == "assistant" and isinstance(m.get("usage"), dict):
+        if d.get("type") == "assistant" and isinstance(m.get("usage"), dict) and m.get("model") != "<synthetic>":
             last[m.get("id") or d.get("uuid")] = m
     out = {"calls": len(last),
            "models": sorted({str(m["model"]) for m in last.values() if str(m.get("model") or "").startswith("claude")})}
@@ -244,10 +246,10 @@ def spend_of(path):
 
 
 def transcript_of(s):
-    """A session's transcript: the path its record keeps, else the file Claude Code names by the session's last
+    """A session's transcript: the path its record keeps where that file is there, else the file Claude Code names by the session's last
     CLI id under a project of its `projects` folder, '' where neither is there."""
     kept = os.path.expanduser(str(s.get("transcript") or ""))
-    if kept:
+    if kept and os.path.isfile(kept):
         return kept
     ids = [str(x) for x in s.get("cliSessionIds") or [] if x]
     base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
@@ -260,8 +262,8 @@ def spend(home, who):
     transcript in the `subagents` folder beside its own, a teammate's or a subagent's by the `.meta.json` beside
     it, and a last row for all of them. `who` is a session id of the store, or a session's title, as the name a
     terminal lead was started under is, where the newest session of that title is taken. [] for a session with no
-    transcript."""
-    held = relay._sessions(home)
+    transcript, and for no name at all."""
+    held = relay._sessions(home) if who else {}
     s = held.get(who) or max((x for x in held.values() if x.get("title") == who),
                              key=lambda x: str(x.get("createdAt") or ""), default={})
     main = transcript_of(s)
