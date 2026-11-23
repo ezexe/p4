@@ -198,9 +198,10 @@ export const PROBES: readonly Probe[] = [
       "p4-phi's task-list advice names a step argued from several sides for an agent team led from a terminal " +
       'session, and its hooks module keeps the teammates in `team.json`.',
     fault:
-      'No agent team has been seen live: on Claude Code 2.1.328 a teammate asked for by name ran as a background ' +
-      'subagent with no folder under `~/.claude/teams/`, where a module set the variable by `$.env.set`.',
-    was: 'blocked',
+      'None where the lead is started by the start file: on Claude Code 2.1.328 such a lead formed a team of two ' +
+      'teammates, with a folder under `~/.claude/teams/` and both in `team.json`. Where a module set the variable ' +
+      'by `$.env.set`, a teammate asked for by name ran as a background subagent. The probe watches for no team forming.',
+    was: 'open',
     fits: anywhere,
     kind: 'by hand',
     check:

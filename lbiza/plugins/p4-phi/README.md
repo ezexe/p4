@@ -84,7 +84,7 @@ A teammate's own steps and the task of the shared task list it works are not sho
 Nothing records which session typed a lead's start line, so a lead no session of the tree started is a row of its own, marked a terminal session, while one of its teammates is not over.
 A teammate in a terminal pane of its own that died keeps its last state in Claude Code's list, and a `/resume` of the lead restores no in-process teammate.
 An orchestrator's ledger lists each team of the store whose teammates are not all over under `## Agent teams`, with each teammate's name, state and task, read from the same `team.json`.
-No team was seen live while this was planned: p4-native's record has the teams switch fail its check in a terminal session once.
+A team was seen live on Claude Code 2.1.328: a lead started by the start file formed two teammates, with a folder under `~/.claude/teams/` and both in `team.json`.
 See more: https://code.claude.com/docs/en/agent-teams.md
 See more: https://code.claude.com/docs/en/plugins/mods/interface.md
 The module hears the pane close at `ui.close`, which by the types of `claude-code` every close raises with the pane's `id` and an `origin`, `person` for the person's close mark or key and `plugin` for a plugin's `$.ui.close`.
