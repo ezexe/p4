@@ -1437,7 +1437,7 @@ class ForkOrFresh(ThreeSessions):
                          "a reader started with use_worktree false shares its starter's worktree")
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
-        """A store moves only by p4.py sync."""
+        """A hand pull or push in a store is asked first."""
         p4 = self.t.p4
         subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
         clone = os.path.join(p4, "temportal", "tmp", "s1", "p4")
@@ -1451,7 +1451,7 @@ class ForkOrFresh(ThreeSessions):
         for host in (TOP, B):
             out = guard(host, f"cd {p4} && git pull origin main")
             self.assertEqual(out["permissionDecision"], "ask")
-            self.assertIn("sync --push --p4", out["permissionDecisionReason"])
+            self.assertIn("Two machines write the same", out["permissionDecisionReason"])
         self.assertIn("force-push", guard(TOP, f'git -C "{p4}" push --force origin win')["permissionDecisionReason"])
         self.assertIsNotNone(guard(TOP, "git push", cwd=p4), "the call's own folder")
         self.assertIsNone(guard(TOP, f"git -C {self.work} push"), "a project checkout is not a store")
@@ -1461,7 +1461,7 @@ class ForkOrFresh(ThreeSessions):
     def test_a_started_sessions_hand_pull_in_a_store_through_lookup_check_names_p4_sync(self):
         """ezexe/p4#240: through `recall-hook.sh lookup-check`, which runs what the hooks module runs for a checked call, a
         started session's hand pull or push inside a store is asked by the store guard, which runs ahead of the
-        branch guard: its reason names `p4.py sync --push --p4 <store>` and the tree's orchestrator as the session
+        branch guard: its reason names the store guard's ask and the tree's orchestrator as the session
         that runs it. The same session's pull in the project's own checkout keeps the branch guard's ask."""
         p4 = self.t.p4.replace("\\", "/")
         subprocess.run(["git", "init", "-q", p4], check=True, capture_output=True)
@@ -1481,18 +1481,18 @@ class ForkOrFresh(ThreeSessions):
             out = check(B, tool, cmd, k)
             self.assertEqual(out.get("permissionDecision"), "ask", f"{tool}: {cmd}")
             reason = out.get("permissionDecisionReason", "")
-            self.assertIn("sync --push --p4", reason, f"{tool}: {cmd}")
+            self.assertIn("Two machines write the same", reason, f"{tool}: {cmd}")
             self.assertIn(relay.norm(p4), relay.norm(reason), "the store by its path")
-            self.assertIn(f"its tree's orchestrator's to run, \"top\" `{TOP}`", reason, "and the session that runs it")
+            self.assertIn(f"a move of the store is its tree's orchestrator's to make, \"top\" `{TOP}`", reason, "and the session that runs it")
             self.assertNotIn("Ask its parent session", reason, "not the branch guard's reason")
         own = check(B, "Bash", "git pull", 7)
         self.assertEqual(own.get("permissionDecision"), "ask")
         self.assertIn("merges and pushes", own.get("permissionDecisionReason", ""), "outside a store: the branch guard")
-        self.assertNotIn("sync --push --p4", own.get("permissionDecisionReason", ""))
+        self.assertNotIn("Two machines write the same", own.get("permissionDecisionReason", ""))
         top = check(TOP, "Bash", f"cd {p4} && git pull origin main", 8)
-        self.assertIn("sync --push --p4", top.get("permissionDecisionReason", ""))
-        self.assertNotIn("orchestrator's to run", top.get("permissionDecisionReason", ""),
-                         "the orchestrator runs the sync itself")
+        self.assertIn("Two machines write the same", top.get("permissionDecisionReason", ""))
+        self.assertNotIn("orchestrator's to make", top.get("permissionDecisionReason", ""),
+                         "the orchestrator moves the store itself")
         import hook
         for tool in ("Bash", "PowerShell"):
             names = hook.PHI_CHECK[tool]

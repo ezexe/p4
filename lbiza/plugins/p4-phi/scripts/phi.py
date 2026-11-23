@@ -3921,11 +3921,11 @@ def store_root(path):
 
 
 def h_store_guard(payload):
-    """PreToolUse on a shell call: a hand `git pull`, `git push` or force-push in a store is asked first, and
-    `p4.py sync --push --p4 <store>` named as the way, since two machines write the same files and a plain merge or
-    a line-union damages them. A session another session started is also told which session runs that sync: its
-    tree's orchestrator, the one session that lands and pushes. hook.py runs this guard ahead of the branch guard,
-    so a started session's pull or push inside a store hears of the sync and not only of its parent's landing."""
+    """PreToolUse on a shell call: a hand `git pull`, `git push` or force-push in a store is asked first, since two
+    machines write the same files and a plain merge or a line-union damages them. A session another session started
+    is also told which session moves the store: its tree's orchestrator, the one session that lands and pushes.
+    hook.py runs this guard ahead of the branch guard, so a started session's pull or push inside a store hears of
+    the store and not only of its parent's landing."""
     if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
         return None
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
@@ -3949,17 +3949,15 @@ def h_store_guard(payload):
     force = bool(re.search(r"(?:^|\s)(?:-f|--force(?:-with-lease)?)\b|\s\+\S", m.group(3) + m.group(1)))
     what = "a force-push" if force and m.group(2) == "push" else f"a hand `git {m.group(2)}`"
     RAN["store_guard"] = what
-    sync = f"python -I -X utf8 \"{os.path.join(HERE, 'p4.py')}\" sync --push --p4 \"{store}\"".replace("\\", "/")
     me = Me(payload)
     s = load_session(me.home, me.id) if me.home and me.id else {}
     top, title = issues.lander(me.home, s) if spawned_from(s) else ("", "")
-    whose = (f" This session is a child, and the sync is its tree's orchestrator's to run, \"{title}\" `{top}`, the "
-             f"one session that lands and pushes: ask that session with SendMessage, and run neither here."
+    whose = (f" This session is a child, and a move of the store is its tree's orchestrator's to make, \"{title}\" `{top}`, "
+             f"the one session that lands and pushes: ask that session with SendMessage, and run neither here."
              if top else "")
     return cards.raised(cards_on(me) if me.home else False, top,
-                        f"phi (p4-phi): this is {what} in the store {store}. A store moves only by `{sync}`, since "
-                        f"two machines write the same files and a plain merge or a line-union damages them. Then "
-                        f"check each entry the sync names as changed.{whose}")
+                        f"phi (p4-phi): this is {what} in the store {store}. Two machines write the same "
+                        f"files, and a plain merge or a line-union damages them, so it is asked first.{whose}")
 
 
 def h_force_guard(payload):

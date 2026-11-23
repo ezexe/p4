@@ -649,7 +649,7 @@ class Guards(unittest.TestCase):
         self.on()
         out = self.guard("store-guard", B, cmd)
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("sync --push --p4", out["permissionDecisionReason"])
+        self.assertIn("Two machines write the same", out["permissionDecisionReason"])
         self.assertIn(f"ask `{TOP}` with SendMessage", out["permissionDecisionReason"])
         self.assertEqual(self.guard("store-guard", TOP, cmd)["permissionDecision"], "ask", "ezexe's own session")
 
