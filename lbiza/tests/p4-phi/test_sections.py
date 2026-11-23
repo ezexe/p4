@@ -110,6 +110,42 @@ class Sections(unittest.TestCase):
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")
         self.assertEqual(sections.calls(self.path, self.base), [])
 
+    def test_a_section_counts_its_fences_and_the_lines_under_its_assumed(self):
+        ticks = chr(96) * 3
+        text = ("# A plan\n\n## 1. The writer\n\n**Files:** `a.py`\n\n**Observed:**\n\n"
+                "- the writer flushes: `a.py:3`\n\n**Assumed:**\n\n"
+                "- the reader waits\n- the queue is short\n\nIt lands as below.\n\n"
+                f"{ticks}python\nx = 1\n{ticks}\n\n{ticks}python\n- **Assumed:** a line in a fence\n{ticks}\n\n"
+                "## 2. The page\n\n**Files:** `b.md`\n**Checks:** none\n\n**Assumed:** none\n\n"
+                "## 3. The flush\n\n**Files:** `c.py`\n\n**Assumed:**\n\n- None of the readers waits.\n")
+        _, found = sections.parse(text, self.base)
+        self.assertEqual([(s["n"], s["fences"], s["assumed"]) for s in found], [("1", 2, 2), ("2", 0, 0), ("3", 0, 1)])
+        self.assertEqual(found[1]["checks"], "", "a Checks line that says none names no check")
+        self.assertFalse(sections.team([found[1]]))
+        self.assertIn("That section holds 2 lines under `Assumed:`", sections.brief(self.path, "A plan", [found[0]]))
+        self.assertNotIn("Assumed", sections.brief(self.path, "A plan", [found[1]]))
+
+    def section(self, n, fences, checks=""):
+        return {"n": str(n), "files": [f"src/file{n}.py"], "after": [], "fences": fences, "checks": checks}
+
+    def test_runs_are_joined_into_groups_of_five_fences_with_no_bound_on_their_count(self):
+        def nums(found):
+            return [[s["n"] for s in group] for group in sections.groups(found)]
+        self.assertEqual(nums([self.section(1, 6), self.section(2, 2), self.section(3, 1), self.section(4, 7)]),
+                         [["1"], ["2", "3", "4"]])
+        self.assertEqual(nums([self.section(1, 6), self.section(2, 2)]), [["1", "2"]], "a last small group joins")
+        self.assertEqual(nums([self.section(1, 13), self.section(2, 12), self.section(3, 6), self.section(4, 13)]),
+                         [["1"], ["2"], ["3"], ["4"]], "the plan this rule was first read by")
+        self.assertEqual(nums([self.section(1, 1)]), [["1"]])
+        six = [self.section(k, fences) for k, fences in enumerate((9, 5, 5, 9, 6, 5), 1)]
+        self.assertEqual(nums(six), [["1"], ["2"], ["3"], ["4"], ["5"], ["6"]], "six groups stay six")
+        self.assertEqual(nums([]), [])
+
+    def test_a_group_earns_a_team_by_five_fences_or_a_check(self):
+        self.assertFalse(sections.team([self.section(1, 2)]))
+        self.assertTrue(sections.team([self.section(1, 2, "`python -m pytest tests/test_a.py`")]))
+        self.assertTrue(sections.team([self.section(1, 3), self.section(2, 2)]))
+
     def test_a_runs_brief_names_the_environment_its_worktree_shares(self):
         import json
         import p4conf

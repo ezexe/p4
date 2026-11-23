@@ -22,6 +22,15 @@ NUMBER = re.compile(r"(\d+)\b")
 LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$"
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
+# plan-planner, "What every section of a plan holds": `**Assumed:**` stands after `**Observed:**`, with one line for
+# each thing the section takes to be so, or the one word `none`.
+ASSUMED = re.compile(r"(?im)^[ \t>*-]*\*\*assumed[ \t]*:?[ \t]*\*\*[ \t]*:?[ \t]*(.*?)[ \t]*$")
+ITEM = re.compile(r"^[ \t]*[-*][ \t]+(.+?)[ \t]*$")
+NOTHING = re.compile(r"^\W*(?:none|nothing)\W*$", re.I)      # the whole of a line, so `None of them waits` is a line
+# agent-teams.md, "Choose an appropriate team size": "Having 5-6 tasks per teammate keeps everyone productive", so a
+# group of sections is filled to five fences before a team reads it, which is the fill the first plan read by
+# groups was read at, on 2026-11-23.
+FULL = 5
 # what `phi.py sections` says after the calls it prints: each is a start that runs at once, which the app refuses in
 # a turn ezexe's own message did not begin, where the same call goes out as a card; a planner another session started
 # makes no such call and starts each run as an integrator subagent, which waits on no card
@@ -31,16 +40,35 @@ CARD = ("In a turn ezexe's own message did not begin, the app refuses a start th
         "with the call's `prompt` as its brief, in a git worktree it makes, as the line at its plan's approval says.")
 
 
+def assumed_of(body):
+    """How many lines stand under a section's `**Assumed:**`: what follows the label on its own line, and each list
+    item beneath it up to the first line that is no item. A line that says `none` counts for nothing."""
+    m = ASSUMED.search(body)
+    if not m:
+        return 0
+    said = [m.group(1)] if m.group(1) else []
+    for line in body[m.end():].split("\n")[1:]:
+        item = ITEM.match(line)
+        if item:
+            said.append(item.group(1))
+        elif line.strip() or said:
+            break
+    return sum(1 for x in said if not NOTHING.match(x))
+
+
 def parse(text, base=""):
     """(title, sections) of a plan's text. A section is a `## ` heading outside any fence whose body names files on
-    a `Files:` line; its number is the one its heading opens with, else its place among the sections."""
-    bare = FENCE.sub(lambda m: " " * len(m.group(0)), str(text or ""))
+    a `Files:` line; its number is the one its heading opens with, else its place among the sections. Its `fences`
+    are the fenced blocks it holds and its `assumed` the lines under its `Assumed:`."""
+    raw = str(text or "")
+    bare = FENCE.sub(lambda m: " " * len(m.group(0)), raw)
     top = TITLE.search(bare)
     marks = list(HEAD.finditer(bare))
     out = []
     taken = {n.group(1) for n in (NUMBER.match(m.group(1)) for m in marks) if n}   # every number a heading opens with
     for k, m in enumerate(marks):
-        body = bare[m.end():marks[k + 1].start() if k + 1 < len(marks) else len(bare)]
+        end = marks[k + 1].start() if k + 1 < len(marks) else len(bare)
+        body = bare[m.end():end]
         files = starts.files_of(body, base)
         if not files:                              # no `Files:` line, or `Files: none`: context, and no worker's
             continue
@@ -54,7 +82,10 @@ def parse(text, base=""):
             taken.add(num)
         out.append({"n": num, "head": m.group(1), "files": files, "said": said,
                     "after": re.findall(r"\d+", after.group(1)) if after else [],
-                    "checks": checks.group(1).rstrip(".") if checks else ""})
+                    # `Checks: none` names no check, as `Files: none` names no file
+                    "checks": checks.group(1).rstrip(".") if checks and not starts.NO_FILES.match(checks.group(1))
+                    else "",
+                    "fences": len(FENCE.findall(raw[m.end():end])), "assumed": assumed_of(body)})
     return (top.group(1) if top else "plan"), out
 
 
@@ -71,6 +102,31 @@ def runs(sections):
     for s in sections:
         out.setdefault(run[s["n"]], []).append(s)
     return list(out.values())
+
+
+def fences(group):
+    return sum(s.get("fences", 0) for s in group)
+
+
+def groups(sections):
+    """The runs as the groups one coworker each reads and lands, in the plan's order: runs are joined until a group
+    holds FULL fences, and a last group under FULL joins the one before it. No count bounds the groups: a plan has
+    as many as its sections' work makes."""
+    out = []
+    for run in runs(sections):
+        if out and fences(out[-1]) < FULL:
+            out[-1] = out[-1] + run
+        else:
+            out.append(list(run))
+    if len(out) > 1 and fences(out[-1]) < FULL:
+        out[-2:] = [out[-2] + out[-1]]
+    return out
+
+
+def team(group):
+    """True where a group earns an agent team: it holds FULL fences, or one of its sections names a check, so the
+    lens `checks` has a test to read. Only a plan's one small group of prose is left for one reader."""
+    return fences(group) >= FULL or any(s.get("checks") for s in group)
 
 
 def name(title, run):
@@ -95,6 +151,11 @@ def brief(path, title, run, base=""):
              "This session never edits the plan file. Its report holds, for each fence, the path and the lines it "
              "landed at, and each check's output, which the session that holds the plan writes into the section as "
              "its Evidence.", ""]
+    assumed = sum(s.get("assumed", 0) for s in run)
+    if assumed:
+        lines += [f"{'Those sections hold' if many else 'That section holds'} {assumed} "
+                  f"line{'s' * (assumed != 1)} under `Assumed:`, which nobody saw: where the tree shows one wrong, "
+                  "stop and report it as a fence that does not fit.", ""]
     if checks:
         lines += ["Checks, and no whole suite: " + "; ".join(checks) + ".", ""]
     lines += [f"Done looks like: every fence of section{'s' if many else ''} {nums} landed"
