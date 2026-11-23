@@ -4460,6 +4460,14 @@ def unlink_main(argv):
     return 0
 
 
+def remove_main(argv):
+    """`phi.py remove <worktree>`: upkeep.remove for the folder, from where this command was run."""
+    status, lines = upkeep.remove(argv[0] if argv else "", os.getcwd())
+    for line in lines:
+        print(line, file=sys.stderr if status else sys.stdout)
+    return status
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["hook"]:
@@ -4470,6 +4478,8 @@ def main(argv=None):
         return shared_main(argv[1:])
     if argv[:1] == ["unlink"]:
         return unlink_main(argv[1:])
+    if argv[:1] == ["remove"]:                     # a worktree's removal, which needs no store either
+        return remove_main(argv[1:])
     import argparse
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)

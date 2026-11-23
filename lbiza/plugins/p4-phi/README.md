@@ -526,6 +526,7 @@ See more: https://code.claude.com/docs/en/worktrees.md for `.worktreeinclude` an
 See more: https://code.claude.com/docs/en/settings-reference.md for `worktree.symlinkDirectories` and `env`.
 See more: https://code.claude.com/docs/en/desktop.md for which of them a desktop session's worktree uses.
 Upkeep holds a worktree that holds a link among what git does not track and names `phi.py unlink "<worktree>"`, which takes each link away, leaves its target and prints the removal to run, since Git for Windows before 2.54.0 empties a junction's target at a removal.
+`phi.py remove "<worktree>"` removes a clean, landed worktree with no force and deletes its branch, and refuses before git runs where the shell that ran it stands in the worktree, since Windows deletes no folder a process stands in.
 `phi.py shared` and `phi.py unlink` read the main checkout's store and need none in the worktree.
 See more: https://github.com/git-for-windows/git/pull/6151
 

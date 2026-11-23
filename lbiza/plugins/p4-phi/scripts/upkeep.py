@@ -31,9 +31,12 @@ for it, p4-phi hands the exact acts that are due for those sessions, and the set
                does is the rest: the branch, a worktree a session made with `git worktree add`, and a merged
                subagent worktree before that sweep. Anything dirty or unmerged is named to ezexe once and left.
 
-No act runs in this module's own process. git is asked only what is true, and the session runs each command, so its
-own permission rules hold for every one: phi.py is allowed by p4's allow rule, and a removal run inside it would pass
-those rules by.
+No act of a hook runs in this module's own process. git is asked only what is true, and the session runs each
+command, so its own permission rules hold for every one. The one command that acts is `phi.py remove`, which a session
+runs itself: it removes only a worktree every check of `removals` passes, with no force. It does two things the handed
+commands do not, each behind a check of its own: it deletes with `-D` a branch `landed` showed on the default branch
+as a patch, which `-d` refuses, and it deletes the folder a failed removal left, where that folder holds only what
+git ignores.
 
 The app refuses a new start on a turn no person began. Its own instructions to a desktop session, "Starting other
 sessions", say "On a turn that another session's message or an automated event started, the app refuses a start:
@@ -56,6 +59,7 @@ answer each other never wake each other without end.
 import hashlib
 import os
 import re
+import shutil
 import time
 
 import p4conf
@@ -820,9 +824,126 @@ def removals(home, s, trees, skip_own=False, but=(), kept=None):
     return cmds, held, waits
 
 
+STANDS = ("phi: this shell stands in {tree}, and Windows deletes no folder a process stands in: make one call that "
+          "only changes folder to {main}, and run this command again in the call after it")
+
+
+def _inside(p, tree):
+    p, tree = relay.norm(os.path.realpath(p)), relay.norm(os.path.realpath(tree))
+    return p == tree or p.startswith(tree + "/")
+
+
+def _free(tree):
+    """On Windows, whether the folder can go: a folder a process stands in, or holds a file of open, cannot be
+    renamed there, so it is renamed and renamed back, which changes nothing where it works. True elsewhere."""
+    if os.name != "nt":
+        return True
+    probe = tree + ".p4-remove"
+    try:
+        os.rename(tree, probe)
+    except OSError:
+        return False
+    os.rename(probe, tree)
+    return True
+
+
+def _residue(tree, here):
+    """What a removal that failed half way left: a folder directly under the main checkout's `.claude/worktrees`
+    that holds no `.git` entry and that git lists no more. It is deleted where the branch named for it, if one is
+    left, is landed, and where it holds nothing but what git ignores and no link: git removes only a clean
+    worktree, so what its removal left is ignored files."""
+    name, up = spelled(tree), os.path.dirname(tree)
+    main = shared.tree_of(up)[1]
+    if not main or relay.norm(os.path.realpath(up)) != relay.norm(os.path.realpath(
+            os.path.join(main, ".claude", "worktrees"))):
+        return 2, [f"phi: {name} is no worktree and lies in no `.claude/worktrees`, so nothing is removed"]
+    if here and _inside(here, tree):
+        return 2, [STANDS.format(tree=name, main=spelled(main))]
+    listed = [relay.norm(line[9:].strip()) for line in (_out(main, "worktree", "list", "--porcelain") or "")
+              .splitlines() if line.startswith("worktree ")]
+    if relay.norm(tree) in listed:
+        return 2, [f"phi: git still lists {name} as a worktree and it holds no `.git` entry: `git worktree prune` "
+                   f"in {spelled(main)} first"]
+    base = os.path.basename(tree)
+    for branch in (base, "worktree-" + base):
+        if _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is not None and landed(main, branch) is not True:
+            return 2, [f"phi: {name} is left as it is, since `{branch}` holds commits that are not on the default "
+                       f"branch"]
+    kept = [line[3:] for line in (_out(main, "status", "--porcelain", "--", tree) or "").splitlines()
+            if line.strip()]
+    if kept:
+        return 2, [f"phi: {name} is left as it is, since it holds files git does not ignore, {kept[0]} among them"]
+    for folder, dirs, files in os.walk(tree):
+        tied = [os.path.join(folder, x) for x in dirs + files if shared.is_link(os.path.join(folder, x))]
+        if tied:
+            return 2, [f"phi: {name} is left as it is, since it holds a link, {spelled(tied[0])}"]
+    if not _free(tree):
+        return 2, [f"phi: {name} is left as it is, since a process stands in it or holds a file of it open"]
+    try:
+        shutil.rmtree(tree)
+    except OSError as e:
+        return 2, [f"phi: {name} could not be deleted whole: {e}"]
+    return 0, [f"deleted {name}, what a removal left of a worktree git lists no more"]
+
+
+def remove(tree, here=""):
+    """`phi.py remove <worktree>`: the linked worktree removed by `git worktree remove` with no force, run in the
+    main checkout, and its branch deleted, where the worktree is clean, landed by hash or by patch, not locked, holds
+    no other checkout and no link, and no process stands in it. `here` is the folder of the shell that ran the
+    command: one inside the worktree is refused before git runs, since git would drop its record of the worktree
+    and leave the folder half removed. Returns (the exit status, the lines to print)."""
+    tree = os.path.abspath(tree) if tree else ""
+    if tree and os.path.isdir(tree) and not os.path.exists(os.path.join(tree, ".git")):
+        return _residue(tree, here)
+    top, main = shared.tree_of(tree) if tree and os.path.isdir(tree) else ("", "")
+    same = lambda a, b: relay.norm(os.path.realpath(a)) == relay.norm(os.path.realpath(b))  # noqa: E731
+    if not top or not same(top, tree) or same(top, main):
+        return 2, [f"phi: {tree or 'no folder'} is not the top folder of a linked worktree, so nothing is removed"]
+    name = spelled(tree)
+    if here and _inside(here, tree):
+        return 2, [STANDS.format(tree=name, main=spelled(main))]
+    branch = _out(tree, "rev-parse", "--abbrev-ref", "HEAD") or ""
+    branch = "" if branch == "HEAD" else branch
+    n = dirty(tree)
+    why = (f"it holds {n} uncommitted change{'s' * (n != 1)}" if n else
+           "git could not read it" if n is None else
+           "git holds it locked" if relay.norm(tree) in locked_trees(main) else
+           "its commits are not on the default branch, by hash or by patch" if landed(tree, "HEAD") is not True else
+           f"it holds another checkout, {nested(tree)[0]}" if nested(tree) else "")
+    tied = links(tree) if not why else []
+    if tied is None or tied:
+        why = ("git could not list what it ignores there" if tied is None else
+               f"it holds a link, {tied[0]}, which `phi.py unlink` takes away first")
+    if not why and not _free(tree):
+        why = "a process stands in it or holds a file of it open"
+    if why:
+        return 2, [f"phi: {name} is left as it is, since {why}"]
+    r = relay._git(main, "worktree", "remove", tree)
+    if r is None or r.returncode != 0:
+        said = (str(r.stderr or r.stdout or "").strip() if r is not None else "git did not run")
+        return 2, [f"phi: git refused the removal of {name}: {said}"]
+    out = [f"removed the worktree {name}"]
+    if branch and branch != default_ref(main).rpartition("/")[2] \
+            and _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is not None:
+        gone = relay._git(main, "branch", "-d", branch)
+        if (gone is None or gone.returncode != 0) and landed(main, branch) is True:
+            gone = relay._git(main, "branch", "-D", branch)     # each commit is on the default branch as a patch
+        out.append(f"deleted the branch {branch}" if gone is not None and gone.returncode == 0 else
+                   f"left the branch {branch}, which git would not delete")
+    return 0, out
+
+
 LEAVE = ("Each is git's own command with no force, and `-d` is never `-D`: where git refuses one, leave it and say "
-         "so in one line. Run each from a folder outside the worktree it removes: Windows deletes no folder a shell "
+         "so in one line. Run each from a folder outside the worktree it removes, reached by a call of its own that "
+         "only changes folder: the shell tool keeps its folder between calls, Windows deletes no folder a shell "
          "stands in, and git then drops its record of the worktree and leaves the folder half removed.")
+
+
+def whole():
+    """The sentence that names `phi.py remove` by the command line this copy runs by, for a line of removals."""
+    return (f" `{PHI.commands()} remove \"<worktree>\"` does one such removal whole in one call: it refuses while "
+            f"its shell stands in the worktree, checks that the worktree is clean, landed and free, removes it with "
+            f"no force and deletes its landed branch.")
 
 
 # A session that made no commit has nothing to land, so "every commit of it on the default branch" holds for it
@@ -925,7 +1046,7 @@ def archive_acts(home, s, d, hand):
         if hand:
             d["tried"][key] = n + 1
         cmds, _, _ = removals(home, s, trees, skip_own=True, but=(k,), kept=d["mains"])
-        after = (f" Once the call returns, remove what it leaves on disk: {cmds_text(cmds)}. {LEAVE}") if cmds else ""
+        after = (f" Once the call returns, remove what it leaves on disk: {cmds_text(cmds)}. {LEAVE}{whole()}") if cmds else ""
         card = "" if mode in NO_ASK else (" This session does not run in auto or bypass permissions mode, so the "
                                           "app shows ezexe its approval card for the call: that card is the app's.")
         last = (f" This is the {TRIES}rd time p4-phi hands it: if the app refuses again, as it does for a session "
@@ -1285,7 +1406,7 @@ def leftover_acts(home, s, d, hand):
         if cmds:
             out.append((f"leftover:{k or 'agents'}:{len(cmds)}:{cmds[0][0][-40:]}", "leftover", True,
                         f"leftovers of {whose}: its worktree is clean and its branch merged, so remove them: "
-                        f"{cmds_text(cmds)}. {LEAVE}"))
+                        f"{cmds_text(cmds)}. {LEAVE}{whole()}"))
         fresh = [h for h in held if f"tree:{h[0]}" not in d["named"]]
         if fresh:
             if hand:
