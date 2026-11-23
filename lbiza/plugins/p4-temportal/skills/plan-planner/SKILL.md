@@ -70,7 +70,7 @@ The evidence links below are written from `plan-planner/`, where `../../../../` 
 
 A plan is written whole and then read in rounds by one agent team until a round has nothing to mend, and nothing is built before ezexe approves it.
 
-- **Each section is researched before it is written:** in both places every time, the checkout and the upstream pages read live on the web, and then the section gets its intents, its Research, its fences and each fence's Documented and Derivation.
+- **Each section is researched before it is written:** in both places every time, the checkout and the upstream pages read live on the web, and then the section gets its intents, its Research, its Observed and Assumed lines, its fences and each fence's Documented and Derivation.
 - **The web research is an agent's own step:** a research agent goes to the upstream pages for the section's subject, read live, beside the read of the checkout, and a section whose subject has an upstream page holds a Documented from that page, never from the checkout's docs alone.
 - **Where the two speak of the same thing, the upstream page wins:** it holds the latest recommended approach, so the fence follows it, and the section gains a fence that brings the checkout's doc in step with it.
 - **The checkout's docs say only what is this code's own:** a fence that writes a doc restates nothing an upstream page says, writes what the code does and why, and links the upstream page as `See more: <url>` where the subject is upstream's.
@@ -89,6 +89,8 @@ A plan is written whole and then read in rounds by one agent team until a round 
 - **A live page is read for the team by a subagent of the lead:** the teammate `sources` sends the lead each page a Documented line names with the words quoted from it, and the lead has one `web-fetch` subagent read them and hands the answers back before the challenge, since a teammate was seen with no tool that fetches a page.
 - **A finding counts only where it held when checked:** the planner opens the file and line each finding names, and one that the file does not bear out is dropped and counted in no round.
 - **The planner mends what held:** each held finding is mended in the plan or answered there with the reason it is no fault, by the planner, the one writer of the plan file.
+- **Each round tests what was seen and what was assumed:** the teammate `sources` reads each Observed line against what it names as having shown it, and tries to show each Assumed line from the code or a live page.
+- **The planner settles each assumption a round touched:** one that was shown moves to Observed with its source, one that was shown wrong is corrected together with every fence that rested on it, and one that nobody could show stays under Assumed.
 - **The rounds are logged at the plan's end:** under a last heading `## Loop log`, one line a round as `- Round <n>: <k> held, <m> minutes: <what the mends changed>`, and beneath it one indented line for each held finding as `  - <section>: <the finding>: mended, <how>` or `  - <section>: <the finding>: answered, <why it is no fault>`, written before the next round is asked for.
 - **The loop ends at the first clean round:** a round with no held finding is logged as `- Round <n>: clean, <m> minutes`, and no round follows it.
 - **The loop goes on while a round holds findings, and stops short of clean only where they grow:** a round that holds as many findings as the round before, or fewer, is mended and followed by a next round. Where a round's held findings are more than the round before, the planner mends them, asks for no further round, and names that to ezexe in one line at the plan's head and beside the approval. No count of rounds ends the loop.
@@ -97,6 +99,7 @@ A plan is written whole and then read in rounds by one agent team until a round 
 - **One reader makes the read where no team can:** in a planner no session started, where p4-phi is not installed, and where the starter answers that it can start no lead, as in a host with no Terminal panel, one reader that has not seen the writing reads the whole plan, `p4-phi:check` where p4-phi is installed, the planner mends, and one more such reader reads the mends, with no read after it, as rule 11 of the skill `sub-agentic` has it.
 - **A reader that returns a partial read is continued:** the planner sends the same agent a message to go on from where it stopped, by `SendMessage` with its id, so one read covers the whole plan.
 - **The plan says at its head how its loop ended:** one line under the title that opens `Read:`, with who read it, the rounds, the held findings of each, whether it ended clean or stopped, and what the team spent.
+- **The plan names at its head what stayed assumed:** one line under the `Read:` line that opens `Assumed:`, with each assumption no round could show and its section's number, or `Assumed: none`, so ezexe approves the plan knowing what nobody saw.
 - **The spend is read before the lead is closed:** a teammate's finish notice holds no token count, so the planner runs `phi.py spend <the lead's name>`, which only reads, once for each lead the loop had, since each has a name of its own, writes each one's line for all of them into the plan's head, and sends its starter one message to close the last lead's tab.
 - **Nothing is built before the approval:** until ezexe approves the whole plan, no session that writes is started and no file but the plan is edited.
 
@@ -134,6 +137,8 @@ Round N. The plan's section Loop log now holds the round before, with each findi
 
 - **Intents:** the section opens by listing what it means to change, one line each.
 - **Research:** after the intents and before any fence, the references the round's research found for each intent and what each recommends, one line each: the upstream page read live on the web with its link, then the file and line in the checkout, and the recommendation learned from them.
+- **Observed:** after the Research and before any fence, what the research itself saw that bears on the section's intents, one line each, and each line ends with what showed it: the file and line, the command with what it printed, or the page with the words quoted from it.
+- **Assumed:** after Observed, what the section takes to be so beyond what was seen, one line each with why it could not be seen, or the one word `none`. A fence, a comment and a sentence of a skill state as fact only what an Observed line holds, and one that rests on an Assumed line says so.
 - **Fences:** every edit is a fenced code block, and above it, its intent:
   - **Documented:** the source in detail: the upstream page or file and line, read live or in the checkout, quoted where a quote fits.
   - **Derivation:** in prose, how the approach follows from that source, and why this approach rather than another.
