@@ -67,7 +67,6 @@ import p4conf
 import plans
 import relay
 import shared
-import store as st
 
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
 
@@ -81,7 +80,20 @@ ITEM_CHARS = 400                 # of one item
 OPEN_MOST = 60                   # open items one session keeps
 FIT_WORDS = 3                    # content words a step shares with a live worker's task before it goes there
 # Words that make no fit: the words every brief of this project carries, and everyday words no task has to itself.
-EVERYDAY = plans.SIBLING_STOP | st.COMMON | frozenset("own owns owned itself".split())
+COMMON = frozenset("""able about above actually add added again ago agree ahead also always another answer anything
+anyway around asked back because before being better big bit both build built call came case change changed check
+clean code come coming correct could current day did different does doing done down each else end enough even
+ever everything exactly fail failed file files find fine first fix fixed following found full get getting give go
+goes going gone good got great had happen happened hard has have help here high hold how idea instead just keep
+kind know last later least left let like line little long look looking looks lot make makes making many maybe mean
+means meant might mine more most move moved much must name need needed needs new next nice none now number off okay
+old once only open other over part pass path please point possible pretty probably problem put quick quite rather
+read ready real really reason right run running said same say says second see seems seen set should show side since
+small some something soon sorry start started still stop sure take taken talk tell test tested tests than thank
+thanks that the them then there these thing things think this those though thought through time today told too
+took top tried try trying turn under until update updated use used using want wanted wants way well went were what
+when where whether which while why will with without work worked working works would wrong yeah yes yet you your""".split())
+EVERYDAY = plans.SIBLING_STOP | COMMON | frozenset("own owns owned itself".split())
 NO_ASK = ("auto", "bypassPermissions")   # the permission modes the app archives in without its card
 CLOSE_ASKS = 2                   # closing messages one session is sent before it is left to ezexe
 CLOSE_LOOKS = 2                  # messages this session gets after one with no turn of the asked session ended

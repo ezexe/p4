@@ -1,7 +1,7 @@
 """gaps.py: a feedback memory that patches over a plugin's behaviour gets its gap written up as a finding.
 
 A session writes a feedback memory into the store's temportal/memory/ when a plugin did not do what ezexe wanted,
-such as "a child never merges" or "a store moves only by p4.py sync". Such a memory hides a gap that belongs in the
+such as "a child never merges" or "a plan is written in the plans folder". Such a memory hides a gap that belongs in the
 plugin. No session publishes a new issue on its own, so when a session writes a feedback memory whose rule describes
 session or plugin behaviour, p4-phi tells it to write the gap into this turn's report as one `Finding:` line. That
 line goes up to the puppeteer that controls its session tree, or to its orchestrator where none does, which

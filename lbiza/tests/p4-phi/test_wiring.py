@@ -246,19 +246,44 @@ class Wiring(unittest.TestCase):
             layout = [e for e in entries() if e[2]["command"].endswith(" layout")][0]
             r = run_entry(*layout, seed, base)
             self.check("layout", layout[0], layout[2], r)
-            self.assertTrue(os.path.isdir(os.path.join(seed, ".claude", "p4", "phi")), "the layout entry made no store")
-            # the store has its Python environment, so the catch-up entry has nothing to tell ezexe of it
-            py = os.path.join(seed, ".claude", "p4", ".venv", *(("Scripts", "python.exe") if os.name == "nt"
-                                                                 else ("bin", "python")))
-            os.makedirs(os.path.dirname(py))
-            with open(py, "w", encoding="utf-8"):
-                pass
+            self.assertTrue(os.path.isfile(os.path.join(seed, ".claude", "p4", "p4.json")), "the layout entry made no store")
 
             def make(tmp):
                 proj = os.path.join(tmp, "a new project")
                 shutil.copytree(seed, proj)
                 return proj
             self.run_all("a new store", make)
+
+
+class KeptScripts(unittest.TestCase):
+    """What stays of the scripts after the training, ranking and recall left: no kept file names a removed one."""
+
+    def test_every_import_of_every_kept_script_is_standard_library_or_a_file_of_the_scripts_folder(self):
+        """An ast walk of each script's `import` and `from` statements, those inside functions too: each name is in
+        the standard library or is a file of the scripts folder, so no kept script imports a removed one."""
+        import ast
+        files = sorted(f for f in os.listdir(SCRIPTS) if f.endswith(".py"))
+        kept = {f[:-3] for f in files}
+        for gone in ("catchup", "deps", "digests", "labels", "lookups", "near", "notices", "p4", "ranker", "repo",
+                     "said", "store", "storeenv", "sync", "teacher", "train", "view"):
+            self.assertNotIn(gone, kept, f"{gone}.py is removed")
+        self.assertIn("pathfilter", kept, "the one file kept for the store's git filter")
+        seen = 0
+        for name in files:
+            with open(os.path.join(SCRIPTS, name), encoding="utf-8") as f:
+                tree = ast.parse(f.read(), name)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    mods = [a.name for a in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    mods = [node.module]
+                else:
+                    continue
+                for mod in mods:
+                    seen += 1
+                    top = mod.split(".")[0]
+                    self.assertTrue(top in sys.stdlib_module_names or top in kept, f"{name}: imports {mod}")
+        self.assertGreater(seen, 100, "the walk saw the imports of the scripts")
 
 
 class NoGitBash(unittest.TestCase):

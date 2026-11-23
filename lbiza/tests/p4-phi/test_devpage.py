@@ -74,7 +74,7 @@ class Page(unittest.TestCase):
                      "lastTurnStopped"):                # each key the page says the record alone holds is still read
             self.assertIn(f"<code>{name}</code>", live, name)
             self.assertTrue(any(name in read(os.path.join(SRC, f)) for f in ("phi.py", "starts.py", "node.py")), name)
-        for reader in ("puppeteer.app_index", "node.record_tree", "controls.started_by", "controls.sections"):
+        for reader in ("puppeteer.app_index", "controls.started_by", "controls.sections"):
             module, _, function = reader.partition(".")
             self.assertIn(f"<code>{reader}</code>", live, reader)
             self.assertIn(f"def {function}(", read(os.path.join(SRC, module + ".py")), reader)

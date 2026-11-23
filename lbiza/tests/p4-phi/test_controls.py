@@ -1419,7 +1419,7 @@ class SidebarTools(unittest.TestCase):
     def answers(self, group=..., linked=None, sections=None):
         """What the module writes for the puppeteer's CLI session: its own answer of `get_session` with `group`, the
         rows of `list_sessions`, and the sections of the sidebar."""
-        os.makedirs(phi.p4conf.sub(self.t.p4, "models"), exist_ok=True)
+        write(os.path.join(self.t.p4, "p4.json"), "{}\n")
         own = {"sessionId": PUP, "title": "Run the trees", "cwd": self.t.proj, **({} if group is ... else {"group": group})}
         d = {"at": 0, "self": own, **({"sessions": linked} if linked is not None else {}),
              **({"sections": sections} if sections is not None else {})}

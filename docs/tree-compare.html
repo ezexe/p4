@@ -206,7 +206,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <h3>What is stored, and where</h3>
       <div class="cs"><b>Session tree</b><code>spawnedFrom</code> in each <code>session.json</code>, under <code>&lt;project&gt;/.claude/p4/phi/sessions/&lt;sessionId&gt;/</code>, or under the shared store that <code>phi.home</code> in <code>p4.json</code> names. The app keeps its own record of the nesting, which p4-phi reads it from.</div>
       <div class="cp"><b>Call tree, drawn</b>Nothing. The tree lives in the page's memory and is built again each time.</div>
-      <div class="cp"><b>Ensemble, built</b><code>tree/&lt;address&gt;.pt</code> for each member, <code>tree.json</code> and <code>tree-oof.json</code>, in the store's models folder, <code>phi/models/</code> in the current layout. No file holds a link.</div>
+      <div class="cp"><b>Ensemble, built</b><code>tree/&lt;address&gt;.pt</code> for each member, <code>tree.json</code> and <code>tree-oof.json</code>, in the store's models folder. No file holds a link.</div>
     </div>
     <div class="row">
       <h3>What the tree is for</h3>
@@ -354,7 +354,7 @@ function pDraw(){
     else said="fib("+num+") makes "+all.length+" calls. "+leaves+" of them are leaves: "+ones+(ones===1?" one":" ones")+" and "+(leaves-ones)+(leaves-ones===1?" zero":" zeros")+". Select a call to see the smaller tree it holds.";
     $("pCon").textContent="buildTree("+num+")";$("pCon").className="con call";
   }else{
-    if(sel){var p=parentOf(sel.id);said="The member at "+sel.id+(p?" is grown under "+p+", which parent(a) reads from the address alone.":" is the root, the store itself.")+" It is trained "+nth(sel.shard)+" of "+num+", "+(sel.kids.length?"starting from the mean of its children's weights before their fine-tuning.":"starting from scratch.")+" Its file is phi/models/tree/"+sel.id+".pt.";}
+    if(sel){var p=parentOf(sel.id);said="The member at "+sel.id+(p?" is grown under "+p+", which parent(a) reads from the address alone.":" is the root, the store itself.")+" It is trained "+nth(sel.shard)+" of "+num+", "+(sel.kids.length?"starting from the mean of its children's weights before their fine-tuning.":"starting from scratch.")+" Its file is tree/"+sel.id+".pt.";}
     else said="K = "+num+" gives the first "+num+" address"+(num===1?"":"es")+", shortest first. The deepest member is trained first, and every member is fine-tuned on every labelled pool. Select an address to see where its training starts.";
     $("pCon").textContent="python -m phi_rank.tree train --p4 <store> --pairs pairs.jsonl --k "+num;$("pCon").className="con";
   }

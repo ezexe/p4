@@ -1,56 +1,43 @@
 #!/usr/bin/env python3
 """hook.py <name>: the p4-phi hooks that hooks/recall-hook.sh runs with Claude Code's JSON payload on stdin: the
-store's layout and catch-up, retrieval, the record of every tool call, and training. The check before a tool call
-is here too, and the plugin's hooks module runs it with a PreToolUse hook's payload. Every handler resolves
-`.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's `cwd`, prints only what its row below names, and on any failure
-exits 0 with one `systemMessage` for ezexe, never context for the model. Each row gives the handler's name, the
-event and matcher hooks/hooks.json runs it on, and what it does.
+store's layout, the watch of Claude Code's changelog, the hand-over of a launch's text to its subagent, and the
+records phi.py keeps after a tool call. The check before a tool call is here too, and the plugin's hooks module runs
+it with a PreToolUse hook's payload. Every handler resolves `.claude/p4/` from CLAUDE_PROJECT_DIR or the payload's
+`cwd`, prints only what its row below names, and on any failure exits 0 with one `systemMessage` for ezexe, never
+context for the model. Each row gives the handler's name, the event and matcher hooks/hooks.json runs it on, and what
+it does.
 
-  catch-up       SessionStart, matcher `startup`. One `systemMessage` from catchup.py when something fell behind on
-                 this machine, such as the store's layout, its branch or its Python environment; nothing otherwise.
-  layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
-                 p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
-                 repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync
-                 workflow once the store has an origin; on the `compact` source, marks the compaction in the
-                 session's view record; runs p4conf.watch, the cheap comparison of the running Claude Code binary,
-                 the p4 plugins' versions, the store's `claude` section and the P4_* variables its p4.json asks
-                 for with p4conf's record, which on any change runs p4conf.keep_settings; runs
-                 p4conf.read_changelog, which reads the versions a newer Claude Code left owed from Claude Code's
-                 own cached changelog; and brings the repository's and the dependencies' documents and the index up
-                 to date.
-                 It prints a `systemMessage` only naming a key a store wants that p4 never writes, and never
-                 `additionalContext`: a rule every session holds is a rules file, which Claude Code loads itself.
+  layout         SessionStart, matcher `startup|resume|clear|compact|fork`. Moves a store of an older layout through
+                 p4conf.migrate_layout; makes `.claude/p4/` with its .gitignore, p4.json and its git repository
+                 where they are missing; adds the `.git/info/exclude` line; sweeps the served folder; runs
+                 p4conf.watch, the cheap comparison of the running Claude Code binary, the p4 plugins' versions, the
+                 store's `claude` section and the P4_* variables its p4.json asks for with p4conf's record, which on
+                 any change runs p4conf.keep_settings; and runs p4conf.read_changelog, which reads the versions a
+                 newer Claude Code left owed from Claude Code's own cached changelog.
+                 It prints a `systemMessage` only with the layout move's lines and a key a store wants that p4 never
+                 writes, and never `additionalContext`: a rule every session holds is a rules file, which Claude Code
+                 loads itself.
   settings       ConfigChange, matcher `local_settings|project_settings|user_settings`. p4conf.watch checks the
                  keys the record owns, never a block, and prints nothing.
-  recall         UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, then the
-                 retrieval lines that `injected` lets through as `additionalContext`, with said.py's handles and
-                 instruction unless `recall.said.mode` is off, and nothing when it lets none through. It opens the
-                 message's row and logs what retrieval found, shown or held back.
+  watch          UserPromptSubmit. A line for each change of Claude Code the changelog read found, once, as
+                 `additionalContext`; nothing when there is none.
   agent          PreToolUse, matcher `Agent`. Nothing: the call runs with its prompt as written. phi.py's text for
-                 the subagent and the retrieval lines under "Notes from this repo's memory:" wait for its start.
+                 the subagent waits for its start.
   subagent-start SubagentStart. phi.py binds the subagent, by the `agent_id` the input carries, to the launching
-                 session's step in progress. Then the lines of the Agent call that launched it as
+                 session's step in progress. Then the text of the Agent call that launched it as
                  `additionalContext`: the plugin's hooks module binds the subagent's id to that call's id at
-                 `agent.spawn`, and launch_of reads the pair. Nothing where no launch is bound or it kept no line.
+                 `agent.spawn`, and launch_of reads the pair. Nothing where no launch is bound or it kept no text.
   lookup-check   No entry of hooks.json. The plugin's hooks module, hooks/register.ts, runs it at `tool.check`, only
                  for a call python has a check for, and reads what it prints as a PreToolUse hook's output: a deny
                  or an ask is the verdict, `additionalContext` reaches the model beside the call's result or in a
                  deny's reason, and a `systemMessage` goes to the debug log. The first answer of phi.py's checks
-                 that PHI_CHECK names for the tool, or else lookups.py's check: an earlier finding beside a web
-                 call, an earlier failure before a command expected to fail. A subagent's call also gets phi.py's
-                 word of what changed since its launch beside that answer, when there is one.
+                 that PHI_CHECK names for the tool. A subagent's call also gets phi.py's word of what changed since
+                 its launch beside that answer, when there is one.
   lookup-record  PostToolUseFailure, matcher `.*`, and PostToolUse for the tools of WAITED alone. phi.py's records
-                 that PHI_RECORD names for the tool, whose answer is returned for `update_plan`, Write and Edit;
-                 otherwise lookups.py writes the call's row and tells a failure what other sessions did about it.
-  lookup-batch   PostToolBatch, async. The lookup row of every call of the batch that worked, written by one start,
-                 and nothing printed.
-  close          Stop. Nothing printed. It completes the message's row from the reply, writes the turn's usage and
-                 repo labels and its task, notes the dependency files the turn opened, brings view.py's record of
-                 the session up to date, and then the repository's and the dependencies' documents and the index.
-  subagent-stop  SubagentStop, matcher `.*`. Nothing printed. It closes phi.py's record of the subagent, then writes
-                 the usage and repo labels of what the agent hook served it, and its task.
-  train          Stop, async. Nothing printed. `train --if-owed`, a round of the ranker when train.py's `owed` says
-                 one is due, which calls no paid model; nothing when p4.json's `recall.learn` is false.
+                 that PHI_RECORD names for the tool, whose answer is returned for `update_plan`, Write and Edit.
+  lookup-batch   PostToolBatch, async. phi.py's tie of a memory to the issue a `gh issue create` filed, for each
+                 call of the batch that worked, and nothing printed.
+  subagent-stop  SubagentStop, matcher `.*`. Nothing printed. It closes phi.py's record of the subagent.
 
 What the hooks reference, https://code.claude.com/docs/en/hooks, says of the events these handlers answer:
 - UserPromptSubmit: `{"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "..."}}`
@@ -60,23 +47,21 @@ What the hooks reference, https://code.claude.com/docs/en/hooks, says of the eve
   `.claude/rules/`", says "Rules without `paths` frontmatter are loaded at launch with the same priority as
   `.claude/CLAUDE.md`" and "Personal rules in `~/.claude/rules/` apply to every project on your machine", and
   context-window.md, "What survives compaction", has the row "Project-root CLAUDE.md and unscoped rules |
-  Re-injected from disk". catchup.py tells ezexe of a rule a store still marks pinned that no rules file carries.
+  Re-injected from disk".
 - PreToolUse: the agent hook rewrites nothing, so the Agent call runs as written, and sets no `permissionDecision`
   unless P4_AGENT_ALLOW=1 adds "allow".
 - SubagentStart: "SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and
   `agent_type` with the agent name that the matcher filters on", and `additionalContext` is "added to the subagent's
   context at the start of its conversation, before its first prompt", so the subagent-start hook binds the id and
-  gives the lines there, ezexe/p4#243 row D2. The page gives the input no field of the Agent call that launched the
+  gives the text there, ezexe/p4#243 row D2. The page gives the input no field of the Agent call that launched the
   subagent, neither its `tool_use_id` nor its prompt. The hooks module's event does: `agent.spawn` carries the
   call's `tool_use_id`, "The Agent tool call this spawn belongs to", and answers "The started subagent's id: the
   same string its loop's `tool.call` events carry as `agentId`", by the types of Claude Code 2.1.326. hooks/
-  register.ts writes that pair, and a start takes the lines of its own launch and of no other.
+  register.ts writes that pair, and a start takes the text of its own launch and of no other.
 - PostToolUse and PostToolUseFailure: `additionalContext` adds context beside the call's result.
-- Stop: the close hook reads the reply from `last_assistant_message`, since `transcript_path` can lag the
-  conversation, and prints nothing, since a `decision` to block or an `additionalContext` would continue the turn.
 - SubagentStop: the input adds `agent_id`, `agent_type`, `agent_transcript_path` and `last_assistant_message`.
 - async: an async hook can't block or control Claude's behaviour, and its output is delivered on the next turn, so
-  the train hook prints nothing. With `-p`, Claude Code kills an async hook still running at teardown.
+  the lookup-batch hook prints nothing. With `-p`, Claude Code kills an async hook still running at teardown.
 - `systemMessage` is a warning shown to ezexe.
 """
 
@@ -86,31 +71,21 @@ import re
 import sys
 import time
 
-# subprocess, hashlib, contextlib and io are imported where they are used, so the `recall` hook, which runs on every
-# message, does not pay for them: h_recall states its budget
+# subprocess, hashlib and tempfile are imported where they are used, so a hook that does not need them does not pay
+# for them
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402
 
-NOTES_HEAD = "Notes from this repo's memory:"
-REPO_DEADLINE_S = 8.0
-HOOK_BUDGET_S = 11.0             # the layout hook's 15 s, less the index build: what the two reads share
 SEED_MARKER = "# seeded by p4-recall"
 # a seed marker: the GITIGNORE header, SEED_MARKER, or the header that the vlds plugin's layout hook wrote in the
 # stores this plugin inherits
 SEED_MARKER_RE = re.compile(r"(?i)^#\s*seeded (once )?by (p4-recall|the vlds plugin)\b")
 GITIGNORE = """# seeded once by p4-recall; your edits win
 temportal/notebook/.out/
-phi/models/served/
-phi/models/index.json
-phi/models/repo.json
-phi/models/deps.json
-phi/models/near.json
-phi/models/lookups.db*
-phi/models/view/
-phi/models/*.tmp
+phi/served/
 .layout.lock
 .settings.lock
 claude-settings.json
@@ -132,43 +107,9 @@ __pycache__/
 *.jpg
 *.zip
 *.gz
-phi/models/ranker.pt
 """
-# phi/models/ranker.pt is each machine's own build of the .pt ranker's chain, the format of ezexe/phi's phi_rank, and
-# is never tracked. The chain itself, phi/models/ranker-anchor.pt and phi/models/ranker.rNNN.phid, and the pretrained
-# base are tracked in git LFS through the store's .gitattributes, so a blanket *.pt or *.phid here would hide the very
-# files the other machines pull.
-# .venv/ is the store's Python environment, which storeenv.py builds on this machine and git never tracks: Python's
-# venv page says an environment is "Not checked into source control systems such as Git".
-# inject is "rules-facts" by default: only the rule and fact lines reach the model. A paid validation over two seeds
-# with a Haiku judge decides it. Every line shown, inject: true, is never better than Claude Code with no line on the
-# general tasks, is worse on one lesson task on both seeds and on held-out short turns, 0.373 and 0.360 against 0.393
-# and 0.373, and is better only on tasks newer than the model, 0.75 against 0.50; a mode worse anywhere stays off.
-# The rule and fact lines alone change nothing where every line costs, and score 0.667 against 0.50 on the newer
-# tasks on both seeds. The other lines are held back while the query still runs and logs what it would have shown,
-# so usage labels keep teaching the model. inject: false shows no line at all.
-CONFIG = {"inject": "rules-facts"}
-
-
-RULES_FACTS = re.compile(r"^- \S+ (rule|fact): ")
-
-
-def inject_mode(p4):
-    """"off", "rules-facts" or "all": which retrieval lines reach the main agent or a subagent, by p4.json's
-    recall.inject, which is false, "rules-facts" or true. P4_RECALL_INJECT set to 0, 1, true, false or rules-facts
-    overrides it as p4conf reads every variable: for the session's own store and only when a person set it."""
-    v = p4conf.section(p4, "recall", write=False).get("inject", CONFIG["inject"])
-    return "rules-facts" if v == "rules-facts" else ("all" if v is True else "off")
-
-
-def injected(p4, lines):
-    """The lines that may reach the model under inject_mode: all of them, only the rule and fact lines, or none."""
-    mode = inject_mode(p4)
-    if mode == "all":
-        return list(lines)
-    if mode == "rules-facts":
-        return [l for l in lines if RULES_FACTS.match(l)]
-    return []
+# .venv/ is a Python environment of the store's, which git never tracks: Python's venv page says an environment is
+# "Not checked into source control systems such as Git".
 
 
 def project_of(payload):
@@ -180,14 +121,10 @@ def p4_of(payload):
 
 
 def ready(payload):
-    """The .claude/p4 directory, with REPO_DEADLINE_S set from its p4.json, when the layout hook has made its corpus
-    or models folder; None otherwise."""
+    """The .claude/p4 directory where it holds its p4.json, which the layout hook writes; None otherwise."""
     p4 = p4_of(payload)
     p4conf.migrate_layout(p4)             # a store in an older layout is moved first
-    if not (os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models"))):
-        return None
-    p4conf.configure(globals(), p4, "recall", {"repo_deadline_s": "REPO_DEADLINE_S"})
-    return p4
+    return p4 if os.path.isfile(os.path.join(p4, p4conf.FILE)) else None
 
 
 def now():
@@ -207,15 +144,13 @@ def git(*args, cwd, timeout=10):
 # --- `layout`, on SessionStart ---------------------------------------------------------------------------
 
 def init_layout(project):
-    """Make .claude/p4/ with its folders, its .gitignore, p4.json and its git repository where they are missing, add
-    its line to the project's .git/info/exclude, and seed the store's sync workflow once it has an origin.
-    Returns the p4 path."""
+    """Make .claude/p4/ with its .gitignore, p4.json and its git repository where they are missing, and add its
+    line to the project's .git/info/exclude. Returns the lines p4conf.migrate_layout printed for a store of an older
+    layout, none where there was nothing to move: the layout hook shows them."""
     import subprocess
     p4 = os.path.join(project, ".claude", "p4")
     os.makedirs(p4, exist_ok=True)
-    p4conf.migrate_layout(p4)             # a store in an older layout is moved first
-    for sub in (p4conf.sub(p4, "store"), p4conf.sub(p4, "store", "messages"), p4conf.sub(p4, "models")):
-        os.makedirs(sub, exist_ok=True)
+    moved = p4conf.migrate_layout(p4)     # a store in an older layout is moved first
     seed_gitignore(os.path.join(p4, ".gitignore"))
     p4conf.load(p4)                       # p4.json: every plugin's settings, written when missing
     if not os.path.exists(os.path.join(p4, ".git")):
@@ -224,14 +159,7 @@ def init_layout(project):
         except (OSError, subprocess.SubprocessError):
             pass
     exclude_line(project)
-    try:                       # the store's sync workflow and script, once it has an origin, unless recall.sync.seed is false
-        conf = p4conf.section(p4, "recall", write=False).get("sync", {})
-        if conf.get("seed", True) and git("remote", "get-url", "origin", cwd=p4).returncode == 0:
-            import sync
-            sync.seed(p4, conf.get("main", "main"))
-    except (OSError, ImportError, subprocess.SubprocessError):
-        pass
-    return p4
+    return list(moved or [])
 
 
 def seeded_lines():
@@ -291,29 +219,9 @@ def exclude_line(project):
     return True
 
 
-def refresh_index(p4, project, deadline_s=None):
-    """Bring the repository's documents, then the dependencies', up to date incrementally within their deadlines,
-    and then rebuild the index when a source is newer than it."""
-    deadline_s = REPO_DEADLINE_S if deadline_s is None else deadline_s
-    import subprocess
-    import deps
-    import repo
-    import store as st
-    t0 = time.time()
-    if project and repo.is_repo(project):
-        try:
-            repo.build(p4, project, deadline_s=deadline_s)
-        except (RuntimeError, OSError, subprocess.SubprocessError):
-            pass
-    if project:
-        try:
-            deps.configure(p4)
-            left = HOOK_BUDGET_S - (time.time() - t0)
-            deps.build(p4, project, deadline_s=max(1.0, min(deps.DEADLINE_S, left)))
-        except (RuntimeError, OSError, ValueError):
-            pass
-    if st.index_stale(p4):
-        st.build_index(p4)
+def served_dir(p4):
+    """The folder a launch's text waits in, and the origin of a prompt: phi/served of the store."""
+    return p4conf.sub(p4, "phi", "served")
 
 
 SERVED_MAX_S = 86400            # a served record no Stop or SubagentStop took: swept at a layout hook once this old
@@ -322,7 +230,7 @@ SERVED_MAX_S = 86400            # a served record no Stop or SubagentStop took: 
 def sweep_served(p4, now_s=None):
     """Remove the served records older than SERVED_MAX_S: a Stop or a SubagentStop removes the one it reads, and one
     whose session never got there, as one a crash ended, is left; returns how many went."""
-    d = p4conf.sub(p4, "models", "served")
+    d = served_dir(p4)
     cut = (now_s or time.time()) - SERVED_MAX_S
     n = 0
     try:
@@ -352,16 +260,8 @@ def sweep_served(p4, now_s=None):
 
 def h_layout(payload):
     project = project_of(payload)
-    p4 = init_layout(project)
-    asks = settings_watch(project, payload)
-    sweep_served(p4)
-    if payload.get("source") == "compact" and payload.get("session_id"):
-        try:                    # view.py: the compaction marked where it happened, not guessed from the transcript
-            import view
-            view.compacted(p4, project, payload["session_id"], payload.get("transcript_path") or "")
-        except (OSError, ValueError, KeyError, ImportError):
-            pass
-    refresh_index(p4, project)
+    asks = init_layout(project) + settings_watch(project, payload)
+    sweep_served(os.path.join(project, ".claude", "p4"))
     return {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else None
 
 
@@ -390,71 +290,20 @@ def h_settings(payload):
     return None
 
 
-# --- `recall`, on UserPromptSubmit -----------------------------------------------------------------------
+# --- `watch`, on UserPromptSubmit ------------------------------------------------------------------------
 
-def h_recall(payload):
-    """The retrieval lines, and before them a line for each change the read of Claude Code's cached changelog
-    found, taken once."""
-    out = _recall(payload)
+def h_watch(payload):
+    """A line for each change the read of Claude Code's cached changelog found, taken once, as additionalContext."""
     p4 = p4_of(payload)
     if not os.path.exists(os.path.join(p4, "phi", "claude-code-watch.pending.json")):
-        return out
+        return None
     watch = p4conf.claim_watch(p4)
     if not watch:
-        return out
-    hso = dict((out or {}).get("hookSpecificOutput") or {"hookEventName": "UserPromptSubmit"})
-    hso["additionalContext"] = "\n".join(watch + [x for x in (hso.get("additionalContext"),) if x])
-    return {**(out or {}), "hookSpecificOutput": hso}
-
-
-def _recall(payload):
-    """The retrieval lines for the submitted message, beside it. The hook runs on every message, so its budget is
-    300 ms from the start of `sh hooks/recall-hook.sh recall` to its answer, on an index of about 5,000 documents whose
-    index is fresh; RecallLatency in test_hooks.py asserts it."""
-    import labels as lb
-    import p4 as cli
-    import rows
-    p4 = ready(payload)
-    if not p4:
         return None
-    prompt = payload.get("prompt") or ""
-    session = payload.get("session_id") or ""
-    by = rows.whose(rows.origin_of(payload))          # whose words it is, by the origin the hooks module kept
-    if rows.harness(prompt, by):
-        rows.row_open(p4, session, prompt, now(), by=by)   # a notification: its row, complete on arrival, no retrieval
-        return None
-    node, node_ids = cli.live_node(p4, session)
-    r = cli.query(p4, prompt, session[:8] if session else None, now(), node=node, node_ids=node_ids)
-    rid = rows.row_open(p4, session, prompt, now(), by=by)
-    ids = [i for i in r["ids"] if not i.startswith(("history:", "repeat"))]
-    shown = injected(p4, r["lines"])
-    shadow = not shown
-    handles = {}
-    if shown:
-        import said
-        if said.mode(p4) != "off":
-            # said.py: the rule, correction, retraction and fact lines get handles, and the session is asked to
-            # state what it did with them
-            keep = set(shown)
-            shown, handles = said.tag([(l, i) for l, i in zip(r["lines"], r["ids"]) if l in keep])
-            if handles:
-                shown.append(said.instruction(handles, session, p4))
-                said.asked(p4, session, rid, handles, now())
-    lb.write_served(p4, f"turn-{session}", {"ids": ids, "text": prompt[:2000], "task": rid, "session": session,
-                                            "time": now(), "lines": len(r["lines"]), "shown": len(shown),
-                                            "shadow": shadow, "handles": handles})
-    if shadow:
-        return None
-    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(shown)}}
+    return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit", "additionalContext": "\n".join(watch)}}
 
 
 # --- `agent`, on PreToolUse for the Agent tool ---------------------------------------------------------
-
-def agent_lines(p4, prompt):
-    import p4 as cli
-    r = cli.query(p4, prompt, None, now())
-    return r
-
 
 def agent_input(inp):
     """The Agent call's answer: none, since its input runs as written, or `permissionDecision: allow` when
@@ -474,25 +323,25 @@ def phi_text(name, payload):
     return str(((out or {}).get("hookSpecificOutput") or {}).get("additionalContext") or "")
 
 
-PENDING_S = 600                  # a launch's lines no subagent start took within this long are dropped
+PENDING_S = 600                  # a launch's text no subagent start took within this long is dropped
 
 
 def pending_dir(payload):
-    """Where a launch's lines wait for its subagent's start: the store's served folder, which git ignores and the
+    """Where a launch's text waits for its subagent's start: the store's served folder, which git ignores and the
     layout hook sweeps, or a folder of the temp directory in a project with no store. The plugin's hooks module
     writes into the store's one too: a subagent's binding to its launch, and the origin of the session's latest
     prompt, origin.json, which rows.origin_of reads."""
     import tempfile
     p4 = p4_of(payload)
-    base = p4conf.sub(p4, "models", "served") if os.path.isdir(p4conf.sub(p4, "models")) else os.path.join(
+    base = served_dir(p4) if os.path.isfile(os.path.join(p4, p4conf.FILE)) else os.path.join(
         tempfile.gettempdir(), "p4-phi-subagent-start", sha8(os.path.normcase(os.path.abspath(project_of(payload)))))
     return os.path.join(base, "start-" + re.sub(r"[^\w-]", "_", payload.get("session_id") or "none"))
 
 
 def hold_for_start(payload, kind, text, key):
-    """The launch's lines, kept for its SubagentStart under the Agent call's tool_use_id, which is how launch_of's
-    answer finds them. A launch whose call was denied or failed starts no subagent, so no start is bound to it, and
-    its lines go at PENDING_S. phi.py binds its own record of the subagent by the `agent_id` alone."""
+    """The launch's text, kept for its SubagentStart under the Agent call's tool_use_id, which is how launch_of's
+    answer finds it. A launch whose call was denied or failed starts no subagent, so no start is bound to it, and
+    its text goes at PENDING_S. phi.py binds its own record of the subagent by the `agent_id` alone."""
     d = pending_dir(payload)
     tid = re.sub(r"[^\w-]", "_", str(payload.get("tool_use_id") or ""))
     try:
@@ -511,7 +360,7 @@ def launch_of(payload):
     """The Agent call that launched the subagent a SubagentStart names: that call's `tool_use_id`, read from the
     file the plugin's hooks module wrote for the subagent's id when `agent.spawn` answered, and taken. '' where no
     launch is bound: a session with no hooks module, a subagent no Agent call started, such as a workflow's, or a
-    project with no store, where no line is kept either."""
+    project with no store, where no text is kept either."""
     aid = re.sub(r"[^\w-]", "_", str(payload.get("agent_id") or ""))
     if not aid:
         return ""
@@ -526,39 +375,24 @@ def launch_of(payload):
 
 
 def h_agent(payload):
-    """The Agent call runs with its prompt as written. phi.py's text for the subagent and the retrieval lines wait
-    in pending_dir for its SubagentStart, which adds them as context, ezexe/p4#243 row D2."""
-    import labels as lb
+    """The Agent call runs with its prompt as written. phi.py's text for the subagent waits in pending_dir for its
+    SubagentStart, which adds it as context, ezexe/p4#243 row D2."""
     inp = payload.get("tool_input")
     if not isinstance(inp, dict) or not isinstance(inp.get("prompt"), str):
         return None
     kind = str(inp.get("subagent_type") or "general-purpose")
     # phi.py's text for the subagent: the plan step it serves, and what this session's parent holds for its paths
     node = phi_text("agent-launch", payload)
-    node = node if node and node not in inp["prompt"] else ""
-    prompt = inp["prompt"]
-    notes, key = "", sha8(prompt.rstrip())
-    p4 = ready(payload)
-    if p4 and NOTES_HEAD not in prompt:
-        r = agent_lines(p4, prompt)
-        if r["lines"]:
-            shown = injected(p4, r["lines"])
-            lb.write_served(p4, f"agent-{key}", {"ids": [i for i in r["ids"] if ":" in i], "text": prompt[:2000],
-                                                 "task": f"agent:{key}", "time": now(),
-                                                 "tool_use_id": payload.get("tool_use_id", ""), "shadow": not shown})
-            if shown:
-                notes = NOTES_HEAD + "\n" + "\n".join(shown)
-    text = "\n\n".join(x for x in (notes, node) if x)
-    if text or p4:
+    text = node if node and node not in inp["prompt"] else ""
+    key = sha8(inp["prompt"].rstrip())
+    if text or ready(payload):
         hold_for_start(payload, kind, text, key)
     return agent_input(inp)
 
 
 def h_subagent_start(payload):
     """SubagentStart: phi.py binds the subagent by the `agent_id` the input carries. Then the launch launch_of
-    names for it gives its lines as `additionalContext`, and its served record is bound to the subagent's id for
-    its SubagentStop. A start no launch is bound to gets no line."""
-    import labels as lb
+    names for it gives its text as `additionalContext`. A start no launch is bound to gets none."""
     phi_text("agent-start", payload)              # phi.py: the subagent's id bound to the step in progress
     tid = launch_of(payload)
     d = pending_dir(payload)
@@ -580,136 +414,14 @@ def h_subagent_start(payload):
             os.remove(p)                                  # taken by the one start it launched
         except (OSError, ValueError):
             continue
-        p4 = p4_of(payload)
-        if payload.get("agent_id") and row.get("key") and os.path.isdir(p4conf.sub(p4, "models")):
-            lb.write_served(p4, f"bind-{payload['agent_id']}", {"key": row["key"]})
         if not row.get("text"):
             return None
         return {"hookSpecificOutput": {"hookEventName": "SubagentStart", "additionalContext": row["text"]}}
     return None
 
 
-# --- `close` and `subagent-stop`, on Stop and SubagentStop -----------------------------------------------
-
-def turn_for(transcript_path, prompt, sidechain=False):
-    """The transcript's last turn whose prompt starts like this one, or else its last turn."""
-    import transcript as tr
-    if not transcript_path or not os.path.exists(transcript_path):
-        return None
-    lines = tr.read_lines(transcript_path)
-    if sidechain:
-        for d in lines:
-            d["isSidechain"] = False
-            if d.get("type") == "user" and isinstance((d.get("message") or {}).get("content"), str):
-                d.setdefault("origin", {})
-    ts = tr.turns(lines)
-    if not ts:
-        return None
-    head = (prompt or "")[:80].strip()
-    for t in reversed(ts):
-        if head and t["prompt"].strip().startswith(head[:40]):
-            return t
-    return ts[-1]
-
-
-def labels_for_turn(p4, project, idx, task_id, served, reply, turn, when):
-    import labels as lb
-    rows_out = []
-    if served:
-        rows_out += lb.usage_labels(p4, idx, served, reply, turn, task_id, when)
-    if turn is not None:
-        ri = lb.repo_index(idx)
-        if ri[0]:
-            got, _ = lb.turn_repo_labels(turn, project, ri, task_id, reply, when, p4=p4)
-            rows_out += got
-        try:                    # a dependency's file the turn opened and the index lacks: read at the next build
-            import deps
-            deps.note_opened(p4, [p for p in deps.opened_in_turn(turn, project) if p not in ri[0]])
-        except (ImportError, OSError, ValueError, KeyError):
-            pass
-    lb.append_tsv(lb.mpath(p4, lb.TRAIN), lb.TRAIN_HEAD, rows_out)
-    return rows_out
-
-
-def h_close(payload):
-    import labels as lb
-    import rows
-    import store as st
-    p4 = ready(payload)
-    if not p4:
-        return None
-    project = project_of(payload)
-    session = payload.get("session_id") or ""
-    reply = payload.get("last_assistant_message") or ""
-    when = now()
-    row, done = rows.row_close(p4, session, reply, when)
-    served = lb.read_served(p4, f"turn-{session}")
-    idx, _ = st.ensure_index(p4)
-    prompt = (served or {}).get("text") or (st.unquote(row.fields.get("fingerprint", "")) if row else "")
-    task_id = (served or {}).get("task") or (row.id if row else f"turn:{session[:8]}:{when}")
-    turn = turn_for(payload.get("transcript_path") or "", prompt)
-    got = labels_for_turn(p4, project, idx, task_id, served, reply, turn, when)
-    if got or served:
-        lb.add_tasks(p4, [{"id": task_id, "session": session[:8], "time": when, "text": st.collapse(prompt)[:2000],
-                           "kind": rows.task_kind(p4, session, row, prompt)}])
-    if served:
-        try:
-            os.remove(lb.served_path(p4, f"turn-{session}"))
-        except OSError:
-            pass
-    try:                        # view.py: what this session has in view, brought up to date with its transcript
-        import view
-        view.refresh(p4, project, session, payload.get("transcript_path") or "",
-                     served_now=list(((served or {}).get("handles") or {}).values()))
-    except (OSError, ValueError, KeyError, ImportError):
-        pass
-    refresh_index(p4, project)
-    return None
-
-
 def h_subagent_stop(payload):
     phi_text("agent-stop", payload)               # phi.py: the subagent's record closed with its last message
-    import labels as lb
-    import store as st
-    import transcript as tr
-    p4 = ready(payload)
-    if not p4:
-        return None
-    project = project_of(payload)
-    path = payload.get("agent_transcript_path") or ""
-    reply = payload.get("last_assistant_message") or ""
-    first = ""
-    for d in tr.read_lines(path):
-        if d.get("type") == "user":
-            c = (d.get("message") or {}).get("content")
-            if isinstance(c, list):
-                c = "\n".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
-            if isinstance(c, str) and c.strip():
-                first = c
-                break
-    original = first.split("\n\n" + NOTES_HEAD, 1)[0]
-    key = f"agent-{sha8(original.rstrip())}"
-    bind = lb.read_served(p4, f"bind-{payload.get('agent_id', '')}") if payload.get("agent_id") else None
-    if bind and bind.get("key"):
-        key = f"agent-{bind['key']}"                  # bound at its SubagentStart, whatever its first message reads
-        try:
-            os.remove(lb.served_path(p4, f"bind-{payload['agent_id']}"))
-        except OSError:
-            pass
-    served = lb.read_served(p4, key)
-    if not served:
-        return None
-    idx, _ = st.ensure_index(p4)
-    task_id = served.get("task") or f"agent:{payload.get('agent_id', '')}"
-    turn = turn_for(path, first, sidechain=True)
-    when = now()
-    labels_for_turn(p4, project, idx, task_id, served, reply, turn, when)
-    lb.add_tasks(p4, [{"id": task_id, "session": (payload.get("session_id") or "")[:8], "time": when,
-                       "text": st.collapse(served.get("text") or original)[:2000], "kind": "agent"}])
-    try:
-        os.remove(lb.served_path(p4, key))
-    except OSError:
-        pass
     return None
 
 
@@ -730,15 +442,13 @@ PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "w
 
 
 # The tools whose PostToolUse entry a call waits on, as the first matcher of hooks.json lists them: a record of
-# phi.py can answer for a tool of PHI_RECORD, and lookups.py reads an error only out of a shell tool's output when
-# the call worked, so it has words for no other. The lookup row of a call that worked, of any tool, is written by
-# the one async entry of PostToolBatch, `lookup-batch`, which writes the same row h_lookup_record would, and a call
-# that failed has the PostToolUseFailure entry whatever its tool.
+# phi.py can answer for a tool of PHI_RECORD, and a shell tool's call can end in the tie of PHI_TIE or the yes of
+# PHI_YES. A call that failed has the PostToolUseFailure entry whatever its tool.
 WAITED = ("Bash", "PowerShell", "Write", "Edit", "TaskStop", "mcp__ccd_turn__update_plan",
           "mcp__ccd_turn__wrap_up", "EnterPlanMode", "ExitPlanMode")
 
 # After a shell call: phi.py's tie of a behaviour memory to the issue a `gh issue create` filed for it. It answers
-# nothing, so it runs behind a clean call with the lookup row and beside a failed one, and needs no gate of its own.
+# nothing, so it runs in the batch's entry behind a clean call and beside a failed one, and needs no gate of its own.
 PHI_TIE = {"Bash": "issue-tie", "PowerShell": "issue-tie"}
 # After a shell call that worked: phi.py keeps ezexe's yes to the set of what p4-phi settles with no approval card,
 # for the call its `cards-guard` raised the card for, and says how the set stands. It runs in the entry the call
@@ -779,15 +489,10 @@ def phi_route(payload, table):
 
 
 def h_lookup_check(payload):
-    """Before a tool runs. The first answer of phi.py's checks that PHI_CHECK names for the tool, or else
-    lookups.py's check: an earlier finding beside a web call, an earlier failure before a command expected to
-    fail. A subagent's call also gets phi.py's word of what changed since its launch, when there is one, as
-    additionalContext beside that answer."""
+    """Before a tool runs. The first answer of phi.py's checks that PHI_CHECK names for the tool. A subagent's call
+    also gets phi.py's word of what changed since its launch, when there is one, as additionalContext beside that
+    answer."""
     out = phi_route(payload, PHI_CHECK)
-    if not out:
-        import lookups
-        p4 = ready(payload)
-        out = lookups.check(p4, payload, now()) if p4 else None
     news = phi_text("agent-pre", payload) if payload.get("agent_id") else ""
     if not news:
         return out
@@ -799,9 +504,8 @@ def h_lookup_check(payload):
 
 
 def h_lookup_phi(payload):
-    """After a clean call the app does not wait on for its lookup row: phi.py's records alone, which must be in
-    place before the next call, run here in the entry the call waits on. Its answer is returned for a Write or an
-    Edit, as h_lookup_record returns it."""
+    """After a clean call: phi.py's records, which must be in place before the next call, run here in the entry the
+    call waits on. Its answer is returned for a Write or an Edit, as h_lookup_record returns it."""
     if plugins_own(payload):
         return None
     out = phi_route(payload, PHI_RECORD)
@@ -818,17 +522,11 @@ FAILED_KEY = "p4_failed"
 
 
 def h_lookup_batch(payload):
-    """PostToolBatch, async: the lookup row of every call of a batch that worked, written in the background by one
-    start, and nothing printed. Until p4-phi 0.11.116 each call had an async PostToolUse entry of its own, so a
-    batch of parallel calls started one process a call. Seen on Claude Code 2.1.328 and 2.1.330 in a scripted run:
-    the event comes once a batch, for a batch of one call too and for a subagent's batch with its `agent_id`, after
-    every PostToolUse and PostToolUseFailure entry a call waits on has answered.
-    A call's `tool_response` here is what the model reads, a string or a list of content blocks, where PostToolUse
-    hands the tool's own object, so a row's text is the model's text.
-    A call that failed is left to its PostToolUseFailure entry, which writes its row with the error and answers it:
-    the module names such a call under FAILED_KEY, and a row that entry wrote stays as it is, since a row is
-    written once by its id. Where no module loads and that entry wrote no row, the call is written as one that
-    worked, and a shell call's error is still read off its text.
+    """PostToolBatch, async: phi.py's tie of a memory to the issue a `gh issue create` filed, for every call of a
+    batch that worked, in the background by one start, and nothing printed. Seen on Claude Code 2.1.328 and 2.1.330
+    in a scripted run: the event comes once a batch, for a batch of one call too and for a subagent's batch with its
+    `agent_id`, after every PostToolUse and PostToolUseFailure entry a call waits on has answered.
+    A call that failed is left to its PostToolUseFailure entry: the module names such a call under FAILED_KEY.
     A call a plugin's hooks module made itself gets none of it."""
     calls = payload.get("tool_calls")
     if not isinstance(calls, list):
@@ -836,7 +534,6 @@ def h_lookup_batch(payload):
     marked = payload.get(FAILED_KEY)
     failed = {str(x) for x in marked} if isinstance(marked, list) else set()
     common = {k: v for k, v in payload.items() if k not in ("tool_calls", FAILED_KEY)}
-    p4, when = None, now()
     for call in calls:
         if not isinstance(call, dict):
             continue
@@ -844,20 +541,14 @@ def h_lookup_batch(payload):
         if plugins_own(one) or str(one.get("tool_use_id") or "") in failed:
             continue
         phi_route(one, PHI_TIE)                    # a `gh issue create` that filed a memory's finding ties it, once
-        if p4 is None:
-            import lookups
-            p4 = ready(one) or ""
-        if p4:
-            lookups.record(p4, one, when)
     return None
 
 
 def h_lookup_record(payload):
-    """After a tool ran or failed, phi.py's
-    records that PHI_RECORD names for the tool run, such as the task list with its step boundary and a background
-    task under its step; their answer is returned for `update_plan`, `wrap_up`, Write, Edit and `ExitPlanMode`. Otherwise lookups.py writes the
-    call's row, and a failure other sessions already met is told what they did about it. A call a plugin's hooks
-    module made itself gets none of it."""
+    """After a tool ran or failed, phi.py's records that PHI_RECORD names for the tool run, such as the task list
+    with its step boundary and a background task under its step; their answer is returned for `update_plan`,
+    `wrap_up`, Write, Edit and `ExitPlanMode`. Then the yes to the set of what p4-phi settles with no approval card,
+    for the one command it is kept for. A call a plugin's hooks module made itself gets none of it."""
     if plugins_own(payload):
         return None
     phi_route(payload, PHI_TIE)                    # as h_lookup_batch does behind a clean call, and a tie is made once
@@ -870,47 +561,15 @@ def h_lookup_record(payload):
     asks = payload.get("hook_event_name") == "PostToolUse" and "phi.py" in cmd and "cards" in cmd
     yes = phi_route(payload, PHI_YES) if asks else None
     said = ((yes or {}).get("hookSpecificOutput") or {}).get("additionalContext") or ""
-    import lookups
-    p4 = ready(payload)
-    text = lookups.record(p4, payload, now()) if p4 else ""
-    if not text and not said:
+    if not said:
         return None
     return {"hookSpecificOutput": {"hookEventName": payload.get("hook_event_name") or "PostToolUse",
-                                   "additionalContext": "\n\n".join(x for x in (said, text) if x)}}
+                                   "additionalContext": said}}
 
 
-def h_train(payload):
-    import contextlib
-    import io
-    p4 = ready(payload)
-    if not p4:
-        return None
-    try:                        # the digests of the sessions closed since the last sweep. They are corpus and no
-        import digests          # model, so they are written whatever recall.learn says, and a failure here costs
-        digests.sweep(p4)       # no round and leaves no retrain notice
-    except Exception:  # noqa: BLE001
-        pass
-    if not p4conf.section(p4, "recall", write=False).get("learn", True):
-        return None             # recall.learn false, set by the p4-model skill's mode off: the models stay untouched
-    import train
-
-    class A:
-        pass
-    a = A()
-    a.p4, a.if_owed, a.now, a.sources = p4, True, "", ""
-    with contextlib.redirect_stdout(io.StringIO()):
-        train.cmd_train(a)
-    return None
-
-
-def h_catch_up(payload):
-    import catchup
-    return catchup.hook(payload)
-
-
-HANDLERS = {"catch-up": h_catch_up, "settings": h_settings, "layout": h_layout, "recall": h_recall, "agent": h_agent, "subagent-start": h_subagent_start,
-            "close": h_close, "subagent-stop": h_subagent_stop, "train": h_train,
-            "lookup-check": h_lookup_check, "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-batch": h_lookup_batch}
+HANDLERS = {"settings": h_settings, "layout": h_layout, "watch": h_watch, "agent": h_agent,
+            "subagent-start": h_subagent_start, "subagent-stop": h_subagent_stop, "lookup-check": h_lookup_check,
+            "lookup-record": h_lookup_record, "lookup-phi": h_lookup_phi, "lookup-batch": h_lookup_batch}
 
 
 def parse_payload(raw: str):
@@ -939,13 +598,6 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001 — a broken hook never blocks a call
         out = {"systemMessage": f"phi (p4-phi): the {name or '?'} hook failed with {type(e).__name__}: {str(e)[:200]};"
                                 " nothing was added"}
-        try:                # one retrain notice in notices.py's file for the p4-model skill, never a second failure
-            import notices
-            p4 = p4_of(payload if isinstance(payload, dict) else {})
-            if os.path.isdir(p4conf.sub(p4, "store")) or os.path.isdir(p4conf.sub(p4, "models")):
-                notices.notify(p4, f"hook {name or '?'}", e, (payload.get("session_id") or "") if isinstance(payload, dict) else "")
-        except Exception:  # noqa: BLE001
-            pass
     if out:
         sys.stdout.write(json.dumps(out, ensure_ascii=False))
     return 0

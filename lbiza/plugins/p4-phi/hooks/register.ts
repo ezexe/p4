@@ -57,10 +57,12 @@ const REPORT_CHARS = 4_000
 // `<plugin>:<name>`, by the types of `prompt.compose`.
 const RULES_SECTION = 'p4-phi:rules'
 
-// A project's store, and under it where hook.py keeps a launch's lines for its subagent's start: hook.pending_dir
-// in python, `served/start-<session>` under the store's models folder. A file `bound-<agent id>` there holds the
-// id of the Agent call that launched the subagent, which hook.launch_of reads at the subagent's SubagentStart.
-const MODELS = '.claude/p4/phi/models'
+// A project's store, marked by its p4.json, and under it where hook.py keeps a launch's text for its subagent's
+// start: hook.pending_dir in python, `start-<session>` under the store's phi/served folder. A file
+// `bound-<agent id>` there holds the id of the Agent call that launched the subagent, which hook.launch_of reads at
+// the subagent's SubagentStart.
+const STORE_FILE = '.claude/p4/p4.json'
+const SERVED = '.claude/p4/phi/served'
 
 // The field of a SessionStart hook's input under which a p4 hooks module hands the plugins' python the settings
 // Claude Code loaded, one object a source, as p4conf.py's HANDED_KEY and HANDED_SOURCES name them. The settings
@@ -88,14 +90,12 @@ const MOST_SUBMITTED = 16
 
 // How long python may take over one call's check.
 const CHECK_MS = 10_000
-// The tools hook.py has a check for, as its PHI_CHECK and lookups.py read them. An edit is checked only for a
-// session that owes a nudge or is a puppeteer, a shell call only where a filter below passes it, and the rest
-// always: a web call, a message to another session, a session archiving itself and a session's start.
+// The tools hook.py has a check for, as its PHI_CHECK reads them. An edit is checked only for a session that owes a
+// nudge or is a puppeteer, a shell call only where a filter below passes it, and the rest always: a message to
+// another session, a session archiving itself and a session's start.
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
 const CHECKED_TOOLS = new Set([
-  'WebFetch',
-  'WebSearch',
   'SendMessage',
   'mcp__ccd_session_mgmt__send_message',
   'mcp__ccd_session_mgmt__archive_session',
@@ -150,10 +150,6 @@ const IN_BACKGROUND = /"run_in_background":\s?true/
 // raises the one approval card the set has, so the yes is ezexe's own. Between the script's name and the word
 // stand the closing quote, as the call's JSON text escapes it, and a space.
 const CARDS_ON = /phi\.py[^A-Za-z0-9]+cards[^A-Za-z0-9]+on[^A-Za-z0-9]/
-// Where a store keeps the failure model a plain shell call is checked by, newest layout first, and how long what
-// its first line said is believed: a training round's new model is read within this long.
-const SHELL_MODELS = ['phi/models', 'recall/models', 'models']
-const MODEL_MS = 60_000
 // The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
 const MOST_TOLD = 256
 
@@ -371,15 +367,13 @@ const submitted: Submitted[] = []
 const told = new Map<string, string>()
 
 // The ids of the calls that failed and whose batch has not ended yet, heard at `classic.PostToolUseFailure`. The
-// PostToolBatch command hook beneath writes the lookup row of every call of a batch that worked, and by hooks.md,
+// PostToolBatch command hook beneath ties the issues of the calls of a batch that worked, and by hooks.md,
 // "PostToolBatch input", a call of `tool_calls` carries its tool, its input, its id and its response and nothing
 // that says whether it failed, so the module names the failed ones under FAILED in that hook's input. A failed
 // call whose batch never ends, as one a stop cut short, would stay here, so the set is emptied past FAILED_MAX.
 const failed = new Set<string>()
 const FAILED = 'p4_failed'
 const FAILED_MAX = 500
-// Whether the store's failure model weighs shell calls, as its first line said when it was last read.
-let shellModel: { at: number; isWeighted: boolean } | undefined
 
 // The pane was opened by its command or drawn, so each look's end reads the pages anew, and what was last set in
 // `$.state`, as JSON: the same pages write nothing, so they draw nothing.
@@ -1120,8 +1114,8 @@ function originOf(prompt: string): PromptOrigin | undefined {
 // one that has none, where phi.py alone reads it. No prompt waits for python to say where that folder is: until a
 // look has answered it, a project with no store keeps no origin, and the hooks read the prompt's text as before.
 async function originFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
-  const models = `${await projectOf($)}/${MODELS}`
-  if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${ORIGIN_FILE}`
+  const project = await projectOf($)
+  if (await $.fs.exists(`${project}/${STORE_FILE}`)) return `${project}/${SERVED}/start-${named(sessionId)}/${ORIGIN_FILE}`
   switches ??= readSwitches($)
   if ((await switches).isPhiOff || folder === undefined) return undefined
 
@@ -1153,24 +1147,6 @@ async function isMarked($: EngineInterface, folder: string, id: string): Promise
   return id !== '' && (await $.fs.exists(`${folder}/${safe(id)}`).catch(() => false))
 }
 
-// Whether the store has a failure model that weighs shell calls: a store has one only once a training round passed
-// it, and one whose first line holds no shell weight checks nothing.
-async function weighsShell($: EngineInterface, root: string): Promise<boolean> {
-  const now = await $.clock.now()
-  if (shellModel !== undefined && now - shellModel.at < MODEL_MS) return shellModel.isWeighted
-  let isWeighted = false
-  for (const models of SHELL_MODELS) {
-    const file = `${root}/.claude/p4/${models}/lookups-model.json`
-    if (!(await $.fs.exists(file).catch(() => false))) continue
-    const first = (await $.fs.read(file).catch(() => '')).split('\n')[0] ?? ''
-    isWeighted = !first.includes('"shell":{"w":{}')
-    break
-  }
-  shellModel = { at: now, isWeighted }
-
-  return isWeighted
-}
-
 // Whether python has a check for a call, by tests that start no process. A
 // subagent phi.py marked open is checked at each call, for phi.py's word of what changed since its launch. `text`
 // is the call's tool and input as JSON, which the shell filters read.
@@ -1195,7 +1171,7 @@ async function isChecked(
   // A top-level session that owes a nudge, and a puppeteer, whose every edit and shell call phi.py reads.
   if ((await isMarked($, `${phi}/.nudge`, sessionId)) || (await isMarked($, `${phi}/.puppeteers`, sessionId))) return true
 
-  return isShell && (await weighsShell($, root))
+  return false
 }
 
 // What python said of a call: a refusal, a question for the person, and words for the model beside the result.
@@ -1600,14 +1576,14 @@ function named(id: string): string {
   return id.replace(/[^\w-]/g, '_')
 }
 
-// Writes which Agent call launched a subagent, where the project has a store: with none, hook.py keeps no line for
-// a launch either. This is retrieval's own record, which P4_PHI=0 does not turn off, as it does not turn off the
-// runner that reads it.
+// Writes which Agent call launched a subagent, where the project has a store: with none, hook.py keeps no text for
+// a launch either. This record is what hands a subagent its step, which P4_PHI=0 does not turn off, as it does not
+// turn off the runner that reads it.
 async function bind($: EngineInterface, toolUseId: string, agentId: string): Promise<void> {
   try {
-    const models = `${await projectOf($)}/${MODELS}`
-    if (!(await $.fs.exists(models))) return
-    const folder = `${models}/served/start-${named(await $.session.id())}`
+    const project = await projectOf($)
+    if (!(await $.fs.exists(`${project}/${STORE_FILE}`))) return
+    const folder = `${project}/${SERVED}/start-${named(await $.session.id())}`
     await $.fs.write(`${folder}/${BOUND}${named(agentId)}`, `${toolUseId}\n`)
   } catch (error) {
     note($, `a subagent was not bound to its launch: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
@@ -1703,8 +1679,8 @@ async function appCall($: EngineInterface, tool: string, input: Record<string, u
 // served folder, rows.origin_dir in python, which phi.py finds by the session's id before it knows the tree's
 // store, and in the session's folder in the tree's store for a project that has none.
 async function appFile($: EngineInterface, sessionId: string): Promise<string | undefined> {
-  const models = `${await projectOf($)}/${MODELS}`
-  if (await $.fs.exists(models)) return `${models}/served/start-${named(sessionId)}/${APP_FILE}`
+  const project = await projectOf($)
+  if (await $.fs.exists(`${project}/${STORE_FILE}`)) return `${project}/${SERVED}/start-${named(sessionId)}/${APP_FILE}`
 
   return folder === undefined ? undefined : `${folder}/${APP_FILE}`
 }
@@ -1967,7 +1943,7 @@ export const register: Register = on => {
     return words.length === 0 ? out : { ...out, additionalContext: [...(out.additionalContext ?? []), ...words] }
   }).catch(($, e, next) => next(e))
 
-  // Above the PostToolBatch command hooks, which write a batch's lookup rows: the calls of the batch that failed,
+  // Above the PostToolBatch command hooks, which tie a batch's issues: the calls of the batch that failed,
   // by their ids, added to the input those hooks read on stdin. The list is added where it is empty too, so python
   // can tell a batch the module read from one no module read.
   on('classic.PostToolBatch', ($, e, next) => {

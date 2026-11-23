@@ -24,7 +24,7 @@ The hooks, each in its h_ function:
   tree can settle are open, runs a writing child's issue gate, counts a child marked report when done as archived,
   tells the orchestrator to push issue-closing commits and makes the anchors.
 - The checks before a tool call are run by the plugin's hooks module, through `hook.py lookup-check`, and the
-  records after one ride on the retrieval hooks' entries, both through `routed`.
+  records after one ride on hook.py's entries, both through `routed`.
 
 Commands: note, done, task, shard, show, tree, background, detach, reparent, disposable, request, proof and controls,
 with the watcher's commands from puppeteer.py; `--help` gives the arguments of each. `rules` is the hooks module's
@@ -53,7 +53,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
-import node as nd  # noqa: E402  a session's place in the tree, which retrieval reads too
+import node as nd  # noqa: E402  the content words two texts share
 import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
@@ -548,7 +548,7 @@ class Me:
         self.id = session or host or str(self.rec.get("sessionId") or "") or self.cli
         project = os.environ.get("CLAUDE_PROJECT_DIR") or payload.get("cwd") or os.getcwd()
         self.home = p4 or ""
-        self.store = store_at(project) or p4 or ""     # this project's own store: its memory, rules and retrieval
+        self.store = store_at(project) or p4 or ""     # this project's own store: its memory and rules
         self.home_missing = ""
         if not self.home:
             above = spawned_from(self.rec)
@@ -4124,7 +4124,7 @@ def replay(me, s, transcript):
     """The task-list calls of the transcript that no hook handled, applied in order, at each message and each Stop,
     each once by its tool_use_id. Returns the step boundary text of the last one, ''
     for none. A session takes a plugin's hooks when it loads the plugin, and `/reload-plugins` applies later edits,
-    so a session whose hook list lacks the retrieval hooks' entries has only phi.py's own, and its calls are read
+    so a session whose hook list lacks hook.py's entries has only phi.py's own, and its calls are read
     back here."""
     if not transcript or not os.path.exists(transcript):
         return ""
@@ -4177,7 +4177,7 @@ def replay(me, s, transcript):
 
 
 def routed(name, payload):
-    """A phi.py handler run from hook.py, at a retrieval hook's entry or at the hooks module's check before a tool
+    """A phi.py handler run from hook.py, at hook.py's entry or at the hooks module's check before a tool
     call, with the hook output phi.py would give and its log line."""
     if os.environ.get("P4_PHI") == "0":
         return None
@@ -4200,7 +4200,7 @@ def agent_marker(me, agent_id):
 
 
 def h_agent_launch(payload):
-    """PreToolUse on Agent, from the retrieval hook's entry: the text for the subagent's start, its step and its
+    """PreToolUse on Agent, from hook.py's entry: the text for the subagent's start, its step and its
     slice. It keeps no record of the launch."""
     me = Me(payload)
     if not me.home or not me.id:
@@ -4215,7 +4215,7 @@ def h_agent_launch(payload):
 
 
 def h_agent_start(payload):
-    """SubagentStart, from the retrieval hook's entry: the subagent bound by the `agent_id` the input carries to the
+    """SubagentStart, from hook.py's entry: the subagent bound by the `agent_id` the input carries to the
     launching session's step in progress, and its marker opened under phi/.agents/ for the plugin's hooks module,
     which checks each call of a subagent a marker names. An input with no `agent_type` is no subagent the Agent
     tool started and is left alone."""
@@ -4293,7 +4293,7 @@ def agent_writes(calls):
 
 
 def h_agent_stop(payload):
-    """SubagentStop, from the retrieval hook's entry: the subagent's entry closed, and the files its own transcript
+    """SubagentStop, from hook.py's entry: the subagent's entry closed, and the files its own transcript
     shows it wrote kept on it for the ledger. The input names that transcript as `agent_transcript_path`."""
     agent_id = str(payload.get("agent_id") or "")
     me = Me(payload)

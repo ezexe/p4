@@ -2195,7 +2195,7 @@ class Origins(unittest.TestCase):
         self._tmp.cleanup()
 
     def keep(self, host, prompt_id, **origin):
-        """What the hooks module writes for a project with no models folder: origin.json in the session's folder."""
+        """What the hooks module writes for a project with no store: origin.json in the session's folder."""
         write(os.path.join(self.t.dir(host), "origin.json"), json.dumps({"promptId": prompt_id, **origin}))
 
     def said(self, host, prompt, prompt_id):
@@ -2246,7 +2246,6 @@ class Origins(unittest.TestCase):
         import plans
         import puppeteer
         import rows
-        import store as st
         import upkeep
         stored = "Port the flush to the new hook in hooks/flush.py"
         self.assertEqual(phi.request_of(stored, "schedule"), "")
@@ -2260,14 +2259,7 @@ class Origins(unittest.TestCase):
         asked = "why did the hook draft a session for this: " + plans.SWEEP_MARK
         self.assertEqual(phi.request_of(asked), asked)
         self.assertFalse(puppeteer.from_session(asked))
-        p4 = os.path.join(self._tmp.name, "rows", ".claude", "p4")
-        os.makedirs(p4)
-        for k, (prompt, by) in enumerate(((stored, "schedule"), (upkeep.SWEEP, ""))):
-            rows.row_open(p4, f"s{k}", prompt, "2026-11-22 14:58", by=by)
-            e = st.parse(st.read_text(rows.session_file(p4, f"s{k}")), "messages/x.md")[-1]
-            self.assertEqual(e.fields["arrival"], "agent message", prompt[:30])
-            self.assertFalse(st.owner_message(e))
-            self.assertFalse(st.completed(e), "answered at the turn's end, like a turn")
+        self.assertEqual(rows.whose({"kind": "scheduled-trigger"}), "schedule", "a stored prompt nobody typed")
 
     def test_the_origin_settles_what_the_head_of_a_text_can_only_suggest(self):
         import puppeteer
@@ -2286,10 +2278,8 @@ class Origins(unittest.TestCase):
             self.assertTrue(puppeteer.from_session(bare, by), by)
         self.assertTrue(phi.from_peer(bare, "session"))
         self.assertFalse(phi.from_peer('<cross-session-message from="local_x">hm</cross-session-message>', "user"))
-        self.assertTrue(rows.harness(bare, "event"))
-        self.assertFalse(rows.harness("<task-notification> pasted by hand", "user"))
         # with no origin every reader goes by the text, as before
-        self.assertTrue(rows.harness("<task-notification>x</task-notification>"))
+        self.assertTrue(rows.HARNESS_RE.match("<task-notification>x</task-notification>"))
         self.assertTrue(puppeteer.from_session("<task-notification>x</task-notification>"))
         self.assertTrue(phi.from_peer('<cross-session-message from="local_x">hm</cross-session-message>'))
 
@@ -2328,12 +2318,13 @@ class Origins(unittest.TestCase):
         self.assertEqual(self.t.session(TOP)["turnBy"], "event")
 
     def test_a_project_with_a_store_keeps_the_origin_beside_a_launchs_lines(self):
-        """The record of a project that has a models folder is in the session's folder under `served`, where the
-        retrieval hook reads it too, and it is read ahead of the session folder's."""
+        """The record of a project that has a store is in the session's folder under `phi/served`, where the hook
+        that hands a launch's text to its subagent keeps it too, and it is read ahead of the session folder's."""
         import rows
         cli = CLI[TOP]
-        served = os.path.join(self.t.p4, "phi", "models", "served", "start-" + cli)
+        served = os.path.join(self.t.p4, "phi", "served", "start-" + cli)
         os.makedirs(served)
+        write(os.path.join(self.t.p4, "p4.json"), "{}\n")
         write(os.path.join(served, "origin.json"), json.dumps({"promptId": "p-1", "kind": "peer"}))
         payload = {"session_id": cli, "cwd": self.t.proj, "prompt_id": "p-1"}
         old = os.environ.pop("CLAUDE_PROJECT_DIR", None)
@@ -2511,7 +2502,7 @@ class AppTools(unittest.TestCase):
         """What the module writes for the CLI session of `host`: the answer of `get_session` for the session itself
         and the rows of `list_sessions`, in the store's served folder, or in `folder`."""
         if not folder:
-            os.makedirs(phi.p4conf.sub(self.t.p4, "models"), exist_ok=True)
+            write(os.path.join(self.t.p4, "p4.json"), "{}\n")
             folder = phi.rows.origin_dir(self.t.proj, CLI[host])
         path = os.path.join(folder, phi.APP_FILE)
         d = {"at": 0, **({"self": own} if own else {}), **({"sessions": linked} if linked is not None else {})}

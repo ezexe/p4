@@ -644,17 +644,6 @@ class NoConsoleWindow(unittest.TestCase):
         self.ended(lambda: issues.run_background(self.tmp, "local_proof0001", cmd, out, "abc1234"))
         self.assertNoWindow(out, "issues.run_background")
 
-    def test_catchups_background_sync_opens_no_console_window(self):
-        import catchup
-        out = os.path.join(self.tmp, "store")
-        os.makedirs(out)
-        saved = catchup.HERE
-        catchup.HERE = self.fake
-        try:
-            self.assertTrue(self.ended(lambda: catchup.start_sync(out)))
-        finally:
-            catchup.HERE = saved
-        self.assertNoWindow(out, "catchup.start_sync")
 
 
 class FindingsGoUp(unittest.TestCase):

@@ -1145,7 +1145,7 @@ def child_paths(home, s):
 # the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, plan.json and anchor.json are tracked,
 # and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
 # tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
-# retrieval hook that seeds the rest of .gitignore runs beside this one at a start.
+# layout hook that seeds the rest of .gitignore runs beside this one at a start.
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
            "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",
@@ -1447,7 +1447,7 @@ def track_notice(home):
 # that holds the tree, which holds on every machine where a path would not. Each machine resolves remotes to its own
 # store folders through a map kept per user, beside Claude Code's settings and in no repository: p4-stores.json,
 # written at a session's start for a store whose p4.json names a home, when the folder kept for that remote differs.
-# The project's session tree goes to the phi/ of the store `phi.home` names; its memory, rules and retrieval data stay
+# The project's session tree goes to the phi/ of the store `phi.home` names; its memory and rules stay
 # its own.
 
 def stores_map_path():
@@ -1779,21 +1779,11 @@ OWED_MAX = 6                   # owed items named in one push line
 
 
 def owed(repos, main="main"):
-    """What a change in `repos` still owes before it is pushed, as far as p4-phi can see: the open retrain notices
-    in `models/retrain-needed.tsv` of a store it touches, and the machine branches of that store that are behind
-    main, read from the refs already fetched. Nothing is fetched and nothing is run."""
+    """What a change in `repos` still owes before it is pushed, as far as p4-phi can see: the machine branches of a
+    store it touches that are behind main, read from the refs already fetched. Nothing is fetched and nothing is
+    run."""
     out = []
     for store in dict.fromkeys(s for r in repos for s in stores_of(r)):
-        try:
-            import notices
-            rows = notices.open_notices(store)
-            where = norm(notices.path(store))
-        except Exception:  # noqa: BLE001
-            rows, where = [], ""
-        if rows:
-            parts = ", ".join(dict.fromkeys(str(r.get("component") or "a model") for r in rows))
-            out.append(f"{len(rows)} open retrain notice{'s' if len(rows) != 1 else ''} in {where}, "
-                       f"for {_short(parts, 120)}: run the retrain they ask for")
         top = _git(store, "rev-parse", "--show-toplevel")
         if not top or top.returncode != 0 or norm(top.stdout.strip()) != norm(store):
             continue                               # the store is not a repository of its own: no machine branches
@@ -2023,8 +2013,7 @@ def push_text(child_title, child, commits, owes=(), branches=(), green=(), workf
                    f"failed run shows.")
     return (f"phi (p4-phi): \"{child_title}\" `{child}` finished with commits that close issues: {named}. "
             f"Green work that closes an issue is landed at once.{merge} "
-            f"{suite} that repository's main and sync each store it touches with "
-            f"`p4.py sync --push`, without asking ezexe, and say in one line what was "
+            f"{suite} that repository's main, without asking ezexe, and say in one line what was "
             f"{'merged and ' if merge else ''}pushed.{after}{first} A force-push, a "
             f"history rewrite or a deletion still waits on ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question "
             f"whose first button is that go.")

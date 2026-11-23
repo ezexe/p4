@@ -1,6 +1,6 @@
 # p4-phi
 
-What linked Claude Code sessions hand each other, and retrieval from the project's own history, in one plugin.
+What linked Claude Code sessions hand each other, in one plugin.
 The skill `skills/phi/SKILL.md` lists the commands a session runs and what p4-phi does not do.
 This page holds how to install p4-phi, the docs sentences its delegation rests on, the model and effort a worker starts with, what sets a subagent's, what p4-phi does for a puppeteer, and the settings, none of which has to be set.
 
@@ -117,13 +117,13 @@ A setting changed during a conversation reaches its system prompt at the next co
 A puppeteer's line at its standing worker's report and the upkeep's check of a short context read each session's share there, so no session is asked for its usage, and only a session with no measure kept is named for a `get_usage` read.
 
 The module holds a prompt's origin while its `prompt.submit` is in flight and writes it at `classic.UserPromptSubmit`, inside which that prompt's UserPromptSubmit command hooks run, as `{"promptId": <the prompt's prompt_id>, "kind": <kind>}` with what else the kind carries.
-In a project whose store has a models folder the record is `.claude/p4/phi/models/served/start-<CLI session id>/origin.json`, in the folder that holds a launch's lines and a subagent's binding, which git ignores and the `layout` hook sweeps at a session's start.
+In a project whose store has a `p4.json` the record is `.claude/p4/phi/served/start-<CLI session id>/origin.json`, in the folder that holds a launch's text and a subagent's binding, which git ignores and the `layout` hook sweeps at a session's start.
 In a project with no store it is `origin.json` in the session's own folder in the tree's store, beside `usage.json`, once a look has answered where that folder is: no prompt waits for python, so a prompt submitted before that keeps no record.
 `rows.origin_of` in `scripts/rows.py` returns the record whose `promptId` equals the hook input's `prompt_id`, and `rows.whose` names whose words the prompt is: `composer`, `bridge`, `slack-ping`, and `plugin` with `asUser` are ezexe's own, `peer`, `peer-send-message`, `coordinator` and `projects-relay` are another session's, `plugin` without `asUser` is a plugin's prompt, p4-phi's own wake among them, `task-notification` is an event, and `scheduled-trigger` is a prompt a schedule fired.
 A prompt a schedule fired is no message of ezexe's, whoever stored its words: the types give the kind as "A scheduled task or /loop firing its stored prompt", so it holds no request, is routed nowhere and drafts no start, and the turn it begins counts as one no person began.
 Seen in the desktop app on Claude Code 2.1.326, for a one-shot `CronCreate` of a session's own: the module was handed `scheduled-trigger`, and the transcript's row of the prompt reads `promptSource` "system", `turnOrigin` "scheduled" and `wakeupSource` "schedule_wakeup".
 Left to the marks before, the sweep's own prompt was routed as a message of ezexe's and drafted a session.
-The scripts ask the origin first for the request a message holds, for who began a turn, for a puppeteer's request rows and its usage line, and for the retrieval hook's message row, so a typed message of ezexe's that opens with `<` or with a mark is ezexe's own where the origin says `composer`.
+The scripts ask the origin first for the request a message holds, for who began a turn, for a puppeteer's request rows and its usage line, so a typed message of ezexe's that opens with `<` or with a mark is ezexe's own where the origin says `composer`.
 For every other kind, and for a prompt with no record, the marks at the head of the text are read: `sdk` is the SDK host's own turn, which the desktop app's unstamped deliveries share with a scripted run's prompt, so a handed-over brief, a `<side-sessions-event>`, a Stop hook's feedback and "This session is being continued" are told by their marks, `unclassified` is what the app's own `[Cross-session delivery notice]` and `[Cross-session idle notice]` are, and no mark tells `auto-continuation`, `channel`, `observer` or `observer-activity` from ezexe's words.
 One mark is p4-phi's own: a prompt that opens with the sweep's words, `plans.SWEEP_MARK`, is the sweep a schedule fires, on a build whose module kept no origin for it too.
 The origin names no sender, so the sender of a cross-session message is read from the wrapper Claude Code puts around it, by `rows.sender_of`: the `from-session` attribute where the wrapper has one, as on a report a hooks module sent with `$.session.send`, whose `from` is the sender's socket, and `from` otherwise.
@@ -158,19 +158,19 @@ Where a project turns `phi.upkeep` on, the look also answers upkeep that is due 
 The Stop hook's send-back to an open step stays, because `$.prompt.submit` starts a turn only after the session went idle, which the starter and the app have by then read as a turn's end.
 
 The module checks a tool call at `tool.check`, which Claude Code raises after the PreToolUse hooks, and runs `scripts/hook.py lookup-check` only for a call python has a check for, with a PreToolUse hook's input on stdin and 10 seconds at most, so the check starts no shell, and no python for any other call.
-Python has a check for a web call, a message to another session, a session archiving itself and a session's start, for an edit in a session that owes a nudge or is a puppeteer, which `phi/.nudge/<CLI session id>` and `phi/.puppeteers/<CLI session id>` in the project's store mark, and for every call of a subagent phi.py marked open with `phi/.agents/<agent id>`.
-It has one for a Bash or PowerShell call whose tool and input hold `git` as a word, `push`, `merge` or the program `gh`, whose command starts in the background, whose session one of those two markers names, or whose store has a failure model `lookups-model.json` whose first line weighs shell calls, read once a minute at most.
+Python has no check for a web call. It has one for a message to another session, a session archiving itself and a session's start, for an edit in a session that owes a nudge or is a puppeteer, which `phi/.nudge/<CLI session id>` and `phi/.puppeteers/<CLI session id>` in the project's store mark, and for every call of a subagent phi.py marked open with `phi/.agents/<agent id>`.
+It has one for a Bash or PowerShell call whose tool and input hold `git` as a word, `push`, `merge` or the program `gh`, whose command starts in the background, whose session one of those two markers names, and for no other shell call: python has no failure model that weighs one.
 A `deny` of python's is the verdict `deny`, which the model reads as the call's error, `Permission to use <tool> denied by plugins <names>: <reason>`, where the names are every plugin hooked on `tool.check`, and an `ask` is the verdict `ask`, which Claude Code puts to ezexe and marks with the plugin's name.
 Python's words for the model are added beside the call's result by the module's hooks at `classic.PostToolUse` and `classic.PostToolUseFailure`, after the command hooks' own context, and are appended to the reason of a `deny`.
 The engine's verdict stands for a call it already refused, for a plugin's `$.tool.check` question about a call nobody made, and where the check fails, as with no python found or at its timeout.
 The module hooks no `tool.call`: a subagent may call any tool, and a hook there that may match a tool turns off that tool's move to the background and its live output.
 It hooks no function at `classic.PreToolUse` either, whose input holds no agent id, which phi.py's checks of a subagent's call read.
-The check does not obey `P4_PHI=0`: retrieval's check runs, and phi.py's own checks read the switch themselves.
+The check does not obey `P4_PHI=0`: phi.py's own checks read the switch themselves.
 The `Agent` entry of `PreToolUse` stays a command hook, and so do the entries of `PostToolUse`, `PostToolUseFailure` and `PostToolBatch` that record a call.
 After a call that worked, the call waits on a shell only for a tool whose record can answer, which the one matcher of `PostToolUse` names: `Bash`, `PowerShell`, `Write`, `Edit`, `TaskStop`, `mcp__ccd_turn__update_plan` and `mcp__ccd_turn__wrap_up`, with the entry `lookup-record`.
 A call of any other tool starts no process of its own once it ran, so nothing stands between the call and its result.
-The lookup row of every call that worked is written by one async entry of `PostToolBatch`, `lookup-batch`, which by `hooks.md`, "PostToolBatch", "fires exactly once with the full batch", so a batch of parallel calls starts one process for its rows.
-Until p4-phi 0.11.116 each call had an async `PostToolUse` entry of its own for its row, one process a call.
+The tie of a memory to the issue a call filed is made by one async entry of `PostToolBatch`, `lookup-batch`, which by `hooks.md`, "PostToolBatch", "fires exactly once with the full batch", so a batch of parallel calls starts one process.
+Until p4-phi 0.11.116 each call had an async `PostToolUse` entry of its own, one process a call.
 Seen on Claude Code 2.1.328 and 2.1.330 in a scripted run: the event came once a batch, for a batch of one call too and for a subagent's batch with its `agent_id`, and after the `PostToolUse` and `PostToolUseFailure` entries of its calls had answered.
 A call of `tool_calls` carries its tool, its input, its id and its response, and a call that failed stood there with its error's text as the response and nothing that marks it.
 So the hooks module, which hears each failed call at `classic.PostToolUseFailure`, names the failed calls of a batch by their ids under `p4_failed` in the input of the `PostToolBatch` command hooks, and the batch's entry leaves those to their own entry.
@@ -178,7 +178,7 @@ Where no module loads, a row is still written once by its id, so the row the `Po
 A call's response in a batch is what the model reads, a string or a list of content blocks, where `PostToolUse` hands the tool's own object, so a row's text is the model's text.
 A call that failed has the `lookup-record` entry of `PostToolUseFailure` whatever its tool.
 These stay command hooks where the hooks module loads too: a function hook at `classic.PostToolUse` runs above the command hooks and cannot keep its own plugin's entry out, since Claude Code has a module's `plugin.register` judged by the modules admitted before it and never by itself, so a function that made the record would run beside the shell that makes it.
-A call a plugin's hooks module makes itself, with `$.tool.call` or `$.session.send`, runs those entries too, under an id that begins `toolu_plugin_`: the shell ends at once for such an id, and no lookup row and no record of `phi.py` is kept of it, since no model reads its result.
+A call a plugin's hooks module makes itself, with `$.tool.call` or `$.session.send`, runs those entries too, under an id that begins `toolu_plugin_`: the shell ends at once for such an id, and no record of `phi.py` is kept of it, since no model reads its result.
 Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin beside a probe mod from a scratch project: no shell started before any of four Bash calls, `tool.check` settled in 44.5 ms and 28.2 ms for two plain commands with no python started and in 523.3 ms for `git status`, where `hook.py lookup-check` ran, a `tool.check` hook's `deny` reached the model as `Permission to use Bash denied by plugins p4-four-probe, p4-phi, cc-plugin-privacy: <reason>`, and context a function hook added at `classic.PostToolUse` reached the model beside the result.
 Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was handed the tool, the call's id and the tool's arguments and no agent id, and in a `claude -p` run a subagent's call carried `agentId` at `tool.check` and none at `classic.PreToolUse`.
 
@@ -366,21 +366,6 @@ Where a step or an item wants a new session on a turn no person began, which the
 Such a worker has no row in the sidebar, no Changes card and no archive, and once its run has ended and its work is on the default branch upkeep names the close of its tab, the unlock of its worktree and their removal.
 The skill page lists what upkeep cannot do, a start on a turn no person began among them.
 
-### A digest of a closed session
-
-A later session's retrieval reaches of an earlier session only its message rows, so p4-phi writes one digest entry for each session that is no longer live, into the store's `phi/store/digests/`.
-The digest holds what the session was asked, what it showed done and reported, the notes it kept as decisions and findings, the files it changed, the heads it left and the plan steps it left open.
-It is built from the session's `session.json`, `turns.jsonl`, `notes.jsonl` and `plan.json`, and never from the transcript, a command a turn ran or a tool's output.
-A fenced block of a report is left out, and a string shaped like a credential is replaced with `[redacted]`.
-No hook of Claude Code is known to run when a session is archived in the app, so nothing is written at the archive itself.
-The async `train` entry of Stop sweeps the store at most once in five minutes, and writes, at most 40 a sweep, the digest of each session that its own record or the app's holds as stale, counted as archived or archived, and whose records are newer than its digest.
-A session archived long ago is written by the next sweeps, and a session revived and archived again is written again in the same file.
-The `replaces:` note of "Upkeep of a session tree" stays as it is: it tells the sessions under one parent who took a child's place, and the digest is what retrieval ranks.
-Retrieval prints a digest's line with the kind `archived session`, and `recall.inject` at its default holds that line back from the model as it holds back every line that is no rule or fact.
-The served ranker learns a digest as it learns every document, from the labels of the turns it was served to and from history labels, and the dual encoder's pretraining reads it as a text file git keeps in the store.
-
-See more: https://code.claude.com/docs/en/hooks.md#sessionend
-
 ## Approval cards and a session's start
 
 A session another session started stops on no approval card for work its brief covers, once ezexe has said yes to the set of what p4-phi settles with no card.
@@ -501,8 +486,6 @@ A cap's value of another type or out of its range keeps the default.
 `phi.py conf` lists every setting of `p4.json` as p4 reads it, with `unset` for a key no file sets, `phi.py conf <key>` prints one, and `phi.py conf <key> <value>` writes one, checked as its reader takes it, and prints it read back.
 It refuses a key with a command of its own, a key p4 does not read, and any write in a session another session started.
 
-The `recall` section's keys and defaults are listed in `scripts/p4conf.py`, each beside its meaning.
-
 ### What a worktree shares with its main checkout
 
 A fresh git worktree holds nothing git ignores, and with neither key set p4-phi says nothing of it, so a worktree's session installs there as Claude Code's own page has it.
@@ -550,7 +533,7 @@ Each is for one run, a test or one machine's unusual layout.
 
 | Variable | Unset means | Set |
 | :- | :- | :- |
-| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record, the origin kept in a session's folder, the report sent to a starter, the turn started for a wait and the four tools the module declares, while retrieval goes on with the origin kept in the store's `served` folder |
+| `P4_PHI` | phi.py's hooks run | `0` turns off phi.py's three hook commands, the checks hook.py hands it, the watcher, the usage record, the origin kept in a session's folder, the report sent to a starter, the turn started for a wait and the four tools the module declares, while the hook that hands a launch's text to its subagent goes on with the origin kept in the store's `phi/served` folder |
 | `P4_PHI_RULES`, `P4_PHI_BOOK`, `P4_PHI_GOAL`, `P4_PHI_APP_TOOLS` | as `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_PUPPETEER` | as `puppeteer` in `phi.json` says | `0` or `1` for one run |
 | `P4_PHI_WATCH` | an orchestrator's watcher runs | `0` keeps it from starting, and with it the turn the module starts for a wait and the goal a worker is given, while a worker's report still goes to its starter |
@@ -562,8 +545,6 @@ Each is for one run, a test or one machine's unusual layout.
 | `P4_PHI_APP_SESSIONS` | the app's own session folder for this system | another folder |
 | `P4_PHI_STORES` | `p4-stores.json` in Claude Code's configuration directory | another file |
 | `P4_PHI_PLUGIN_ROOT` | `CLAUDE_PLUGIN_ROOT` | another plugin root |
-| `P4_PHI_CATCHUP` | the catch-up notice runs | `0` turns it off |
-| `P4_RECALL_INJECT` | as `recall.inject` says | `0`, `1` or `rules-facts` |
 | `P4_RECALL_SYNC` | a clean call's record is written behind the call | `1` waits for it |
 | `P4_AGENT_ALLOW` | no permission decision on a subagent's rewritten prompt | `1` adds `allow` |
 

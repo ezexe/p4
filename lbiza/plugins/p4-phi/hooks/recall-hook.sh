@@ -1,5 +1,5 @@
 #!/bin/sh
-# p4-phi's runner for scripts/hook.py, which holds retrieval and hands phi.py its records after a tool call: it finds
+# p4-phi's runner for scripts/hook.py, which makes the store's layout and hands phi.py its records after a tool call: it finds
 # a working python, runs `hook.py <name>` with the hook's input on stdin, and exits 0 whatever happens, so a broken
 # hook never blocks a call. Python runs isolated with -I and in UTF-8 mode with -X utf8, so stdin, stdout and every
 # file opened are UTF-8 rather than the Windows code page, and a prompt's UTF-8 punctuation never decodes into lone
@@ -10,22 +10,21 @@
 # is read from the environment, so no `uname` runs, and a clean call's record is written by a python left running
 # behind, so the call waits only for this script. hooks.json has a call that worked wait for this script only for a
 # tool whose record can answer, a shell tool or a tool of hook.py's PHI_RECORD, so no shell stands between any other
-# call and its result. The lookup row of every call that worked is written by the one async entry of PostToolBatch,
-# `lookup-batch`, which Claude Code runs once for a batch of calls, so a batch of parallel calls starts one process
-# for its rows. The check before a call starts no shell: the plugin's hooks module
+# call and its result. The tie of a memory to the issue a call filed is made by the one async entry of PostToolBatch,
+# `lookup-batch`, which Claude Code runs once for a batch of calls, so a batch of parallel calls starts one process. The check before a call starts no shell: the plugin's hooks module
 # tells which calls python has a check for and runs `hook.py lookup-check` for those itself.
 set -u
 
 name="${1:-}"
 payload=""
 piped=0
-# A call that worked and printed nothing like an error has nothing to be told, so only its lookup row is written,
+# A call that worked and printed nothing like an error has nothing to be told, so only the tie of an issue is looked for,
 # by the `lookup-batch` entry, which hooks.json marks `async`: the app runs it in the background and no call waits
 # for it, ezexe/p4#150. phi.py's records of a clean call stay with the `lookup-record` entry the call
 # waits on: the tools PHI_RECORD of hook.py names, whose plan records and memory checks a later check reads. A
 # subagent's clean call waits on nothing, since its id is bound at its SubagentStart. That entry answers every other
 # call whole.
-# P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it, the row too.
+# P4_RECALL_SYNC=1, which the tests set, has `lookup-record` do all of it.
 clean=0
 if [ "$name" = lookup-batch ]; then
   # Every call of a batch in one input: python reads it whole, and leaves out a call a plugin's module made itself.
@@ -64,7 +63,7 @@ elif [ "$name" = lookup-record ]; then
       *'"tool_name":"Edit"'*|*'"tool_name": "Edit"'*) ;;
       *) exit 0 ;;
     esac
-    name=lookup-phi                               # phi.py's records, and no lookup row: the batch's entry writes it
+    name=lookup-phi                               # phi.py's records: the batch's entry ties the issues
   fi
 fi
 

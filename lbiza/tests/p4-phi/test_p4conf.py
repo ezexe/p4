@@ -103,18 +103,6 @@ class P4Conf(unittest.TestCase):
         self.assertIn("phi.worktree_python", p4conf.env_keys())
         self.assertIn("phi.worktree_lines", p4conf.env_keys())
 
-    def test_every_query_setting_p4_reads_has_its_default(self):
-        """Each key QUERY_SETTINGS in p4.py maps from recall.query is in DEFAULTS, at the constant's own value."""
-        import ast
-        tree = ast.parse((SRC / "p4.py").read_text(encoding="utf-8"))
-        consts = {t.id: n.value for n in tree.body if isinstance(n, ast.Assign) for t in n.targets
-                  if isinstance(t, ast.Name)}
-        names = ast.literal_eval(consts["QUERY_SETTINGS"])
-        query = p4conf.DEFAULTS["recall"]["query"]
-        self.assertEqual(sorted(names), sorted(query))
-        for key, const in names.items():
-            self.assertEqual(query[key], ast.literal_eval(consts[const]), key)
-
     def test_an_archive_at_the_top_moves_under_phi_at_a_start(self):
         """A store with archive/ at the top, one of its files differing from phi/archive/'s, is moved by a start:
         the older copy is set aside in phi/.layout-conflicts/archive/ and the move is committed."""
@@ -290,16 +278,16 @@ class P4Conf(unittest.TestCase):
         self.assertEqual(git("status", "--porcelain"), "")
         self.assertEqual(len(git("ls-files", "phi/archive").split()), 20)
 
-    def copy_of(self, gen, **query):
+    def copy_of(self, gen, **phi):
         """A second copy of p4conf.py, as another installed plugin would carry, at generation `gen` with
-        recall.query defaults changed by `query`."""
+        phi defaults changed by `phi`."""
         import copy
         import importlib.util
         spec = importlib.util.spec_from_file_location(f"p4conf_gen{gen}", SRC / "p4conf.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         mod.DEFAULTS = copy.deepcopy(mod.DEFAULTS)
-        mod.DEFAULTS["recall"]["query"].update(query)
+        mod.DEFAULTS["phi"].update(phi)
         mod.GEN = gen
         return mod
 
@@ -307,18 +295,18 @@ class P4Conf(unittest.TestCase):
         """A value load wrote follows a newer generation's default; a value set by hand stays as it is."""
         p4conf.load(self.p4)
         d = self.read(record=True)
-        d["recall"]["query"]["per_file"] = 7
+        d["phi"]["max_children"] = 7
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
             json.dump(d, f)
-        s = self.copy_of(p4conf.GEN + 1, max_lines=9, per_file=4).load(self.p4)
-        self.assertEqual(s["recall"]["query"]["max_lines"], 9, "written by load: follows the new default")
-        self.assertEqual(s["recall"]["query"]["per_file"], 7, "set by hand: kept")
-        self.assertEqual(self.read()["recall"]["query"]["max_lines"], 9)
+        s = self.copy_of(p4conf.GEN + 1, max_depth=9, max_children=4).load(self.p4)
+        self.assertEqual(s["phi"]["max_depth"], 9, "written by load: follows the new default")
+        self.assertEqual(s["phi"]["max_children"], 7, "set by hand: kept")
+        self.assertEqual(self.read()["phi"]["max_depth"], 9)
 
     def test_two_copies_that_differ_on_a_default_settle_on_the_newer(self):
         """Two copies, both with the record, that differ on a default write p4.json at most twice in turn and settle
         on the newer generation's value."""
-        old, new = self.copy_of(1, max_lines=5), self.copy_of(2, max_lines=9)
+        old, new = self.copy_of(1, max_depth=5), self.copy_of(2, max_depth=9)
         writes = []
         for c in (old, new):
             real = c._write
@@ -326,24 +314,8 @@ class P4Conf(unittest.TestCase):
         for c in (old, new, old, new, old, new):
             c.load(self.p4, warn=False)
         self.assertLessEqual(len(writes), 2, "written by the first load, moved once by the newer")
-        self.assertEqual(self.read()["recall"]["query"]["max_lines"], 9)
-        self.assertEqual(old.load(self.p4)["recall"]["query"]["max_lines"], 9, "the older copy reads the newer value")
-
-    def test_a_store_holding_the_old_web_default_moves_to_note(self):
-        """ezexe/p4#243, row D1: a store load wrote at GEN 1 moves from "answer" to "note"; a value set by hand
-        stays."""
-        stores = {}
-        for name, value, record in (("written", "answer", True), ("by hand", "shadow", True)):
-            p4 = tempfile.mkdtemp()
-            self.addCleanup(shutil.rmtree, p4, True)
-            d = json.loads(json.dumps(p4conf.DEFAULTS))
-            d["recall"]["lookups"]["web"] = value
-            if record:
-                d[p4conf.WRITTEN] = {"recall.lookups.web": {"v": "answer", "gen": 1}}
-            with open(p4conf.path(p4), "w", encoding="utf-8") as f:
-                json.dump(d, f)
-            stores[name] = p4conf.load(p4)["recall"]["lookups"]["web"]
-        self.assertEqual(stores, {"written": "note", "by hand": "shadow"})
+        self.assertEqual(self.read()["phi"]["max_depth"], 9)
+        self.assertEqual(old.load(self.p4)["phi"]["max_depth"], 9, "the older copy reads the newer value")
 
     def test_the_notebook_moves_out_of_temportal_scratchpad(self):
         """B8 of ezexe/p4#131: the notebook's place is temportal/notebook, so a store's temportal/scratchpad moves there
@@ -439,10 +411,10 @@ class P4Conf(unittest.TestCase):
         updated."""
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
-                11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63", 15: "95656cb9ae6e2f7f"}
+                11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63", 15: "95656cb9ae6e2f7f", 16: "b5d9965d5d399131"}
         # append only: one more for each GEN. 11 came with a key of the keeper, 12 with the plans folder's move,
         # 13 with the default phi.plan_mode, and 14 with the default phi.goal_review
-        # and 15 with the default phi.new_issues
+        # and 15 with the default phi.new_issues, and 16 with the removal of the group recall
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -452,7 +424,7 @@ class P4Conf(unittest.TestCase):
         s = p4conf.load(self.p4)
         self.assertEqual(s, p4conf.DEFAULTS)
         self.assertEqual(self.read(), p4conf.DEFAULTS)
-        self.assertEqual(set(s), {"scratchpad", "phi", "temportal", "recall"})
+        self.assertEqual(set(s), {"scratchpad", "phi", "temportal"}, "no group of the removed retrieval")
 
     def test_the_retired_config_json_seeds_nothing(self):
         os.makedirs(p4conf.sub(self.p4, "models"))
@@ -463,15 +435,33 @@ class P4Conf(unittest.TestCase):
 
     def test_missing_keys_are_added_and_set_values_kept(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"recall": {"repo_deadline_s": 3.0, "once_was": "kept"}, "extra": 1}, f)
+            json.dump({"phi": {"max_depth": 4, "once_was": "kept"}, "extra": 1}, f)
         s = p4conf.load(self.p4, warn=False)
         on_disk = self.read()
-        self.assertEqual(on_disk["recall"]["repo_deadline_s"], 3.0)
-        self.assertEqual(on_disk["recall"]["inject"], "rules-facts", "a missing key is added")
-        self.assertEqual(on_disk["recall"]["once_was"], "kept", "an unknown key stays on disk, read by nothing")
-        self.assertEqual(on_disk["phi"], p4conf.DEFAULTS["phi"])
+        self.assertEqual(on_disk["phi"]["max_depth"], 4)
+        self.assertEqual(on_disk["phi"]["max_children"], p4conf.DEFAULTS["phi"]["max_children"], "a missing key is added")
+        self.assertEqual(on_disk["phi"]["once_was"], "kept", "an unknown key stays on disk, read by nothing")
+        self.assertEqual(on_disk["scratchpad"], p4conf.DEFAULTS["scratchpad"])
         self.assertEqual(on_disk["extra"], 1, "an unknown key survives the rewrite")
-        self.assertEqual(s["recall"]["repo_deadline_s"], 3.0)
+        self.assertEqual(s["phi"]["max_depth"], 4)
+
+    def test_a_store_that_still_holds_the_recall_group_keeps_it_and_names_no_key_of_it(self):
+        """The group `recall` is no part of DEFAULTS since the retrieval left p4-phi. A store whose p4.json still
+        holds it keeps it whole through every rewrite, and load prints no line about keys this plugin does not read."""
+        import contextlib
+        import io
+        held = {"inject": False, "learn": True, "once_was": "kept"}
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump({"recall": held, "phi": {"max_depth": 4}}, f)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            p4conf.load(self.p4)
+            p4conf.load(self.p4)
+        self.assertEqual(err.getvalue(), "")
+        self.assertNotIn("recall", p4conf.DEFAULTS)
+        self.assertIn("recall", p4conf.READ_WHEN_SET)
+        self.assertEqual(self.read()["recall"], held, "kept as it was")
+        self.assertEqual(self.read()["phi"]["max_children"], p4conf.DEFAULTS["phi"]["max_children"], "the rest is filled")
 
     def test_a_writer_holding_a_temp_file_does_not_block_another(self):
         """Two hooks of one event load at once: a temp file another writer still holds does not stop this write."""
@@ -547,10 +537,10 @@ class P4Conf(unittest.TestCase):
 
     def test_configure_sets_only_values_that_differ_from_the_default(self):
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"recall": {"query": {"max_lines": 9}}, "scratchpad": {"ignorable_ext": ["log"]}}, f)
-        g = {"MAX_LINES": 5, "PER_FILE": 3}
-        p4conf.configure(g, self.p4, "recall.query", {"max_lines": "MAX_LINES", "per_file": "PER_FILE"})
-        self.assertEqual(g, {"MAX_LINES": 9, "PER_FILE": 3}, "per_file at its default leaves the patched 3")
+            json.dump({"phi": {"max_depth": 9}, "scratchpad": {"ignorable_ext": ["log"]}}, f)
+        g = {"MAX_DEPTH": 5, "MAX_CHILDREN": 3}
+        p4conf.configure(g, self.p4, "phi", {"max_depth": "MAX_DEPTH", "max_children": "MAX_CHILDREN"})
+        self.assertEqual(g, {"MAX_DEPTH": 9, "MAX_CHILDREN": 3}, "max_children at its default leaves the patched 3")
         g = {"IGNORABLE_EXT": {"log", "tmp"}}
         p4conf.configure(g, self.p4, "scratchpad", {"ignorable_ext": "IGNORABLE_EXT"})
         self.assertEqual(g["IGNORABLE_EXT"], {"log"})
@@ -820,13 +810,13 @@ class ClaudeSettings(unittest.TestCase):
 
     def rules(self, scripts):
         s = os.path.abspath(scripts).replace("\\", "/")
-        cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
-        return [f"Bash({c})" for c in cmds] + [f"PowerShell({c})" for c in cmds]
+        cmd = f'python -I -X utf8 "{s}/phi.py" *'
+        return [f"Bash({cmd})", f"PowerShell({cmd})"]
 
-    def test_the_two_allow_rules_are_p4s_own_entries_beside_the_users(self):
-        """ezexe approved two allow rules, phi.py and p4.py sync, as Bash and on Windows PowerShell: after two checks
-        each is in permissions.allow once, the user's own allow, ask and deny rules are untouched and in order, and
-        no rule names catchup.py prune-cache."""
+    def test_the_allow_rule_is_p4s_own_entry_beside_the_users(self):
+        """ezexe approved one allow rule, phi.py, as Bash and on Windows PowerShell: after two checks each is in
+        permissions.allow once, the user's own allow, ask and deny rules are untouched and in order, and no rule
+        names p4.py."""
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         mine = {"allow": ["Bash(npm test)", "Read(./docs/**)"], "ask": ["Bash(git push *)"], "deny": ["Bash(rm *)"]}
         with open(self.local(), "w", encoding="utf-8") as f:
@@ -837,7 +827,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(got["allow"], mine["allow"] + self.rules(SRC), "the user's rules first, each of p4's once")
         self.assertEqual((got["ask"], got["deny"]),
                          (mine["ask"] + list(p4conf.ASK_RULES), mine["deny"] + list(p4conf.DENY_RULES)))
-        self.assertFalse([r for r in got["allow"] if "prune-cache" in r or "catchup.py" in r])
+        self.assertFalse([r for r in got["allow"] if "p4.py" in r])
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
         self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(SRC)))
 
@@ -996,7 +986,6 @@ class ClaudeSettings(unittest.TestCase):
             got = p4conf.load(p4)
         self.assertIs(got["phi"]["upkeep"], True)
         self.assertEqual(got["phi"]["max_depth"], 5)
-        self.assertEqual(got["recall"], p4conf.DEFAULTS["recall"])
 
     def test_the_keeper_never_removes_an_ask_rule_it_did_not_write(self):
         """A user who wrote the same rule first owns it: the keeper takes it over neither while it wants the rule nor
@@ -1287,7 +1276,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(sorted(list(rec["rules"].values())[0]["entries"]), sorted(self.rules(new)))
 
     def test_a_rule_of_p4s_shape_for_a_copy_that_does_not_run_is_taken_out(self):
-        """Seen on 2026-11-19 in E:/projects/p4-phi/.claude/settings.local.json: four allow rules named a checkout's
+        """Seen on 2026-11-19 in E:/projects/p4-phi/.claude/settings.local.json: allow rules named a checkout's
         phi.py and p4.py, the record of them was lost with a store started anew, and the keeper left them as a
         person's, so they allowed a script that is not the plugin and kept the running copy's rules unwritten. A
         rule exactly of p4's shape whose folder is not a copy that runs is taken out by a step of its own, which
@@ -1303,9 +1292,9 @@ class ClaudeSettings(unittest.TestCase):
         mine = ["Bash(npm test)", f'Bash(python -I -X utf8 "{there}/phi.py" tree)', f'Bash(python "{there}/phi.py" *)',
                 f'Bash(python -I -X utf8 "{there}/p4.py" *)']
         strays = self.rules(checkout) + self.rules(gone)[:1]
-        before = mine[:1] + strays[:4] + mine[1:3] + strays[4:] + mine[3:]
+        before = mine[:1] + strays[:2] + mine[1:3] + strays[2:] + mine[3:]
         wanted = self.rules(new) + self.rules(old)
-        self.assertEqual(p4conf.stray_rules(before, wanted), strays, "the checkout's four, and one for a folder gone")
+        self.assertEqual(p4conf.stray_rules(before, wanted), strays, "the checkout's two, and one for a folder gone")
         self.assertEqual(p4conf.stray_rules(before + wanted, wanted), strays, "no rule of a copy that runs")
         data = {"permissions": {"allow": list(before), "deny": ["Bash(rm *)"]}}
         self.assertEqual(p4conf._drop_strays(data, {}, "f", wanted), strays)
@@ -1531,7 +1520,7 @@ class ClaudeSettings(unittest.TestCase):
             p4conf.keep_settings(self.project, platform="win32")
         allow = self.read(self.local())["permissions"]["allow"]
         self.assertFalse([r for r in allow if p4conf.rule_identity(r) == p4conf.rule_identity(gone)], allow)
-        self.assertEqual(len(allow), 3, "the other three moved with the folder")
+        self.assertEqual(len(allow), 1, "the other one moved with the folder")
 
     def test_a_file_that_is_not_json_is_checked_again_only_once_it_changes(self):
         from unittest import mock
@@ -1891,9 +1880,7 @@ REFERENCE = {
     "attribution": {"commit": "Co-Authored-By: Anthropics Connoisseur of Hallucinations <noreply@anthropic.com>"},
     "permissions": {"allow": [
         'Bash(python -I -X utf8 "<scripts>/phi.py" *)',
-        'Bash(python -I -X utf8 "<scripts>/p4.py" sync *)',
-        'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)',
-        'PowerShell(python -I -X utf8 "<scripts>/p4.py" sync *)']},
+        'PowerShell(python -I -X utf8 "<scripts>/phi.py" *)']},
     "disableAllHooks": False,
     "disableSkillShellExecution": False,
 }
@@ -1924,9 +1911,8 @@ class SettingsVariables(unittest.TestCase):
         return p4
 
     def test_every_setting_has_one_variable_of_its_own(self):
-        """Each setting of DEFAULTS but the record recall.updated, and each phi key read when set, has a name of its
-        own, and no name is an older variable of another meaning: the three older switches that share a name mean
-        what their setting means."""
+        """Each setting of DEFAULTS, and each phi key read when set, has a name of its own, and no name is an older
+        variable of another meaning: the two older switches that share a name mean what their setting means."""
         import re
         keys = p4conf.env_keys()
         leaves = {k for k, _v in p4conf._leaves(p4conf.DEFAULTS)} - set(p4conf.ENV_SKIP)
@@ -1938,7 +1924,7 @@ class SettingsVariables(unittest.TestCase):
         for path in PLUGINS.rglob("*.py"):
             if path.name != "p4conf.py" and not path.name.startswith("test_"):
                 older |= set(re.findall(r"P4_[A-Z0-9_]+", path.read_text(encoding="utf-8", errors="replace")))
-        self.assertEqual(older & set(names), {"P4_SCRATCHPAD_ASKS", "P4_RECALL_INJECT", "P4_PHI_ISSUES"})
+        self.assertEqual(older & set(names), {"P4_SCRATCHPAD_ASKS", "P4_PHI_ISSUES"})
         self.assertEqual(p4conf.env_name("phi.watch_s"), "P4_PHI_WATCH_SECONDS", "P4_PHI_WATCH_S is puppeteer's tick")
 
     def test_the_settings_page_lists_every_variable_with_its_default(self):
@@ -1956,11 +1942,9 @@ class SettingsVariables(unittest.TestCase):
         """A bool is 1 or 0, a string is written as it is unless it would read back as another value, and every
         other value is compact JSON; each reads back as the same value of the same type."""
         cases = {"phi.max_depth": [5, 1], "phi.watch_s": [2.5, 10.0], "phi.levels": [False, True],
-                 "recall.inject": [False, True, "rules-facts"], "recall.said.mode": ["shadow", "on"],
                  "phi.home": ["https://github.com/x/y.git", "5", "true", "[x"], "scratchpad.ignorable_ext": [[], ["a"]],
                  "temportal.cache": [{"notebook/.out": {"max_age_days": 3}}],
-                 "phi.child_levels": [{"worker": {"model": "x"}}],
-                 "recall.lookups.threshold": [0.7]}
+                 "phi.child_levels": [{"worker": {"model": "x"}}]}
         keys = p4conf.env_keys()
         for key, values in cases.items():
             for v in values:
@@ -1968,7 +1952,7 @@ class SettingsVariables(unittest.TestCase):
                 got = p4conf.env_value(key, text, keys[key])
                 self.assertEqual(json.dumps(got), json.dumps(v), f"{key}={v!r} written as {text!r}")
         self.assertEqual(p4conf.env_text("phi.levels", False, True), "0")
-        self.assertEqual(p4conf.env_text("recall.inject", "rules-facts", "rules-facts"), "rules-facts")
+        self.assertEqual(p4conf.env_text("phi.home", "https://github.com/x/y.git", None), "https://github.com/x/y.git")
         self.assertEqual(p4conf.env_text("phi.home", "5", None), "5", "a string key takes its text")
         self.assertEqual(p4conf.env_text("scratchpad.ignorable_ext", ["a", "b"], []), '["a","b"]')
 
@@ -1987,12 +1971,12 @@ class SettingsVariables(unittest.TestCase):
                 self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], want, f"P4_PHI_MAX_DEPTH={text!r}")
             self.assertEqual(bool(err.getvalue()), want == 5 and text != "", err.getvalue())
         with mock.patch.dict(os.environ, {"P4_PHI_LEVELS": "0", "P4_PHI_WATCH_SECONDS": "10",
-                                          "P4_RECALL_INJECT": "1", "P4_SCRATCHPAD_ASKS": "yes",
+                                          "P4_PHI_TRACK": "1", "P4_SCRATCHPAD_ASKS": "yes",
                                           "P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": 1}}'}):
             got = p4conf.load(p4, warn=False)
         self.assertIs(got["phi"]["levels"], False)
         self.assertEqual(got["phi"]["watch_s"], 10)
-        self.assertIs(got["recall"]["inject"], True)
+        self.assertIs(got["phi"]["track"], True)
         self.assertIs(got["scratchpad"]["asks"], False, "yes is no bool: the default")
         self.assertEqual(got["temportal"]["cache"],
                          {**p4conf.DEFAULTS["temportal"]["cache"], "x": {"max_age_days": 1}})
@@ -2040,19 +2024,18 @@ class SettingsVariables(unittest.TestCase):
     def test_a_changed_setting_is_written_under_env_and_goes_at_its_default(self):
         """Each setting p4.json changes is a variable p4 owns under `env`; one back at its default goes, and `env`
         goes with the last of p4's variables."""
-        p4 = self.store({"phi": {"max_depth": 5, "home": "https://github.com/x/y.git", "watch_s": 5},
-                         "recall": {"inject": False}, "scratchpad": {"ignorable_ext": ["log"]}})
+        p4 = self.store({"phi": {"max_depth": 5, "home": "https://github.com/x/y.git", "watch_s": 5, "levels": False},
+                         "scratchpad": {"ignorable_ext": ["log"]}})
         p4conf.keep_settings(self.project)
         self.assertEqual(self.read(self.local())["env"], {
             "P4_SCRATCHPAD_IGNORABLE_EXT": '["log"]', "P4_PHI_HOME": "https://github.com/x/y.git",
-            "P4_PHI_MAX_DEPTH": "5", "P4_RECALL_INJECT": "0"}, "watch_s 5 equals the default 5.0: no variable")
+            "P4_PHI_MAX_DEPTH": "5", "P4_PHI_LEVELS": "0"}, "watch_s 5 equals the default 5.0: no variable")
         owned = list(json.loads(Path(self.record()).read_text(encoding="utf-8"))["files"].values())[0]
         self.assertIn("env.P4_PHI_MAX_DEPTH", owned)
-        _write(p4conf.path(p4), {"phi": {"max_depth": 3, "home": "https://github.com/x/y.git"},
-                                 "recall": {"inject": False}})
+        _write(p4conf.path(p4), {"phi": {"max_depth": 3, "home": "https://github.com/x/y.git", "levels": False}})
         p4conf.keep_settings(self.project)
         self.assertEqual(self.read(self.local())["env"], {"P4_PHI_HOME": "https://github.com/x/y.git",
-                                                         "P4_RECALL_INJECT": "0"})
+                                                         "P4_PHI_LEVELS": "0"})
         _write(p4conf.path(p4), {})
         p4conf.keep_settings(self.project)
         self.assertNotIn("env", self.read(self.local()))
@@ -2179,10 +2162,10 @@ class SettingsVariables(unittest.TestCase):
         import io
         from unittest import mock
         p4 = self.store({})
-        bad = {"P4_SCRATCHPAD_IGNORABLE_EXT": "[1,2]", "P4_RECALL_DEPS_ROOTS": '"x"',
+        bad = {"P4_SCRATCHPAD_IGNORABLE_EXT": "[1,2]",
                "P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CLEAR_AT": "true",
-               "P4_RECALL_LOOKUPS_THRESHOLD": '"high"', "P4_RECALL_SAID_MODE": "loud",
-               "P4_RECALL_INJECT": "all", "P4_PHI_MAX_DEPTH": "[" * 20000,
+               "P4_PHI_WATCH_SECONDS": '"high"', "P4_PHI_LEVELS": "loud",
+               "P4_PHI_TRACK": "all", "P4_PHI_MAX_DEPTH": "[" * 20000,
                "P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": "a"}}'}
         plain = json.dumps(p4conf.load(p4, write=False, env=False), sort_keys=True)
         for name, text in bad.items():
@@ -2191,28 +2174,18 @@ class SettingsVariables(unittest.TestCase):
             self.assertEqual(json.dumps(got, sort_keys=True), plain, name)
         with mock.patch.dict(os.environ, {"P4_TEMPORTAL_CACHE": '{"x": {"max_age_days": 1}}',
                                           "P4_PHI_CHILD_LEVELS": '{"worker": {"model": "m", "effort": "low"}}',
-                                          "P4_PHI_HOME": "5", "P4_RECALL_LOOKUPS_THRESHOLD": "0.7"}):
+                                          "P4_PHI_HOME": "5", "P4_PHI_MAX_CHILDREN": "7"}):
             got = p4conf.load(p4, write=False)
         self.assertEqual(got["temportal"]["cache"],
                          {**p4conf.DEFAULTS["temportal"]["cache"], "x": {"max_age_days": 1}})
         self.assertEqual(got["phi"]["child_levels"], {"worker": {"model": "m", "effort": "low"}})
-        self.assertEqual((got["phi"]["home"], got["recall"]["lookups"]["threshold"]), ("5", 0.7))
+        self.assertEqual((got["phi"]["home"], got["phi"]["max_children"]), ("5", 7))
 
     def test_the_raw_readers_read_a_variable_as_p4conf_does(self):
-        """hook.inject_mode, issues.on and scratchpad's asks read 1, 0, true and false alike, and P4_RECALL_INJECT
-        holds only for the session's own store."""
+        """issues.on and scratchpad's asks read 1, 0, true and false alike."""
         from unittest import mock
-        import hook
         import issues
-        p4 = self.store({"recall": {"inject": False}})
-        other = os.path.join(self.tmp, "other")
-        os.makedirs(other)
-        for text, want in (("1", "all"), ("true", "all"), ("TRUE", "all"), ("0", "off"), ("false", "off"),
-                           ("rules-facts", "rules-facts")):
-            with mock.patch.dict(os.environ, {"P4_RECALL_INJECT": text, "CLAUDE_PROJECT_DIR": self.project}):
-                self.assertEqual(hook.inject_mode(p4), want, text)
-        with mock.patch.dict(os.environ, {"P4_RECALL_INJECT": "1", "CLAUDE_PROJECT_DIR": other}):
-            self.assertEqual(hook.inject_mode(p4), "off", "another project's variable")
+        p4 = self.store({})
         for text, want in (("0", False), ("false", False), ("1", True), ("true", True), ("", True)):
             with mock.patch.dict(os.environ, {"P4_PHI_ISSUES": text}):
                 self.assertIs(issues.on(""), want, text)
@@ -2367,10 +2340,9 @@ class ReadDuringAReplace(unittest.TestCase):
         return asked, mock.patch.object(p4conf, "open", opened, create=True)
 
     def test_a_read_that_meets_a_replace_and_then_succeeds_answers_the_record(self):
-        import node
         import phi
         import relay
-        for read in (p4conf.read_json, relay._read_json, phi.read_json, node._read_json):
+        for read in (p4conf.read_json, relay._read_json, phi.read_json):
             asked, patch = self.refused(3)
             with patch:
                 self.assertEqual(read(self.path), self.RECORD, read.__module__)

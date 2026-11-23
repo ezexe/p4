@@ -1361,9 +1361,9 @@ test('with no python the system prompt goes out as composed', async ($, on) => {
   expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })
 
-// A project with a store: hook.py keeps a launch's lines under its models folder, in `served/start-<session>`.
-const STORE = { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '', '/work/project/.claude/p4/phi/models/index.json': '{}' }
-const BOUND_IN = '/work/project/.claude/p4/phi/models/served/start-cli-0001'
+// A project with a store: hook.py keeps a launch's text under the store's phi/served folder, in `start-<session>`.
+const STORE = { [`${DATA}/.python`]: `${KEPT}\n`, [KEPT]: '', '/work/project/.claude/p4/p4.json': '{}' }
+const BOUND_IN = '/work/project/.claude/p4/phi/served/start-cli-0001'
 // An Agent call's launch and the subagent it starts, with the ids a live run in the desktop app gave both.
 const LAUNCH = { prompt: 'Read flush.py and list its writes', description: 'flush reads', subagentType: 'Explore' }
 const CALL = 'toolu_01TjNXV8xpTHFt4xgeeSvhDJ'
@@ -1382,7 +1382,7 @@ test('a subagent is bound to the Agent call that launched it, where hook.py read
 
   expect(started).toEqual(SPAWNED)
   expect(seen.wrote).toEqual([{ path: `${BOUND_IN}/bound-${AGENT}`, text: `${CALL}\n` }])
-  // The pair is retrieval's own record, so no python runs for it.
+  // The pair is the record that hands a subagent its text, so no python runs for it.
   expect(seen.calls).toEqual([])
 })
 
@@ -1481,7 +1481,7 @@ test('a spawn no Agent call launched and a project with no store are bound to no
   expect(raised).toEqual([{ tool_use_id: '', workflow: undefined, resume: undefined }])
   expect(seen.wrote).toEqual([])
 
-  delete seen.files['/work/project/.claude/p4/phi/models/index.json']
+  delete seen.files['/work/project/.claude/p4/p4.json']
   await $.agent.spawn({ ...LAUNCH, tool_use_id: CALL } as never)
   await clock.settle()
   expect(seen.wrote).toEqual([])
@@ -1583,8 +1583,8 @@ test('P4_PHI=0 keeps no origin in the session folder, and a store keeps it still
   await $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
   expect(seen.wrote).toEqual([])
 
-  // Retrieval's hook reads the origin too, and P4_PHI=0 does not turn retrieval off.
-  seen.files['/work/project/.claude/p4/phi/models/index.json'] = '{}'
+  // The hook that hands a launch's text to its subagent reads the origin too, and P4_PHI=0 does not turn it off.
+  seen.files['/work/project/.claude/p4/p4.json'] = '{}'
   await $.prompt.submit({ text: 'port the flush', origin: { kind: 'composer' }, wait: false } as never)
   expect(seen.wrote.map(write => write.path)).toEqual([ORIGIN_IN])
 })
@@ -1658,8 +1658,6 @@ test('a call python has no check for starts no process, and a listed one runs ho
   expect(seen.tried).toEqual([])
 
   for (const [tool, input] of [
-    ['WebFetch', { url: 'https://example.com' }],
-    ['WebSearch', { query: 'flush' }],
     ['SendMessage', { to: 'local_x', message: 'go ahead' }],
     ['mcp__ccd_session_mgmt__send_message', { session_id: 'local_x', message: 'go ahead' }],
     ['mcp__ccd_session_mgmt__archive_session', { session_id: 'self' }],
@@ -1668,8 +1666,6 @@ test('a call python has no check for starts no process, and a listed one runs ho
     expect(await $.tool.check(call(tool, input))).toEqual(ALLOW)
   }
   expect(seen.checks.map(check => check.payload.tool_name)).toEqual([
-    'WebFetch',
-    'WebSearch',
     'SendMessage',
     'mcp__ccd_session_mgmt__send_message',
     'mcp__ccd_session_mgmt__archive_session',
@@ -1686,8 +1682,8 @@ test('a call python has no check for starts no process, and a listed one runs ho
     transcript_path: hasInfo ? TRANSCRIPT : '',
     cwd: '/work/project',
     hook_event_name: 'PreToolUse',
-    tool_name: 'WebFetch',
-    tool_input: { url: 'https://example.com' },
+    tool_name: 'SendMessage',
+    tool_input: { to: 'local_x', message: 'go ahead' },
     tool_use_id: first?.payload.tool_use_id,
   })
   expect(String(first?.payload.tool_use_id).startsWith('toolu_')).toBe(true)
@@ -1751,35 +1747,21 @@ test('git opens the check only as a word of a shell command, and so does what ma
   expect(seen.checks.length).toBe(git.length + 2)
 })
 
-test('a plain shell call is checked only where the store has a failure model that weighs shell calls', async ($, on) => {
+test('a plain shell call starts no python, whatever the store holds', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
-  const model = `${PHI}/models/lookups-model.json`
   const seen = machine(on, {})
   on('tool.check', () => ALLOW)
 
   await $.tool.check(bash('pytest -q'))
   expect(seen.checks).toEqual([])
 
-  // A store has a model only once a training round passed one, and the last answer is believed for a minute.
-  seen.files[model] = '{"shell":{"w":{"pytest":0.4}},"web":{}}\n{"more":1}\n'
-  await $.tool.check(bash('pytest -q'))
-  expect(seen.checks).toEqual([])
+  // A model file of an earlier p4-phi in the store changes nothing: the plugin has no failure model.
+  seen.files[`${PHI}/models/lookups-model.json`] = '{"shell":{"w":{"pytest":0.4}},"web":{}}\n{"more":1}\n'
   await clock.advance(60_000)
   await $.tool.check(bash('pytest -q'))
-  expect(seen.checks.length).toBe(1)
-
-  seen.files[model] = '{"shell":{"w":{}},"web":{"w":{"a":1}}}\n'
-  await clock.advance(60_000)
-  await $.tool.check(bash('pytest -q'))
-  expect(seen.checks.length).toBe(1)
-
-  // An older layout's model is read where the newest has none.
-  delete seen.files[model]
-  seen.files['/work/project/.claude/p4/recall/models/lookups-model.json'] = '{"shell":{"w":{"ls":1}}}\n'
-  await clock.advance(60_000)
   await $.tool.check(bash('ls'))
-  expect(seen.checks.length).toBe(2)
+  expect(seen.checks).toEqual([])
 })
 
 test('a session that owes a nudge and a puppeteer are checked at each edit and shell call', async ($, on) => {
@@ -1831,7 +1813,7 @@ test("only a subagent's own marker opens the check for it, at any tool, with its
 
   // The main conversation's own read beside it is not checked, and a subagent's listed call is, marked or not.
   await $.tool.check(call('Read', { file_path: 'a.py' }))
-  await $.tool.check(call('WebFetch', { url: 'https://example.com' }, `${old}x`))
+  await $.tool.check(call('SendMessage', { to: 'local_x', message: 'go ahead' }, `${old}x`))
   expect(seen.checks.map(check => check.payload.agent_id)).toEqual([fresh, `${old}x`])
 })
 
@@ -1874,9 +1856,9 @@ test('what a check says beside a call reaches the model with the result, once, a
   on('tool.check', () => ALLOW)
   on('classic.PostToolUse', () => ({ additionalContext: ['a row was written'] }))
   on('classic.PostToolUseFailure', () => ({}))
-  const ran = { tool_name: 'WebFetch', tool_input: { url: 'https://example.com' }, tool_response: 'ok' }
+  const ran = { tool_name: 'SendMessage', tool_input: { to: 'local_x', message: 'go ahead' }, tool_response: 'ok' }
 
-  const first = call('WebFetch', { url: 'https://example.com' }) as { tool_use_id: string }
+  const first = call('SendMessage', { to: 'local_x', message: 'go ahead' }) as { tool_use_id: string }
   expect(await $.tool.check(first as never)).toEqual(ALLOW)
   expect(await $.classic.PostToolUse({ ...ran, tool_use_id: first.tool_use_id })).toEqual({
     additionalContext: ['a row was written', earlier],
@@ -1886,12 +1868,12 @@ test('what a check says beside a call reaches the model with the result, once, a
   })
 
   // A call that fails gets it with the failure, and a call no check spoke of gets nothing added.
-  const second = call('WebFetch', { url: 'https://example.com/2' }) as { tool_use_id: string }
+  const second = call('SendMessage', { to: 'local_x', message: 'one more' }) as { tool_use_id: string }
   await $.tool.check(second as never)
   expect(
     await $.classic.PostToolUseFailure({
-      tool_name: 'WebFetch',
-      tool_input: { url: 'https://example.com/2' },
+      tool_name: 'SendMessage',
+      tool_input: { to: 'local_x', message: 'one more' },
       tool_use_id: second.tool_use_id,
       error: 'timeout',
     }),
@@ -2005,7 +1987,7 @@ test('with no python found a call goes on unjudged', async ($, on) => {
   const seen = machine(on, { files: {}, check: () => ({ hookSpecificOutput: { permissionDecision: 'deny' } }) })
   on('tool.check', () => ALLOW)
 
-  expect(await $.tool.check(call('WebSearch', { query: 'flush' }))).toEqual(ALLOW)
+  expect(await $.tool.check(call('SendMessage', { to: 'local_x', message: 'go ahead' }))).toEqual(ALLOW)
   expect(seen.checks).toEqual([])
   expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })
@@ -2161,7 +2143,7 @@ test("on a build with no $.session.info a call is still checked, with no transcr
   })
   on('tool.check', () => ALLOW)
 
-  expect(await $.tool.check(call('WebSearch', { query: 'flush' }))).toEqual({ decision: 'deny', reason: 'no' })
+  expect(await $.tool.check(call('SendMessage', { to: 'local_x', message: 'go ahead' }))).toEqual({ decision: 'deny', reason: 'no' })
   expect(seen.checks.length).toBe(1)
   expect(seen.checks[0]?.payload.transcript_path).toBe('')
   expect(seen.logged.filter(line => line.includes('was not checked'))).toEqual([])
@@ -2930,8 +2912,8 @@ const IN_A_WORKTREE = {
   [`${DATA}/.python`]: `${KEPT}\n`,
   [`${OLDER_DATA}/.python`]: `${KEPT}\n`,
   [KEPT]: '',
-  [`${MAIN}/.claude/p4/phi/models/index.json`]: '{}',
-  [`${WORKTREE}/.claude/p4/phi/models/index.json`]: '{}',
+  [`${MAIN}/.claude/p4/p4.json`]: '{}',
+  [`${WORKTREE}/.claude/p4/p4.json`]: '{}',
 }
 
 test('a script the module runs is handed the variables a command hook gets, so both read one store', async ($, on) => {
@@ -2965,7 +2947,7 @@ test('a script the module runs is handed the variables a command hook gets, so b
   // `cwd`, where a command hook reads the folder the session works in.
   await $.tool.call({ tool: 'mcp__p4-phi__note', claim: 'the flush is ported', source: 'git log -1' } as never)
   expect(seen.calls.at(-1)?.env).toEqual(hasEnv ? HOOK_ENV : OLDER_ENV)
-  await $.tool.check(call('WebFetch', { url: 'https://example.com' }))
+  await $.tool.check(call('SendMessage', { to: 'local_x', message: 'go ahead' }))
   const checked = seen.checks.at(-1)
   const older = { ...OLDER_ENV, CLAUDE_PLUGIN_ROOT: checked?.env?.CLAUDE_PLUGIN_ROOT }
   expect(checked?.env).toEqual(hasEnv ? HOOK_ENV : older)
@@ -3001,7 +2983,7 @@ test("what the module keeps for python in a worktree session lands in the main c
   // On a build with no `$.process.hookEnv`, the session's own folder as before.
   const project = seen.envs > 0 ? MAIN : WORKTREE
   const kept = seen.wrote.map(write => write.path).filter(path => path.endsWith('/origin.json'))
-  expect(kept).toEqual([`${project}/.claude/p4/phi/models/served/start-cli-0001/origin.json`])
+  expect(kept).toEqual([`${project}/.claude/p4/phi/served/start-cli-0001/origin.json`])
 })
 
 test('where the engine gives no such variables the module names the session and its root, as before', async ($, on) => {

@@ -498,23 +498,6 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(t.stop(A, "finish", report="Fixed x; suites green.", uuid="c3").returncode, 0)
         self.assertNotIn("close issues", context(t.say(TOP, "what next?")))
 
-    def test_the_push_line_names_an_open_retrain_notice_of_a_store_the_change_touches(self):
-        """The push line names, before the push, an open retrain notice of a store the change touches."""
-        import notices
-        t = self.t
-        self.assertEqual(relay.stores_of(self.work), [relay.norm(t.p4)], "the store of the project it sits in")
-        self.assertEqual(relay.owed([self.work]), [], "nothing open: nothing owed")
-        notices.notify(t.p4, "json ranker", "the pool went stale", session=A)
-        ctx = relay.push_text("the child", A, [(self.work, "abc1234", "lib: fix x", ["#5"])], relay.owed([self.work]))
-        self.assertIn("finished with commits that close issues", ctx)
-        self.assertIn("Before that push, this change owes: 1 open retrain notice in ", ctx)
-        self.assertIn("retrain-needed.tsv, for json ranker", ctx)
-        self.assertIn("Finish each first. Where one cannot be finished from here, name it in the report before "
-                      "pushing, not after.", ctx)
-        plain = relay.push_text("the child", A, [(self.work, "abc1234", "lib: fix x", ["#5"])])
-        self.assertNotIn("owes", plain, "with nothing owed, the line has no owed part")
-        self.assertIn("without asking ezexe", plain)
-
     def test_the_push_line_runs_the_suite_once_on_the_pushed_commit_and_keeps_its_verdict(self):
         """ezexe/p4#234: the push line has the full suite run once, on the commit being pushed, by the orchestrator, as
         one background command, and has its verdict kept with `phi.py note` under that commit's hash."""
@@ -530,7 +513,7 @@ class ThreeSessions(unittest.TestCase):
     OLD_RUN = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
                "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
                "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push that "
-               "repository's main and sync each store it touches with `p4.py sync --push`, without asking ezexe, "
+               "repository's main, without asking ezexe, "
                "and say in one line what was pushed. A force-push, a history rewrite or a deletion still waits on "
                "ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question whose first button is that go.")
 

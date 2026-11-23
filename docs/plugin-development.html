@@ -137,9 +137,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
   "permissions": {
     "allow": [
       "Bash(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)",
-      "Bash(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)",
-      "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)",
-      "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/p4.py\" sync *)"
+      "PowerShell(python -I -X utf8 \"E:/projects/p4-phi/p4/lbiza/plugins/p4-phi/scripts/phi.py\" *)"
     ],
     "ask": [
       "mcp__ccd_session_mgmt__archive_session"
@@ -151,7 +149,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <div class="scroll"><table><thead><tr><th>Keys</th><th>Whose</th><th>What they do here</th></tr></thead><tbody>
 <tr><td><code>enabledPlugins</code>, with <code>p4-phi@p4-marketplace</code> and <code>p4-temportal@p4-marketplace</code> <code>false</code>, and <code>autoMemoryEnabled</code> <code>false</code></td><td>ezexe's own</td><td>The installed copies are off in this project only, and Claude Code's own auto memory is off here.</td></tr>
 <tr><td><code>autoMemoryDirectory</code> and <code>attribution.commit</code></td><td>Keys p4's settings keeper writes in a project where p4 runs</td><td>The store's memory folder and the store's commit trailer, as the page <a href="claude-settings.html">Claude Code settings</a> sets out. In the development project sessions start without <code>--plugin-dir</code> and the installed copies are off, so no hook of p4's runs there and they stand as ezexe wrote them.</td></tr>
-<tr><td><code>permissions.allow</code></td><td>The two rules ezexe approved, each in its Bash and its PowerShell form, which p4's keeper writes in a project where p4 runs, built from the running copy's own scripts folder</td><td>A session may run <code>phi.py</code> and <code>p4.py sync</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Here, where sessions start without <code>--plugin-dir</code> and the installed copies are off, no hook of p4's runs, so they stand as ezexe wrote them and name that checkout's scripts.</td></tr>
+<tr><td><code>permissions.allow</code></td><td>The rule ezexe approved, in its Bash and its PowerShell form, which p4's keeper writes in a project where p4 runs, built from the running copy's own scripts folder</td><td>A session may run <code>phi.py</code> of the checkout <code>E:/projects/p4-phi/p4</code> without a prompt. Here, where sessions start without <code>--plugin-dir</code> and the installed copies are off, no hook of p4's runs, so it stands as ezexe wrote it and names that checkout's scripts.</td></tr>
 <tr><td><code>permissions.ask</code></td><td>The ask rule ezexe approved on <code>mcp__ccd_session_mgmt__archive_session</code>, which p4's keeper wrote until KEEPER 15 in a project where p4-phi is installed and enabled</td><td>On 2026-11-17 the app showed its approval card before every archive call, in every permission mode. The keeper now writes no ask rule, with <code>phi.upkeep</code> on or off, and takes its own entry out.</td></tr>
 <tr><td><code>disableAllHooks</code> <code>false</code> and <code>disableSkillShellExecution</code> <code>false</code></td><td>The defaults the work relies on, written out</td><td>Hooks run and skills may run their shell commands.</td></tr>
 </tbody></table></div>
@@ -452,7 +450,7 @@ pre.file{margin:0;padding:12px 14px;font:13px/1.5 var(--mono);background:var(--p
 <ul>
 <li>Every one stays, and none was deleted. The answers exist only in a session the app hosts, only after the module's first look, and only for five minutes after a round, and no round runs while a turn of the session does. So a hook of a long turn, a scripted run and a terminal worker all read the files.</li>
 <li>The tools answer less than a record holds. <code>cliSessionId</code> and <code>lastAssistantCliSessionId</code>, which tell a scripted run from the session whose shell started it, are in the record alone, and so are <code>startChain</code>, <code>forkedFromSessionId</code>, <code>lastTurnStopped</code> and a record file's own time and size.</li>
-<li>The readers that open the files with no word of <code>app.json</code> each need more than a linked family's rows: <code>puppeteer.app_index</code> reads every session of the app, <code>node.record_tree</code> reads the CLI ids and the fork a session came from, <code>controls.started_by</code> waits on the record of a session just started, and <code>controls.sections</code> walks every session's filing in <code>claude_desktop_config.json</code>, where a tool's <code>group</code> covers one session.</li>
+<li>The readers that open the files with no word of <code>app.json</code> each need more than a linked family's rows: <code>puppeteer.app_index</code> reads every session of the app, <code>controls.started_by</code> waits on the record of a session just started, and <code>controls.sections</code> walks every session's filing in <code>claude_desktop_config.json</code>, where a tool's <code>group</code> covers one session.</li>
 </ul>
 </section>
 <section id="not-confirmed" aria-labelledby="not-confirmed-h">

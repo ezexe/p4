@@ -1,26 +1,12 @@
 #!/usr/bin/env python3
-"""rows.py: the message rows of `phi/store/messages/<s8>.md`, one row for each message a session is sent.
-
-open   the UserPromptSubmit hook `recall` stamps a row: `fingerprint:`, the message quoted and cut to 300
-       characters, `time:` and `arrival:`. `arrival:` is `turn` for ezexe's message, `notification` for one that
-       Claude Code wrote, and `agent message` for another session's and for the prompt of a turn a plugin's hooks
-       module started. Whose message it is comes from the origin Claude Code stamped on the prompt, which the
-       plugin's hooks module kept and origin_of reads, and from how the text opens where the origin does not say:
-       HARNESS_RE, PEER_RE and WAKE_RE. A row of ezexe's also gets `resembles:`, naming the newest completed row
-       of ezexe's in the session that resembles it by store.resembles. A notification is complete on arrival: `state: FRESH` and an
-       `addressed:` saying so. Another session's message is answered like a turn: its row stays open to the turn end,
-       and so does the row of a prompt a schedule fired, which is `agent message` too since nobody typed it.
-close  at the turn end, the Stop hook `close` completes the session's last open row from the reply: `state:`,
-       `addressed:`, the reply's first paragraph cut to 300 characters, `recommended:`, the reply's first sentence
-       that recommends something, cut to 300 characters and empty when none, and `match:` when the row's
-       `resembles:` names a completed row. judge_state gives the state and `match:`.
-Rows are appended or extended in place: no other line of the file changes.
-
-`recommended:` takes its sentence from any paragraph, since a reply often states its recommendation after the
-first. store.entry_text indexes it with the row's other text, so its words reach retrieval.
+"""rows.py: whose words a prompt is. Claude Code stamps each prompt with where it came from, the plugin's hooks module
+keeps that origin where the UserPromptSubmit hooks read it, and origin_of reads it back. whose() names whose words the
+prompt is by that origin, sender_of names the session that sent a cross-session message by its wrapper, and
+origin_dir is the folder of the store that holds the origin, which is the folder hook.pending_dir names for a
+session. The marks at the head of a text that tell a prompt that the origin does not say are HARNESS_RE, PEER_RE and
+WAKE_RE.
 """
 
-import datetime
 import json
 import os
 import re
@@ -30,8 +16,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import p4conf  # noqa: E402
-import ranker  # noqa: E402
-import store as st  # noqa: E402
 
 FP_CHARS = 300
 ADDRESSED_CHARS = 300
@@ -88,10 +72,10 @@ def origin_dir(project, session):
     """Where the hooks module keeps a prompt's origin for a project that has a store: the session's folder under
     the store's served folder, hook.pending_dir, which git ignores and the layout hook sweeps. '' for a project
     with no store, where the module writes it into the session's folder in the tree's store instead."""
-    models = p4conf.sub(os.path.join(project or "", ".claude", "p4"), "models")
-    if not project or not os.path.isdir(models):
+    p4 = os.path.join(project or "", ".claude", "p4")
+    if not project or not os.path.isfile(os.path.join(p4, p4conf.FILE)):
         return ""
-    return os.path.join(models, "served", "start-" + re.sub(r"[^\w-]", "_", session or "none"))
+    return os.path.join(p4conf.sub(p4, "phi", "served"), "start-" + re.sub(r"[^\w-]", "_", session or "none"))
 
 
 def origin_of(payload, folder=""):
@@ -147,135 +131,3 @@ def sender_of(prompt):
         return ""
     attrs = dict(re.findall(r'([\w-]+)="([^"]*)"', m.group(1)))
     return attrs.get("from-session") or attrs.get("from") or ""
-
-
-def session_file(p4, session):
-    return os.path.join(st.store_dir(p4), st.MESSAGES, f"{(session or 'nosession')[:8]}.md")
-
-
-def now_stamp():
-    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-
-
-def quote(text, n):
-    t = re.sub(r"\s+", " ", (text or "").replace('"', "'")).strip()
-    return '"' + (t if len(t) <= n else t[:n - 1].rstrip() + "…") + '"'
-
-
-def first_paragraph(reply):
-    paras = [p.strip() for p in re.split(r"\n\s*\n", reply or "") if p.strip()]
-    p = paras[0] if paras else ""
-    p = re.sub(r"\s+", " ", p)
-    return p if len(p) <= ADDRESSED_CHARS else p[:ADDRESSED_CHARS - 1].rstrip() + "…"
-
-
-def recommended_sentence(reply):
-    """The reply's first sentence that RECOMMEND_RE finds, from any paragraph, fenced code left out and a question
-    skipped, cut to RECOMMENDED_CHARS; '' when none."""
-    text = FENCE_RE.sub(" ", reply or "")
-    for s in SENTENCE_END_RE.split(text):
-        s = re.sub(r"\s+", " ", s or "").strip()
-        if s and not s.endswith("?") and RECOMMEND_RE.search(s):
-            return s if len(s) <= RECOMMENDED_CHARS else s[:RECOMMENDED_CHARS - 1].rstrip() + "…"
-    return ""
-
-
-def harness(prompt, by=""):
-    """True for a prompt Claude Code wrote, whose row is complete on arrival: a background task's notification by
-    its origin, and, for a prompt whose origin does not say, one whose text opens with a tag HARNESS_RE matches."""
-    return by == "event" or (not by and bool(HARNESS_RE.match(prompt or "")))
-
-
-def row_open(p4, session, prompt, now=None, arrival=None, by=""):
-    """Append the row; returns its entry id. `by` is whose words the prompt is by its origin, whose(), and ''
-    where the origin does not say, which leaves it to the marks at the head of the text."""
-    now = now or now_stamp()
-    path = session_file(p4, session)
-    rel = f"{st.MESSAGES}/{os.path.basename(path)}"
-    is_harness = harness(prompt, by)
-    # another session's message arrives as a turn and is answered like one, but its words are not ezexe's, and
-    # neither are those of a turn a plugin's hooks module started, p4-phi's own among them, or a schedule fired
-    is_peer = by in ("session", "plugin", "schedule") or (
-        not by and bool(PEER_RE.match(prompt or "") or WAKE_RE.match(prompt or "")))
-    arrival = arrival or ("notification" if is_harness else "agent message" if is_peer else "turn")
-    pairs = [("fingerprint", quote(prompt, FP_CHARS)), ("time", now), ("arrival", arrival)]
-    old = st.parse(st.read_text(path), rel) if os.path.exists(path) else []
-    if not is_harness and not is_peer:
-        new = set(st.norm_token(prompt).split())
-        for e in reversed(old):
-            if st.completed(e) and st.owner_message(e) and st.resembles(
-                    new, set(st.norm_token(st.unquote(e.fields.get("fingerprint", e.value))).split())):
-                pairs.append(("resembles", e.id))
-                break
-    if arrival != "turn" and not is_peer:
-        pairs += [("state", "FRESH"), ("addressed", f"(a {arrival}; complete on arrival)")]
-    text = st.read_text(path) if os.path.exists(path) else st.render(rel, [])
-    text = text.rstrip("\n") + "\n\n" + st.format_entry(pairs) + "\n"
-    ranker.write_atomic(path, text)
-    got = st.parse(text, rel)
-    return got[-1].id if got else ""
-
-
-def row_close(p4, session, reply, now=None):
-    """Complete the session's last open row from the reply. Returns `(row, done)`: the row's Entry as it was before,
-    None when the session has no open row, and whether the row was completed, which a reply with no text is not."""
-    path = session_file(p4, session)
-    if not os.path.exists(path):
-        return None, False
-    rel = f"{st.MESSAGES}/{os.path.basename(path)}"
-    text = st.read_text(path)
-    ents = st.parse(text, rel)
-    open_rows = [e for e in ents if not st.completed(e)]
-    if not open_rows:
-        return None, False
-    e = open_rows[-1]
-    addressed = first_paragraph(reply)
-    if not addressed:
-        return e, False
-    lines = text.split("\n")
-    j = e.line                          # the line after the head: e.line counts the head's line from 1
-    while j < len(lines) and lines[j].startswith("  "):
-        j += 1
-    add = []
-    state, match = judge_state(e, ents, addressed)
-    if not e.fields.get("state", "").strip():
-        add.append(f"  state: {state}")
-    add.append(f"  addressed: {addressed}")
-    rec = recommended_sentence(reply)
-    add.append(f"  recommended: {rec}" if rec else "  recommended:")
-    if match:
-        add.append(f"  match: {match}")
-    lines[j:j] = add
-    ranker.write_atomic(path, "\n".join(lines))
-    return e, True
-
-
-def task_kind(p4, session, row, prompt):
-    """The task kind of a closed turn, as labels.task_of_row names it: `short` for a message of at most
-    store.SHORT_WORDS words, `first` for the session's first row of ezexe's, with none of ezexe's before it in the
-    session's file, else `new`."""
-    if len(st.norm_token(prompt).split()) <= st.SHORT_WORDS:
-        return "short"
-    if row is not None:
-        path = session_file(p4, session)
-        ents = st.parse(st.read_text(path), f"{st.MESSAGES}/{os.path.basename(path)}") if os.path.exists(path) else []
-        owner = [e for e in ents if st.owner_message(e)]
-        if owner and owner[0].id == row.id:
-            return "first"
-    return "new"
-
-
-def judge_state(e, ents, addressed):
-    """`(state, match)` for a row being completed: ECHO when the earlier row its `resembles:` names got the same
-    answer again, the two `addressed:` paragraphs alike by st.resembles; SUPERSEDED when that earlier row was
-    answered anew; FRESH when its `resembles:` names no completed row. `match` names the earlier row by its time
-    and says which of the two it was, in plain words; '' for FRESH."""
-    rid = e.fields.get("resembles", "").strip()
-    prior = next((x for x in ents if rid and x.id == rid and st.completed(x)), None)
-    if prior is None:
-        return "FRESH", ""
-    new = set(st.norm_token(addressed).split())
-    old = set(st.norm_token(prior.fields.get("addressed", "")).split())
-    if st.resembles(new, old):
-        return "ECHO", f"the {prior.time} row, the same answer again"
-    return "SUPERSEDED", f"the {prior.time} row, answered anew"

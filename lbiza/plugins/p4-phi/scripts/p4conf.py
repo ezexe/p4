@@ -87,67 +87,6 @@ DEFAULTS = {
             ".layout-conflicts": {"max_age_days": 30},                 # the older copies a layout move set aside
         },
     },
-    "recall": {                          # p4-phi's retrieval
-        "inject": "rules-facts",         # what reaches the model: false none, "rules-facts" only rule and fact lines,
-                                         # true every line; P4_RECALL_INJECT=0, 1 or rules-facts wins for a run
-        "learn": True,                   # false: the Stop hook trains nothing, and labels are still written
-        "updated": None,                 # who last set inject and learn, and when: ezexe/phi's phi_model mode writes it
-        "repo_deadline_s": 8.0,
-        "deps": {                        # frameworks, library packages and external modules as entries, by deps.py
-            "auto": True,                # node_modules, vendor, third_party, _deps, vcpkg_installed, site-packages
-            "roots": [],                 # more roots: paths relative to the project, or absolute paths outside it
-            "deadline_s": 6.0,           # what one hook spends reading changed packages; the rest waits for the next
-            "max_entries": 20000,
-            "package_files": 3,          # files read of one package beyond those a session opened, and entries
-            "package_entries": 40,       # kept of it: more of either measured worse on silence and precision
-            "scan": 20000,               # directory entries one package's walk looks at
-            "depth": 6,
-        },
-        "said": {                        # what a session states about the lines it was shown, by said.py
-            "mode": "off",               # "off", "shadow" to ask and write it down, or "on" for training to read it
-        },
-        "lookups": {                     # each tool call recorded and checked before the next like it, by lookups.py
-            "on": True,
-            "web": "note",               # what an earlier finding for the same question does: "note" beside the
-            "shell": "shadow",           # call, which runs, "answer" in place of the call, once, "shadow" logged
-                                         # only, or "off"
-            "after": True,               # a failure other sessions met is told what they did about it
-            "threshold": None,           # None: the trained threshold, and 0.6 before a first round
-            "min_precision": 0.85,       # how often an answered call must be right for a threshold to be taken
-            "max_age_days": 30,          # an older finding is not handed back
-            "finding_chars": 4000,       # kept of a web call's answer
-            "shown_chars": 1500,         # shown of it
-            "epochs_web": 30,            # training rounds of the web model and passes of the failure model, as the
-            "epochs_shell": 6,           # held-out runs noted in lookups.py chose them
-        },
-        "near": {                        # candidates from what earlier, similar tasks used, by near.py
-            "on": True,
-            "neighbours": 20,            # earlier tasks whose entries are taken
-            "max": 100,                  # entries added to a task's candidates
-            "same_session": False,       # the session's own earlier tasks too: scores well, tells it nothing
-        },
-        "node": {                        # the session tree, by node.py
-            "on": False,                 # true: entries the sessions above used are candidates and a training feature
-        },
-        "sync": {                        # every machine's branch of the store kept in step, by sync.py
-            "seed": True,                # the layout hook writes .github/workflows/p4-sync.yml and .github/p4_sync.py
-            "main": "main",              # the branch the machines' branches are merged into
-        },
-        "query": {
-            "max_lines": 5, "per_file": 2, "text_chars": 160, "history_chars": 120, "candidates": 200,
-            "min_rare": 2, "fallback_cover": 0.75, "fallback_icover": 0.65, "fallback_dense": 0.35,
-            "file_shared": 4, "file_cover": 0.55, "file_dense": 0.75,
-            "variant_weight": 0.5, "expand_weight": 0.5,
-        },
-        "train": {
-            "candidates": 200, "train_neg": 60, "folds": 5, "floor_drop": 0.02, "min_precision": 0.6,
-            "first_floor": 0.36, "owed_labels": 10, "owed_age_s": 3600, "max_tasks": 400,
-        },
-        "teacher": {
-            "model": "claude-fable-5-2", "second_opinion": "claude-opus-5-5", "cutoff": None, "effort": "high",
-            "max_tokens": 16000, "agree_min": 0.65, "newer_max": 12, "cand_k": 60, "dict_batch": 20,
-        },
-    },
 }
 
 # Sections whose keys are ezexe's to choose: merged over the defaults, never called unknown.
@@ -156,11 +95,12 @@ OPEN = ("temportal.cache",)
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
 READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "temportal.compact_at", "claude",
-                 "phi.cards", "phi.worktree_python", "phi.worktree_lines")
+                 "phi.cards", "phi.worktree_python", "phi.worktree_lines", "recall")
 
 # Where each kind of file lives in the store, by plugin. p4-temportal keeps the auto memory, the notebook and saved
-# code in temportal/, and p4-phi keeps its session tree, the retrieval corpus and
-# models, and the archive a migration from the per-session layout keeps verbatim in phi/. p4.json and the store's own
+# code in temportal/, and p4-phi keeps its session tree and the archive a
+# migration from the per-session layout keeps verbatim in phi/. The store/ and models/ of an earlier p4-phi are still
+# read and moved. p4.json and the store's own
 # git files stay at the top: .git, .github, .gitignore and .gitattributes.
 LAYOUT = {
     "memory": "temportal/memory",
@@ -171,8 +111,8 @@ LAYOUT = {
     "archive": "phi/archive",      # what an earlier p4's migration kept verbatim from a per-session tree
     "plans": "temportal/plan-planner",   # the plan files, where plansDirectory points Claude Code, by plan-planner
 }
-# Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for the corpus
-# and the models. migrate_layout moves files from any of them.
+# Each kind's earlier places in a store, oldest first: at the top of the store, and under recall/ for what an earlier
+# p4-phi kept there. migrate_layout moves files from any of them.
 OLDER = {k: [k] for k in LAYOUT}
 OLDER["store"].append("recall/store")
 OLDER["models"].append("recall/models")
@@ -417,8 +357,8 @@ def _migrate_layout(p4, commit):
 
 def _take(lock, wait_s=5.0, stale_s=120.0):
     """The layout lock, or False once another hook held it for `wait_s`, since the hooks of a start run at once.
-    The wait stays well under the 10-second timeout of the shortest hook that reaches it, retrieval's, so that hook
-    still has time for its own work."""
+    The wait stays well under the 10-second timeout of the shortest hook that reaches it, so that hook still has
+    time for its own work."""
     end, waited = time.monotonic() + wait_s, False
     while True:
         try:
@@ -783,8 +723,9 @@ WRITTEN = "_written"
 # back. 13 came with the default `phi.plan_mode`, the switch of p4-phi's plan rule. 14 came with the default
 # `phi.goal_review`, the switch of the review a worker's goal asks for.
 # 15 came with the default `phi.new_issues` and with the general part of CARD_SET, whose rules an installed copy of
-# 14 leaves to the copy that wrote them.
-GEN = 15
+# 14 leaves to the copy that wrote them. 16 came with the removal of the group `recall`, which a store that still
+# holds it keeps, since READ_WHEN_SET names it.
+GEN = 16
 
 
 def _leaves(d, prefix=""):
@@ -936,7 +877,7 @@ def apply(module_globals, values, names, defaults=None):
 
 
 def configure(module_globals, p4, dotted, names, write=True):
-    """apply() from the section of p4.json at `dotted`, such as "recall.query", with the P4_* variables of person_env
+    """apply() from the section of p4.json at `dotted`, such as "phi.cards", with the P4_* variables of person_env
     ahead of it; returns that section. A constant a variable set goes back to the value it had before once the
     variable is gone, since a process that runs hooks in turn keeps its module globals."""
     values = _at(load(p4, write=write), dotted)
@@ -975,23 +916,22 @@ def configure(module_globals, p4, dotted, names, write=True):
 # value out of range. A section of OPEN, temportal.cache, is merged over its default rules as p4.json's is. A variable
 # only ever applies to the store of the session's own project, by env_applies.
 ENV_PREFIX = "P4_"
-ENV_SKIP = ("recall.updated",)            # who last set recall.inject and learn, and when: a record, not a setting
+ENV_SKIP = ()                             # the keys of DEFAULTS that are a record and no setting: none
 # `phi.cards` has no variable: what is settled with no approval card is in force by the store's file alone, cards_on.
 ENV_SET_ONLY = tuple(k for k in READ_WHEN_SET if k.startswith("phi.") and k != "phi.cards")
 # A name the rule would give that an older variable of other meaning already has: P4_PHI_WATCH_S is puppeteer.py's
 # tick for one run, used whether or not a session is busy, while phi.watch_s is the tick of a busy watcher only.
 ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
 # What a key's reader takes where its default does not say: "num" a number, "strs" a list of strings, "rules" the
-# lifetime rules of temportal.cache by folder, "levels" plans.child_levels' kinds, "inject" a bool or "rules-facts".
+# lifetime rules of temportal.cache by folder, "levels" plans.child_levels' kinds.
 ENV_SCHEMA = {
-    "phi.home": str, "recall.lookups.threshold": "num", "recall.teacher.cutoff": str,
+    "phi.home": str,
     "phi.child_levels": "levels", "phi.puppeteer_section": str,
     "phi.worktree_python": str, "phi.worktree_lines": "strs",
-    "phi.clear_at": "num", "temportal.cache": "rules", "recall.inject": "inject",
+    "phi.clear_at": "num", "temportal.cache": "rules",
 }
 # The strings a key's reader knows.
-ENV_CHOICES = {"recall.said.mode": ("off", "shadow", "on"), "recall.lookups.web": ("note", "answer", "shadow", "off"),
-               "recall.lookups.shell": ("note", "answer", "shadow", "off")}
+ENV_CHOICES = {}
 _BAD = object()
 _WARNED = set()
 
@@ -1252,7 +1192,7 @@ PAST_MAX = 5                     # texts kept per variable of those p4 wrote and
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
 # "Exceptions to managed settings precedence" of settings.md, and the keys named beside them. A dotted key under one
-# of these is in the class too. ezexe's yes covers only what the keeper writes of it: the two allow rules, the ask
+# of these is in the class too. ezexe's yes covers only what the keeper writes of it: the allow rules, the ask
 # rule on the archive tool, the deny rule on the model tool and p4's own P4_* variables under env; a store's `claude`
 # section naming any key of the class is still told it is ezexe's to decide.
 SECURITY = (
@@ -1720,8 +1660,8 @@ def carry_memory(src, dst):
     return n
 
 
-# The two allow rules ezexe approved for p4 to keep in the local file, so a session runs the p4 commands its hook
-# text names without a prompt: phi.py with any arguments, and p4.py sync. On Windows the same two in the PowerShell
+# The allow rule ezexe approved for p4 to keep in the local file, so a session runs the p4 commands its hook
+# text names without a prompt: phi.py with any arguments. On Windows the same rule in the PowerShell
 # form too. Each rule is one entry of `permissions.allow` that
 # p4 owns, recorded under RECORD's `rules` with the GEN of the copy that wrote it: p4 adds and removes only its own
 # entries, never reorders or drops another, and replaces one when the plugin folder moves, only on a start and only at
@@ -1737,7 +1677,7 @@ def carry_memory(src, dst):
 # can run from any version folder still on disk, and the keeper keeps the two rules for each of them beside the
 # running copy's, and drops a folder's rules once Claude Code has removed the folder. Each rule names one folder
 # exactly: permissions.md, "Wildcard patterns", says "A `*` in a Bash rule matches any text, including spaces", so a
-# `*` in place of the version would allow more than these scripts, and a rule wider than the two ezexe approved is
+# `*` in place of the version would allow more than this script, and a rule wider than the one ezexe approved is
 # ezexe's to write.
 ALLOW_KEY = "permissions.allow"
 OWN_KEYS = ("allowRules",)
@@ -1754,10 +1694,10 @@ def allow_rules(platform, conf):
         return None
     out = []
     for s in [fwd(here)] + version_folders(here):
-        cmds = [f'python -I -X utf8 "{s}/phi.py" *', f'python -I -X utf8 "{s}/p4.py" sync *']
-        out += [f"Bash({c})" for c in cmds]
+        cmd = f'python -I -X utf8 "{s}/phi.py" *'
+        out.append(f"Bash({cmd})")
         if platform.startswith("win"):
-            out += [f"PowerShell({c})" for c in cmds]
+            out.append(f"PowerShell({cmd})")
     return out
 
 
@@ -2191,7 +2131,7 @@ def _keep_rules(new, rec, name, wanted, owned_only, key=ALLOW_KEY, part="rules")
 
 # A rule exactly as allow_rules writes one, for any scripts folder: the tool, the fixed words, the folder, the script
 # and its tail. A rule a person wrote another way, such as one that names a command of phi.py, is not of this shape.
-_OWN_RULE = re.compile(r'^(?:Bash|PowerShell)\(python -I -X utf8 "(.+)/(?:phi\.py" \*|p4\.py" sync \*)\)$')
+_OWN_RULE = re.compile(r'^(?:Bash|PowerShell)\(python -I -X utf8 "(.+)/phi\.py" \*\)$')
 
 
 def stray_rules(have, wanted, entries=()):
@@ -2213,8 +2153,8 @@ def stray_rules(have, wanted, entries=()):
 
 def _drop_strays(new, rec, name, wanted):
     """The allow rules stray_rules names, taken out of `new`. Seen on 2026-11-19: a store started anew lost the
-    record of the four rules a checkout of p4-phi wrote, so the keeper left them as a person's, they allowed the
-    checkout's phi.py and p4.py, and by their identity they kept the running copy's own rules from being written.
+    record of the rules a checkout of p4-phi wrote, so the keeper left them as a person's, they allowed the
+    checkout's phi.py, and by their identity they kept the running copy's own rules from being written.
     This step only takes rules out: it writes none and widens none. A list it empties held nothing but p4's own
     rules, so it goes with its key and _keep_rules makes the next one. With `wanted` None, as in a copy that cannot
     tell which copy of p4-phi runs, nothing moves."""
