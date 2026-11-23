@@ -28,10 +28,12 @@ Claude Code's own folder into plans/, by keep_plans, and leaves each original.
 The skill plan-planner sorts a plan into a subfolder of that folder: complete/ once it is finished, todo/ once
 ezexe parks it and unplanned/ once ezexe drops it, while a plan being worked stays directly in the folder. The age
 clears only the files directly in the folder, where plan mode writes them, so a sorted plan stays until ezexe's
-word moves it, and no subfolder of the three takes a cookie whole. keep_plans copies no plan whose name one of
-them holds, and carry_over moves a plan of the main checkout's store into the place a worktree moved it to.
-Plan mode gives every plan of one session the same file name, so a plan sorted where a subfolder holds its name
-is named `<stem>.<n>.md`, which NUMBERED tells, and a worked plan newer than the sorted plans of its name is the
+word moves it, and no subfolder of the three takes a cookie whole. A plan is sorted under the name its title
+makes, which sorted_name tells, and keeps plan mode's name where it has no title, so plans sorted before
+p4-temportal 0.3.71 hold plan mode's names. keep_plans copies no plan whose name or title name one of them holds,
+and carry_over moves a plan of the main checkout's store into the place a worktree moved it to. A plan sorted
+where a place of a plan holds its name is named `<stem>.<n>.md`, which NUMBERED tells. Plan mode gives every plan
+of one session the same file name, and a worked plan newer than the sorted plans of its name or title is the
 session's next plan: carry_over carries it and takes no sorted plan away.
 
 The folder is temportal/plan-planner since p4-temportal 0.3.55 and was temportal/plans before, which p4conf's layout
@@ -122,9 +124,13 @@ PLANS = p4conf.PLANS.split("/", 1)[-1]  # the plan files under temportal/, where
 # clears and no session reads unless ezexe names the file
 COMPLETE, TODO, UNPLANNED = "complete", "todo", "unplanned"
 SHELVES = (COMPLETE, TODO, UNPLANNED)
-# a plan sorted as `<stem>.<n>.md`, since its subfolder already held the name plan mode gives every plan of one
-# session. Claude Code's plan names are words joined by hyphens, and none ends in a dot and a number.
+# a plan sorted as `<stem>.<n>.md`, since a place of a plan already held its title name or the name plan mode gives
+# every plan of one session. Claude Code's plan names and title names are words joined by hyphens, and none ends in
+# a dot and a number.
 NUMBERED = re.compile(r"(?P<stem>.+)\.[0-9]+\.md", re.I)
+TITLE = re.compile(r"#[ \t]+(?P<title>.*)")    # a plan's title: its first heading line, `# ...`
+TITLE_BYTES = 4096                      # how much of a plan file sorted_name reads to find that line
+TITLE_CHARS = 60                        # the longest a title name's stem may be
 # the notebook, saved code, plans, the finished and parked plans and the cookies, which no cookie clears whole
 WHOLE = (NOTEBOOK, "src", PLANS, *(f"{PLANS}/{shelf}" for shelf in SHELVES), EXPIRES)
 # the other plugins' folders of the layout, where a layout move sets copies aside in a .layout-conflicts/ of their own
@@ -624,7 +630,8 @@ def keep_plans(root, made, edited=()):
     file of its name where it is the newer, so a resumed session's edit reaches the copy. A file that was only
     edited and that the store holds no copy of is left alone: another project's session may have made it. A plan
     whose name complete/, todo/ or unplanned/ holds is never copied, since plan-planner sorted it there and only
-    ezexe's word revives it."""
+    ezexe's word revives it, and nor is one whose title name, by sorted_name, one of them holds, as it is or
+    numbered: plan-planner sorts a plan under that name, and the original here still holds plan mode's."""
     p4 = store_of(root)
     target = p4conf.settings_file(root)
     want = p4conf.plans_dir(p4, target)
@@ -649,6 +656,9 @@ def keep_plans(root, made, edited=()):
         kept = os.path.join(to, name)
         if any(os.path.lexists(os.path.join(to, shelf, name)) for shelf in SHELVES):
             continue                                    # closed or parked: only ezexe's word brings it back
+        titled = sorted_name(path)
+        if titled and _shelf_copies(to, titled):
+            continue                                    # sorted under its title name, where plan-planner sorts a plan
         if os.path.lexists(kept):
             if p4conf.is_link(kept) or not os.path.isfile(kept) or os.path.getmtime(path) <= os.path.getmtime(kept):
                 continue                                # the store's file is no older: it stays as it is
@@ -687,11 +697,13 @@ def carry_over(root):
 
     A plan has four places by plan-planner: the plans folder while it is worked, and its complete/, todo/ and
     unplanned/ once sorted. Plan mode gives every plan of one session the same name, so a name alone does not
-    tell one plan from the next, and _other_places says which copies in the main checkout's store are this
-    plan's. A sorted plan is carried only where it is newer than every copy of its name in the other two
-    subfolders, and the older copies of it there and in the worked place are then removed, their removal staged
-    where that store is a git repository of its own. A worked plan is carried only where it is newer than every
-    sorted copy of its name, and removes none. So a close in a worktree does not leave the plan worked in the
+    tell one plan from the next, and a plan is sorted under its title name, so a worked plan and its sorted copy
+    may hold two names. _other_places says which copies in the main checkout's store are this plan's, by name and
+    by title name, and is asked only of a file that would be carried, since the title is read from the file. A
+    sorted plan is carried only where it is newer than every copy of its name in the other two subfolders, and the
+    older copies of it there and in the worked place are then removed, their removal staged where that store is a
+    git repository of its own. A worked plan is carried only where it is newer than every sorted copy of its name
+    or title name, and removes none. So a close in a worktree does not leave the plan worked in the
     main checkout too, a plan the main checkout closed is not brought back by an older copy a worktree still
     holds, and a session's next plan takes no sorted plan away."""
     main, in_git = p4conf.main_root(root)
@@ -710,13 +722,13 @@ def carry_over(root):
             for file in files:
                 path = os.path.join(folder, file)
                 kept = os.path.join(there, os.path.relpath(path, here))
-                held, behind = _other_places(here, there, os.path.relpath(path, here))
                 try:
                     if p4conf.is_link(path) or not os.path.isfile(path) or p4conf.is_link(kept):
                         continue
                     if os.path.lexists(kept) and (not os.path.isfile(kept)
                                                   or os.path.getmtime(path) <= os.path.getmtime(kept)):
                         continue                        # the main checkout's file is no older: it stays as it is
+                    held, behind = _other_places(here, there, os.path.relpath(path, here))
                     when = os.path.getmtime(path)
                     if any(not os.path.isfile(o) or when <= os.path.getmtime(o) for o in held):
                         continue                        # the plan's newest copy is in another of its places there
@@ -752,41 +764,78 @@ def _other_places(here, there, rel):
     store under `there` holds in its other places. A copy in `held` that is no older keeps this one from being
     carried, and a copy in `behind` that is older goes once this one is carried. ([], []) for any other path.
 
-    Plan mode gives every plan of one session the same name. So a worked plan is held back by a sorted copy of
-    its name, or of its name numbered, that is no older, and takes none away: where it is the newer it is the
-    session's next plan. A sorted plan is held back by a newer copy of its name in another subfolder, and takes
-    away the older copies in the other subfolders and the older worked copy, under its own name and under the
-    name its number was added to. A worked name the worktree itself still holds is left out, since the worked
-    copy in the main checkout's store is then that plan's and not this one's."""
+    Plan mode gives every plan of one session the same name, and plan-planner sorts a plan under its title name.
+    So a worked plan is held back by a sorted copy of its name, of its name numbered, or of its title name as it
+    is or numbered, that is no older, and takes none away: where it is the newer it is the session's next plan. A
+    sorted plan is held back by a newer copy of its name in another subfolder, and takes away the older copies in
+    the other subfolders and the older worked copy, under its own name, under the name its number was added to,
+    and under any plan mode name whose title name is one of those two. A worked name the worktree itself still
+    holds is left out, since the worked copy in the main checkout's store is then that plan's and not this one's."""
     parts = rel.replace("\\", "/").split("/")
     if parts[0] != PLANS or not parts[-1].lower().endswith(".md"):
         return [], []
     name, plans = parts[-1], os.path.join(there, PLANS)
     if len(parts) == 2:
-        return _shelf_copies(plans, name), []
+        return _shelf_copies(plans, name, sorted_name(os.path.join(here, rel))), []
     if len(parts) != 3 or parts[1] not in SHELVES:
         return [], []
     held = [p for p in (os.path.join(plans, shelf, name) for shelf in SHELVES if shelf != parts[1])
             if os.path.lexists(p)]
     numbered = NUMBERED.fullmatch(name)
     names = [name] + ([numbered.group("stem") + ".md"] if numbered else [])
+    try:
+        entries = sorted(os.listdir(plans))
+    except OSError:
+        entries = []
+    titles = [os.path.normcase(n) for n in names]
+    names += [entry for entry in entries if entry.lower().endswith(".md") and os.path.normcase(entry) not in titles
+              and not p4conf.is_link(os.path.join(plans, entry))
+              and os.path.normcase(sorted_name(os.path.join(plans, entry)) or "") in titles]
     worked = [os.path.join(plans, n) for n in names if not os.path.lexists(os.path.join(here, PLANS, n))]
     return held, held + [p for p in worked if os.path.lexists(p)]
 
 
-def _same_plan(name, other):
-    """True where `other`, a file name in a subfolder of SHELVES, is a copy of the plan worked as `name`: the same
-    name, or, where `name` is one plan mode gave, that name numbered."""
+def sorted_name(path):
+    """The name plan-planner sorts the plan file at `path` under -> its title name, or None where it has none. The
+    title is the file's first heading line, `# ...`, among the first TITLE_BYTES of it, and its name is a slug: lower
+    case, each run of characters outside a to z and 0 to 9 one hyphen, no hyphen at either end, cut at the last
+    hyphen that keeps it within TITLE_CHARS, or at TITLE_CHARS where no hyphen does, and then `.md`. A file that
+    cannot be read, holds no heading or whose slug is empty has none, and such a plan keeps plan mode's name."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(TITLE_BYTES)
+    except OSError:
+        return None
+    lines = head.decode("utf-8-sig", errors="ignore").splitlines()
+    if len(head) == TITLE_BYTES and not head.endswith((b"\n", b"\r")):
+        lines = lines[:-1]                              # a line the read cut off is no whole heading
+    title = next((m.group("title") for m in map(TITLE.fullmatch, lines) if m), None)
+    if title is None:
+        return None
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if len(slug) > TITLE_CHARS:
+        cut = slug.rfind("-", 0, TITLE_CHARS + 1)
+        slug = slug[:cut] if cut > 0 else slug[:TITLE_CHARS]
+    return slug + ".md" if slug else None
+
+
+def _same_plan(name, other, titled=None):
+    """True where `other`, a file name in a subfolder of SHELVES, is a copy of the plan worked as `name`, whose
+    title name is `titled`: the same name, or, where `name` is one plan mode gave, that name numbered, or
+    `titled` as it is or numbered. The name match keeps a plan sorted under plan mode's name matched."""
     a, b = os.path.normcase(name), os.path.normcase(other)
     if a == b:
         return True
     numbered = NUMBERED.fullmatch(b)
-    return numbered is not None and NUMBERED.fullmatch(a) is None and numbered.group("stem") == a[:-3]
+    if numbered is not None and NUMBERED.fullmatch(a) is None and numbered.group("stem") == a[:-3]:
+        return True
+    stem = os.path.normcase(numbered.group("stem") + ".md") if numbered else b
+    return titled is not None and stem == os.path.normcase(titled)
 
 
-def _shelf_copies(plans, name):
-    """The copies the subfolders of SHELVES under `plans` hold of the plan worked as `name` -> their paths, by
-    _same_plan. A subfolder that is not there holds none."""
+def _shelf_copies(plans, name, titled=None):
+    """The copies the subfolders of SHELVES under `plans` hold of the plan worked as `name`, whose title name is
+    `titled` -> their paths, by _same_plan. A subfolder that is not there holds none."""
     found = []
     for shelf in SHELVES:
         folder = os.path.join(plans, shelf)
@@ -794,7 +843,7 @@ def _shelf_copies(plans, name):
             entries = sorted(os.listdir(folder))
         except OSError:
             continue
-        found += [os.path.join(folder, entry) for entry in entries if _same_plan(name, entry)]
+        found += [os.path.join(folder, entry) for entry in entries if _same_plan(name, entry, titled)]
     return found
 
 

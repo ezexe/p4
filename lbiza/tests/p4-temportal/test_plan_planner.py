@@ -118,6 +118,20 @@ class SkillText(unittest.TestCase):
         self.assertLess(body.index("## Plan mode writes the plan"), body.index("## A planner another session starts"))
         self.assertLess(body.index("## A planner another session starts"), body.index("## What a session reads"))
 
+    def test_a_sorted_plan_takes_its_titles_name_and_a_worked_one_keeps_plan_modes(self):
+        body = text()
+        for word in ("While a plan is worked, the file keeps the name plan mode gave it",
+                     "fixes one plan file name per session", "treats any other file in this folder as a protected path",
+                     "under the name its title makes", "The title is the plan file's first heading line, `# ...`.",
+                     "cut at the last hyphen that keeps it within 60 characters",
+                     "A plan with no heading, or whose slug is empty, keeps the name plan mode gave it.",
+                     "A prep is sorted the same way, by its own first heading",
+                     "where a place of a plan already holds that name, the plan moves as `<stem>.<n>.md`",
+                     "A revive moves the plan back into `plan-planner/` under its sorted name as it stands",
+                     "copies the plan's content into its own plan file", "into `complete/` under its title's name",
+                     "into `todo/` under its title's name", "into `unplanned/` under its title's name"):
+            self.assertIn(word, body, word)
+
     def test_the_loops_reader_traces_live_paths_and_a_check_runs_as_written(self):
         body = text()
         loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
@@ -213,6 +227,59 @@ class Places(unittest.TestCase):
             self.assertNotIn(f"{shelf}.md", said[0])
             self.assertEqual(read(os.path.join(self.plans, shelf, f"{shelf}.md")), f"STATUS: {shelf}\n")
 
+    def test_a_plan_sorted_under_its_title_name_is_not_copied_back_either(self):
+        with open(os.path.join(self.root, ".claude", "settings.local.json"), "w", encoding="utf-8") as f:
+            json.dump({"plansDirectory": ".claude/p4/" + lifetime.p4conf.PLANS}, f)
+        put(os.path.join(self.plans, "complete", "closed-plan.md"), "STATUS: COMPLETED\n# Closed plan\n", age_days=1)
+        put(os.path.join(self.plans, "todo", "parked-plan.2.md"), "STATUS: TODO\n# Parked plan\n", age_days=1)
+        made = [put(os.path.join(self.own, "brave-otter.md"), "# Closed plan\n"),
+                put(os.path.join(self.own, "quiet-fox.md"), "# Parked plan\n"),
+                put(os.path.join(self.own, "new-heron.md"), "# Another plan\n")]
+        said = lifetime.keep_plans(self.root, made, made)
+        self.assertEqual(sorted(os.listdir(self.plans)), ["complete", "new-heron.md", "todo"])
+        self.assertIn("new-heron.md", said[0])
+
+
+class TitleName(unittest.TestCase):
+    """A sorted plan is named by its title, its first heading line, and keeps plan mode's name where it has none."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="p4-temportal-planner-title-")
+        self.addCleanup(wipe, self.base)
+
+    def name(self, body):
+        return lifetime.sorted_name(put(os.path.join(self.base, "brave-otter.md"), body))
+
+    def test_a_plain_title_is_its_slug(self):
+        self.assertEqual(self.name("# Plan files take their title's name\n\n## Context\n"),
+                         "plan-files-take-their-title-s-name.md")
+        self.assertEqual(self.name("STATUS: TODO 2026-11-23: none\n# p4-temportal 0.3.71: names  --  sorted\n"),
+                         "p4-temportal-0-3-71-names-sorted.md")
+
+    def test_a_title_of_punctuation_only_and_no_heading_keep_plan_modes_name(self):
+        self.assertIsNone(self.name("# ?!. -- ...\n"))
+        self.assertIsNone(self.name("# \n"))
+        self.assertIsNone(self.name("plain prose\n## a second level heading\n#nospace\n"))
+        self.assertIsNone(self.name(""))
+        self.assertIsNone(lifetime.sorted_name(os.path.join(self.base, "none-here.md")))
+
+    def test_a_prep_takes_the_heading_after_its_marker_or_none(self):
+        self.assertIsNone(self.name("PREP COMPLETE plan names\nfindings\n"))
+        self.assertEqual(self.name("PREP COMPLETE plan names\n# Prep: plan names\n"), "prep-plan-names.md")
+
+    def test_a_long_title_is_cut_at_a_hyphen_within_sixty_characters(self):
+        title = "A sorted plan takes a file name made from its own title in place of plan mode's"
+        got = self.name(f"# {title}\n")
+        self.assertEqual(got, "a-sorted-plan-takes-a-file-name-made-from-its-own-title-in.md")
+        self.assertLessEqual(len(got) - len(".md"), 60)
+        self.assertEqual(self.name("# " + "x" * 70 + "\n"), "x" * 60 + ".md")
+        self.assertEqual(self.name("# " + "y" * 60 + " z\n"), "y" * 60 + ".md")
+
+    def test_only_the_files_first_bytes_are_read(self):
+        self.assertIsNone(self.name("x" * lifetime.TITLE_BYTES + "\n# Too far down\n"))
+        self.assertIsNone(self.name("x" * (lifetime.TITLE_BYTES - 6) + "\n# Cut\n"))
+        self.assertEqual(self.name("﻿# Héllo wörld\r\n"), "h-llo-w-rld.md")
+
 
 class CarriedPlaces(unittest.TestCase):
     """A plan a worktree moved leaves its old place in the main checkout's store, and an older copy a worktree still
@@ -306,6 +373,56 @@ class CarriedPlaces(unittest.TestCase):
         lifetime.carry_over(self.tree)
         staged = git(store, "diff", "--cached", "--name-status").stdout.decode()
         self.assertIn(f"D\ttemportal/{lifetime.PLANS}/p.md", staged)
+
+    def test_a_plan_sorted_in_a_worktree_under_its_title_leaves_the_worked_place_of_the_main_checkout(self):
+        put(os.path.join(self.there, "brave-otter.md"), "# Plan names\n", age_days=2)
+        put(os.path.join(self.there, "quiet-fox.md"), "# Taken title\n", age_days=2)
+        put(os.path.join(self.there, "other-heron.md"), "# Another plan\n", age_days=2)
+        put(os.path.join(self.here, "complete", "plan-names.md"), "STATUS: COMPLETED\n# Plan names\n", age_days=1)
+        put(os.path.join(self.here, "todo", "taken-title.2.md"), "STATUS: TODO\n# Taken title\n", age_days=1)
+        said = lifetime.carry_over(self.tree)
+        self.assertFalse(os.path.exists(os.path.join(self.there, "brave-otter.md")))
+        self.assertFalse(os.path.exists(os.path.join(self.there, "quiet-fox.md")))
+        self.assertEqual(read(os.path.join(self.there, "other-heron.md")), "# Another plan\n")
+        self.assertEqual(read(os.path.join(self.there, "complete", "plan-names.md")),
+                         "STATUS: COMPLETED\n# Plan names\n")
+        self.assertIn("moved 2 plans of the main checkout's store", said[-1])
+
+    def test_a_worked_plan_the_worktree_still_holds_is_left_by_a_title_named_close(self):
+        put(os.path.join(self.here, "brave-otter.md"), "# Plan names\n", age_days=2)
+        lifetime.carry_over(self.tree)
+        put(os.path.join(self.here, "complete", "plan-names.md"), "STATUS: COMPLETED\n# Plan names\n", age_days=1)
+        lifetime.carry_over(self.tree)
+        self.assertEqual(read(os.path.join(self.there, "brave-otter.md")), "# Plan names\n")
+
+    def test_an_older_worked_copy_brings_back_no_plan_the_main_checkout_closed_under_its_title(self):
+        put(os.path.join(self.here, "brave-otter.md"), "# Plan names\n", age_days=2)
+        put(os.path.join(self.here, "quiet-fox.md"), "# Taken title\n", age_days=2)
+        put(os.path.join(self.there, "complete", "plan-names.md"), "STATUS: COMPLETED\n# Plan names\n", age_days=1)
+        put(os.path.join(self.there, "todo", "taken-title.3.md"), "STATUS: TODO\n# Taken title\n", age_days=1)
+        self.assertEqual(lifetime.carry_over(self.tree), [])
+        self.assertFalse(os.path.exists(os.path.join(self.there, "brave-otter.md")))
+        self.assertFalse(os.path.exists(os.path.join(self.there, "quiet-fox.md")))
+
+    def test_a_sessions_next_plan_takes_away_no_plan_the_main_checkout_holds_under_its_title(self):
+        first = put(os.path.join(self.there, "complete", "plan-names.md"), "STATUS: COMPLETED\n", age_days=2)
+        put(os.path.join(self.here, "brave-otter.md"), "# Plan names\n# the next plan\n")
+        lifetime.carry_over(self.tree)
+        self.assertEqual(read(first), "STATUS: COMPLETED\n")
+        self.assertEqual(read(os.path.join(self.there, "brave-otter.md")), "# Plan names\n# the next plan\n")
+
+    def test_a_plan_sorted_under_plan_modes_name_still_matches_by_name_in_both_directions(self):
+        """Plans sorted before p4-temportal 0.3.71 hold plan mode's name, and a title that makes another name leaves
+        that match as it was."""
+        put(os.path.join(self.there, "brave-otter.md"), "# Plan names\n", age_days=2)
+        put(os.path.join(self.here, "complete", "brave-otter.md"), "STATUS: COMPLETED\n# Plan names\n", age_days=1)
+        put(os.path.join(self.here, "quiet-fox.md"), "# Another plan\n", age_days=2)
+        put(os.path.join(self.there, "todo", "quiet-fox.2.md"), "STATUS: TODO\n# Another plan\n", age_days=1)
+        lifetime.carry_over(self.tree)
+        self.assertFalse(os.path.exists(os.path.join(self.there, "brave-otter.md")))
+        self.assertEqual(read(os.path.join(self.there, "complete", "brave-otter.md")),
+                         "STATUS: COMPLETED\n# Plan names\n")
+        self.assertFalse(os.path.exists(os.path.join(self.there, "quiet-fox.md")))
 
 
 class FolderMove(unittest.TestCase):

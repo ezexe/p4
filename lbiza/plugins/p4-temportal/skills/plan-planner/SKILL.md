@@ -19,8 +19,8 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 ## Plan mode writes the plan
 
 - A plan is written in plan mode, where Claude Code writes it into the folder `plansDirectory` names, and p4-temportal's settings keeper names this folder there.
-- The file keeps the name plan mode gave it, since a resumed session writes its plan again by that name.
-- Plan mode gives every plan of one session that same name, so a session's next plan is written under the name of the plan before it, and a plan already sorted under that name keeps its own file by the rule of `Moving a plan`.
+- While a plan is worked, the file keeps the name plan mode gave it, since Claude Code fixes one plan file name per session, documents no way to choose it, writes the plan again by that name when the session is resumed, and treats any other file in this folder as a protected path.
+- Plan mode gives every plan of one session that same name, so a session's next plan is written under the name of the plan before it, and a plan takes a name made from its own title once it is sorted, by the rule of `Moving a plan`.
 - The plan mode file is shaped by the sections below, so the plan ezexe reviews at approval already holds its intents, fences and sources.
 - `Ctrl+G` opens the plan in ezexe's editor before approval, and approving it is ezexe's decision on the plan.
 - After a compaction Claude Code reads the plan in again from disk, so the plan file holds what the work needs and the conversation does not.
@@ -35,7 +35,7 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 - A session whose plan mode ended with no approval, as when its mode was changed from outside, edits only its plan file and asks ezexe to approve the plan before it edits any other file.
 - Prep is the research one session hands to the planner that follows it: the prep session is started in plan mode too, writes the prep as its plan file, and puts `PREP COMPLETE <subject>` on line 1 once the prep is whole, which is how the planner finds it among the files directly in this folder.
 - The planner reads the prep as findings to check, and reads each source the prep leans on before a fence rests on it.
-- A prep is closed with the plan it fed, by `STATUS: COMPLETED <date>: prep for <plan file>` on line 2 and the move into `complete/`.
+- A prep is closed with the plan it fed, by `STATUS: COMPLETED <date>: prep for <plan file>` on line 2 and the move into `complete/`, where it is named by its own title as `Moving a plan` says.
 
 ## What a session reads
 
@@ -45,16 +45,21 @@ The folder is p4-temportal's own, the plugin that creates it, and the store's gi
 
 ## Moving a plan
 
-A move is a plain move of the file into its subfolder, and nothing in it is cleared by age or takes a lifetime as a whole folder.
-Plan mode gives every plan of one session the same name, so look before a move: where one of the three subfolders already holds the plan's name, the plan moves as `<stem>.<n>.md`, where `<stem>` is its name without `.md` and `<n>` the smallest number from 2 that no place of a plan holds with that stem.
+A move is a plain move of the file into its subfolder, under the name its title makes, and nothing in it is cleared by age or takes a lifetime as a whole folder.
+The title is the plan file's first heading line, `# ...`.
+The title's name is a slug of it: lower case, every run of characters outside `a` to `z` and `0` to `9` turned to one hyphen, the hyphens at either end taken off, cut at the last hyphen that keeps it within 60 characters or at 60 characters where no hyphen does, and then `.md`.
+A plan with no heading, or whose slug is empty, keeps the name plan mode gave it.
+A prep is sorted the same way, by its own first heading, and keeps the name plan mode gave it where line 1 is its `PREP COMPLETE` marker and no heading follows.
+Look before a move: where a place of a plan already holds that name, the plan moves as `<stem>.<n>.md`, where `<stem>` is that name without `.md` and `<n>` the smallest number from 2 that no place of a plan holds with that stem.
 A move onto a name that is taken would replace the plan sorted there.
-A revive into `plan-planner/` takes such a name the same way where a plan there holds its name.
+A revive moves the plan back into `plan-planner/` under its sorted name as it stands, and takes a numbered name the same way where a plan there holds that name.
+A session that revives a plan in plan mode copies the plan's content into its own plan file, since Claude Code writes only that one file in plan mode.
 A plan revived in a git worktree leaves its sorted copy in the main checkout's store until the plan is sorted again, which takes that copy away.
 
-- **Close:** STATUS on line 2, as `STATUS: COMPLETED <date>: <sections by short sha>; <what ran where>; <what did not>`, then the plan moved into `complete/`.
-- **Park** on ezexe's word only: `STATUS: TODO <date>: <what landed>; <what did not>`, then moved into `todo/`.
-- **Drop** on ezexe's word only: `STATUS: UNPLANNED <date>: <why it stopped>`, then moved into `unplanned/`.
-- **Revive** on ezexe's word only: moved back from `todo/` or `unplanned/` into `plan-planner/`, its STATUS line taken out.
+- **Close:** STATUS on line 2, as `STATUS: COMPLETED <date>: <sections by short sha>; <what ran where>; <what did not>`, then the plan moved into `complete/` under its title's name.
+- **Park** on ezexe's word only: `STATUS: TODO <date>: <what landed>; <what did not>`, then moved into `todo/` under its title's name.
+- **Drop** on ezexe's word only: `STATUS: UNPLANNED <date>: <why it stopped>`, then moved into `unplanned/` under its title's name.
+- **Revive** on ezexe's word only: moved back from `todo/` or `unplanned/` into `plan-planner/` under the name it was sorted under, its STATUS line taken out, and in plan mode its content copied into the session's own plan file.
 
 The evidence links below are written from `plan-planner/`, where `../../../../` is the project root, and keep that form when the plan moves.
 
