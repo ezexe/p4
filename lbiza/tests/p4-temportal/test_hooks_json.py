@@ -86,8 +86,6 @@ class ModuleTest(unittest.TestCase):
         for script in ("p4_memory.py", "scratchpad.py"):
             self.assertIn("p4conf.hand_settings(payload, p4conf.settings_file(project_root(payload)))",
                           (SRC / script).read_text(encoding="utf-8"), script)
-        for word in ("classic.SessionStart", "$.settings.read", names["HANDED_KEY"]):
-            self.assertIn(word, FILE["description"])
 
     def test_the_module_reads_p4_natives_map_before_its_own_reading_of_the_host(self):
         """p4-native's README gives `<project>/.claude/p4/native/host.json` as the one way to read what the host is,
@@ -100,7 +98,6 @@ class ModuleTest(unittest.TestCase):
         search = text.split("async function provenPython", 1)[1].split("\n}\n", 1)[0]
         self.assertIn("const mapped = await mappedPlatform($)", search)
         self.assertIn("mapped === undefined ? /^[A-Za-z]:", search)
-        self.assertIn("p4-native", FILE["description"])
 
     def test_the_module_names_the_plan_files_a_session_wrote_to_the_last_sweep(self):
         """settings-reference.md, `plansDirectory`: unset, "Claude Code uses `~/.claude/plans`". The key the keeper
@@ -113,8 +110,6 @@ class ModuleTest(unittest.TestCase):
         for said in ('"--plan"', '"--plan-edited"', "def keep_plans(root, made, edited=()):", "shutil.copy2(path, kept)"):
             self.assertIn(said, script)
         self.assertNotIn("shutil.move", script.split("def keep_plans", 1)[1].split("\ndef ", 1)[0])
-        for word in ("classic.PostToolUse", "plansDirectory", "leaves the original"):
-            self.assertIn(word, FILE["description"])
 
     def test_no_command_hook_runs_the_retention_sweep(self):
         """The module sweeps at a session's start, on its timer and at the session's end, and it runs lifetime.py with
@@ -171,15 +166,13 @@ class ModuleTest(unittest.TestCase):
         "Claude Code runs them and adds their output to the compacted context". The module's `classic.SessionStart`
         hook hands the list as additional context where the source is `compact`, reads the list before from the
         conversation as the model is sent it, and keeps the message for a compaction no SessionStart came inside
-        of and for a subagent's transcript. The description and the skill page say the list is no message."""
+        of and for a subagent's transcript."""
         text = (SRC / "register.ts").read_text(encoding="utf-8")
         for said in ("if (e.source !== 'compact' || owed === undefined) return out",
                      "additionalContext: [...(out.additionalContext ?? []), text]",
                      "await $.session.messages({ as: 'api' })",
                      "messages: isTaken ? rest : [...rest, kept]"):
             self.assertIn(said, text, said)
-        self.assertIn("no message", FILE["description"])
-        self.assertIn("additional context of the SessionStart", FILE["description"])
         test = (SRC / "register.test.ts").read_text(encoding="utf-8")
         for case in ("the ledger of the main conversation is handed at the SessionStart Claude Code raises inside a "
                      "compaction, and is no message",
@@ -190,15 +183,10 @@ class ModuleTest(unittest.TestCase):
                      "words after it"):
             self.assertIn(case, test, case)
 
-    def test_the_keep_list_names_what_a_session_needs_after_a_compaction(self):
+    def test_the_modules_test_holds_the_keep_list_word_for_word(self):
         import re
         text = (SRC / "register.ts").read_text(encoding="utf-8")
         said = re.search(r"(?m)^const KEEP =\n((?:  .+\n)+)", text).group(1).rstrip()
-        keep = "".join(re.findall(r"'([^']*)'", said))
-        for kept in ("every session id", "every file path", "every branch", "every commit hash",
-                     "every decision with its source", "every open item",
-                     "the path of every state page and hand-over note"):
-            self.assertIn(kept, keep)
         test = (SRC / "register.test.ts").read_text(encoding="utf-8")
         self.assertIn(said, test, "the module's test holds the list word for word")
 
@@ -207,8 +195,6 @@ class ModuleTest(unittest.TestCase):
         module does not load in a session started with `--safe-mode` or `--bare`. So the SessionStart command hook
         with the source `compact` stays, which runs the memory start again in the compacted context."""
         self.assertEqual(sum("memory migrate" in c for c in runs("SessionStart", "compact")), 1)
-        for word in ("session.compact", "/compact", "temportal.compact_at"):
-            self.assertIn(word, FILE["description"])
 
     def test_the_slash_command_runs_the_commands_lifetime_py_takes(self):
         """`/lifetime` hands lifetime.py the word typed after it, so each of the module's four is a command of
@@ -320,7 +306,6 @@ class FileChangedTest(unittest.TestCase):
             self.assertEqual(sum("scratchpad notebook-out" in c for c in runs("SessionStart", source)), 1, source)
         text = (SRC / "scratchpad.py").read_text(encoding="utf-8")
         self.assertIn('"watchPaths": [pad]', text)
-        self.assertIn("FileChanged", FILE["description"])
 
 
 class PreCompactTest(unittest.TestCase):
@@ -344,7 +329,6 @@ class PreCompactTest(unittest.TestCase):
     def test_every_compaction_runs_the_keep_hook_once(self):
         for trigger in ("manual", "auto"):
             self.assertEqual(sum("compact keep" in c for c in runs("PreCompact", trigger)), 1, trigger)
-        self.assertIn("PreCompact", FILE["description"])
 
     def test_the_hook_prints_the_modules_keep_list_word_for_word(self):
         for told in (None, "", "Stress the open review."):

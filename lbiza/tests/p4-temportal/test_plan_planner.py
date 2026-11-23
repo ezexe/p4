@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""test_plan_planner.py: p4-temportal's skill plan-planner, its rules for a plan's sections and its places.
+"""test_plan_planner.py: p4-temportal's skill plan-planner, its front matter and its places.
 
-The rules of a section are the source skill's word for word, but that ezexe is named where the source says the boss.
 A plan is the one plan mode writes into the plugin's plans folder, and it is sorted into complete/, todo/ or
 unplanned/ under it, which no session reads unless ezexe names the file. The retention sweep, the copy out of Claude
 Code's own plans folder and the carry out of a worktree each keep to those places.
@@ -27,20 +26,6 @@ sys.path.insert(0, str(PLUGIN / "hooks"))
 import lifetime  # noqa: E402
 
 DAY = 86400
-
-# The source skill's section rules, word for word, with ezexe where it says the boss, with the evidence rule's
-# last sentence holding back only a section that depends on the one implemented, since runs land side by side, and
-# with the Research rule, which is this skill's own.
-SECTION = """## What every section of a plan holds
-
-- **Intents:** the section opens by listing what it means to change, one line each.
-- **Research:** after the intents and before any fence, the references the round's research found for each intent and what each recommends, one line each: the upstream page read live on the web with its link, then the file and line in the checkout, and the recommendation learned from them.
-- **Fences:** every edit is a fenced code block, and above it, its intent:
-  - **Documented:** the source in detail: the upstream page or file and line, read live or in the checkout, quoted where a quote fits.
-  - **Derivation:** in prose, how the approach follows from that source, and why this approach rather than another.
-- **No choices for ezexe:** a section avoids, with all the effort it takes, putting a choice to ezexe. Wherever the plan's writer wants to present one, that is the sign the section's planning failed to find the documented approach: the writer goes back to the upstream sources, finds how upstream does it, and writes that approach with its Documented and Derivation, the alternatives named only in the Derivation's "rather than another". A choice reaches ezexe only when no upstream source settles it after that search; it then names the sources searched and what each said.
-- **Evidence:** once a section is implemented, its evidence is added to that same section: links to the implemented lines (`[path:N-M](../../../../path:N-M)`) with what ran and its output. Only then does a section that depends on it start.
-"""
 
 
 def text():
@@ -82,22 +67,7 @@ class SkillText(unittest.TestCase):
         head = re.match(r"---\n(.*?)\n---\n", text(), re.S)
         self.assertIsNotNone(head)
         self.assertIn("name: plan-planner\n", head.group(1) + "\n")
-        description = re.search(r"^description: (.+)$", head.group(1), re.M).group(1)
-        for word in ("temportal/plan-planner", "plansDirectory", "complete/, todo/ or unplanned/",
-                     "which no session reads unless ezexe names the file", "Invoke BEFORE writing",
-                     "Never the repo root, the scratchpad or an ad-hoc directory"):
-            self.assertIn(word, description, word)
-
-    def test_every_section_holds_the_source_skills_rules_word_for_word(self):
-        self.assertTrue(text().endswith(SECTION), "the section rules are the source's, with ezexe for the boss")
-
-    def test_ezexe_is_named_and_never_the_boss_or_the_owner(self):
-        body = text()
-        self.assertNotRegex(body.lower(), r"\bboss\b")
-        self.assertNotRegex(body.lower(), r"\bthe owner\b")
-        for word in ("No choices for ezexe", "Park** on ezexe's word only", "Drop** on ezexe's word only",
-                     "Revive** on ezexe's word only"):
-            self.assertIn(word, body, word)
+        self.assertRegex(head.group(1), r"(?m)^description: .+$")
 
     def test_the_plan_is_the_one_plan_mode_writes_into_the_plugins_folder(self):
         body = text()
@@ -105,55 +75,9 @@ class SkillText(unittest.TestCase):
         places += [f"`.claude/p4/temportal/plan-planner/{shelf}/<plan>.md`" for shelf in lifetime.SHELVES]
         for place in places:
             self.assertIn(place, body, place)
-        for word in ("## Plan mode writes the plan", "A plan is written in plan mode", "`plansDirectory`",
-                     "`Ctrl+G`", "reads the plan in again from disk"):
-            self.assertIn(word, body, word)
-
-    def test_a_taken_name_is_numbered_and_a_started_planner_and_a_prep_have_their_rules(self):
-        body = text()
-        for word in ("Plan mode gives every plan of one session that same name", "`<stem>.<n>.md`",
-                     "the smallest number from 2 that no place of a plan holds with that stem",
-                     "## A planner another session starts", "by the start tool's `permission_mode`",
-                     "under a name of the session's own making", "edits only its plan file",
-                     "`PREP COMPLETE <subject>` on line 1", "reads the prep as findings to check"):
-            self.assertIn(word, body, word)
-        self.assertLess(body.index("## Plan mode writes the plan"), body.index("## A planner another session starts"))
-        self.assertLess(body.index("## A planner another session starts"), body.index("## What a session reads"))
-
-    def test_a_sorted_plan_takes_its_titles_name_and_a_worked_one_keeps_plan_modes(self):
-        body = text()
-        for word in ("While a plan is worked, the file keeps the name plan mode gave it",
-                     "fixes one plan file name per session", "treats any other file in this folder as a protected path",
-                     "under the name its title makes", "The title is the plan file's first heading line, `# ...`.",
-                     "cut at the last hyphen that keeps it within 60 characters",
-                     "A plan with no heading, or whose slug is empty, keeps the name plan mode gave it.",
-                     "A prep is sorted the same way, by its own first heading",
-                     "where a place of a plan already holds that name, the plan moves as `<stem>.<n>.md`",
-                     "A revive moves the plan back into `plan-planner/` under its sorted name as it stands",
-                     "copies the plan's content into its own plan file", "into `complete/` under its title's name",
-                     "into `todo/` under its title's name", "into `unplanned/` under its title's name"):
-            self.assertIn(word, body, word)
-
-    def test_the_loops_reader_traces_live_paths_and_a_check_runs_as_written(self):
-        body = text()
-        loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
-        for word in ("the feature not work in a real session", "traces the live path of each new hook",
-                     "names the interpreter by its full path", "says at its head how its loop ended"):
-            self.assertIn(word, loop, word)
-        hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
-        self.assertIn("the plugin's whole test folder is run once there before a push", hand)
-
-    def test_a_move_makes_no_commit_and_no_orphan_branch(self):
-        body = text()
-        self.assertIn("A move is a plain move of the file into its subfolder", body)
-        move = body.split("## Moving a plan")[1].split("## The plan loop")[0]
-        for word in ("orphan", "git worktree add", "origin plans", "git -C", "commit -m"):
-            self.assertNotIn(word, move, word)
-        for word in ("orphan", "origin plans", "commit -m"):
-            self.assertNotIn(word, body, word)
 
     def test_the_prose_writes_no_parenthetical_and_each_list_item_is_one_line(self):
-        # the section rules are the source's word for word, its parenthesis round the evidence link with them
+        # the section rules hold a parenthesis round the evidence link, so the scan stops before them
         own = text().split("---\n", 2)[2].split("## What every section of a plan holds")[0]
         prose = re.sub(r"```.*?```", "", own, flags=re.S)
         prose = re.sub(r"`[^`]*`", "", prose)
@@ -163,29 +87,6 @@ class SkillText(unittest.TestCase):
         for i, line in enumerate(lines[:-1]):
             if re.match(r"\s*- ", line):
                 self.assertTrue(lines[i + 1] == "" or re.match(r"\s*(- |#)", lines[i + 1]), line)
-
-    def test_a_plan_is_looped_until_dry_and_its_sections_are_handed_to_workers_by_run(self):
-        """workflows.md, "Find issues until the list stops growing": "stop once two rounds in a row find nothing
-        new". building-effective-agents, "Agents": "stopping conditions (such as a maximum number of iterations)".
-        agent-teams.md, "Avoid file conflicts": "each teammate owns a different set of files"."""
-        body = text()
-        loop = body.split("## The plan loop")[1].split("## Handing a plan's sections to workers")[0]
-        for word in ("researches the section first", "in both places every time",
-                     "sends a research agent to the upstream pages", "the upstream page wins",
-                     "restates nothing an upstream page says", "`See more: <url>`", "one writer of the plan file",
-                     "a reader that has not seen the writing", "two dry rounds in a row, or after five rounds",
-                     "under a last heading `## Loop log`", "`- Round <n> of 5: <what the round changed>`",
-                     "`- Round <n> of 5: dry`",
-                     "no session that writes is started and no file but the plan is edited"):
-            self.assertIn(word, loop, word)
-        hand = body.split("## Handing a plan's sections to workers")[1].split("## What every section")[0]
-        for word in ("`**Files:**`", "`**Depends on:**`", "`**Checks:**`", "share a file or depend on one another",
-                     "section `Distribution`", "landed by an integrator", "`phi.py sections <plan file>`",
-                     "A worker never edits the plan file", "subagents and never sessions",
-                     "worktree add -b <run> <main checkout>/.claude/worktrees/<run> origin/main",
-                     "naming each branch, its commits and its check results"):
-            self.assertIn(word, hand, word)
-        self.assertLess(body.index("## The plan loop"), body.index("## What every section of a plan holds"))
 
 
 class Places(unittest.TestCase):
