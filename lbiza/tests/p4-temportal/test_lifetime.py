@@ -131,7 +131,7 @@ class OwnCopy(unittest.TestCase):
         self.assertEqual(os.path.normcase(os.path.realpath(p4conf.__file__)), os.path.normcase(os.path.realpath(own)))
         self.assertIs(lifetime.p4conf, p4conf)
         self.assertIs(sys.modules["p4conf"], p4conf)
-        self.assertIsNone(p4conf.allow_rules(sys.platform, {}))
+        self.assertIsNone(p4conf.allow_rules(sys.platform))
 
 
 class Tick(unittest.TestCase):

@@ -139,13 +139,17 @@ class Setting(Base):
         out = self.turn_on()
         self.assertIn("phi.upkeep is on", out)
         self.assertIs(jload(os.path.join(self.t.p4, "p4.json"))["phi"]["upkeep"], True)
-        local = jload(os.path.join(self.t.proj, ".claude", "settings.local.json"))
+        asked = jload(os.path.join(self.t.p4, p4conf.ASKS))
+        self.assertIn("allow", asked["permissions"], "set_on writes what p4-phi asks for")
+        self.assertNotIn("adopt", asked.get("p4", {}), "the set is not in force, so nothing is adopted")
+        local_file = os.path.join(self.t.proj, ".claude", "settings.local.json")
+        local = jload(local_file) if os.path.exists(local_file) else {}
         self.assertNotIn(ARCHIVE, local.get("permissions", {}).get("ask", []), "the keeper wrote no ask rule")
         self.assertIn(f"no ask rule on `{ARCHIVE}`", out)
         r = self.t.cli(TOP, "upkeep", "off")
         self.assertIn("phi.upkeep is off", r.stdout)
         self.assertIs(jload(os.path.join(self.t.p4, "p4.json"))["phi"]["upkeep"], False)
-        local = jload(os.path.join(self.t.proj, ".claude", "settings.local.json"))
+        local = jload(local_file) if os.path.exists(local_file) else {}
         self.assertNotIn(ARCHIVE, local.get("permissions", {}).get("ask", []), "off: the keeper writes none either")
         self.assertIn(f"no ask rule on `{ARCHIVE}`", r.stdout)
 

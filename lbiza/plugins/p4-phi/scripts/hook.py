@@ -143,12 +143,18 @@ def sweep_served(p4, now_s=None):
 
 
 def h_layout(payload):
-    """p4-temportal's `store make` makes the store, so this runs the settings watch and the served sweep where
-    ready() gives a store, and does nothing where it gives none."""
+    """p4-temportal's `store make` makes the store, so this writes what p4-phi asks the keeper for into the store's
+    settings.local.json, runs the settings watch and the served sweep where ready() gives a store, and does nothing
+    where it gives none."""
     if not ready(payload):
         return None
     project = project_of(payload)
-    asks = settings_watch(project, payload)
+    asks = []
+    try:
+        p4conf.want_settings(os.path.join(p4conf.main_root(project)[0], ".claude", "p4"))
+    except Exception as e:  # noqa: BLE001 — a failure is one line of the message, never the hook's own
+        asks.append(f"what p4-phi asks the keeper for was not written: {type(e).__name__}: {e}")
+    asks += settings_watch(project, payload)
     sweep_served(os.path.join(project, ".claude", "p4"))
     return {"systemMessage": "phi (p4-phi): " + "; ".join(asks) + "."} if asks else None
 

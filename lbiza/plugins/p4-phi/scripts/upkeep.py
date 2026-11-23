@@ -133,22 +133,25 @@ def save(home, sid, d):
 
 
 def set_on(store, flag):
-    """`phi.upkeep` written to the store's p4.json, and the settings keeper run for the project the store sits in, so
-    the local file holds the changed setting at once. The keeper writes no ask rule on the archive tool, with the
-    setting on or off. Returns the lines to print."""
+    """`phi.upkeep` written to the store's p4.json, and what p4-phi asks the keeper for written to the store's
+    settings.local.json, which p4-temportal's keeper copies into the project's local file when it next runs. The
+    keeper writes no ask rule on the archive tool, with the setting on or off. Returns the lines to print."""
     was = p4conf.upkeep_on(store)
     p4conf.set_key(store, "phi.upkeep", bool(flag))
     out = [f"phi.upkeep is {'on' if flag else 'off'} in {p4conf.fwd(p4conf.path(store))}"
            + ("" if was != bool(flag) else ", as it was")]
     project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
     if os.path.basename(os.path.dirname(os.path.abspath(store))) == ".claude":
-        kept = p4conf.keep_settings(project, p4=store)
+        p4conf.want_settings(store)
+        kept = {"file": p4conf.settings_file(project)}
         asks = p4conf._get(p4conf.read_json(kept["file"]) or {}, p4conf.ASK_KEY)
         held = isinstance(asks, list) and ARCHIVE in asks
         out.append(f"{p4conf.fwd(kept['file'])} holds "
                    + (f"an ask rule on `{ARCHIVE}`, which is not p4's own: p4 writes none and takes out only the "
                       f"entry it wrote" if held
-                      else f"no ask rule on `{ARCHIVE}`"))
+                      else f"no ask rule on `{ARCHIVE}`")
+                   + "; p4-temportal's keeper brings it in step when the file changes, at the next prompt or at the "
+                     "next start")
     out.append("With it on, a session that started others is handed the archive call of each finished, landed "
                "session, its open follow-through items, the steps whose wait is over and the leftovers on disk."
                if flag else "With it off, p4-phi hands none of the upkeep acts.")

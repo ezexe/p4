@@ -171,7 +171,7 @@ class Gitignore(Base):
         tail = got[len(old):].splitlines()
         self.assertRegex(tail[0], r"^# seeded by p4-recall \d{4}-\d{2}-\d{2}$")
         self.assertEqual(tail[1:], ["temportal/notebook/.out/", "phi/served/", ".layout.lock",
-                                    ".settings.lock", "claude-settings.json", "phi/cards.json",
+                                    ".settings.lock", "claude-settings.json", "phi/cards.json", "settings.local.json",
                                     "phi/claude-code-watch.pending.json*",
                                     "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
                                     "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",

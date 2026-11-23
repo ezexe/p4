@@ -223,28 +223,35 @@ def text(store):
 
 
 def held_line(store):
-    """One line on what the local settings file of the store's project holds of the set, after the keeper ran for
-    it: how many of the allow rules for p4's tools, and whether an ask rule on the archive tool, which the keeper
-    writes no more. '' for a store that sits in no project's `.claude`."""
+    """One line on what p4-phi asks the keeper for and what the local settings file of the store's project holds
+    now, read without a write: the file p4-phi asks in, how many of the allow rules for p4's tools it asks for and
+    the local file holds, and whether an ask rule on the archive tool stands there. p4-temportal's keeper brings the
+    local file in step when that file changes, at the next prompt or at the next start. '' for a store that sits in
+    no project's `.claude`."""
     import os
     project = os.path.dirname(os.path.dirname(os.path.abspath(store)))
     if os.path.basename(os.path.dirname(os.path.abspath(store))) != ".claude":
         return ""
-    kept = p4conf.keep_settings(project, p4=store)
+    asked = p4conf.want_settings(store) or {}
+    kept = {"file": p4conf.settings_file(project)}
     data = p4conf.read_json(kept["file"]) or {}
     allow = p4conf._get(data, p4conf.ALLOW_KEY)
     ask = p4conf._get(data, p4conf.ASK_KEY)
+    wants = [t for t in p4conf.CARD_TOOLS if t in (asked.get("permissions") or {}).get("allow", [])]
     have = [t for t in p4conf.CARD_TOOLS if isinstance(allow, list) and t in allow]
-    return (f"{p4conf.fwd(kept['file'])} holds {len(have)} of the {len(p4conf.CARD_TOOLS)} allow rules for p4's "
-            f"tools and " + ("an" if isinstance(ask, list) and p4conf.ASK_RETIRED[0] in ask else "no")
-            + f" ask rule on `{p4conf.ASK_RETIRED[0]}`.")
+    return (f"{p4conf.fwd(p4conf.asks_file(store))} asks for {len(wants)} of the {len(p4conf.CARD_TOOLS)} allow rules "
+            f"for p4's tools and {p4conf.fwd(kept['file'])} holds {len(have)} of them and "
+            + ("an" if isinstance(ask, list) and p4conf.ASK_RETIRED[0] in ask else "no")
+            + f" ask rule on `{p4conf.ASK_RETIRED[0]}`. p4-temportal's keeper brings it in step when the file changes, "
+              f"at the next prompt or at the next start.")
 
 
 def switch(store, on, given=""):
     """`phi.py cards on <id>` and `cards off`. `on` writes `phi.cards` to the store's p4.json and takes out the yes
     kept before in phi/cards.json, so the key asks for the set and one press of ezexe's answers one writing of it: the set comes in
     force only when `kept` runs for the call that ran the command. `off` takes the key and the kept yes out, and
-    the settings keeper then runs for the project the store sits in, so the allow rules of the set go at once. After
+    what p4-phi asks the keeper for is written, and the rules of the set go from the project's local file when
+    p4-temportal's keeper next runs. After
     `on` the keeper runs once, in `kept`, when the yes is in the
     store's phi/cards.json. `on` where the set is in force already
     writes nothing, so a second run of it, or one where no hook of p4-phi runs, never takes a standing yes out. `on`
@@ -265,8 +272,8 @@ def switch(store, on, given=""):
 
 def kept(store, session, call):
     """ezexe's yes kept, for the call whose approval card p4-phi raised and that then ran: p4conf.cards_yes for the
-    store the card named, and the settings keeper for its project, so the allow rules of the set come at once.
-    Returns the lines that say so, or [] where the key does not name this copy's set, as after a command that
+    store the card named; held_line then says what p4-phi asks for and what the local file holds, since the keeper
+    brings the allow rules of the set in when it next runs. Returns the lines that say so, or [] where the key does not name this copy's set, as after a command that
     wrote nothing."""
     if not p4conf.cards_yes(store, session=session, call=call):
         return []

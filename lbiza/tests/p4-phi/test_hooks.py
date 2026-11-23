@@ -184,6 +184,18 @@ class Layout(Base):
         for name in ("init_layout", "seed_gitignore", "exclude_line", "GITIGNORE"):
             self.assertFalse(hasattr(hook, name), f"{name} moved to p4-temportal's store.py")
 
+    def test_the_layout_entry_leaves_what_p4_phi_asks_for_in_the_store(self):
+        """The layout entry, run on a made store, writes the store's settings.local.json: the allow rules p4-phi
+        asks the keeper for, in Claude Code's settings format."""
+        r = run_hook("layout", {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}, self.proj)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        asked = os.path.join(self.p4, "settings.local.json")
+        self.assertTrue(os.path.isfile(asked), "p4-phi wrote its file in the store")
+        with open(asked, encoding="utf-8") as f:
+            got = json.load(f)
+        allow = got["permissions"]["allow"]
+        self.assertTrue(allow and all("phi.py" in rule for rule in allow), allow)
+
     def test_a_served_record_older_than_a_day_is_swept(self):
         """A served record whose session never got to take it, as a session ended by a crash, is swept by the next
         layout hook once it is a day old."""

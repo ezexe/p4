@@ -1124,11 +1124,12 @@ ENV_KEY = "env"                  # where an earlier keeper wrote the P4_* variab
 # temportal/plan-planner, so a plansDirectory the keeper wrote for temportal/plans takes the new folder at the next
 # start, and one a person set stays as it is, and 13 with DENY_RULES emptied, so the deny rule on the model tool an
 # earlier keeper wrote goes at the next start.
+# 18 came with the rules copied from the store's settings.local.json, which p4-phi writes.
 # 17 came with the env mirror gone, so each P4_* entry a keeper wrote goes at a store's next start.
 # 14 came with the general part of CARD_SET, so its rules are written at a store's next start where the set is in
 # force, and 15 with ASK_RULES emptied, so the ask rule on the archive tool an earlier keeper wrote goes at the next
 # start.
-KEEPER = 17
+KEEPER = 18
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1303,6 +1304,7 @@ _PER_FILE = {
                         and _int(v.get("gen", 0))),
     "made": lambda v: isinstance(v, dict) and isinstance(v.get("file"), bool) and isinstance(v.get("exclude", ""), str),
     "phi": lambda v: isinstance(v, bool),
+    "asks": lambda v: isinstance(v, dict) and _strs(v.get("allow", [])) and _strs(v.get("adopt", [])),
     "lists": lambda v: isinstance(v, dict) and all(isinstance(x, bool) for x in v.values()),
     "unreadable": lambda v: v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)),
 }
@@ -1701,10 +1703,9 @@ PHI_SCRIPTS = None               # the folder of phi.py the rules name; None: th
 _RULE = re.compile(r'^(\w+)\(python -I -X utf8 "(?:.*/)?([^/"]+)"(.*)\)$')
 
 
-def allow_rules(platform, conf):
-    """The allow rules p4 wants, [] for none, or None when this copy cannot tell which and leaves them."""
-    if conf.get("allowRules", True) is False:
-        return []
+def allow_rules(platform):
+    """The allow rules for phi.py that p4-phi asks for, or None when this copy has no phi.py beside it and cannot tell
+    which. The switch claude.allowRules is the keeper's."""
     here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
     if not os.path.isfile(os.path.join(here, "phi.py")):
         return None
@@ -1925,27 +1926,121 @@ def cards_no(p4):
     return True
 
 
-def card_tool_rules(p4, phi):
-    """The allow rules of CARD_SET's `tools` that the keeper wants for a store: every tool of CARD_TOOLS where p4-phi
-    runs and the set is in force, none where it does not or the set is off, and None where this copy cannot tell
-    whether p4-phi runs, which leaves the entries as they are."""
-    if phi is None:
+# --- what p4-phi asks the keeper for ---------------------------------------------------------------------------------
+# p4-phi writes the allow rules it wants into the store's settings.local.json, in Claude Code's settings format, and
+# nothing else writes that file. p4-temportal's keeper copies permissions.allow from it into the project's local
+# settings file. The key `p4` holds the one thing that format cannot say: `adopt`, the entries of permissions.ask that
+# are to be taken out.
+ASKS = "settings.local.json"
+
+
+def asks_file(p4):
+    """The file in store `p4` that holds what p4-phi asks the keeper for."""
+    return os.path.join(p4, ASKS)
+
+
+def _same_asks(a, b):
+    """Equal as what p4-phi asks for: each list of permissions.allow and p4.adopt without its order."""
+    def norm(v):
+        v = copy.deepcopy(v) if isinstance(v, dict) else {}
+        perms = v.get("permissions")
+        if isinstance(perms, dict) and isinstance(perms.get("allow"), list):
+            perms["allow"] = sorted(str(x) for x in perms["allow"])
+        mine = v.get("p4")
+        if isinstance(mine, dict) and isinstance(mine.get("adopt"), list):
+            mine["adopt"] = sorted(str(x) for x in mine["adopt"])
+        return json.dumps(v, sort_keys=True)
+    return norm(a) == norm(b)
+
+
+def want_settings(p4, platform=None):
+    """Writes into the store's settings.local.json what p4-phi asks the keeper for: the allow rules for phi.py of this
+    folder and of each cached version folder; with the set in force the tool rules and the general rules too; with
+    `phi.upkeep` on as well, p4.adopt. None, and no write, where `p4` is no folder or this copy has no phi.py beside it.
+    The file is written only where what it holds differs, each list taken as a set. Returns what is wanted."""
+    if not p4 or not os.path.isdir(p4):
         return None
-    return list(CARD_TOOLS) if phi and cards_on(p4) else []
-
-
-def general_rules(p4, phi, platform=None):
-    """The allow rules of CARD_SET's `general` that the keeper wants for a store, by the rule of card_tool_rules:
-    all of them where p4-phi runs and the set is in force, none where it does not or the set is off, and None where
-    this copy cannot tell whether p4-phi runs."""
-    if phi is None:
+    platform = platform or sys.platform
+    rules = allow_rules(platform)
+    if rules is None:
         return None
-    if not (phi and cards_on(p4)):
-        return []
-    return list(GENERAL_RULES) + (list(GENERAL_WIN) if (platform or sys.platform).startswith("win") else [])
+    yes = _cards(p4).get("yes")
+    if yes is not None and (not isinstance(yes, dict) or yes.get("set") != cards_asked(p4)):
+        cards_no(p4)                                    # the key no longer names the set the yes was for
+    on = cards_on(p4)
+    allow = list(rules)
+    if on:
+        allow += list(CARD_TOOLS) + list(GENERAL_RULES) + (list(GENERAL_WIN) if platform.startswith("win") else [])
+    want = {"permissions": {"allow": allow}}
+    if on and upkeep_on(p4):
+        want["p4"] = {"adopt": list(ASK_RETIRED)}
+    if not _same_asks(read_json(asks_file(p4)), want):
+        write_whole(asks_file(p4), json.dumps(want, indent=2, ensure_ascii=False) + "\n")
+    return want
 
 
-def _adopt_ask(new, rec, name):
+def _phi_folder(folder):
+    """True where `folder` holds a file phi.py, is named scripts, and the folder above it holds
+    .claude-plugin/plugin.json whose "name" is PHI: a version folder of the plugin cache or a checkout loaded by
+    --plugin-dir."""
+    try:
+        folder = os.path.normpath(folder)
+        if os.path.basename(folder) != "scripts" or not os.path.isfile(os.path.join(folder, "phi.py")):
+            return False
+        manifest = read_json(os.path.join(os.path.dirname(folder), ".claude-plugin", "plugin.json"))
+        return isinstance(manifest, dict) and manifest.get("name") == PHI
+    except Exception:  # noqa: BLE001 — a folder that cannot be read is no copy of p4-phi
+        return False
+
+
+def _asked(p4):
+    """(allow, adopt) from the store's settings.local.json: allow is each text of its permissions.allow that a keeper
+    writes today, one of CARD_TOOLS, one of GENERAL_RULES and GENERAL_WIN, or a phi.py rule of p4-phi's scripts folder
+    by _phi_folder; any other entry is passed over. adopt is each text of its p4.adopt that is in ASK_RETIRED.
+    (None, []) where the file is missing or no object."""
+    got = read_json(asks_file(p4)) if p4 and os.path.isfile(asks_file(p4)) else None
+    if not isinstance(got, dict):
+        return None, []
+    perms = got.get("permissions")
+    listed = perms.get("allow") if isinstance(perms, dict) else None
+    allow = []
+    for r in listed if isinstance(listed, list) else []:
+        if not isinstance(r, str):
+            continue
+        m = _OWN_RULE.match(r)
+        if r in CARD_TOOLS or r in GENERAL_RULES or r in GENERAL_WIN or (m and _phi_folder(m.group(1))):
+            allow.append(r)
+    mine = got.get("p4")
+    adopt = [r for r in (mine.get("adopt") if isinstance(mine, dict) and isinstance(mine.get("adopt"), list) else [])
+             if isinstance(r, str) and r in ASK_RETIRED]
+    return allow, adopt
+
+
+def asks_moved(p4, project):
+    """True when what the store's settings.local.json asks differs from what the last whole check or run copied, the
+    record's `asks` of the project's local file, a missing file and a missing entry being the same. False where
+    SETTINGS_ENV is "0" or the section's "keep" is false."""
+    try:
+        if os.environ.get(SETTINGS_ENV) == "0" or not own_switch(p4, "keep"):
+            return False
+        allow, adopt = _asked(p4)
+        now = None if allow is None else {"allow": sorted(allow), "adopt": sorted(adopt)}
+        return now != ((read_record(p4).get("asks") or {}).get(fwd(settings_file(project))))
+    except Exception:  # noqa: BLE001 — a record or a file that cannot be read moves nothing
+        return False
+
+
+def asks_due(p4, project):
+    """What a run with asks_only can act on: asks_moved, and the record holds an answer to whether p4-phi runs for
+    the project's local file. Where it holds none, the next start's whole check writes the rules."""
+    try:
+        return bool(asks_moved(p4, project)) and (
+            (read_record(p4).get(PHI_PART) or {}).get(fwd(settings_file(project)))) is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _adopt_ask(new, rec, name, adopt):
     """CARD_SET's `archive`: an entry of `permissions.ask` that is exactly a rule of ASK_RETIRED and that the record
     does not hold becomes p4's own entry, so the keeper, which wants none, takes it out. A
     store started anew loses the record of the entry p4 wrote, and the entry then stood as a person's. A keeper from
@@ -1961,18 +2056,12 @@ def _adopt_ask(new, rec, name):
     part = rec.setdefault("askRules", {})
     mine = dict(part.get(name) or {})
     entries = list(mine.get("entries") or [])
-    found = [r for r in ASK_RETIRED if r in cur and r not in entries]
+    found = [r for r in adopt if r in cur and r not in entries]
     if found:
         hand = [h for h in (mine.get("hand") or []) if h not in found]
         part[name] = {"entries": entries + found, "hand": hand, "gen": mine.get("gen", 0)}
     elif not part:
         rec.pop("askRules", None)
-
-
-def _phi_copy():
-    """The scripts folder of this copy when it is p4-phi's own, which sits beside phi.py; '' for any other copy."""
-    here = PHI_SCRIPTS or os.path.dirname(os.path.abspath(__file__))
-    return fwd(here) if os.path.isfile(os.path.join(here, "phi.py")) else ""
 
 
 def plugin_enabled(name, target, platform=None):
@@ -1993,26 +2082,24 @@ def plugin_enabled(name, target, platform=None):
     return True
 
 
-def phi_on(project, target, platform=None, rec=None):
-    """Whether p4-phi runs in a session of `project`, whose local settings file is `target`: True for p4-phi's own
-    copy, and for any copy where p4-phi is installed for the project and no settings file switches it off. None
-    where neither holds and the record names a copy of p4-phi outside the plugin cache that still holds phi.py, a
-    checkout loaded by `--plugin-dir`: no file says whether this session loaded it, so the rules are left to that
-    copy. False otherwise."""
-    if _phi_copy():
-        return True
+def phi_on(project, target, platform=None, allow=None):
+    """Whether p4-phi runs in a session of `project`, whose local settings file is `target`: True where p4-phi is
+    installed for the project and no settings file switches it off; else True where a rule of `allow` is of
+    _OWN_RULE's shape with a folder outside the plugin cache that still holds phi.py, a checkout loaded by
+    --plugin-dir; else False. It answers no None."""
     if PHI in plugin_versions(project) and plugin_enabled(PHI, target, platform):
         return True
-    dev = (rec or {}).get("phiCopy")
-    if isinstance(dev, str) and dev and not _CACHED.match(dev) and os.path.isfile(os.path.join(dev, "phi.py")):
-        return None
+    for r in allow or []:
+        m = _OWN_RULE.match(r) if isinstance(r, str) else None
+        if m and not _CACHED.match(m.group(1)) and os.path.isfile(os.path.join(m.group(1), "phi.py")):
+            return True
     return False
 
 
 def phi_moved(p4, project):
     """True when whether p4-phi runs for `project` differs from what the last whole check of its local file
-    recorded, so the keeper has the two rules to write or to take out. False where this copy cannot tell, where the
-    local file is recorded as unreadable at its present time, and where SETTINGS_ENV turns the keeper off."""
+    recorded, so the keeper has the rules to write or to take out. False where the local file is recorded as
+    unreadable at its present time, and where SETTINGS_ENV turns the keeper off."""
     if os.environ.get(SETTINGS_ENV) == "0":
         return False
     try:
@@ -2020,8 +2107,8 @@ def phi_moved(p4, project):
         target = settings_file(project)
         if (rec.get("unreadable") or {}).get(fwd(target), "none") == _mtime(target):
             return False
-        on = phi_on(project, target, sys.platform, rec)
-        return on is not None and (rec.get(PHI_PART) or {}).get(fwd(target)) != on
+        on = phi_on(project, target, sys.platform, _asked(p4)[0])
+        return (rec.get(PHI_PART) or {}).get(fwd(target)) != on
     except Exception:  # noqa: BLE001 — a record or a settings file that cannot be read moves nothing
         return False
 
@@ -2165,7 +2252,7 @@ def _take_lock(lock, wait_s=3.0, stale_s=60.0):
         time.sleep(0.05)
 
 
-def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, tell=False):
+def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, tell=False, asks_only=False):
     """Bring the Claude Code settings p4 owns in the local file of a session started in `project` to what the store
     wants, under the store's SETTINGS_LOCK. `owned_only`, at a ConfigChange, looks only at the keys the record owns.
     `note`, such as the Claude Code binary the watcher saw, is merged into the record under the same lock. Returns
@@ -2182,7 +2269,7 @@ def keep_settings(project, platform=None, owned_only=False, p4=None, note=None, 
     if not _take_lock(lock):
         return out
     try:
-        _keep(p4, project, target, platform, owned_only, out, note or {}, tell)
+        _keep(p4, project, target, platform, owned_only, out, note or {}, tell, asks_only)
     finally:
         try:
             os.remove(lock)
@@ -2198,7 +2285,7 @@ def _mtime(p):
         return None
 
 
-def _keep(p4, project, target, platform, owned_only, out, note, tell):
+def _keep(p4, project, target, platform, owned_only, out, note, tell, asks_only=False):
     rec = read_record(p4)
     before = json.dumps(rec, sort_keys=True)
     if not own_switch(p4, "keep"):
@@ -2212,6 +2299,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         return
     name = fwd(target)
     data = read_json(target)
+    if asks_only and (data is None or (rec.get(PHI_PART) or {}).get(name) is None):
+        return                                          # nothing to move: the next start's whole check writes the rules
     if data is None:
         if (rec.get("unreadable") or {}).get(name) != _mtime(target):
             print(f"p4: {target} is not a JSON object; p4's Claude Code settings left out, the file left as it is",
@@ -2235,7 +2324,11 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     owned = dict(files.get(name) or {})
     hand = dict(rec.get("hand") or {})
     gone = list(hand.get(name) or [])
-    want, others, conf, other = wants(p4, target, platform)
+    if asks_only:                                       # no managed settings are read: neither _elsewhere nor plugin_enabled
+        want, others, other = {}, {}, []
+        conf = _flat(load(p4, write=False, warn=False).get(SECTION) or {})
+    else:
+        want, others, conf, other = wants(p4, target, platform)
     new = copy.deepcopy(data)
     frozen = env_written(p4) is None                   # a malformed record: every P4_* entry left as it is
     past = {n: list(t) for n, t in ((rec.get("p4past") or {}).get(name) or {}).items()}
@@ -2243,29 +2336,32 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     # entry an earlier keeper wrote, which goes; then each other key an earlier copy wrote that this one no longer
     # owns, such as disableAllHooks, which goes
     env = [k for k in owned if k.startswith(ENV_KEY + ".")]
-    if frozen or not isinstance(new.get(ENV_KEY, {}), dict):
+    if frozen or asks_only or not isinstance(new.get(ENV_KEY, {}), dict):
         env = []                                        # an `env` that is not an object: left as it is
-    dropped = [k for k in owned if k not in WRITES and not k.startswith(ENV_KEY + ".")]
+    dropped = [] if asks_only else [k for k in owned if k not in WRITES and not k.startswith(ENV_KEY + ".")]
     rec.pop("keeper", None)                             # one KEEPER per store, before "kept"
     rec.pop("p4env", None)
-    for k in WRITES:
-        _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
-    allow = allow_rules(platform, conf)
+    if not asks_only:
+        for k in WRITES:
+            _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only)
+    asked, adopt = _asked(p4)                           # what p4-phi asks for, in the store's settings.local.json
+    phi = (rec.get(PHI_PART) or {}).get(name) if asks_only else phi_on(project, target, platform, asked)
+    wanted = None if (asked is None and phi) else ([] if not phi else asked)   # None: the file is missing
+    own = None if wanted is None else [e for e in wanted if _OWN_RULE.match(e)]
+    tools = None if wanted is None else [e for e in wanted if e not in own and e.startswith("mcp__")]
+    general = None if wanted is None else [e for e in wanted if e not in own and e not in tools]
+    if own is not None and conf.get("allowRules", True) is False:
+        own = []
     if not owned_only:
-        _drop_strays(new, rec, name, allow)             # a rule of p4's shape for a copy that does not run
-        yes = _cards(p4).get("yes") if os.path.isdir(p4) else None
-        if yes is not None and (not isinstance(yes, dict) or yes.get("set") != cards_asked(p4)):
-            cards_no(p4)                                # the key no longer names the set the yes was for
-    _keep_rules(new, rec, name, allow, owned_only)
-    phi = phi_on(project, target, platform, rec)        # None: this copy cannot tell, and leaves p4's entries
+        _drop_strays(new, rec, name, own)               # a rule of p4's shape for a copy that does not run
+    _keep_rules(new, rec, name, own, owned_only)
     ask = list(ASK_RULES) if phi else []
-    if phi and not owned_only and upkeep_on(p4) and cards_on(p4):
-        _adopt_ask(new, rec, name)                      # a leftover entry of p4's own text, taken out below
-    _keep_rules(new, rec, name, card_tool_rules(p4, phi), owned_only, ALLOW_KEY, "toolRules")
-    _keep_rules(new, rec, name, general_rules(p4, phi, platform), owned_only, ALLOW_KEY, "generalRules")
-    _keep_rules(new, rec, name, None if phi is None else ask, owned_only, ASK_KEY, "askRules")
-    _keep_rules(new, rec, name, None if phi is None else list(DENY_RULES) if phi else [], owned_only, DENY_KEY,
-                "denyRules")
+    if phi and not owned_only and adopt:
+        _adopt_ask(new, rec, name, adopt)               # a leftover entry of p4's own text, taken out below
+    _keep_rules(new, rec, name, tools, owned_only, ALLOW_KEY, "toolRules")
+    _keep_rules(new, rec, name, general, owned_only, ALLOW_KEY, "generalRules")
+    _keep_rules(new, rec, name, ask, owned_only, ASK_KEY, "askRules")
+    _keep_rules(new, rec, name, list(DENY_RULES) if phi else [], owned_only, DENY_KEY, "denyRules")
     for k in env + dropped:
         _keep_key(p4, project, new, k, want.get(k), owned, gone, owned_only, past)
         if k.startswith(ENV_KEY + "."):
@@ -2296,7 +2392,8 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         for k, e in owned.items():
             if _get(back, k) != e.get("v"):
                 print(f"p4: {target} lost {k} after p4 wrote it", file=sys.stderr)
-    keep_lines(project, rec, owned_only, p4, platform)
+    if not asks_only:
+        keep_lines(project, rec, owned_only, p4, platform)
     if owned:
         files[name] = owned
     else:
@@ -2305,14 +2402,18 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
         hand[name] = list(dict.fromkeys(gone))
         rec["hand"] = hand
     rec.update(note)
-    if not owned_only:
+    if not owned_only and not asks_only:
         rec["section"] = conf
         rec.setdefault("kept", {})[name] = {"keeper": KEEPER}
-        if phi is not None:                             # else the answer of the last copy that could tell stays
-            rec.setdefault(PHI_PART, {})[name] = phi
-        if _phi_copy() and not _CACHED.match(_phi_copy()):
-            rec["phiCopy"] = _phi_copy()                # a copy of p4-phi outside the plugin cache kept this store
-    if tell:
+        rec.setdefault(PHI_PART, {})[name] = phi
+    if not owned_only:
+        if asked is None:
+            (rec.get("asks") or {}).pop(name, None)
+            if not rec.get("asks"):
+                rec.pop("asks", None)
+        else:
+            rec.setdefault("asks", {})[name] = {"allow": sorted(asked), "adopt": sorted(adopt)}
+    if tell and not asks_only:
         told = rec.get("asked") or {}
         for k, v in others.items():
             if told.get(k) != v:
@@ -2735,7 +2836,8 @@ def watch(project, payload):
             and other == (rec.get("otherMemory") or [])
             and ((rec.get("kept") or {}).get(fwd(target)) or {})
             == {"keeper": KEEPER}
-            and (unread != "none" or phi_on(project, target, sys.platform, rec) in (None, phi))):
+            and not asks_moved(p4, project)
+            and (unread != "none" or phi_on(project, target, sys.platform, _asked(p4)[0]) == phi)):
         return out
     out["asks"] = keep_settings(project, p4=p4, note=note, tell=True)["asks"]
     return out

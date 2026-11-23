@@ -39,6 +39,7 @@ phi/served/
 .settings.lock
 claude-settings.json
 phi/cards.json
+settings.local.json
 phi/claude-code-watch.pending.json*
 phi/sessions/*/log.jsonl
 phi/sessions/*/session.md

@@ -49,7 +49,7 @@ class P4Conf(unittest.TestCase):
         test_isolation.py runs this case after the like case of test_lifetime.py, and before it."""
         self.assertEqual(Path(p4conf.__file__).resolve(), (SRC / "p4conf.py").resolve())
         self.assertIs(sys.modules["p4conf"], p4conf)
-        self.assertIsNotNone(p4conf.allow_rules(sys.platform, {}))
+        self.assertIsNotNone(p4conf.allow_rules(sys.platform))
 
     def test_every_setting_scratchpad_reads_has_its_default(self):
         """Each key temportal's scratchpad.py maps to a constant is in DEFAULTS, at the constant's own value, so a
@@ -560,6 +560,26 @@ def _make_store(project):
     p4conf.load(p4)
 
 
+def fake_phi(scripts):
+    """A scripts folder laid out as the plugin p4-phi: a phi.py in it and the manifest above it."""
+    Path(scripts).mkdir(parents=True, exist_ok=True)
+    Path(scripts, "phi.py").write_text("", encoding="utf-8")
+    manifest = Path(scripts).parent / ".claude-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps({"name": "p4-phi"}), encoding="utf-8")
+
+
+def asks(project, *rules, adopt=()):
+    """What p4-phi asks the keeper for, as a hand writes it where want_settings writes it: the store's
+    settings.local.json of `project`, with the allow `rules` and, where given, p4.adopt."""
+    want = {"permissions": {"allow": list(rules)}}
+    if adopt:
+        want["p4"] = {"adopt": list(adopt)}
+    p4 = os.path.join(project, ".claude", "p4")
+    os.makedirs(p4, exist_ok=True)
+    Path(p4, p4conf.ASKS).write_text(json.dumps(want, indent=2) + "\n", encoding="utf-8")
+
+
 class ClaudeSettings(unittest.TestCase):
     """ezexe/p4#246: the store keeps the Claude Code settings it relies on in the project's local settings file."""
 
@@ -602,8 +622,8 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual({k: got[k] for k in ("spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory")},
                          {"spinnerTipsEnabled": False, "autoMemoryDirectory": self.memory(),
                           "plansDirectory": PLANS})
-        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory", "permissions"],
-                         "the user's keys keep their order")
+        self.assertEqual(list(got), ["spinnerTipsEnabled", "autoMemoryDirectory", "plansDirectory"],
+                         "the user's keys keep their order, and a store whose file asks for nothing gets no rule")
         self.assertTrue(os.path.isfile(self.record()), "the record is .claude/p4/claude-settings.json")
         rec = Path(self.record()).read_text(encoding="utf-8")
         self.assertIn("autoMemoryDirectory", rec)
@@ -802,7 +822,8 @@ class ClaudeSettings(unittest.TestCase):
         out = p4conf.keep_settings(self.project, tell=True)
         got = self.read(self.local())
         self.assertEqual(got["attribution"], {"commit": "Co-Authored-By: x <x@x>"})
-        self.assertNotIn("Bash(ls *)", got["permissions"]["allow"], "a store's own permission key is never written")
+        self.assertNotIn("Bash(ls *)", (got.get("permissions") or {}).get("allow", []),
+                         "a store's own permission key is never written")
         self.assertTrue(any("permissions.allow" in a and "Bash(ls *)" in a for a in out["asks"]), out)
         self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "named once for one value")
 
@@ -819,6 +840,7 @@ class ClaudeSettings(unittest.TestCase):
         mine = {"allow": ["Bash(npm test)", "Read(./docs/**)"], "ask": ["Bash(git push *)"], "deny": ["Bash(rm *)"]}
         with open(self.local(), "w", encoding="utf-8") as f:
             json.dump({"permissions": mine}, f)
+        asks(self.project, *self.rules(SRC))
         for _ in range(2):
             p4conf.keep_settings(self.project, platform="win32")
         got = self.read(self.local())["permissions"]
@@ -854,6 +876,7 @@ class ClaudeSettings(unittest.TestCase):
         with `phi.upkeep` off and with it on. The user's own ask rules stay as they were and in order, and the entry
         is not written back."""
         from unittest import mock
+        self.install_phi(enabled=True)
         mine = ["Bash(git push *)", "mcp__ccd_session_mgmt__stop_session"]
         for upkeep in (False, True):
             project = os.path.join(self.tmp, f"upkeep{int(upkeep)}")
@@ -895,7 +918,7 @@ class ClaudeSettings(unittest.TestCase):
         that still holds another key stays."""
         from unittest import mock
         self.install_phi(enabled=True)
-        for n, copy in enumerate((p4conf, self.temportal())):
+        for n, copy in enumerate((p4conf,)):
             project = os.path.join(self.tmp, f"made{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
@@ -916,7 +939,7 @@ class ClaudeSettings(unittest.TestCase):
         out and leaves the list, in both copies. So is a list a person emptied by hand, which p4 did not empty."""
         from unittest import mock
         self.install_phi(enabled=True)
-        for n, copy in enumerate((p4conf, self.temportal())):
+        for n, copy in enumerate((p4conf,)):
             project = os.path.join(self.tmp, f"theirs{n}")
             p4 = os.path.join(project, ".claude", "p4")
             os.makedirs(p4)
@@ -944,6 +967,7 @@ class ClaudeSettings(unittest.TestCase):
         nothing but p4's own entries is p4's making, as a key that already holds p4's value is p4's, and a list
         that holds a person's rule beside them is the person's."""
         from unittest import mock
+        self.install_phi(enabled=True)
         for n, (mine, left) in enumerate((([], None), (["Bash(git push *)"], ["Bash(git push *)"]))):
             project = os.path.join(self.tmp, f"before{n}")
             p4 = os.path.join(project, ".claude", "p4")
@@ -956,12 +980,13 @@ class ClaudeSettings(unittest.TestCase):
             _write(self.record(project), rec)
             p4conf.set_key(p4, "phi.upkeep", True)
             p4conf.keep_settings(project, platform="linux")
-            self.assertEqual(self.read(self.local(project))["permissions"].get("ask"), left, mine)
+            self.assertEqual((self.read(self.local(project)).get("permissions") or {}).get("ask"), left, mine)
 
     def test_what_an_earlier_keeper_left_of_a_leftover_ask_rule_goes_with_the_set_in_force(self):
         """Seen on 2026-11-19 in a store started anew: with `phi.upkeep` on and the set in force the keeper took
         out the ask rule its record no longer held and left `"ask": []`. The same step takes an empty list the
         record holds nothing of as what is left of that entry. With the set off it is nobody's to touch."""
+        self.install_phi(enabled=True)
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
         _write(self.local(), {"permissions": {"deny": ["Read(./.env)"], "ask": []}})
@@ -970,6 +995,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(self.read(self.local())["permissions"]["ask"], [], "set off: left as it is")
         p4conf.set_key(p4, p4conf.CARDS_KEY, p4conf.card_set_id())
         self.assertTrue(p4conf.cards_yes(p4, session="local_top", call="toolu_yes"), "the yes, as the hook keeps it")
+        asks(self.project, adopt=p4conf.ASK_RETIRED)      # what p4-phi asks with the set in force and upkeep on
         p4conf.keep_settings(self.project, platform="linux")
         got = self.read(self.local())["permissions"]
         self.assertNotIn("ask", got)
@@ -1017,9 +1043,10 @@ class ClaudeSettings(unittest.TestCase):
         from unittest import mock
         self.assertEqual(p4conf.DENY_RULES, ())
         self.assertGreaterEqual(p4conf.KEEPER, 13)
+        self.install_phi(enabled=True)
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         p4conf.keep_settings(self.project, platform="linux")
-        self.assertNotIn("deny", self.read(self.local())["permissions"], "a fresh project gets none")
+        self.assertNotIn("deny", self.read(self.local()).get("permissions") or {}, "a fresh project gets none")
         with mock.patch.object(p4conf, "DENY_RULES", (self.MODEL_DENY,)):      # as a copy before KEEPER 13 left it
             p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.read(self.local())["permissions"]["deny"], [self.MODEL_DENY])
@@ -1027,7 +1054,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(list(rec["denyRules"].values())[0]["entries"], [self.MODEL_DENY])
         for _ in range(2):
             p4conf.keep_settings(self.project, platform="linux")
-        got = self.read(self.local())["permissions"]
+        got = self.read(self.local()).get("permissions") or {}
         self.assertNotIn("deny", got, "p4's own entry is gone, and so is the list p4 made for it")
         self.assertNotIn("ask", got, "and p4 writes no ask rule")
         self.assertNotIn("denyRules", json.loads(Path(self.record()).read_text(encoding="utf-8")))
@@ -1067,14 +1094,6 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(got["permissions"]["deny"], ["Bash(rm *)"], "p4's own goes, the user's stays")
         self.assertNotIn("ask", got["permissions"], "and p4 writes no ask rule")
 
-    def temportal(self):
-        """p4-temportal's copy of p4conf.py, which sits beside no phi.py."""
-        import importlib.util
-        spec = importlib.util.spec_from_file_location("p4conf_temportal", COPIES[0])
-        other = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(other)
-        return other
-
     def config(self, *parts):
         return os.path.join(os.environ["CLAUDE_CONFIG_DIR"], *parts)
 
@@ -1095,7 +1114,7 @@ class ClaudeSettings(unittest.TestCase):
         where Claude Code's own files say p4-phi is installed for the project and not switched off. The ask rule a
         keeper before KEEPER 15 wrote stands for them here."""
         from unittest import mock
-        other = self.temportal()
+        other = p4conf
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         self.install_phi(enabled=True)
         with mock.patch.object(other, "ASK_RULES", (self.ARCHIVE_ASK,)):
@@ -1106,7 +1125,7 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(list(rec["phi"].values()), [True])
 
     def test_the_temportal_copy_writes_neither_rule_where_p4_phi_is_not_installed(self):
-        other = self.temportal()
+        other = p4conf
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         mine = {"ask": ["Bash(git push *)"], "deny": ["Read(./.env)"]}
         _write(self.local(), {"permissions": mine})
@@ -1120,7 +1139,7 @@ class ClaudeSettings(unittest.TestCase):
     def test_a_settings_file_that_switches_p4_phi_off_decides_by_precedence(self):
         """`enabledPlugins` is read as settings.md orders the files: the local file is over the project's, which is
         over the user's, and an install no file names counts as enabled."""
-        other = self.temportal()
+        other = p4conf
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         key = "p4-phi@p4-marketplace"
         project = os.path.join(self.project, ".claude", "settings.json")
@@ -1141,9 +1160,8 @@ class ClaudeSettings(unittest.TestCase):
         off or installed since the record was written. The keeper then takes out its own two entries and no rule
         of the user's, and a start with nothing changed writes nothing."""
         from unittest import mock
-        other = self.temportal()
-        with mock.patch.object(other, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
-            self.both_rules_follow_p4_phi(other)
+        with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
+            self.both_rules_follow_p4_phi(p4conf)
 
     def both_rules_follow_p4_phi(self, other):
         p4 = os.path.join(self.project, ".claude", "p4")
@@ -1169,63 +1187,82 @@ class ClaudeSettings(unittest.TestCase):
         other.migrate_layout(p4)
         self.assertEqual(self.two_rules(), mine, "uninstalled: p4's two go")
 
-    def test_p4_phis_own_copy_writes_both_rules_and_its_watcher_writes_them_back(self):
-        """p4-phi's own copy sits beside phi.py and runs only where p4-phi is loaded, as by `--plugin-dir`, which no
-        file records. After p4-temportal's copy kept a store with neither rule, the watcher of p4-phi's copy reads
-        from the record that p4-phi did not run then, and writes both at its start."""
+    def test_a_checkout_loaded_by_plugin_dir_is_known_by_the_rule_the_file_asks_for(self):
+        """A checkout of p4-phi loaded by `--plugin-dir` is in no file of Claude Code's. Where p4-phi is not installed,
+        the file that asks for a rule of a folder outside the plugin cache that holds phi.py is what says it runs: the
+        keeper writes that rule and p4's other two, and the watcher writes them at its start."""
         from unittest import mock
-        other = self.temportal()
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
-        other.keep_settings(self.project, platform="linux")
+        p4conf.keep_settings(self.project, platform="linux")
         self.assertEqual(self.two_rules(), (None, None))
+        asks(self.project, *self.rules(SRC))
         with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)), \
                 mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
             p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
         self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], self.rules(SRC))
 
-    def test_the_temportal_copy_leaves_both_rules_to_a_checkout_of_p4_phi_that_kept_the_store(self):
-        """A checkout of p4-phi loaded by `--plugin-dir` is in no file of Claude Code's, so p4-temportal's copy
-        cannot tell whether a session loaded it. The record names the checkout that kept the store, and while that
-        folder holds phi.py the copy neither writes the two rules nor takes them out."""
+    def test_no_file_leaves_p4s_entries_and_p4_phi_off_takes_them_out(self):
+        """The keeper can run before p4-phi's first write, so a store with no file leaves p4's entries as they are
+        and adds none, and a store whose p4-phi does not run has them taken out."""
         from unittest import mock
-        other = self.temportal()
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
+        self.install_phi(enabled=True)
+        old, = self.cached("0.11.97")
         with mock.patch.object(p4conf, "ASK_RULES", (self.ARCHIVE_ASK,)):      # as a keeper before KEEPER 15
-            p4conf.keep_settings(self.project, platform="linux")
-        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
-        self.assertEqual(rec["phiCopy"], SRC.as_posix())
-        self.assertIsNone(other.phi_on(self.project, self.local(), "linux", rec))
-        other.migrate_layout(p4)
-        other.keep_settings(self.project, platform="linux")
-        self.assertEqual(self.two_rules(), ([self.ARCHIVE_ASK], None))
-        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
-        rec["phiCopy"] = Path(self.tmp, "gone", "scripts").as_posix()
-        _write(self.record(), rec)
-        other.migrate_layout(p4)
-        self.assertEqual(self.two_rules(), (None, None),
-                         "the checkout is gone, so the two rules go, each with the list p4 made for it")
+            asks(self.project, *self.rules(old))
+            p4conf.keep_settings(self.project, platform="win32")
+            before = self.read(self.local())["permissions"]
+            self.assertEqual(before["allow"], self.rules(old))
+            os.remove(os.path.join(p4, p4conf.ASKS))
+            p4conf.keep_settings(self.project, platform="win32")
+            self.assertEqual(self.read(self.local())["permissions"], before, "no file: left as they are")
+            self.install_phi(enabled=False)
+            asks(self.project, *self.rules(old))
+            p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local()).get("permissions") or {}
+        self.assertEqual((got.get("allow"), got.get("ask")), (None, None), "p4-phi off: every entry of p4's goes")
+
+    def test_a_cache_folders_rule_is_taken_out_where_p4_phi_is_not_installed(self):
+        """The file asks for a rule of a version folder of the plugin cache, but p4-phi is not installed for the
+        project and no checkout is named: p4-phi does not run, so every entry of p4's the record holds is taken out
+        and a person's rule stays."""
+        os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        old, = self.cached("0.11.97")
+        self.install_phi(enabled=True)
+        _write(self.local(), {"permissions": {"allow": ["Bash(npm test)"]}})
+        asks(self.project, *self.rules(old))
+        p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())["permissions"]
+        self.assertEqual(got["allow"], ["Bash(npm test)"] + self.rules(old))
+        os.remove(self.config("plugins", "installed_plugins.json"))
+        p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())["permissions"]
+        self.assertEqual(got["allow"], ["Bash(npm test)"], "not installed: the rules it kept go, the person's stays")
 
     def test_the_rules_follow_the_plugin_folder_and_an_entry_deleted_by_hand_stays_gone(self):
-        from unittest import mock
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
         with open(self.local(), "w", encoding="utf-8") as f:
             json.dump({"permissions": {"allow": ["Bash(npm test)"]}}, f)
+        first = os.path.join(self.tmp, "first", "p4-phi", "scripts")
+        fake_phi(first)
+        asks(self.project, *self.rules(first))
         p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], ["Bash(npm test)"] + self.rules(first))
         moved = os.path.join(self.tmp, "plugins", "p4-phi", "scripts")
-        os.makedirs(moved)
-        Path(moved, "phi.py").write_text("", encoding="utf-8")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", moved):
-            p4conf.keep_settings(self.project, platform="win32")
-            allow = self.read(self.local())["permissions"]["allow"]
-            self.assertEqual(allow, ["Bash(npm test)"] + self.rules(moved), "the old entries replaced by the new")
-            d = self.read(self.local())
-            d["permissions"]["allow"].remove(self.rules(moved)[0])
-            with open(self.local(), "w", encoding="utf-8") as f:
-                json.dump(d, f)
-            p4conf.keep_settings(self.project, platform="win32")
-            self.assertNotIn(self.rules(moved)[0], self.read(self.local())["permissions"]["allow"],
-                             "deleted by hand: not written back")
+        fake_phi(moved)
+        asks(self.project, *self.rules(moved))
+        p4conf.keep_settings(self.project, platform="win32")
+        allow = self.read(self.local())["permissions"]["allow"]
+        self.assertEqual(allow, ["Bash(npm test)"] + self.rules(moved), "the old entries replaced by the new")
+        d = self.read(self.local())
+        d["permissions"]["allow"].remove(self.rules(moved)[0])
+        with open(self.local(), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertNotIn(self.rules(moved)[0], self.read(self.local())["permissions"]["allow"],
+                         "deleted by hand: not written back")
 
     def cached(self, *versions):
         """Version folders of p4-phi as Claude Code's plugin cache holds them, `cache/<marketplace>/<plugin>/
@@ -1234,7 +1271,7 @@ class ClaudeSettings(unittest.TestCase):
         for v in versions:
             s = os.path.join(self.tmp, "plugins", "cache", "p4-marketplace", "p4-phi", v, "scripts")
             os.makedirs(s, exist_ok=True)
-            Path(s, "phi.py").write_text("", encoding="utf-8")
+            fake_phi(s)
             out.append(s)
         return out
 
@@ -1244,30 +1281,28 @@ class ClaudeSettings(unittest.TestCase):
         already loaded the old version keeps running". So after an update the keeper of the new copy keeps the rules
         of each version folder still on disk beside its own, each naming its folder exactly, and drops a folder's
         rules once the folder is gone."""
-        from unittest import mock
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        self.install_phi(enabled=True)
         with open(self.local(), "w", encoding="utf-8") as f:
             json.dump({"permissions": {"allow": ["Bash(npm test)"]}}, f)
         old, = self.cached("0.11.46")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", old):
-            p4conf.keep_settings(self.project, platform="win32")
+        asks(self.project, *self.rules(old))
+        p4conf.keep_settings(self.project, platform="win32")
         self.assertEqual(self.read(self.local())["permissions"]["allow"], ["Bash(npm test)"] + self.rules(old))
         _, new = self.cached("0.11.46", "0.11.48")
         os.makedirs(os.path.join(os.path.dirname(os.path.dirname(new)), "0.11.47"))   # no phi.py: no copy to cover
         self.assertEqual(p4conf.version_folders(new), [os.path.abspath(old).replace("\\", "/")])
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
-            for _ in range(2):
-                p4conf.keep_settings(self.project, platform="win32")
+        asks(self.project, *self.rules(old), *self.rules(new))   # each version of p4-phi asks for its own and the rest
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
         both = ["Bash(npm test)"] + self.rules(old) + self.rules(new)
         self.assertEqual(self.read(self.local())["permissions"]["allow"], both,
                          "the session on 0.11.46 is still covered, and the new copy's rules stand beside its")
         self.assertFalse([r for r in both if "*/scripts" in r or "p4-phi/*" in r], "no rule spans versions by a *")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", old):        # the older session's own keeper runs again
-            p4conf.keep_settings(self.project, platform="win32")
+        p4conf.keep_settings(self.project, platform="win32")        # the keeper runs again
         self.assertEqual(sorted(self.read(self.local())["permissions"]["allow"]), sorted(both))
         shutil.rmtree(os.path.dirname(old))                         # Claude Code's cleanup took the old version
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
-            p4conf.keep_settings(self.project, platform="win32")
+        p4conf.keep_settings(self.project, platform="win32")
         self.assertEqual(self.read(self.local())["permissions"]["allow"], ["Bash(npm test)"] + self.rules(new),
                          "the folder is gone, and its rules with it")
         rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
@@ -1279,11 +1314,11 @@ class ClaudeSettings(unittest.TestCase):
         person's, so they allowed a script that is not the plugin and kept the running copy's rules unwritten. A
         rule exactly of p4's shape whose folder is not a copy that runs is taken out by a step of its own, which
         only takes out. A person's rule of another shape stays, in its place, and at a ConfigChange nothing moves."""
-        from unittest import mock
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        self.install_phi(enabled=True)
         checkout = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
         os.makedirs(checkout)
-        Path(checkout, "phi.py").write_text("", encoding="utf-8")
+        fake_phi(checkout)
         gone = os.path.join(self.tmp, "gone", "scripts")
         old, new = self.cached("0.11.96", "0.11.97")
         there = p4conf.fwd(checkout)
@@ -1304,36 +1339,215 @@ class ClaudeSettings(unittest.TestCase):
         self.assertEqual(p4conf._drop_strays(same, {}, "f", None), [], "a copy that cannot tell moves nothing")
         self.assertEqual(same["permissions"]["allow"], before)
         _write(self.local(), {"permissions": {"allow": list(before)}})
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
-            p4conf.keep_settings(self.project, platform="win32", owned_only=True)
-            self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "a ConfigChange moves nothing")
-            for _ in range(2):
-                p4conf.keep_settings(self.project, platform="win32")
+        asks(self.project, *wanted)
+        p4conf.keep_settings(self.project, platform="win32", owned_only=True)
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "a ConfigChange moves nothing")
+        for _ in range(2):
+            p4conf.keep_settings(self.project, platform="win32")
         allow = self.read(self.local())["permissions"]["allow"]
         self.assertEqual(allow[:len(mine)], mine, "the person's rules, in their order")
         self.assertFalse([r for r in allow if r in strays], "no rule names the checkout or the folder that is gone")
         self.assertEqual(allow[len(mine):], wanted, "and the keeper's standing step writes the running copies' own")
-        self.temportal().keep_settings(self.project, platform="win32")
+        p4conf.keep_settings(self.project, platform="win32")
         self.assertEqual(self.read(self.local())["permissions"]["allow"], allow)
 
-    def test_a_copy_that_cannot_tell_and_a_checkout_leave_an_installed_versions_rules(self):
-        """p4-temportal's copy cannot tell which copy of p4-phi runs, so it takes no rule out. A checkout loaded by
-        `--plugin-dir` leaves the rules of an installed version folder that is still on disk, which a session that
-        loaded that version runs from, and takes out those of a folder that is gone."""
-        from unittest import mock
+    def test_a_file_that_asks_for_fewer_rules_takes_the_others_out_and_a_missing_file_takes_none(self):
+        """A checkout loaded by `--plugin-dir` is named by its rule in the file. The rules of an installed version
+        folder that is still on disk stay while the file asks for them, those of a folder that is gone go, and a
+        store with no file moves none."""
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        self.install_phi(enabled=True)
         installed, = self.cached("0.11.97")
         checkout = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
-        os.makedirs(checkout)
-        Path(checkout, "phi.py").write_text("", encoding="utf-8")
+        fake_phi(checkout)
         gone = os.path.join(self.tmp, "plugins", "cache", "p4-marketplace", "p4-phi", "0.11.01", "scripts")
         before = self.rules(installed) + self.rules(gone) + self.rules(checkout)
         _write(self.local(), {"permissions": {"allow": list(before)}})
-        self.temportal().keep_settings(self.project, platform="win32")
-        self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "p4-temportal's copy: left")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", checkout):
-            p4conf.keep_settings(self.project, platform="win32")
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], before, "no file: left")
+        asks(self.project, *self.rules(installed), *self.rules(checkout))
+        p4conf.keep_settings(self.project, platform="win32")
         self.assertEqual(self.read(self.local())["permissions"]["allow"], self.rules(installed) + self.rules(checkout))
+
+    def store_of(self, project=None):
+        p4 = os.path.join(project or self.project, ".claude", "p4")
+        os.makedirs(p4, exist_ok=True)
+        return p4
+
+    def test_an_entry_in_the_file_that_is_no_text_is_passed_over_and_no_other_key_writes_anything(self):
+        """The file is in Claude Code's settings format, but the keeper copies only the allow entries it writes
+        itself: an entry that is no text is passed over, a key other than permissions.allow writes nothing, and a
+        p4.adopt entry outside ASK_RETIRED takes out no ask rule."""
+        self.store_of()
+        mine = ["Bash(git push *)"]
+        _write(self.local(), {"permissions": {"ask": list(mine)}})
+        _write(os.path.join(self.store_of(), p4conf.ASKS),
+               {"permissions": {"allow": [5, None, ["x"], self.rules(SRC)[0]], "ask": ["Bash(git push *)"],
+                                "deny": ["Read(./.env)"], "defaultMode": "bypassPermissions"},
+                "autoMemoryDirectory": "D:/elsewhere", "env": {"X": "1"},
+                "p4": {"adopt": ["Bash(git push *)", 3]}})
+        self.assertEqual(p4conf._asked(self.store_of()), ([self.rules(SRC)[0]], []))
+        p4conf.keep_settings(self.project, platform="win32")
+        got = self.read(self.local())
+        self.assertEqual(got["permissions"]["allow"], [self.rules(SRC)[0]])
+        self.assertEqual(got["permissions"]["ask"], mine, "p4.adopt outside ASK_RETIRED takes out nothing")
+        self.assertEqual({k for k in got["permissions"]}, {"allow", "ask"}, "no other key of the file is copied")
+        self.assertEqual(got["autoMemoryDirectory"], self.memory(), "the store's own, not the file's")
+        self.assertNotIn("env", got)
+
+    def test_allowRules_false_leaves_out_the_phi_py_rules_and_copies_the_tool_rules(self):
+        """The switch claude.allowRules is the keeper's: with it off the phi.py rules are not copied and the rules
+        for p4's tools, which it never covered, are."""
+        p4 = self.store_of()
+        _write(p4conf.path(p4), {"claude": {"allowRules": False}})
+        asks(self.project, *self.rules(SRC), *p4conf.CARD_TOOLS)
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(sorted(self.read(self.local())["permissions"]["allow"]), sorted(p4conf.CARD_TOOLS))
+
+    def test_asks_moved_is_true_after_the_file_changes_and_false_after_the_keeper_ran(self):
+        """A change of the file is seen against the record's `asks`, and watch() runs the keeper once for it."""
+        from unittest import mock
+        p4 = self.store_of()
+        asks(self.project, *self.rules(SRC))
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertFalse(p4conf.asks_moved(p4, self.project))
+        asks(self.project, *self.rules(SRC), p4conf.CARD_TOOLS[0])
+        self.assertTrue(p4conf.asks_moved(p4, self.project))
+        asks(self.project, p4conf.CARD_TOOLS[0], *self.rules(SRC))
+        self.assertTrue(p4conf.asks_moved(p4, self.project), "moved from the record, whatever the order")
+        asks(self.project, *reversed(self.rules(SRC)))
+        self.assertFalse(p4conf.asks_moved(p4, self.project), "the same set in another order is not a change")
+        asks(self.project, *self.rules(SRC), p4conf.CARD_TOOLS[0])
+        calls = []
+        real = p4conf.keep_settings
+        payload = {"source": "startup", "hook_event_name": "SessionStart"}
+        with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)), \
+                mock.patch.object(p4conf, "keep_settings", lambda *a, **k: calls.append(1) or real(*a, **k)):
+            p4conf.watch(self.project, payload)
+            self.assertEqual(len(calls), 1, "a changed file: the keeper runs once")
+            p4conf.watch(self.project, payload)
+            self.assertEqual(len(calls), 1, "and not again")
+        self.assertFalse(p4conf.asks_moved(p4, self.project))
+        self.assertIn(p4conf.CARD_TOOLS[0], self.read(self.local())["permissions"]["allow"])
+
+    def test_want_settings_writes_the_rules_for_this_folder_each_cached_version_and_the_set(self):
+        """What p4-phi asks for: the phi.py rules for this folder and each cached version folder; with the set in
+        force the tool rules and the general rules too; with phi.upkeep on as well, p4.adopt. The file is not
+        rewritten where only its order differs, and a copy with no phi.py beside it asks for nothing."""
+        from unittest import mock
+        p4 = self.store_of()
+        old, new = self.cached("0.11.96", "0.11.97")
+        os.makedirs(os.path.join(os.path.dirname(os.path.dirname(new)), "0.11.95"))     # no phi.py: no copy
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", new):
+            got = p4conf.want_settings(p4, "win32")
+            self.assertEqual(sorted(got["permissions"]["allow"]), sorted(self.rules(new) + self.rules(old)))
+            self.assertNotIn("p4", got)
+            self.assertEqual(got, self.read(os.path.join(p4, p4conf.ASKS)), "the file holds what is returned")
+            p4conf.set_key(p4, p4conf.CARDS_KEY, p4conf.card_set_id())
+            self.assertTrue(p4conf.cards_yes(p4, session="local_top", call="toolu_yes"))
+            got = p4conf.want_settings(p4, "win32")
+            self.assertEqual(sorted(got["permissions"]["allow"]),
+                             sorted(self.rules(new) + self.rules(old) + list(p4conf.CARD_TOOLS)
+                                    + list(p4conf.GENERAL_RULES) + list(p4conf.GENERAL_WIN)))
+            self.assertNotIn("p4", got, "upkeep is off")
+            got = p4conf.want_settings(p4, "linux")
+            self.assertFalse([r for r in got["permissions"]["allow"] if r in p4conf.GENERAL_WIN])
+            p4conf.set_key(p4, "phi.upkeep", True)
+            got = p4conf.want_settings(p4, "win32")
+            self.assertEqual(got["p4"], {"adopt": list(p4conf.ASK_RETIRED)})
+            file = os.path.join(p4, p4conf.ASKS)
+            flipped = self.read(file)
+            flipped["permissions"]["allow"].reverse()
+            _write(file, json.dumps(flipped, indent=2) + "\n")
+            os.utime(file, (1, 1))
+            before = Path(file).read_bytes()
+            self.assertEqual(p4conf.want_settings(p4, "win32"), got)
+            self.assertEqual((Path(file).read_bytes(), os.stat(file).st_mtime), (before, 1), "not rewritten")
+            nowhere = os.path.join(self.tmp, "nowhere")
+            self.assertIsNone(p4conf.want_settings(nowhere, "win32"), "no store folder")
+            self.assertFalse(os.path.exists(nowhere))
+        bare = os.path.join(self.tmp, "bare", "scripts")
+        os.makedirs(bare)
+        other = self.store_of(os.path.join(self.tmp, "other"))
+        with mock.patch.object(p4conf, "PHI_SCRIPTS", bare):
+            self.assertIsNone(p4conf.want_settings(other, "win32"), "no phi.py beside the copy")
+        self.assertFalse(os.path.exists(os.path.join(other, p4conf.ASKS)))
+
+    def test_a_run_with_asks_only_moves_only_what_the_file_decides(self):
+        """With asks_only a rule the file asks for is written, and a plansDirectory taken out by hand, the import
+        line and the record's "kept" are left as they were. No managed settings are read. With no entry of the
+        record for the file, nothing is written."""
+        from unittest import mock
+        p4 = self.store_of()
+        asks(self.project, *self.rules(SRC))
+        p4conf.keep_settings(self.project, platform="win32")
+        d = self.read(self.local())
+        d.pop("plansDirectory")
+        _write(self.local(), d)
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        local = p4conf.fwd(self.local())
+        kept = rec["kept"][local]
+        lines = sorted(os.listdir(self.project))
+        asks(self.project, *self.rules(SRC), p4conf.CARD_TOOLS[0])
+        boom = AssertionError("a run with asks_only reads no managed settings")
+        with mock.patch.object(p4conf, "plugin_enabled", side_effect=boom), \
+                mock.patch.object(p4conf, "_elsewhere", side_effect=boom):
+            p4conf.keep_settings(self.project, platform="win32", asks_only=True)
+        got = self.read(self.local())
+        self.assertIn(p4conf.CARD_TOOLS[0], got["permissions"]["allow"], "the rule the file asks for is written")
+        self.assertNotIn("plansDirectory", got, "a key taken out by hand is not written back by this run")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(rec["kept"][local], kept)
+        self.assertEqual(sorted(os.listdir(self.project)), lines)
+        fresh = os.path.join(self.tmp, "fresh")
+        self.store_of(fresh)
+        asks(fresh, *self.rules(SRC))
+        p4conf.keep_settings(fresh, platform="win32", asks_only=True)
+        self.assertFalse(os.path.exists(self.local(fresh)), "no PHI_PART entry for the file: nothing is written")
+
+    def test_asks_due_is_false_without_an_answer_of_a_whole_check_and_true_with_one(self):
+        """Where the record holds nothing for the file no prompt reruns a keeper that would move nothing, and
+        watch() still runs the whole check for that store; where it holds False, asks_due is true and the run
+        takes p4's rules out."""
+        from unittest import mock
+        p4 = self.store_of()
+        asks(self.project, *self.rules(SRC))
+        self.assertTrue(p4conf.asks_moved(p4, self.project))
+        self.assertFalse(p4conf.asks_due(p4, self.project), "no whole check has run for the file")
+        calls = []
+        real = p4conf.keep_settings
+        with mock.patch.object(p4conf, "claude_binary", return_value=(None, True)), \
+                mock.patch.object(p4conf, "keep_settings", lambda *a, **k: calls.append(k) or real(*a, **k)):
+            p4conf.watch(self.project, {"source": "startup", "hook_event_name": "SessionStart"})
+        self.assertEqual(len(calls), 1, "the start runs the whole check")
+        self.assertFalse(p4conf.asks_due(p4, self.project), "the record is current")
+        rec = json.loads(Path(self.record()).read_text(encoding="utf-8"))
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], self.rules(SRC))
+        rec[p4conf.PHI_PART][p4conf.fwd(self.local())] = False
+        _write(self.record(), rec)
+        asks(self.project, *self.rules(SRC), p4conf.CARD_TOOLS[0])
+        self.assertTrue(p4conf.asks_due(p4, self.project))
+        p4conf.keep_settings(self.project, platform="win32", asks_only=True)
+        got = self.read(self.local()).get("permissions") or {}
+        self.assertEqual(got.get("allow"), None, "p4-phi does not run, so p4's rules are taken out")
+
+    def test_an_entry_the_keeper_does_not_write_is_passed_over_and_the_others_are_copied(self):
+        """Each of these is passed over and the others are copied: `Bash(*)`, `Read`, `mcp__p4-phi__*`, a tool
+        `mcp__p4-phi__other`, a phi.py rule whose folder holds no phi.py, and one whose folder holds a phi.py with no
+        manifest of p4-phi above it, as a file put into a folder of the project."""
+        self.store_of()
+        nophi = os.path.join(self.tmp, "nophi", "scripts")
+        os.makedirs(nophi)
+        planted = os.path.join(self.project, "lib", "scripts")
+        os.makedirs(planted)
+        Path(planted, "phi.py").write_text("", encoding="utf-8")
+        passed = ["Bash(*)", "Read", "mcp__p4-phi__*", "mcp__p4-phi__other", self.rules(nophi)[0],
+                  self.rules(planted)[0]]
+        copied = [p4conf.CARD_TOOLS[0], p4conf.GENERAL_RULES[0], self.rules(SRC)[0]]
+        asks(self.project, *passed, *copied)
+        self.assertEqual(sorted(p4conf._asked(self.store_of())[0]), sorted(copied))
+        p4conf.keep_settings(self.project, platform="win32")
+        self.assertEqual(sorted(self.read(self.local())["permissions"]["allow"]), sorted(copied))
 
     def test_a_copy_outside_the_plugin_cache_keeps_one_folders_rules(self):
         """A checkout is no version folder: its rules follow it, and no folder beside it is read as a version."""
@@ -1341,7 +1555,7 @@ class ClaudeSettings(unittest.TestCase):
         here = os.path.join(self.tmp, "repo", "lbiza", "plugins", "p4-phi", "scripts")
         for s in (beside, here):
             os.makedirs(s)
-            Path(s, "phi.py").write_text("", encoding="utf-8")
+            fake_phi(s)
         self.assertEqual(p4conf.version_folders(here), [])
 
     def test_the_users_autoMemoryEnabled_is_never_touched(self):
@@ -1486,36 +1700,29 @@ class ClaudeSettings(unittest.TestCase):
         self.assertTrue(any("D:/mine" in a and "not from the store's" in a for a in first), first)
         self.assertEqual(p4conf.keep_settings(self.project, tell=True)["asks"], [], "said once")
 
-    def test_an_older_copy_and_a_config_change_never_take_p4s_rules_away(self):
-        """Two plugin versions at once: a copy of a lower GEN whose folder differs leaves the newer copy's entries,
-        and a ConfigChange records and removes nothing."""
-        from unittest import mock
+    def test_a_config_change_never_takes_p4s_rules_away(self):
+        """A ConfigChange records and removes nothing, whatever the file asks for."""
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        asks(self.project, *self.rules(SRC))
         p4conf.keep_settings(self.project, platform="win32")
         rules = self.read(self.local())["permissions"]["allow"]
-        older = os.path.join(self.tmp, "older", "p4-phi", "scripts")
-        os.makedirs(older)
-        Path(older, "phi.py").write_text("", encoding="utf-8")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", older), mock.patch.object(p4conf, "GEN", p4conf.GEN - 1):
-            p4conf.keep_settings(self.project, platform="win32")
-            self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "the older copy leaves them")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", older):
-            p4conf.keep_settings(self.project, platform="win32", owned_only=True)
-            self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "a ConfigChange moves none")
+        self.assertEqual(rules, self.rules(SRC))
+        asks(self.project)
+        p4conf.keep_settings(self.project, platform="win32", owned_only=True)
+        self.assertEqual(self.read(self.local())["permissions"]["allow"], rules, "a ConfigChange moves none")
 
     def test_a_rule_deleted_by_hand_stays_gone_when_the_plugin_folder_moves(self):
-        from unittest import mock
         os.makedirs(os.path.join(self.project, ".claude", "p4"))
+        asks(self.project, *self.rules(SRC))
         p4conf.keep_settings(self.project, platform="win32")
         d = self.read(self.local())
         gone = d["permissions"]["allow"].pop(0)
         _write(self.local(), d)
         p4conf.keep_settings(self.project, platform="win32")
         moved = os.path.join(self.tmp, "moved", "p4-phi", "scripts")
-        os.makedirs(moved)
-        Path(moved, "phi.py").write_text("", encoding="utf-8")
-        with mock.patch.object(p4conf, "PHI_SCRIPTS", moved):
-            p4conf.keep_settings(self.project, platform="win32")
+        fake_phi(moved)
+        asks(self.project, *self.rules(moved))
+        p4conf.keep_settings(self.project, platform="win32")
         allow = self.read(self.local())["permissions"]["allow"]
         self.assertFalse([r for r in allow if p4conf.rule_identity(r) == p4conf.rule_identity(gone)], allow)
         self.assertEqual(len(allow), 1, "the other one moved with the folder")
@@ -2018,7 +2225,7 @@ class SettingsVariables(unittest.TestCase):
         local = os.path.abspath(self.local()).replace("\\", "/")
         self.assertEqual(rec["p4past"][local], {"P4_PHI_MAX_DEPTH": ["5"]})
         self.assertIn("env.P4_PHI_MAX_DEPTH", rec["hand"][local])
-        self.assertEqual(rec["kept"][local], {"keeper": 17})
+        self.assertEqual(rec["kept"][local], {"keeper": p4conf.KEEPER})
         self.assertNotIn("env.P4_PHI_MAX_DEPTH", rec.get("files", {}).get(local, {}))
         with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": "5"}):
             self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], 5, "p4's text is passed over, p4.json's 5 holds")
@@ -2078,6 +2285,7 @@ class SettingsVariables(unittest.TestCase):
         the same order, apart from ezexe's own keys, the defaults left to the app and the paths; it holds no `env`,
         also after a setting changes."""
         self.store({"claude": {"attribution.commit": REFERENCE["attribution"]["commit"]}})
+        asks(self.project, *[f'{t}(python -I -X utf8 "{p4conf.fwd(SRC)}/phi.py" *)' for t in ("Bash", "PowerShell")])
         p4conf.keep_settings(self.project, platform="win32")
         got = self.read(self.local())
         self.assertEqual(got, self.reference())

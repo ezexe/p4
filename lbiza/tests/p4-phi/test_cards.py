@@ -52,8 +52,16 @@ class TheSet(unittest.TestCase):
         self._env.start()
         for k in [k for k in os.environ if k.startswith("P4_")]:
             os.environ.pop(k)
+        keep = p4conf.keep_settings
+
+        def kept(project, *args, p4=None, **kw):       # p4-phi's `layout` entry writes what it asks for first
+            p4conf.want_settings(p4 or os.path.join(p4conf.main_root(project)[0], ".claude", "p4"))
+            return keep(project, *args, p4=p4, **kw)
+        self._asking = mock.patch.object(p4conf, "keep_settings", kept)
+        self._asking.start()
 
     def tearDown(self):
+        self._asking.stop()
         self._env.stop()
         self._tmp.cleanup()
 
@@ -99,6 +107,8 @@ class TheSet(unittest.TestCase):
         sid = p4conf.card_set_id()
         p4conf.keep_settings(self.proj)
         tools = lambda: [r for r in self.rules(p4conf.ALLOW_KEY) if r.startswith("mcp__")]   # noqa: E731
+        asked_tools = lambda: [r for r in jload(p4conf.asks_file(self.p4))["permissions"]["allow"]   # noqa: E731
+                               if r.startswith("mcp__")]
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4), "set_key")
         data = jload(p4conf.path(self.p4))
@@ -124,13 +134,18 @@ class TheSet(unittest.TestCase):
         self.assertIn(f"ezexe's yes to the set {sid} is kept", said[0])
         self.assertIn("the set is in force", said[0])
         self.assertTrue(p4conf.cards_on(self.p4))
-        self.assertEqual(sorted(tools()), sorted(p4conf.CARD_TOOLS), "and the keeper ran with it")
+        self.assertEqual(sorted(asked_tools()), sorted(p4conf.CARD_TOOLS), "and the file p4-phi writes asks for the set")
+        self.assertEqual(tools(), [], "the local file follows when the keeper next runs")
+        p4conf.keep_settings(self.proj)
+        self.assertEqual(sorted(tools()), sorted(p4conf.CARD_TOOLS), "and the keeper copied it")
         kept = yes_of(self.p4)
         self.assertEqual((kept["set"], kept["session"], kept["call"]), (sid, "local_top00001", "toolu_1"))
         # each yes is one press for one writing of the key
         self.assertEqual(cards.switch(self.p4, False)[0], 0)
         self.assertIsNone(yes_of(self.p4), "`off` takes the yes out with the key")
-        self.assertEqual(tools(), [])
+        self.assertEqual(asked_tools(), [], "`off` changes what the file asks for")
+        p4conf.keep_settings(self.proj)
+        self.assertEqual(tools(), [], "and the local file follows after the keeper")
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, sid)
         self.assertFalse(p4conf.cards_on(self.p4), "the key written again after an `off`")
         say_yes(self.p4)
@@ -253,7 +268,9 @@ class TheSet(unittest.TestCase):
         self.assertNotIn("Bash(git *)", self.rules(p4conf.ALLOW_KEY), "set off")
         say_yes(self.p4)
         p4conf.keep_settings(self.proj, p4=self.p4)
-        for rule in p4conf.general_rules(self.p4, True):
+        general = list(p4conf.GENERAL_RULES) + (list(p4conf.GENERAL_WIN) if sys.platform.startswith("win") else [])
+        for rule in general:
+            self.assertIn(rule, p4conf.want_settings(self.p4)["permissions"]["allow"], "p4-phi asks for it")
             self.assertIn(rule, self.rules(p4conf.ALLOW_KEY))
         p4conf.cards_no(self.p4)
         p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
