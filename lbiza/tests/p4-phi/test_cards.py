@@ -81,7 +81,7 @@ class TheSet(unittest.TestCase):
             self.assertNotEqual(p4conf.card_set_id(), sid)
             self.assertFalse(p4conf.cards_on(self.p4), "a set that changed is in force nowhere until a new yes")
         names = [name for name, _ in p4conf.CARD_SET]
-        self.assertEqual(names, ["tools", "archive", "own-branch", "push", "refusal", "start"], "the whole set")
+        self.assertEqual(names, ["tools", "archive", "own-branch", "push", "refusal", "start", "general"], "the whole set")
         for word in ("deny", "credential", "password", "token"):
             self.assertNotIn(word, json.dumps(p4conf.CARD_SET).lower(), "it lifts no deny rule, touches no credential")
 
@@ -316,6 +316,22 @@ class TheSet(unittest.TestCase):
         p4conf.keep_settings(self.proj)
         self.assertEqual(self.rules(p4conf.ALLOW_KEY), before, "the yes withdrawn: p4's rules go, the person's stays")
         self.assertNotIn("toolRules", p4conf.read_record(self.p4))
+
+    def test_the_general_part_is_written_only_while_the_set_is_in_force(self):
+        """CARD_SET's `general`: the keeper writes its allow rules into the local file where ezexe's yes to the set
+        stands, and takes its own entries out again with the set. KEEPER 14 came with the part, so a store's
+        next start runs the whole check."""
+        self.assertGreaterEqual(p4conf.KEEPER, 14)
+        p4conf.keep_settings(self.proj, p4=self.p4)
+        self.assertNotIn("Bash(git *)", self.rules(p4conf.ALLOW_KEY), "set off")
+        say_yes(self.p4)
+        p4conf.keep_settings(self.proj, p4=self.p4)
+        for rule in p4conf.general_rules(self.p4, True):
+            self.assertIn(rule, self.rules(p4conf.ALLOW_KEY))
+        p4conf.cards_no(self.p4)
+        p4conf.set_key(self.p4, p4conf.CARDS_KEY, None)
+        p4conf.keep_settings(self.proj, p4=self.p4)
+        self.assertNotIn("Bash(git *)", self.rules(p4conf.ALLOW_KEY), "taken out with the set")
 
     def test_a_leftover_ask_rule_goes_only_with_upkeep_on_and_the_set_in_force(self):
         """The `archive` part: a store started anew lost the record of the ask rule p4 wrote, so with `phi.upkeep`

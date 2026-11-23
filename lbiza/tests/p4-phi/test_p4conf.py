@@ -439,9 +439,10 @@ class P4Conf(unittest.TestCase):
         updated."""
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
-                11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63"}
+                11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63", 15: "95656cb9ae6e2f7f"}
         # append only: one more for each GEN. 11 came with a key of the keeper, 12 with the plans folder's move,
         # 13 with the default phi.plan_mode, and 14 with the default phi.goal_review
+        # and 15 with the default phi.new_issues
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")

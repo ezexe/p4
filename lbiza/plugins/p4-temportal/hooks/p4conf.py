@@ -63,6 +63,9 @@ DEFAULTS = {
                                          # that has not seen the conversation
         "issues": True,                  # false: the issue loop is off: no open issue a brief names, no commit line
                                          # for it, no regression test at Stop and no push line
+        "new_issues": True,              # false: no session is told to publish a new issue, and `gh issue create`
+                                         # is asked about in the top session and refused in a started one; an open
+                                         # issue a brief names is still taken, with its commit line and push line
         # caps a project sets, ezexe/p4#125, read by phi.CAPS and apply_caps, which keep the default for a value of
         # the wrong type or out of range
         "max_depth": 3,                  # how deep the session tree goes before a session is told to start no more
@@ -780,7 +783,9 @@ WRITTEN = "_written"
 # move to temportal/plan-planner, so a copy of 11 leaves the new value of plansDirectory and never writes the old one
 # back. 13 came with the default `phi.plan_mode`, the switch of p4-phi's plan rule. 14 came with the default
 # `phi.goal_review`, the switch of the review a worker's goal asks for.
-GEN = 14
+# 15 came with the default `phi.new_issues` and with the general part of CARD_SET, whose rules an installed copy of
+# 14 leaves to the copy that wrote them.
+GEN = 15
 
 
 def _leaves(d, prefix=""):
@@ -1240,7 +1245,9 @@ ENV_KEY = "env"                  # where the P4_* variables go: each one p4 owns
 # temportal/plan-planner, so a plansDirectory the keeper wrote for temportal/plans takes the new folder at the next
 # start, and one a person set stays as it is, and 13 with DENY_RULES emptied, so the deny rule on the model tool an
 # earlier keeper wrote goes at the next start.
-KEEPER = 13
+# 14 came with the general part of CARD_SET, so its rules are written at a store's next start where the set is in
+# force.
+KEEPER = 14
 PAST_MAX = 5                     # texts kept per variable of those p4 wrote and later replaced or removed
 # The class of keys ezexe decides, by #246: every key of the topics "Permission settings", "Sandbox settings",
 # "Authentication and providers" and "Enterprise and managed settings" of settings-reference.md, the table
@@ -1808,7 +1815,7 @@ PHI_PART = "phi"
 # takes a list that holds nothing but p4's own entries as p4's making, as _keep_key takes a key that already holds
 # p4's value, and any other list as a person's. LIST_PARTS names the record's parts whose entries share one list.
 LISTS = "lists"
-LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules"), ASK_KEY: ("askRules",), DENY_KEY: ("denyRules",)}
+LIST_PARTS = {ALLOW_KEY: ("rules", "toolRules", "generalRules"), ASK_KEY: ("askRules",), DENY_KEY: ("denyRules",)}
 
 # --- what is settled before a session's start, with no approval card -------------------------------------------------
 # A session another session started stops on no approval card for work its brief covers. desktop.md names the prompt
@@ -1838,6 +1845,15 @@ CARDS_KEY = "phi.cards"
 YES = "cardsYes"
 CARD_TOOLS = ("mcp__p4-phi__note", "mcp__p4-phi__done", "mcp__p4-phi__tree", "mcp__p4-phi__goal",
               "mcp__p4-temportal__lifetime", "mcp__p4-native__native")
+# The general part of the set: what a session does in every task. permissions.md: a bare tool name matches every use
+# of the tool, and "PowerShell permission rules use the same shape as Bash rules". permission-modes.md:
+# "`permissions.allow` rules in settings files do not pre-approve protected-path writes", so no rule here covers a
+# settings file under `.claude`, and the default mode approves "File reads inside your working directories" by
+# itself, so the part holds no rule for a read: one would add only the reads outside them, where stored logins lie.
+# What an argument pattern cannot hold, a force and a deletion, is phi.py's h_force_guard, as permissions.md advises
+# a PreToolUse hook where "patterns that try to constrain command arguments are fragile".
+GENERAL_RULES = ("Edit", "Write", "Bash(git *)")
+GENERAL_WIN = ("PowerShell(git *)",)
 CARD_SET = (
     ("tools", "The project's local settings file holds an allow rule for each tool a p4 hooks module declares: "
               + ", ".join(f"`{t}`" for t in CARD_TOOLS) + "."),
@@ -1855,6 +1871,12 @@ CARD_SET = (
     ("start", "A session another session started is refused a start whose `permission_mode` is of another class "
               "than its own, since every message between the two would be held, and a start in another folder, "
               "on another host or in the cloud, which the top session makes in a turn of ezexe's."),
+    ("general", "The project's local settings file holds an allow rule for each of `Edit`, `Write` and `Bash(git *)`, "
+                "and on Windows `PowerShell(git *)`, so a session edits files and runs git with no approval card. No "
+                "allow rule lifts Claude Code's own prompt for a write under `.claude`. With the set in force "
+                "p4-phi's guard asks ezexe, in every session and every permission mode, before a git command that "
+                "forces, that deletes work found nowhere else, or that reads or writes a stored login, and refuses "
+                "it in a session another session started."),
 )
 
 
@@ -1994,6 +2016,17 @@ def card_tool_rules(p4, phi):
     if phi is None:
         return None
     return list(CARD_TOOLS) if phi and cards_on(p4) else []
+
+
+def general_rules(p4, phi, platform=None):
+    """The allow rules of CARD_SET's `general` that the keeper wants for a store, by the rule of card_tool_rules:
+    all of them where p4-phi runs and the set is in force, none where it does not or the set is off, and None where
+    this copy cannot tell whether p4-phi runs."""
+    if phi is None:
+        return None
+    if not (phi and cards_on(p4)):
+        return []
+    return list(GENERAL_RULES) + (list(GENERAL_WIN) if (platform or sys.platform).startswith("win") else [])
 
 
 def _adopt_ask(new, rec, name):
@@ -2305,6 +2338,7 @@ def _keep(p4, project, target, platform, owned_only, out, note, tell):
     if phi and not ask and not owned_only and cards_on(p4):
         _adopt_ask(new, rec, name)                      # a leftover entry of p4's own text, taken out below
     _keep_rules(new, rec, name, card_tool_rules(p4, phi), owned_only, ALLOW_KEY, "toolRules")
+    _keep_rules(new, rec, name, general_rules(p4, phi, platform), owned_only, ALLOW_KEY, "generalRules")
     _keep_rules(new, rec, name, None if phi is None else ask, owned_only, ASK_KEY, "askRules")
     _keep_rules(new, rec, name, None if phi is None else list(DENY_RULES) if phi else [], owned_only, DENY_KEY,
                 "denyRules")
