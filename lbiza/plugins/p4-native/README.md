@@ -155,8 +155,8 @@ What the record comes to, by kind, as `/native weighed` prints it.
 - `tool`: 124 rows, 54 used, 1 open, 69 declined, 0 weighed by nobody
 - `hook`: 33 rows, 15 used, 0 open, 18 declined, 0 weighed by nobody
 - `event`: 60 rows, 19 used, 0 open, 41 declined, 0 weighed by nobody
-- `method`: 100 rows, 36 used, 0 open, 64 declined, 0 weighed by nobody
-- `used`: 145 rows, 52 watched by a row of misses.ts, 93 with no by-hand call to watch, 0 with neither
+- `method`: 100 rows, 37 used, 0 open, 63 declined, 0 weighed by nobody
+- `used`: 146 rows, 52 watched by a row of misses.ts, 94 with no by-hand call to watch, 0 with neither
 
 When the probes run, at a change of the Claude Code version on a kind of host, the module lists the slash commands Claude Code ships, its own tools and the desktop app's tools, and names once each that has no row: new in this build and weighed by nobody.
 The names told are kept in `probes.json` under the kind of host, so a name is told again only after it left the build and came back.
@@ -257,7 +257,7 @@ A session sometimes does by hand what a native feature of this host does.
 Six rows have a miss seen live behind them, and each says when it was seen.
 The other 37 are written from the record: one for each slash command and tool a p4 plugin uses that a session can also do by hand, with the by-hand way it is read off.
 Every row of `hooks/weighed.json` that a plugin uses names under `miss` the rows that watch it, or says under `nowatch` in one line why no by-hand call exists to watch, and a test holds that.
-Of the 145 used rows, 52 are watched by a row of the table and 93 say why none watches them: the 70 hook events, module events and module methods, which only a hooks module hooks or calls, and 23 commands and tools whose work no file or command a session reaches does.
+Of the 146 used rows, 52 are watched by a row of the table and 94 say why none watches them: the 71 hook events, module events and module methods, which only a hooks module hooks or calls, and 23 commands and tools whose work no file or command a session reaches does.
 The module checks the table after a tool call of the session and at the end of a turn, and hands one line of context that names the feature.
 
 - A line refuses no call: after a tool call the hooks beneath answer first, their answer is passed on whole, and the line is added to its context.

@@ -97,6 +97,8 @@ type Machine = {
   // What `phi.py progress` prints: the file that holds the tree. With none given it prints `{}`, as for a session
   // with no folder.
   progress?: () => { path?: string; changed?: boolean }
+  // What `$.agent.list()` answers: this session's subagents and teammates. With none given it answers none.
+  agents?: () => Record<string, unknown>[]
 }
 
 // What the module read, the pythons it tried, each look it ran and each other phi.py command it asked, every one
@@ -257,6 +259,7 @@ function machine(on: On, has: Machine): Seen {
       return (env === undefined ? { deny: 'the data folder could not be made' } : { value: env }) as never
     })
   }
+  on('agent.list', () => ({ value: (has.agents?.() ?? []) as never }))
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.receive', (_, e) => ({ text: e.text }))
@@ -2547,6 +2550,64 @@ test("the session's own task-list call refreshes the open pane's tree inside the
   await $.classic.PostToolUse({ ...call, tool_name: 'mcp__ccd_turn__update_plan' })
   await clock.settle()
   expect(seen.progressed.length).toBe(2)
+})
+
+test('a lead keeps its teammates in team.json at a turn end, and a session with no teammate writes none', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  let agents: Record<string, unknown>[] = [{ id: 'a0', kind: 'local_agent', description: 'Find the ports', label: 'Find the ports', status: 'running' }]
+  const seen = machine(on, { agents: () => agents })
+  const teams = (): string[] => seen.wrote.filter(write => write.path.endsWith('/team.json')).map(write => write.text)
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(teams()).toEqual([])
+
+  agents = [
+    ...agents,
+    { id: 'a1', kind: 'in_process_teammate', name: 'scout', description: 'Read the exporter', label: 'Read the exporter', status: 'idle' },
+    { id: 'a2', kind: 'in_process_teammate', name: 'critic', description: 'Argue against the plan', label: 'reading flush.py', status: 'running' },
+  ]
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(teams().map(text => JSON.parse(text))).toEqual([
+    {
+      teammates: [
+        { name: 'scout', task: 'Read the exporter', state: 'idle', doing: '' },
+        { name: 'critic', task: 'Argue against the plan', state: 'running', doing: 'reading flush.py' },
+      ],
+    },
+  ])
+  expect(seen.wrote.find(write => write.path.endsWith('/team.json'))?.path).toBe(`${FOLDER}/team.json`)
+
+  // The same list writes nothing more.
+  await $.turn.complete(TURN)
+  await clock.settle()
+  expect(teams().length).toBe(1)
+})
+
+test('a terminal worker and a teammate are lines under their session, and a lead apart says so', () => {
+  const lead = {
+    ...NODES[0],
+    apart: true,
+    steps: [],
+    goal: null,
+    workers: [{ name: 'upkeep-aaaa1111', task: 'port the flush', state: 'running' }],
+    team: [
+      { name: 'scout', task: 'Read the exporter', state: 'idle', doing: '' },
+      { name: 'critic', task: 'Argue against the plan', state: 'running', doing: 'reading flush.py' },
+    ],
+  }
+
+  expect(treeLines([lead])).toEqual([
+    { kind: 'title', text: 'Port the flush: working, a terminal session' },
+    { kind: 'now', text: 'terminal worker upkeep-aaaa1111, running: port the flush' },
+    { kind: 'text', text: 'teammate scout, idle: Read the exporter' },
+    { kind: 'now', text: 'teammate critic, running: Argue against the plan' },
+    { kind: 'dim', text: '  reading flush.py' },
+  ])
 })
 
 // A look where the store's phi.json turns `app_tools` on, and what the desktop app's two tools for sessions answer:

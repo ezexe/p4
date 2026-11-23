@@ -21,12 +21,15 @@
   },
   "$.agent.list": {
    "kind": "method",
+   "used": [
+    "p4-phi"
+   ],
    "declined": {
-    "p4-phi": "p4-phi binds a subagent at `agent.spawn`, which hands the call that launched it, and a list does not.",
     "p4-temportal": "it tracks no subagent.",
     "p4-native": "it tracks no subagent."
    },
-   "says": "Returns the session's agents so far, subagents and teammates: the ones the model spawned and the ones plugins did alike."
+   "says": "Returns the session's agents so far, subagents and teammates: the ones the model spawned and the ones plugins did alike.",
+   "nowatch": "Only a hooks module calls it: a session has no call that does this by hand."
   },
   "$.agent.register": {
    "kind": "method",

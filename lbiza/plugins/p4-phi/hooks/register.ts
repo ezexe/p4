@@ -393,6 +393,9 @@ let isProgressOwed = false
 let isStamping = false
 let emptyTicks = 0
 let paneTimer: Timer | undefined
+// The teammates last written to team.json, as its text: none written yet where this session has led no team.
+const TEAM_FILE = 'team.json'
+let teamed: string | undefined
 
 // One line of the Progress view: a session's title, the step in progress, a plain or a dim line, or a count of a
 // whole, which a surface with a `Progress` element draws as one and any other as `bar` draws it.
@@ -417,7 +420,7 @@ export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
   for (const one of nodes) {
     const pad = '  '.repeat(Math.min(Math.max(one.depth, 0), 6))
     const state = one.working ? 'working' : one.done ? 'idle, shown done' : 'idle'
-    lines.push({ kind: 'title', text: `${pad}${one.title}: ${state}` })
+    lines.push({ kind: 'title', text: `${pad}${one.title}: ${state}${one.apart === true ? ', a terminal session' : ''}` })
     if (one.goal !== null) {
       const word = GOAL_WORDS[one.goal.state] ?? one.goal.state
       const color = GOAL_COLORS[one.goal.state]
@@ -432,6 +435,15 @@ export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
         const agents = step.agents > 0 ? `, ${step.agents} ${step.agents === 1 ? 'agent' : 'agents'} running` : ''
         lines.push({ kind: step.status === 'in_progress' ? 'now' : 'text', text: `${pad}[${mark}] ${step.addr} ${step.content}${agents}` })
       }
+    }
+    for (const worker of one.workers ?? []) {
+      const kind = worker.state === 'running' ? 'now' : 'text'
+      lines.push({ kind, text: `${pad}terminal worker ${worker.name}, ${worker.state}: ${worker.task}` })
+    }
+    for (const mate of one.team ?? []) {
+      const kind = mate.state === 'running' ? 'now' : 'text'
+      lines.push({ kind, text: `${pad}teammate ${mate.name}, ${mate.state}: ${mate.task}` })
+      if (mate.doing !== '') lines.push({ kind: 'dim', text: `${pad}  ${mate.doing}` })
     }
     if (one.plan !== null) {
       lines.push({ kind: 'text', text: `${pad}plan: ${one.plan.title}` })
@@ -1464,6 +1476,31 @@ async function page($: EngineInterface): Promise<void> {
   }
 }
 
+// The teammates of the agent team this session leads, as `$.agent.list()` answers them, kept in team.json in the
+// session's folder for scripts/progress.py: each one's name, the task its lead gave it, its state and what it is
+// doing. A session with no teammate writes nothing, and `isOver` writes an empty list at the session's end.
+async function team($: EngineInterface, isOver = false): Promise<void> {
+  try {
+    const agents = isOver ? [] : await $.agent.list()
+    const mates = agents
+      .filter(one => one.kind === 'in_process_teammate' || one.teammateId !== undefined)
+      .map(one => ({
+        name: one.name ?? one.id,
+        task: one.description,
+        state: String(one.status),
+        doing: one.label === one.description ? '' : one.label.slice(0, 200),
+      }))
+    const now = `${JSON.stringify({ teammates: mates })}\n`
+    if (now === teamed || (teamed === undefined && mates.length === 0)) return
+    const dir = await folderOf($)
+    if (dir === undefined) return
+    await $.fs.write(`${dir}/${TEAM_FILE}`, now)
+    teamed = now
+  } catch {
+    // a Claude Code with no `$.agent.list`, or a folder that cannot be written: no team is shown
+  }
+}
+
 // The time and size of each file the tree was read from, and the names in each watched folder, as one string. A
 // file's time is read from its folder's list, one call a folder, and a folder that cannot be listed reads as empty.
 async function stamped($: EngineInterface): Promise<string> {
@@ -1768,7 +1805,8 @@ export const register: Register = on => {
   })
 
   // After a /clear or a resume the process goes on under another session id, whose folder can be another one.
-  on('session.end', ($, e, next) => {
+  on('session.end', async ($, e, next) => {
+    await team($, true)
     if (e.reason === 'clear' || e.reason === 'resume') {
       folder = undefined
       starter = undefined
@@ -1798,6 +1836,7 @@ export const register: Register = on => {
       isNoticeTurn = false
     }
     if (e.agentId === undefined || isWatching) void look($, true)
+    void team($)
 
     return next(e)
   })
@@ -1984,6 +2023,7 @@ export const register: Register = on => {
   on('agent.spawn', async ($, e, next) => {
     const started = await next(e)
     if (started.agentId !== undefined) keepSpawn($, e, started.agentId)
+    void team($)
 
     return started
   }).catch(($, e, next) => next(e))
@@ -1991,6 +2031,7 @@ export const register: Register = on => {
   // The SubagentStart command hooks run beneath this hook, so they run once the pair is written.
   on('classic.SubagentStart', async ($, e, next) => {
     await spawnBound($, e.agent_id)
+    void team($)
 
     return next(e)
   }).catch(($, e, next) => next(e))

@@ -177,7 +177,8 @@ class Tree(Store):
             for name in ("session.json", "plan.json"):
                 self.assertIn(f"{self.home}/phi/sessions/{sid}/{name}".replace("\\", "/"), m["sources"])
         # the hooks' log and the turns are watched too, since `working` and `done` are read from them
-        self.assertEqual(len(m["sources"]), 8)
+        self.assertEqual(len(m["sources"]), 12)
+        self.assertEqual((kid["workers"], kid["team"]), ([], []))
         self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/")])
 
     def test_the_file_is_written_once_and_again_only_when_the_tree_changed(self):
@@ -194,6 +195,55 @@ class Tree(Store):
     def test_a_session_with_no_folder_gets_no_file_and_no_folder(self):
         self.assertEqual(progress.write(self.home, "local_never001"), {})
         self.assertFalse(os.path.exists(os.path.join(self.home, "phi", "sessions", "local_never001")))
+
+
+class Others(Store):
+    def put(self, sid, name, data):
+        with open(os.path.join(self.home, "phi", "sessions", sid, name), "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    def test_a_terminal_worker_is_not_started_running_ended_or_removed(self):
+        self.session(TOP)
+        main = self.root.replace("\\", "/")
+        self.put(TOP, "upkeep.json", {"terminals": [
+            {"name": "upkeep-aaaa1111", "main": main, "text": "port the flush"},
+            {"name": "upkeep-bbbb2222", "main": main, "text": "read the exporter", "started": "2026-11-23 06:00"},
+            {"name": "upkeep-cccc3333", "main": main, "text": "run the suite", "started": "2026-11-23 06:00"},
+            {"name": "upkeep-dddd4444", "main": main, "text": "fix the docs", "started": "x", "removed": "y"}]})
+        for name in ("upkeep-bbbb2222", "upkeep-cccc3333"):
+            os.makedirs(os.path.join(self.root, ".claude", "worktrees", name))
+        lock = os.path.join(self.root, ".git", "worktrees", "upkeep-bbbb2222")
+        os.makedirs(lock)
+        with open(os.path.join(lock, "locked"), "w", encoding="utf-8") as f:
+            f.write(f"claude session upkeep-bbbb2222 (pid {os.getpid()})\n")
+        got = progress.workers_of(self.home, TOP)
+        self.assertEqual([(w["name"][-8:], w["state"]) for w in got],
+                         [("aaaa1111", "not started"), ("bbbb2222", "running"), ("cccc3333", "ended"),
+                          ("dddd4444", "removed")])
+        self.assertEqual(got[0]["task"], "port the flush")
+        self.assertEqual(progress.workers_of(self.home, "local_never001"), [])
+
+    def test_a_leads_teammates_are_read_from_its_team_file(self):
+        self.session(TOP)
+        self.put(TOP, "team.json", {"teammates": [
+            {"name": "scout", "task": "Read the exporter", "state": "idle", "doing": ""},
+            {"name": "critic", "task": "Argue against the plan", "state": "running", "doing": "reading flush.py"},
+            "no row"]})
+        self.assertEqual(progress.team_of(self.home, TOP), [
+            {"name": "scout", "task": "Read the exporter", "state": "idle", "doing": ""},
+            {"name": "critic", "task": "Argue against the plan", "state": "running", "doing": "reading flush.py"}])
+        self.assertEqual(progress.build(self.home, TOP)["nodes"][0]["team"][1]["name"], "critic")
+
+    def test_a_lead_no_session_started_is_a_row_apart_while_its_team_works(self):
+        self.session(TOP)
+        self.session("cli-lead-0001")
+        self.session("cli-plain-0001")
+        self.put("cli-lead-0001", "team.json", {"teammates": [{"name": "scout", "task": "Read", "state": "idle"}]})
+        nodes = progress.build(self.home, TOP)["nodes"]
+        self.assertEqual([(n["sessionId"], n.get("apart", False)) for n in nodes],
+                         [(TOP, False), ("cli-lead-0001", True)])
+        self.put("cli-lead-0001", "team.json", {"teammates": [{"name": "scout", "task": "Read", "state": "completed"}]})
+        self.assertEqual(len(progress.build(self.home, TOP)["nodes"]), 1, "a team that is over leaves no row")
 
 
 class Kept(Store):
