@@ -1,4 +1,4 @@
-# the virtual environment lbiza/scripts/make_venv.py builds
+# a virtual environment at the root, where lbiza/scripts/make_venv.py built one before the store held it in .claude/p4/.venv
 .venv/
 
 # what Claude Code and the plugins write for a session started in this checkout: its settings and its store
