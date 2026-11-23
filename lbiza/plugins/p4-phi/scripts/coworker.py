@@ -210,7 +210,9 @@ def land(path, checkout, folder, who, mode, windows=None):
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
-    folder = os.path.abspath(folder).replace("\\", "/")
+    # A folder written with a drive letter is whole on every machine, where os.path.abspath takes it as whole only
+    # on Windows and puts the working directory before it elsewhere.
+    folder = (folder if re.match(r"^(?:[A-Za-z]:[\\/]|/)", folder) else os.path.abspath(folder)).replace("\\", "/")
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
     sep = "\\" if windows else "/"
