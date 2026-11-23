@@ -116,6 +116,7 @@ The probe of a plugin's own compaction asks for a compaction that this module's 
 - `fullscreen-at-session-start`, asked: p4-phi opens its pane only by the typed `/phi-pane`.
 - `goal-as-a-first-prompt`, by hand: p4-phi sets a worker's goal from its hooks module after the first turn.
 - `agent-teams-in-the-desktop-app`, by hand: the settings keeper does not write `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`, and a team is led from a terminal session.
+- `agent-team-led-from-a-terminal-session`, by hand: p4-phi names a step argued from several sides for an agent team led from a terminal session, and keeps its teammates in `team.json`.
 - `message-held-across-permission-modes`, by hand: a message to a session in another permission mode is not relied on.
 - `skills-copy-named-like-an-installed-plugin`, by hand: a development copy is checked live through a session's mods folder.
 - `unknown-event-in-a-module`, by hand: a p4 hooks module names an event an older Claude Code lacks by a glob and tests `next.event`, as p4-temportal does for `tool.run`, and p4-phi's module names `tool.run` itself.

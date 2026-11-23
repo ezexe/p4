@@ -193,6 +193,21 @@ export const PROBES: readonly Probe[] = [
     check: 'read the page again, or set the variable in a desktop session and ask for a named teammate',
   },
   {
+    id: 'agent-team-led-from-a-terminal-session',
+    decision:
+      "p4-phi's task-list advice names a step argued from several sides for an agent team led from a terminal " +
+      'session, and its hooks module keeps the teammates in `team.json`.',
+    fault:
+      'No agent team has been seen live: on Claude Code 2.1.328 a teammate asked for by name ran as a background ' +
+      'subagent with no folder under `~/.claude/teams/`, where a module set the variable by `$.env.set`.',
+    was: 'blocked',
+    fits: anywhere,
+    kind: 'by hand',
+    check:
+      'start a lead by the start file of the skill `p4-phi:phi`, ask it for two named teammates, and read ' +
+      '`~/.claude/teams/` and the `team.json` of its folder in the store',
+  },
+  {
     id: 'message-held-across-permission-modes',
     decision:
       "A terminal worker's settings file sets `crossSessionInbound` to `accept`, and a message to a session in " +
