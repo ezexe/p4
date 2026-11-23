@@ -512,6 +512,9 @@ Every key is optional.
 
 A cap's value of another type or out of its range keeps the default.
 
+`phi.py conf` lists every setting of `p4.json` as p4 reads it, with `unset` for a key no file sets, `phi.py conf <key>` prints one, and `phi.py conf <key> <value>` writes one, checked as its reader takes it, and prints it read back.
+It refuses a key with a command of its own, a key p4 does not read, and any write in a session another session started.
+
 The `recall` section's keys and defaults are listed in `scripts/p4conf.py`, each beside its meaning.
 
 ### What a worktree shares with its main checkout

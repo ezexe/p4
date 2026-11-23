@@ -4484,7 +4484,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "sections",
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "conf", "sections",
                  "progress"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
@@ -4523,6 +4523,12 @@ def main(argv=None):
         if name == "detach":
             p.add_argument("moved", nargs="?", default="", help="the session to detach to top level, this one when "
                                                                 "left out")
+        if name == "conf":
+            p.add_argument("key", nargs="?", default="", help="a setting of p4.json by its dotted path, such as "
+                                                              "phi.worktree_python; none lists every setting")
+            p.add_argument("value", nargs="?", default=None, help="what to set it to, as its variable would hold "
+                                                                  "it; none prints the key")
+            p.add_argument("--unset", action="store_true", help="put the key back at its default")
         if name == "reparent":
             p.add_argument("moved")
         if name == "shard":
@@ -4626,6 +4632,21 @@ def main(argv=None):
                       "the set to ezexe", file=sys.stderr)
                 return 2
             status, lines = cards.switch(store, a.act == "on", a.set)
+            for line in lines:
+                print(line, file=sys.stderr if status else sys.stdout)
+            return status
+        if a.cmd == "conf":                        # a setting of p4.json, which needs no session
+            import conf
+            store = a.p4 or me.store or me.home
+            if a.value is None and not a.unset:
+                for line in conf.show(store, a.key):
+                    print(line)
+                return 0
+            if spawned_from(load_session(me.home, safe_id(me.id)) if me.id else {}):
+                print("phi: a setting is written by the top session, where ezexe is: ask it with SendMessage",
+                      file=sys.stderr)
+                return 2
+            status, lines = conf.unset(store, a.key) if a.unset else conf.put(store, a.key, a.value)
             for line in lines:
                 print(line, file=sys.stderr if status else sys.stdout)
             return status
