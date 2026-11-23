@@ -46,6 +46,11 @@ CLEAN = re.compile(r"(?i)^clean\b")
 EVIDENCE = re.compile(sections.LINE % r"evidence")
 # A plan a brief names, as sections.brief words it: "of the plan `<path>`", a file directly in a plans folder.
 NAMED = re.compile(r"`([^`\n]*[\\/]plan-planner[\\/][^`\\/\n]+\.md)`")
+# plan-planner, "The plan loop": where the last round held findings and no round follows, since every group's loop
+# has ended, the log closes with `- Ended: <the groups that stopped and the groups that ended clean>`.
+ENDED = re.compile(r"(?im)^[ \t]*[-*][ \t]+Ended[ \t]*:[ \t]*(.+?)[ \t]*$")
+# A round read by groups holds one indented line for each, `  - group <name>: <k> held, <m> minutes`.
+GROUP = re.compile(r"(?im)^[ \t]+[-*][ \t]+group[ \t]+\S")
 
 
 def goal_of(s):
@@ -89,7 +94,10 @@ def loop_of(bare):
         return {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False}
     held = [held_of(said) for _, said in rows]
     state = "clean" if held[-1] == 0 else ""
-    if not state and len(held) > 1 and None not in held[-2:] and held[-1] > held[-2]:
+    by_group = bool(GROUP.search(bare[m.end():]))
+    if not state and not by_group and len(held) > 1 and None not in held[-2:] and held[-1] > held[-2]:
+        state = "stopped"
+    if not state and ENDED.search(bare[m.end():]):
         state = "stopped"
     n, said = rows[-1]
     return {"round": n, "of": max(n, (held[0] or 0) + 1), "held": held[-1] or 0, "last": relay._short(said, 200),
@@ -257,6 +265,17 @@ def transcript_of(s):
     return found[0] if found else ""
 
 
+def worktree_transcripts(who):
+    """The transcripts Claude Code keeps for the sessions of the worktree named `who`, as a coworker's is: it names
+    a session's folder under `projects` by the session's own folder with every character that is no letter or digit
+    turned to a hyphen, so a worktree `.claude/worktrees/<who>` ends in `-worktrees-<who>`. [] for a name that
+    could be no worktree's."""
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", str(who or "")):
+        return []
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return sorted(glob.glob(os.path.join(base, "projects", f"*-worktrees-{who}", "*.jsonl")))
+
+
 def spend(home, who):
     """What a session and each agent under it spent, for `phi.py spend`: a row for the session itself, one for each
     transcript in the `subagents` folder beside its own, a teammate's or a subagent's by the `.meta.json` beside
@@ -267,14 +286,17 @@ def spend(home, who):
     s = held.get(who) or max((x for x in held.values() if x.get("title") == who),
                              key=lambda x: str(x.get("createdAt") or ""), default={})
     main = transcript_of(s)
-    if not main:
+    mains = [main] if main else worktree_transcripts(who)
+    if not mains:
         return []
-    rows = [dict(spend_of(main), who="the session itself", kind="session")]
-    for path in sorted(glob.glob(os.path.join(os.path.splitext(main)[0], "subagents", "agent-*.jsonl"))):
-        meta = relay._read_json(os.path.splitext(path)[0] + ".meta.json")
-        kind = "teammate" if meta.get("taskKind") == "in_process_teammate" else "subagent"
-        name = str(meta.get("name") or meta.get("agentType") or os.path.basename(path)[6:-6])
-        rows.append(dict(spend_of(path), who=f"{kind} {name}", kind=kind))
+    rows = []
+    for main in mains:
+        rows.append(dict(spend_of(main), who="the session itself", kind="session"))
+        for path in sorted(glob.glob(os.path.join(os.path.splitext(main)[0], "subagents", "agent-*.jsonl"))):
+            meta = relay._read_json(os.path.splitext(path)[0] + ".meta.json")
+            kind = "teammate" if meta.get("taskKind") == "in_process_teammate" else "subagent"
+            name = str(meta.get("name") or meta.get("agentType") or os.path.basename(path)[6:-6])
+            rows.append(dict(spend_of(path), who=f"{kind} {name}", kind=kind))
     rows.append({"who": "all of them", "kind": "all", "calls": sum(r["calls"] for r in rows),
                  "models": sorted({m for r in rows for m in r["models"]}),
                  **{key: sum(r[key] for r in rows) for key, _ in SPENT}})

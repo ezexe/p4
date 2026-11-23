@@ -146,6 +146,17 @@ class Plan(Store):
         self.assertEqual(progress.loop_of("## Loop log\n\n- Round 2 of 5: dry\n")["round"], 2, "the earlier shape")
         self.assertIsNone(progress.loop_of("# A plan\n\n## 1. A section\n"))
 
+    def test_a_log_that_closes_with_ended_is_a_loop_that_stopped(self):
+        log = ("## Loop log\n\n- Round 1: 5 held, 9 minutes: two fences mended.\n  - group cw-a: 3 held, 9 minutes\n"
+               "  - group cw-b: 2 held, 6 minutes\n- Round 2: 3 held, 4 minutes: one check narrowed.\n")
+        self.assertEqual(progress.loop_of(log)["state"], "", "the sum shrank, so it reads as going on")
+        more = log + "- Round 3: 4 held, 2 minutes: one group's count grew.\n"
+        self.assertEqual(progress.loop_of(more)["state"], "", "a sum over groups that grew ends no loop")
+        ended = progress.loop_of(log + "- Ended: group cw-a stopped, group cw-b ended clean.\n")
+        self.assertEqual((ended["round"], ended["held"], ended["state"], ended["ended"]), (2, 3, "stopped", True))
+        path = self.plan(text=PLAN + "- Ended: the one group stopped.\n")
+        self.assertEqual(progress.plan_of({"planFile": path})["loop"]["state"], "stopped", "as the pane is handed it")
+
     def test_a_plans_sections_say_which_land_files_and_which_hold_their_evidence(self):
         path = self.plan()
         got = progress.plan_of({"planFile": path})
@@ -310,6 +321,30 @@ class Spend(Store):
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
             self.assertEqual(progress.spend(self.home, "cli-0002")[0]["input"], 9)
             self.assertEqual(progress.transcript_of({"cliSessionIds": ["cli-9999"]}), "")
+
+    def test_a_coworker_with_no_record_is_found_by_the_folder_of_its_worktrees_name(self):
+        from unittest import mock
+        config = os.path.join(self.root, "config")
+        lead = os.path.join(config, "projects", "E--repo--claude-worktrees-cw-move-1", "cli-0003.jsonl")
+        self.rows(lead, ("m1", "claude-sonnet-5-5", {"input_tokens": 4, "output_tokens": 1}))
+        mate = os.path.join(os.path.splitext(lead)[0], "subagents", "agent-afences-1.jsonl")
+        self.rows(mate, ("m2", "claude-sonnet-5-5", {"input_tokens": 6, "output_tokens": 2}))
+        with open(mate[:-6] + ".meta.json", "w", encoding="utf-8") as f:
+            json.dump({"name": "fences", "taskKind": "in_process_teammate"}, f)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
+            got = progress.spend(self.home, "cw-move-1")
+            self.assertEqual([(r["who"], r["calls"]) for r in got],
+                             [("the session itself", 1), ("teammate fences", 1), ("all of them", 2)])
+            self.assertEqual(got[-1]["input"], 10)
+            self.assertEqual(progress.spend(self.home, "cw-move"), [], "the start of a name is no name")
+            self.assertEqual(progress.spend(self.home, "../cw-move-1"), [], "and a path is none")
+        # the command itself, which exits 0 for a coworker's name and 2 for a name of nothing
+        command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "spend", "--p4", self.home]
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": config}
+        ran = subprocess.run(command + ["cw-move-1"], capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual((ran.returncode, len(ran.stdout.strip().split("\n"))), (0, 3), ran.stderr)
+        none = subprocess.run(command + ["cw-move"], capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(none.returncode, 2)
 
 
 class Kept(Store):
