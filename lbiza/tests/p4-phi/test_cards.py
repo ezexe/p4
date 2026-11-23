@@ -443,6 +443,42 @@ class Guards(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
 
+    def test_the_force_guard_asks_at_the_top_and_refuses_in_a_started_session(self):
+        """With the set in force a git command that forces is ezexe's: asked in the top session, refused in a
+        session another session started. With the set off, and for a plain push, the guard says nothing."""
+        cmd = "git push --force origin main"
+        self.assertIsNone(self.guard("force-guard", TOP, cmd), "set off: as before")
+        self.on()
+        self.assertEqual(self.guard("force-guard", TOP, cmd)["permissionDecision"], "ask")
+        self.assertEqual(self.guard("force-guard", self.pusher, cmd)["permissionDecision"], "deny")
+        self.assertIsNone(self.guard("force-guard", TOP, "git push origin main"))
+        self.assertIsNone(self.guard("force-guard", TOP, "git commit -m 'git push --force'"), "a quoted word is data")
+        both = "git status && git push --force origin main"
+        self.assertEqual(self.guard("force-guard", TOP, both)["permissionDecision"], "ask", "the line is read whole")
+        chained = "git commit -am x && git reset --hard HEAD~1"
+        self.assertEqual(self.guard("force-guard", TOP, chained, cwd=self.work)["permissionDecision"], "ask",
+                         "a reset behind another command is never judged by the tree as it stands")
+        import hook
+        for tool in ("Bash", "PowerShell"):
+            names = hook.PHI_CHECK[tool]
+            self.assertLess(names.index("store-guard"), names.index("force-guard"), tool)
+            self.assertLess(names.index("force-guard"), names.index("branch-guard"), tool)
+
+    def test_what_a_line_runs_that_the_general_part_never_covers(self):
+        for cmd, kind in (("git push -f", "push"), ("git push origin +main", "push"),
+                          ("git push origin :old", "push"), ("git -C x push --force-with-lease", "push"),
+                          ("git branch -D old", "branch"), ("git branch -f main HEAD~3", "move"),
+                          ("git worktree remove --force w", "worktree"), ("git reset --hard HEAD~1", "reset"),
+                          ("git checkout -f main", "reset"), ("git clean -fd", "clean"),
+                          ("git stash drop", "stash"), ("git update-ref -d refs/heads/x", "ref"),
+                          ("git reflog expire --all", "ref"), ("git credential fill", "login"),
+                          ("git config credential.helper store", "login")):
+            self.assertEqual([k for _, k, _ in issues.risks(cmd)], [kind], cmd)
+        for cmd in ("git push origin main", "git branch -d old", "git worktree remove w", "git reset --soft HEAD~1",
+                    "git clean -n", "git commit -m 'reset --hard'", "git restore a.txt", "git stash", "ls"):
+            self.assertEqual(issues.risks(cmd), [], cmd)
+        self.assertEqual([k for _, k, _ in issues.risks("git reset --hard && git push -f")], ["reset", "push"])
+
     def test_the_brief_is_read_at_the_first_message(self):
         self.assertIs(self.t.session(self.pusher).get("pushes"), True)
         self.assertIs(self.t.session(self.keeper).get("pushes"), False)

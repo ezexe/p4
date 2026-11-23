@@ -272,6 +272,70 @@ def landings(cmd, verbs=LANDS):
     return found
 
 
+RISKY_PUSH = re.compile(r"^(?:--force(?:-with-lease|-if-includes)?(?:=.*)?|--delete|--mirror|--prune)$")
+
+
+def _risk(exe, nxt):
+    """What one program's name and the words after it run that the general part of p4conf.CARD_SET never covers,
+    as (its words, its kind, the names it acts on), or () for none."""
+    if exe != "git":
+        return ()
+    k = 0
+    while k < len(nxt) and nxt[k].startswith("-") and nxt[k] not in SEPS:
+        k += 2 if nxt[k] in GIT_VALUED else 1
+    args = _args(nxt[k:])
+    if not args:
+        return ()
+    verb, rest = args[0].lower(), args[1:]
+    flags = [a for a in rest if a.startswith("-")]
+    words = [a for a in rest if not a.startswith("-")]
+    short = "".join(a[1:] for a in flags if not a.startswith("--"))
+    forced = "--force" in flags or "f" in short
+    if verb == "push" and (any(RISKY_PUSH.match(a) for a in flags) or "f" in short or "d" in short
+                           or any(w.startswith("+") or (w.startswith(":") and len(w) > 1) for w in words)):
+        return ("a push that forces or that deletes a branch on the remote", "push", [])
+    if verb == "branch" and "D" in short or verb == "branch" and forced and ("--delete" in flags or "d" in short):
+        return ("a forced deletion of a branch", "branch", words)
+    if verb == "branch" and (forced or "M" in short or "C" in short):
+        return ("a forced move of a branch", "move", [])
+    if verb == "worktree" and words[:1] == ["remove"] and forced:
+        return ("a forced removal of a worktree", "worktree", words[1:])
+    if verb == "reset" and "--hard" in flags:
+        return ("a hard reset", "reset", [])
+    if verb == "checkout" and forced:
+        return ("a forced checkout", "reset", [])
+    if verb == "clean" and forced and "--dry-run" not in flags and "n" not in short:
+        return ("a clean of untracked files", "clean", [])
+    if verb == "stash" and words[:1] in (["drop"], ["clear"]):
+        return ("a deletion of stashed work", "stash", [])
+    if verb == "update-ref" and ("--delete" in flags or "d" in short) or verb == "reflog" and \
+            words[:1] in (["expire"], ["delete"]):
+        return ("a deletion of a ref or of the reflog", "ref", [])
+    if verb == "credential" or verb.startswith("credential-") \
+            or (verb == "config" and any("credential" in a.lower() for a in rest)):
+        return ("a read or write of a stored login", "login", [])
+    return ()
+
+
+def risks(cmd):
+    """Every command of a shell line that the general part of p4conf.CARD_SET never covers, in the line's order, each
+    as _risk gives it, read as `_scan` reads a line: a push that forces or deletes on the remote, a forced deletion
+    or move of a branch, a forced removal of a worktree, a hard reset, a forced checkout, a clean of untracked
+    files, a deletion of stashed work, of a ref or of the reflog, and a read or write of a stored login. A line is
+    read whole, as `landings` reads one, so a force behind a harmless command is found."""
+    found = []
+    if "git" not in str(cmd or ""):
+        return found
+
+    def hit(exe, nxt):
+        got = _risk(exe, nxt)
+        if got:
+            found.append(got)
+        return ""                                  # never the scan's answer, so it reads on to the line's end
+    _scan(cmd, hit)
+    return found
+
+
 GH_VALUED = {"-R", "--repo"}                       # gh's options that take the next word as their value
 
 

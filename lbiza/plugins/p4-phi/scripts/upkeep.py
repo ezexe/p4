@@ -162,6 +162,18 @@ def on_default(repo, rev):
     return None if r is None or r.returncode not in (0, 1) else r.returncode == 0
 
 
+def landed(repo, rev):
+    """True when every commit of `rev` is on the remote's default branch, by its own hash or as a commit of the same
+    patch, as `git cherry` reads it: it marks with `+` each commit whose patch the upstream lacks. None when git
+    cannot say. A branch landed by a rebase holds other hashes than the default branch, so on_default reads it as
+    unmerged and this does not."""
+    ref = default_ref(repo)
+    if not ref or not rev:
+        return None
+    got = _out(repo, "cherry", ref, rev)
+    return None if got is None else not any(line.startswith("+") for line in got.splitlines())
+
+
 def ahead(repo, rev):
     n = _out(repo, "rev-list", "--count", f"{default_ref(repo)}..{rev}") if default_ref(repo) else None
     return int(n) if n and n.isdigit() else 0

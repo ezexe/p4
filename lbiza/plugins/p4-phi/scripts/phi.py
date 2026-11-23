@@ -3923,6 +3923,49 @@ def h_store_guard(payload):
                         f"check each entry the sync names as changed.{whose}")
 
 
+def h_force_guard(payload):
+    """PreToolUse on a shell call, with the set of p4conf.CARD_SET in force: a git command the general part never
+    covers, as issues.risks reads the whole line, is asked of ezexe in a session no session started and refused in
+    a started one, by cards.raised. Two pass unasked where the command runs in the hook's own folder, since the
+    check is the go: a hard reset in a worktree that holds no uncommitted change and no commit the default branch
+    lacks, and a forced deletion of branches whose every commit is on the default branch by hash or by patch.
+    Silent with the set off."""
+    if str(payload.get("tool_name") or "") not in SHELL_TOOLS:
+        return None
+    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
+    line = str(inp.get("command") or "")
+    found = issues.risks(line)
+    if not found:
+        return None
+    me = Me(payload)
+    if not me.home or not cards_on(me):
+        return None
+    here = str(payload.get("cwd") or "")
+    # a check of the tree holds only for a line that is one command run where the hook says: behind `cd`, `-C` or
+    # an earlier command of the same line the tree is another by the time the command runs
+    plain = bool(here) and not CD.search(line) and not DASH_C.search(line) \
+        and not re.search(r"&&|\|\||[;|\n]", QUOTED.sub("''", line))
+
+    def spared(kind, names):
+        if not plain:
+            return False
+        if kind == "reset":                        # no uncommitted change, and each commit is on the default branch
+            return upkeep.dirty(here) == 0 and upkeep.landed(here, "HEAD") is True
+        if kind == "branch":                       # each commit is on the default branch, by hash or by patch
+            return bool(names) and all(upkeep.landed(here, n) is True for n in names)
+        return False
+    left = [(what, kind) for what, kind, names in found if not spared(kind, names)]
+    if not left:
+        return None
+    what, kind = left[0]
+    s = load_session(me.home, me.id) if me.id else {}
+    RAN["force_guard"] = kind
+    return cards.raised(True, spawned_from(s),
+                        f"phi (p4-phi): this is {what}, which the set of what p4-phi settles with no approval card "
+                        f"never covers: a force, a deletion of work found nowhere else and a stored login stay "
+                        f"ezexe's.")
+
+
 def h_cards_guard(payload):
     """PreToolUse on a shell call that runs `phi.py cards on`: the one approval card the set has. What p4-phi
     settles with no card is a permission, so the yes is ezexe's own press on Claude Code's card, which a hook's
@@ -4253,6 +4296,7 @@ HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_chec
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
+HOOKS["force-guard"] = ROUTED["force-guard"] = ("PreToolUse", h_force_guard)
 HOOKS["issue-tie"] = ROUTED["issue-tie"] = ("PostToolUse", h_issue_tie)
 HOOKS["cards-yes"] = ROUTED["cards-yes"] = ("PostToolUse", h_cards_yes)
 HOOKS["plan-mode"] = ROUTED["plan-mode"] = ("PostToolUse", h_plan_mode)
