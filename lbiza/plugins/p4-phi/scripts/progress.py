@@ -18,7 +18,6 @@ import sections
 import starts
 
 FILE = "progress.json"
-ROUNDS = 5                       # plan-planner, "The plan loop": the loop ends after five rounds
 NODES = 64                       # the most sessions one file holds
 STEPS = 24                       # the most steps of one session, and the most sections of one plan
 SOURCES = 400                    # the most files the module watches
@@ -34,10 +33,12 @@ OVER = ("completed", "failed", "killed")
 LOCK_PID = re.compile(r"\(pid (\d+)\)")
 
 # plan-planner, "The plan loop": "under a last heading `## Loop log`, one line a round as
-# `- Round <n> of 5: <what the round changed>`, or `- Round <n> of 5: dry` for a dry round".
+# `- Round <n>: <k> held, <m> minutes: <what the mends changed>`", and a clean round as
+# `- Round <n>: clean, <m> minutes`. The indented lines beneath a round, one a finding, open with no `Round`.
 LOG = re.compile(r"(?im)^## +Loop log[ \t]*$")
-ROUND = re.compile(r"(?im)^[ \t]*[-*][ \t]+Round[ \t]+(\d+)(?:[ \t]+of[ \t]+(\d+))?[ \t]*:[ \t]*(.+?)[ \t]*$")
-DRY = re.compile(r"(?i)^dry\b")
+ROUND = re.compile(r"(?im)^[ \t]*[-*][ \t]+Round[ \t]+(\d+)[ \t]*:[ \t]*(.+?)[ \t]*$")
+HELD = re.compile(r"(?i)^(\d+)[ \t]+held\b")
+CLEAN = re.compile(r"(?i)^clean\b")
 EVIDENCE = re.compile(sections.LINE % r"evidence")
 # A plan a brief names, as sections.brief words it: "of the plan `<path>`", a file directly in a plans folder.
 NAMED = re.compile(r"`([^`\n]*[\\/]plan-planner[\\/][^`\\/\n]+\.md)`")
@@ -64,24 +65,31 @@ def goal_of(s):
     return None
 
 
+def held_of(said):
+    """The findings that held in a round, by its line's words: 0 for a clean round, None where the line says none."""
+    m = HELD.match(said)
+    return 0 if CLEAN.match(said) else int(m.group(1)) if m else None
+
+
 def loop_of(bare):
-    """A plan's loop as its log says it, or None for a plan with no `## Loop log`: the round it is on, of how many,
-    what the last round changed, how many dry rounds stand in a row at the log's end, and whether the loop has ended,
-    which it has after two dry rounds in a row or at the last round. `bare` is the plan's text with its fences
-    blanked, so a log quoted in a fence is no log."""
+    """A plan's loop as its log says it, or None for a plan with no `## Loop log`: the round it is on, the most
+    rounds it can take, which is one more than round 1 held findings, the findings that held in the last round,
+    what that round's line says, and how the loop ended: `clean` at a round with nothing to mend, `stopped` where a
+    round held no fewer findings than the round before, and '' while it goes on. `bare` is the plan's text with its
+    fences blanked, so a log quoted in a fence is no log."""
     m = LOG.search(bare)
     if not m:
         return None
-    rows = [(int(n), int(of or ROUNDS), said) for n, of, said in ROUND.findall(bare[m.end():])]
+    rows = [(int(n), said) for n, said in ROUND.findall(bare[m.end():])]
     if not rows:
-        return {"round": 0, "of": ROUNDS, "last": "", "dry": 0, "ended": False}
-    dry = 0
-    for _, _, said in reversed(rows):
-        if not DRY.match(said):
-            break
-        dry += 1
-    n, of, said = rows[-1]
-    return {"round": n, "of": of, "last": relay._short(said, 200), "dry": dry, "ended": dry >= 2 or n >= of}
+        return {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False}
+    held = [held_of(said) for _, said in rows]
+    state = "clean" if held[-1] == 0 else ""
+    if not state and len(held) > 1 and None not in held[-2:] and held[-1] >= held[-2]:
+        state = "stopped"
+    n, said = rows[-1]
+    return {"round": n, "of": max(n, (held[0] or 0) + 1), "held": held[-1] or 0, "last": relay._short(said, 200),
+            "state": state, "ended": bool(state)}
 
 
 def plan_of(s):

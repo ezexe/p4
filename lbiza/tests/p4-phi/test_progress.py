@@ -41,7 +41,7 @@ No worker lands this.
 {TICKS}markdown
 ## Loop log
 
-- Round 9 of 5: a log quoted in a fence is no log
+- Round 9: a log quoted in a fence is no log
 {TICKS}
 
 ## 2. The flush
@@ -52,8 +52,9 @@ No worker lands this.
 
 ## Loop log
 
-- Round 1 of 5: section 2 gained its fence and its check.
-- Round 2 of 5: dry
+- Round 1: 3 held, 9 minutes: section 2 gained its fence and its check.
+  - 2: the check names no test file: mended, the file is named.
+- Round 2: 1 held, 4 minutes: one check was narrowed.
 """
 
 
@@ -128,16 +129,18 @@ class Goal(unittest.TestCase):
 
 
 class Plan(Store):
-    def test_the_loop_log_gives_the_round_the_last_change_and_the_dry_rounds_in_a_row(self):
-        log = "## Loop log\n\n- Round 1 of 5: two fences changed.\n- Round 2 of 5: dry\n"
-        self.assertEqual(progress.loop_of(log),
-                         {"round": 2, "of": 5, "last": "dry", "dry": 1, "ended": False})
-        self.assertEqual(progress.loop_of(log + "- Round 3 of 5: Dry.\n"),
-                         {"round": 3, "of": 5, "last": "Dry.", "dry": 2, "ended": True})
-        five = "## Loop log\n\n" + "".join(f"- Round {n} of 5: a check changed.\n" for n in range(1, 6))
-        self.assertEqual(progress.loop_of(five)["ended"], True)
-        self.assertEqual(progress.loop_of(five)["dry"], 0)
-        self.assertEqual(progress.loop_of("## Loop log\n"), {"round": 0, "of": 5, "last": "", "dry": 0, "ended": False})
+    def test_the_loop_log_gives_the_round_its_held_findings_and_how_the_loop_ended(self):
+        log = "## Loop log\n\n- Round 1: 3 held, 9 minutes: two fences mended.\n  - 2: a check: mended, named.\n"
+        self.assertEqual(progress.loop_of(log), {"round": 1, "of": 4, "held": 3, "state": "", "ended": False,
+                                                 "last": "3 held, 9 minutes: two fences mended."})
+        on = progress.loop_of(log + "- Round 2: 1 held, 4 minutes: one check narrowed.\n")
+        self.assertEqual((on["round"], on["of"], on["held"], on["state"], on["ended"]), (2, 4, 1, "", False))
+        clean = progress.loop_of(log + "- Round 2: clean, 3 minutes\n")
+        self.assertEqual((clean["held"], clean["state"], clean["ended"]), (0, "clean", True))
+        stopped = progress.loop_of(log + "- Round 2: 3 held, 5 minutes: no fewer than before.\n")
+        self.assertEqual((stopped["state"], stopped["ended"]), ("stopped", True))
+        self.assertEqual(progress.loop_of("## Loop log\n"),
+                         {"round": 0, "of": 0, "held": 0, "last": "", "state": "", "ended": False})
         self.assertIsNone(progress.loop_of("# A plan\n\n## 1. A section\n"))
 
     def test_a_plans_sections_say_which_land_files_and_which_hold_their_evidence(self):
@@ -147,7 +150,8 @@ class Plan(Store):
         self.assertEqual(got["sections"], [{"head": "Context", "lands": False, "done": False},
                                            {"head": "1. The writer", "lands": True, "done": True},
                                            {"head": "2. The flush", "lands": True, "done": False}])
-        self.assertEqual(got["loop"], {"round": 2, "of": 5, "last": "dry", "dry": 1, "ended": False})
+        self.assertEqual(got["loop"], {"round": 2, "of": 4, "held": 1, "state": "", "ended": False,
+                                       "last": "1 held, 4 minutes: one check was narrowed."})
 
     def test_a_worker_reads_the_plan_its_brief_names_and_a_plan_that_is_gone_reads_as_none(self):
         path = self.plan().replace("\\", "/")

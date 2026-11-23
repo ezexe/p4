@@ -462,8 +462,8 @@ export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
       lines.push({ kind: 'dim', text: `${pad}  ${one.plan.path}` })
       const loop = one.plan.loop
       if (loop !== null) {
-        const dry = loop.dry > 0 ? `, ${loop.dry} dry in a row` : ''
-        const text = `round ${loop.round} of ${loop.of}${dry}${loop.ended ? ', ended' : ''}`
+        const held = loop.state === 'clean' ? 'clean' : `${loop.held} held`
+        const text = `round ${loop.round}, ${held}${loop.state === 'stopped' ? ', stopped' : ''}`
         lines.push({ kind: 'bar', label: `${pad}loop`, value: loop.round, max: loop.of, text })
         if (loop.last !== '') lines.push({ kind: 'dim', text: `${pad}  last round: ${loop.last}` })
       }

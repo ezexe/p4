@@ -2489,7 +2489,7 @@ test('where no surface draws a pane the command says why, and a pane nobody open
 })
 
 // A tree of two sessions as scripts/progress.py writes it: an orchestrator on its second step with a goal set, and
-// a planner under it whose plan is on round 2 of 5 with one dry round.
+// a planner under it whose plan is on round 2 with one finding held, of a loop that can take four rounds.
 const TREE_FILE = `${FOLDER}/progress.json`
 const KID_PLAN = '/work/project/.claude/p4/phi/sessions/local_kid00001/plan.json'
 const NODES = [
@@ -2523,7 +2523,7 @@ const NODES = [
         { head: 'Context', lands: false, done: false },
         { head: '1. The writer', lands: true, done: true },
       ],
-      loop: { round: 2, of: 5, last: 'dry', dry: 1, ended: false },
+      loop: { round: 2, of: 4, held: 1, last: '1 held, 4 minutes', state: '', ended: false },
     },
   },
 ]
@@ -2544,8 +2544,8 @@ test('the tree is lines: a session, its goal, its steps with a bar, and its plan
     { kind: 'dim', text: '    the command was dropped' },
     { kind: 'text', text: "  plan: The exporter's move" },
     { kind: 'dim', text: '    /work/project/.claude/p4/temportal/plan-planner/linear-stallman.md' },
-    { kind: 'bar', label: '  loop', value: 2, max: 5, text: 'round 2 of 5, 1 dry in a row' },
-    { kind: 'dim', text: '    last round: dry' },
+    { kind: 'bar', label: '  loop', value: 2, max: 4, text: 'round 2, 1 held' },
+    { kind: 'dim', text: '    last round: 1 held, 4 minutes' },
     { kind: 'dim', text: '  [ ] Context' },
     { kind: 'text', text: '  [x] 1. The writer' },
   ])

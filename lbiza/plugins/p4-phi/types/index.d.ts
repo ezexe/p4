@@ -10,7 +10,7 @@ export type PhiPage = { name: 'board' | 'asks' | 'ledger'; title: string; path: 
 // `failed` or `cleared`, its steps, and the plan it works with that plan's sections and its loop.
 export type PhiGoal = { state: string; condition: string; reason?: string }
 export type PhiStep = { addr: string; content: string; status: string; agents: number }
-export type PhiLoop = { round: number; of: number; last: string; dry: number; ended: boolean }
+export type PhiLoop = { round: number; of: number; held: number; last: string; state: string; ended: boolean }
 export type PhiPlan = {
   path: string
   title: string
