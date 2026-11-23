@@ -176,7 +176,7 @@ class Coworker(unittest.TestCase):
         run = one["lines"][-1]
         for word in ("--worktree", "--add-dir", "--session-id"):
             self.assertNotIn(word, run, word)
-        self.assertIn("--permission-mode auto ", run)
+        self.assertIn("--permission-mode bypassPermissions ", run, "whatever mode its starter is in")
         self.assertTrue(run.startswith(f"claude --name {name} --model "), run)
         at = one["folder"].replace("/", "\\")
         self.assertIn(f"--settings '{at}\\coworker-settings.json' '/goal ", run)

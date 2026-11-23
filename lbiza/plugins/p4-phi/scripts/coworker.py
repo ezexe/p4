@@ -306,6 +306,11 @@ PHI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phi.py").replace
 TEAMMATES = ("fences", "sources", "checks")
 AGENT_ID = re.compile(r"a[0-9a-f]{6,}(?:-[0-9a-z]+)*|local_[0-9a-f-]+")
 TURNS = 60                                     # the goal page: a goal with no turn or time clause has no cap
+# The mode every terminal worker of land() starts in, whatever its starter's: a worker is unattended, and in auto
+# mode the classifier refused a step of the plan it was landing, a nested `claude -p`, seen on 2026-11-23 with
+# the worker tw-one-checkout-for-1-2-cf08. permission-modes.md gives `bypassPermissions` as the mode that asks
+# for nothing but a protected path. See more: https://code.claude.com/docs/en/permission-modes.md
+LAND_MODE = "bypassPermissions"
 
 
 def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None):
@@ -314,7 +319,8 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
     makes for it in the store `store` of its starter `starter`, and in the node's folder the `brief` text and its
     file, the `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in
     its tab; a name that has a node already gets `started`, its node's folder, and nothing else. The worker has no
-    worktree, no team, no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one."""
+    worktree, no team, no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one. It
+    starts in LAND_MODE, and `mode`, its starter's, is not read."""
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
@@ -357,7 +363,7 @@ def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
             f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
             f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
             "with what is done and what is not.")
-    file, lines, typed = script(name, checkout, mode, goal, folder, windows, worktree=False, team=False)
+    file, lines, typed = script(name, checkout, LAND_MODE, goal, folder, windows, worktree=False, team=False)
     one.update(brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
                report=report, goal=goal, file=file, lines=lines, typed=typed)
 
