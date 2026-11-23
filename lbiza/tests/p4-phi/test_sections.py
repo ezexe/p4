@@ -105,6 +105,14 @@ class Sections(unittest.TestCase):
         self.assertEqual([[s["n"] for s in run] for run in sections.runs(found)], [["2"], ["1"]])
         self.assertIn("\nFiles: `b.py`\n", sections.brief(self.path, title, [found[1]]))
 
+    def test_a_section_with_evidence_is_landed_and_joins_no_run(self):
+        text = PLAN.replace("## 1. The writer\n", "## 1. The writer\n\n**Evidence:** landed as abc1234\n", 1)
+        _, found = sections.parse(text, self.base)
+        self.assertEqual([s["landed"] for s in found], [True, False, False, False])
+        runs = [[s["n"] for s in run] for run in sections.runs(found)]
+        self.assertEqual(runs, [["2"], ["3"], ["4"]], "section 2 depends on 1, which is met, and joins nothing")
+        self.assertEqual([[s["n"] for s in g] for g in sections.groups(found)], [["2", "3", "4"]])
+
     def test_a_plan_with_no_files_line_has_no_run(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")

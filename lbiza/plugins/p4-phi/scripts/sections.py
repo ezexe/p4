@@ -22,6 +22,7 @@ NUMBER = re.compile(r"(\d+)\b")
 LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$"
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
+EVIDENCE = re.compile(LINE % r"evidence")      # a landed section holds this line; progress.py reads it for the pane too
 # plan-planner, "What every section of a plan holds": `**Assumed:**` stands after `**Observed:**`, with one line for
 # each thing the section takes to be so, or the one word `none`.
 ASSUMED = re.compile(r"(?im)^[ \t>*-]*\*\*assumed[ \t]*:?[ \t]*\*\*[ \t]*:?[ \t]*(.*?)[ \t]*$")
@@ -58,7 +59,7 @@ def assumed_of(body):
 
 def parse(text, base=""):
     """(title, sections) of a plan's text. A section is a `## ` heading outside any fence whose body names files on
-    a `Files:` line; its number is the one its heading opens with, else its place among the sections. Its `fences`
+    a `Files:` line, and is `landed` where it holds an `Evidence:` line; its number is the one its heading opens with, else its place among the sections. Its `fences`
     are the fenced blocks it holds and its `assumed` the lines under its `Assumed:`."""
     raw = str(text or "")
     bare = FENCE.sub(lambda m: " " * len(m.group(0)), raw)
@@ -85,13 +86,16 @@ def parse(text, base=""):
                     # `Checks: none` names no check, as `Files: none` names no file
                     "checks": checks.group(1).rstrip(".") if checks and not starts.NO_FILES.match(checks.group(1))
                     else "",
-                    "fences": len(FENCE.findall(raw[m.end():end])), "assumed": assumed_of(body)})
+                    "fences": len(FENCE.findall(raw[m.end():end])), "assumed": assumed_of(body),
+                    "landed": bool(EVIDENCE.search(body))})
     return (top.group(1) if top else "plan"), out
 
 
 def runs(sections):
     """The sections as runs, each a list in the plan's order: two sections are in one run when one depends on the
-    other or they share a file, and so are the sections each of them is joined with."""
+    other or they share a file, and so are the sections each of them is joined with. A landed section, one that holds
+    its `Evidence:`, is in no run, and a `Depends on:` that names it is met and joins nothing."""
+    sections = [s for s in sections if not s.get("landed")]
     run = {s["n"]: k for k, s in enumerate(sections)}
     for i, a in enumerate(sections):
         for b in sections[:i]:

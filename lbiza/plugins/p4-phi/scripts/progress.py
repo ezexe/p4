@@ -43,7 +43,7 @@ LOG = re.compile(r"(?im)^## +Loop log[ \t]*$")
 ROUND = re.compile(r"(?im)^[ \t]*[-*][ \t]+Round[ \t]+(\d+)(?:[ \t]+of[ \t]+\d+)?[ \t]*:[ \t]*(.+?)[ \t]*$")
 HELD = re.compile(r"(?i)^(\d+)[ \t]+held\b")
 CLEAN = re.compile(r"(?i)^clean\b")
-EVIDENCE = re.compile(sections.LINE % r"evidence")
+EVIDENCE = sections.EVIDENCE
 # A plan a brief names, as sections.brief words it: "of the plan `<path>`", a file directly in a plans folder.
 NAMED = re.compile(r"`([^`\n]*[\\/]plan-planner[\\/][^`\\/\n]+\.md)`")
 # plan-planner, "The plan loop": where the last round held findings and no round follows, since every group's loop
