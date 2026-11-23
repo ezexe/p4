@@ -23,9 +23,12 @@ LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
 # what `phi.py sections` says after the calls it prints: each is a start that runs at once, which the app refuses in
-# a turn ezexe's own message did not begin, where the same call goes out as a card
+# a turn ezexe's own message did not begin, where the same call goes out as a card; a planner another session started
+# makes no such call and starts each run as an integrator subagent, which waits on no card
 CARD = ("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each call there "
-        "with `initiation` `own_initiative` and without `wake_when_done`, which shows a card ezexe presses.")
+        "with `initiation` `own_initiative` and without `wake_when_done`, which shows a card ezexe presses. A planner "
+        "another session started sends none of these calls: it starts one `p4-phi:integrator` subagent for each, "
+        "with the call's `prompt` as its brief, in a git worktree it makes, as the line at its plan's approval says.")
 
 
 def parse(text, base=""):

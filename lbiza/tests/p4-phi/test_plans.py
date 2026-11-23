@@ -1409,12 +1409,43 @@ class TopOrchestrates(unittest.TestCase):
         self.assertIn(f'phi.py" sections "{shown}"`', top)
         self.assertIn("Run it now and make the calls it prints", top)
         kid = said(A, {"plan": "the plan", "filePath": path})
-        self.assertIn("put that command in this session's report", kid)
+        self.assertIn("this session lands the plan itself", kid)
         self.assertNotIn("Run it now", kid)
         self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path + ".gone"}), "", "no such file: no line")
         with open(path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")
         self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path}), "", "no Files line: no run to start")
+
+    def approval_line(self, host):
+        path = os.path.join(self._tmp.name, "the-runs.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("# The runs\n\n## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Depends on:** none\n")
+        r = self.t.hook("plan-mode", host, {"hook_event_name": "PostToolUse", "tool_name": "ExitPlanMode",
+                                            "tool_input": {}, "tool_response": {"plan": "p", "filePath": path}})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_a_started_sessions_approval_line_has_it_start_the_runs_itself_and_report_the_branches(self):
+        """The app refuses a start that runs at once in a turn ezexe's own message did not begin, so a planner
+        another session started lands its runs by integrator subagents, each in a worktree it makes, and hands its
+        starter the branches, which that session reviews, tests, merges and pushes."""
+        kid = self.approval_line(A)
+        for word in ("this session lands the plan itself, in this turn",
+                     "worktree add -b <run> <main checkout>/.claude/worktrees/<run> origin/main",
+                     "one `p4-phi:integrator` subagent on `sonnet` at `medium` effort",
+                     "never sessions", "one commit per section", "SendMessage",
+                     "Neither this session nor any run pushes, merges or raises a version",
+                     "names each branch, its commits and its check results",
+                     "pushes by fast-forward and closes the plan"):
+            self.assertIn(word, kid, word)
+        self.assertEqual(kid.count("builds nothing"), 1, "the exception is said once")
+        self.assertNotIn("put that command in this session's report", kid)
+
+    def test_a_top_sessions_approval_line_is_unchanged(self):
+        top = self.approval_line(TOP)
+        self.assertIn("Run it now and make the calls it prints, in this turn.", top)
+        for word in ("lands the plan itself", "p4-phi:integrator", "worktree add", "builds nothing"):
+            self.assertNotIn(word, top, word)
 
     def test_a_prompts_own_mode_is_over_what_a_plan_mode_tool_said_before_it(self):
         tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}

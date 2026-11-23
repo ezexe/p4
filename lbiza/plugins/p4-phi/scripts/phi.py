@@ -1466,8 +1466,12 @@ PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned
                 "neither `EnterPlanMode` nor `ExitPlanMode`, unless a message of ezexe's own in this conversation "
                 "asks for plan mode or this session was started in plan mode, as a planner is: it then writes its "
                 "plan file there and ends its turn with `ExitPlanMode`, whose approval card ezexe answers in this "
-                "session. Where its task asks for " + PLAN_OPEN + ", and its brief does not settle how, "
-                "it has the built-in `Plan` subagent design the change, which only reads and raises no approval "
+                "session. Once that returns approved, it runs `phi.py sections \"<its plan file>\"`, starts one "
+                "`p4-phi:integrator` subagent for each run, never a session, in a git worktree it makes from "
+                "`origin/main`, and sends the session that started it one message naming each branch, its commits "
+                "and its check results, and it pushes nothing, merges nothing and raises no version, unless its "
+                "brief says it builds nothing. Where its task asks for " + PLAN_OPEN + ", and its brief does not "
+                "settle how, it has the built-in `Plan` subagent design the change, which only reads and raises no approval "
                 "card, sends that plan to the session that started it in one SendMessage, and takes that session's "
                 "message as the approval. A change the brief spells out, or one a sentence describes, is made with "
                 "no plan.")
@@ -2051,7 +2055,11 @@ def approved_runs_text(payload, s):
     """At a plan's approval: the command that prints one start call for each run of the approved plan, with how many
     sections and runs it holds. hooks.md, "ExitPlanMode": "In `PostToolUse`, `tool_response` is an object with `plan`
     and `filePath` fields holding the approved plan". '' where the response names no file that is there, and for a
-    plan with no section that names files on a `Files:` line."""
+    plan with no section that names files on a `Files:` line. A session ezexe is at makes the calls in its own turn.
+    A session another session started lands the runs itself by integrator subagents, each in a worktree it makes,
+    since the app refuses a start that runs at once in a turn ezexe's own message did not begin, and it reports the
+    branches to its starter, which reviews, tests, merges and pushes them; only a brief that says it builds nothing
+    has it hand the command back."""
     resp = payload.get("tool_response") if isinstance(payload.get("tool_response"), dict) else {}
     path = str(resp.get("filePath") or "")
     if not path or not os.path.isfile(path):
@@ -2070,9 +2078,24 @@ def approved_runs_text(payload, s):
             "an integrator's in a git worktree of its own.")
     RAN["runs"] = k
     if spawned_from(s):
-        return (head + " Another session started this one, so put that command in this session's report, and the "
-                       "session that started it runs it and makes the calls, unless this session's brief has it "
-                       "land the plan itself.")
+        return (head + " Another session started this one, so this session lands the plan itself, in this turn: run "
+                       "that command, and for each run it prints, first make that run's git worktree, standing "
+                       "outside it, from `origin/main` freshly fetched, by `git -C <main checkout> fetch origin` and "
+                       "then `git -C <main checkout> worktree add -b <run> <main checkout>/.claude/worktrees/<run> "
+                       "origin/main`, and then start one `p4-phi:integrator` subagent on `sonnet` at `medium` effort "
+                       "in that worktree, in parallel where runs share no file. These are subagents and never "
+                       "sessions, since the app refuses a start that runs at once in a turn ezexe's own message did "
+                       "not begin, and a subagent waits on no card. Each brief is the call's `prompt`, which names "
+                       "the plan by its full path and its sections by number, carries their `Files:` line and "
+                       "`Checks:` command as what done looks like and has the agent stop and report where a fence "
+                       "does not fit, with two lines added: the worktree's path, and one commit per section there. "
+                       "Mend such a fence from the plan and send the mend to the same agent with SendMessage. "
+                       "Neither this session nor any run pushes, merges or raises a version. Once every run has "
+                       "reported with its checks passing, send the session that started this one one message that "
+                       "names each branch, its commits and its check results: that message is this session's done. "
+                       "That session reads each branch's change, raises the version, runs the plugin's whole test "
+                       "folder, pushes by fast-forward and closes the plan. Only where this session's brief says it "
+                       "builds nothing does it hand that command back in its report for that session to run.")
     return head + " Run it now and make the calls it prints, in this turn."
 
 
