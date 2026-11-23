@@ -7,7 +7,7 @@ exits 0 with one `systemMessage` for ezexe, never context for the model. Each ro
 event and matcher hooks/hooks.json runs it on, and what it does.
 
   catch-up       SessionStart, matcher `startup`. One `systemMessage` from catchup.py when something fell behind on
-                 this machine, such as the store's layout or its branch; nothing otherwise.
+                 this machine, such as the store's layout, its branch or its Python environment; nothing otherwise.
   layout         SessionStart, matcher `startup|resume|clear|compact`. Moves a store of an older layout through
                  p4conf.migrate_layout; makes `.claude/p4/` with its folders, its .gitignore, p4.json and its git
                  repository where they are missing; adds the `.git/info/exclude` line; seeds the store's sync

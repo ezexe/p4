@@ -15,6 +15,10 @@ prints nothing when nothing is behind. Otherwise one `systemMessage` for ezexe, 
             https://code.claude.com/docs/en/memory.md and https://code.claude.com/docs/en/context-window.md. Neither
             page has Claude Code read a store's rules.md, so the line names each such rule until ezexe writes it as
             a rules file or takes its `pinned` field away.
+  environment  when the store's Python environment, `.claude/p4/.venv` in the repository's main checkout, has no
+            interpreter: the line gives the whole command that builds it, as storeenv.py gives it. A start
+            installs nothing, since the build downloads torch and is ezexe's to ask for, and the line is said at
+            each startup until the environment is there.
 
 P4_PHI_CATCHUP=0 turns it off.
 
@@ -156,6 +160,21 @@ def pinned_line(p4, project):
             f"~/.claude/rules/ for every project, or take its `pinned` field away: {shown}{more}")
 
 
+# --- the store's Python environment ------------------------------------------------------------------------------
+
+def env_line(project):
+    """The line that says the store of the repository holding `project` has no Python environment, with the whole
+    command that builds it; '' when its interpreter is there. Only the interpreter's path is looked at, so a start
+    pays one stat, and nothing is installed."""
+    import storeenv
+    root, venv = storeenv.place(project)
+    if storeenv.python_of(venv).exists():
+        return ""
+    return (f"the store has no Python environment at {str(venv).replace(chr(92), '/')}, which `python -m phi_model` "
+            f"and `p4.py teacher` run on; nothing is installed unasked: run `{storeenv.command(root)}` to build it, "
+            f"with `--no-torch` to leave torch out")
+
+
 # --- the hook ------------------------------------------------------------------------------------------------
 
 def sync_command(p4):
@@ -166,7 +185,7 @@ def sync_command(p4):
 def run(project, p4, sync=True):
     """The line for ezexe, '' when nothing is behind. On the way it calls p4conf.migrate_layout and, when the
     store's branch is behind, starts `p4.py sync`. A rule the store still marks pinned that no rules file holds is
-    named last."""
+    named after those, and a store with no Python environment last."""
     parts = []
     if os.path.isdir(p4):
         moved = p4conf.migrate_layout(p4)
@@ -186,6 +205,12 @@ def run(project, p4, sync=True):
             pinned = ""
         if pinned:
             parts.append(pinned)
+        try:
+            env = env_line(project)
+        except (OSError, ImportError):
+            env = ""
+        if env:
+            parts.append(env)
     return ("phi (p4-phi): " + ". ".join(parts) + ".") if parts else ""
 
 

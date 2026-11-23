@@ -47,6 +47,11 @@ class Base(unittest.TestCase):
         else:
             os.environ["CLAUDE_CONFIG_DIR"] = self.old
 
+    def have_env(self, project=None):
+        """Give the store of `project` its environment's interpreter, an empty file, which is all catch-up looks at."""
+        import storeenv
+        write(str(storeenv.python_of(storeenv.place(project or self.project)[1])), "")
+
     def install(self, rows, enabled_user=None, enabled_local=None):
         cache = os.path.join(self.conf, "plugins", "cache", M)
         data = {}
@@ -87,6 +92,7 @@ class Plugins(Base):
         write(os.path.join(old, "a.txt"), "y" * 1024)
         p4 = os.path.join(self.project, ".claude", "p4")
         os.makedirs(p4)
+        self.have_env()
         self.assertEqual(catchup.run(self.project, p4, sync=False), "")
         self.assertTrue(os.path.isdir(old), "nothing is deleted")
         self.assertFalse(os.path.exists(os.path.join(p4, "phi", "catchup.json")))
@@ -130,6 +136,7 @@ class Branch(Base):
 
     def test_a_branch_level_with_main_is_silent(self):
         self.assertEqual(catchup.behind(self.p4), ("win", 0))
+        self.have_env()
         self.assertEqual(catchup.run(self.project, self.p4), "")
         self.assertEqual(self.started, [])
 
@@ -166,6 +173,60 @@ class Branch(Base):
             self.assertIsNone(catchup.hook({"source": "startup"}))
         finally:
             os.environ.pop(catchup.ENV, None)
+            if old is None:
+                os.environ.pop("CLAUDE_PROJECT_DIR", None)
+            else:
+                os.environ["CLAUDE_PROJECT_DIR"] = old
+
+
+class Environment(Base):
+    def setUp(self):
+        super().setUp()
+        self.p4 = os.path.join(self.project, ".claude", "p4")
+        os.makedirs(self.p4)
+
+    def test_a_store_without_its_environment_is_named_with_the_whole_command(self):
+        line = catchup.run(self.project, self.p4, sync=False)
+        self.assertIn("the store has no Python environment at", line)
+        p4py = os.path.join(catchup.HERE, "p4.py").replace("\\", "/")
+        self.assertIn(f'`python -I -X utf8 "{p4py}" venv --p4 "{self.project}"`'.replace("\\", "/"), line)
+        self.assertIn("--no-torch", line)
+        self.assertFalse(os.path.exists(os.path.join(self.p4, ".venv")), "a start installs nothing")
+
+    def test_a_store_with_its_environment_is_silent(self):
+        self.have_env()
+        self.assertEqual(catchup.run(self.project, self.p4, sync=False), "")
+
+    def test_a_worktree_is_told_of_the_main_checkouts_environment(self):
+        """A worktree has no environment of its own: the line names the main checkout's, and once that is there a
+        start in the worktree is silent."""
+        main, wt = os.path.join(self.tmp, "main"), os.path.join(self.tmp, "wt")
+        admin = os.path.join(main, ".git", "worktrees", "wt")
+        write(os.path.join(admin, "commondir"), "../..\n")
+        write(os.path.join(wt, ".git"), f"gitdir: {admin}\n")
+        p4 = os.path.join(wt, ".claude", "p4")
+        os.makedirs(p4)
+        saved = catchup.p4conf.migrate_layout
+        catchup.p4conf.migrate_layout = lambda p4, commit=True: []
+        try:
+            line = catchup.run(wt, p4, sync=False)
+            self.assertIn(os.path.join(main, ".claude", "p4", ".venv").replace("\\", "/"), line)
+            self.assertNotIn(wt.replace("\\", "/") + "/.claude", line)
+            self.have_env(wt)
+            self.assertTrue(os.path.isfile(os.path.join(main, ".claude", "p4", ".venv",
+                                                        "Scripts" if os.name == "nt" else "bin",
+                                                        "python.exe" if os.name == "nt" else "python")))
+            self.assertEqual(catchup.run(wt, p4, sync=False), "")
+        finally:
+            catchup.p4conf.migrate_layout = saved
+
+    def test_the_hook_says_it_only_at_a_startup(self):
+        old = os.environ.get("CLAUDE_PROJECT_DIR")
+        os.environ["CLAUDE_PROJECT_DIR"] = self.project
+        try:
+            self.assertIsNone(catchup.hook({"source": "resume"}))
+            self.assertIn("no Python environment", catchup.hook({"source": "startup"})["systemMessage"])
+        finally:
             if old is None:
                 os.environ.pop("CLAUDE_PROJECT_DIR", None)
             else:

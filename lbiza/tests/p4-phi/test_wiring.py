@@ -247,6 +247,12 @@ class Wiring(unittest.TestCase):
             r = run_entry(*layout, seed, base)
             self.check("layout", layout[0], layout[2], r)
             self.assertTrue(os.path.isdir(os.path.join(seed, ".claude", "p4", "phi")), "the layout entry made no store")
+            # the store has its Python environment, so the catch-up entry has nothing to tell ezexe of it
+            py = os.path.join(seed, ".claude", "p4", ".venv", *(("Scripts", "python.exe") if os.name == "nt"
+                                                                 else ("bin", "python")))
+            os.makedirs(os.path.dirname(py))
+            with open(py, "w", encoding="utf-8"):
+                pass
 
             def make(tmp):
                 proj = os.path.join(tmp, "a new project")

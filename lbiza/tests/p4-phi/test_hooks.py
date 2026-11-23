@@ -298,6 +298,8 @@ class Layout(Base):
             self.assertNotIn("Indent with tabs", line, "a project rules file holds it, in a subfolder too")
             self.assertNotIn("ports check", line, "a rules file of the configuration folder holds it")
             write(p4conf.sub(self.p4, "memory", "tests.md"), "Name each test for what it proves.\n")
+            import storeenv
+            write(str(storeenv.python_of(storeenv.place(self.proj)[1])), "")    # the store has its environment
             self.assertEqual(catchup.run(self.proj, self.p4, sync=False), "", "a memory holds the last one")
             payload = {"hook_event_name": "SessionStart", "source": "startup", "cwd": self.proj}
             os.remove(p4conf.sub(self.p4, "memory", "tests.md"))
