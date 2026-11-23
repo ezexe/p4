@@ -17,6 +17,7 @@ It builds no copy of anything Claude Code or the desktop app does: it asks the e
 - `claude` is the Claude Code version of this session's engine, which in the desktop app is the app's own build and can differ from the `claude` on the PATH.
 - `tools.app` lists the desktop app's tools that answer here by name, `tools.native` lists Claude Code's own, and `tools.servers` counts the tools of every other server.
 - A tool the map or a lookup says a deny rule of the settings takes out of this session is no limit of the host: tell ezexe that the settings deny it and which file holds the rule, and never that the desktop app or Claude Code cannot do it.
+- State a limit of the host, the app or a tool only after `map`, `probes` or the tool's own description showed it in this session, and say "not tested" where it was not tried: a question about the sessions is answered for each session this one started too, and not for this one alone.
 
 ## Where it is kept
 

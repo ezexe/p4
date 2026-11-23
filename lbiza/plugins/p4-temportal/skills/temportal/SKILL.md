@@ -37,6 +37,7 @@ Claude Code compacts a conversation by itself when its context fills, and p4-tem
 - Every summary is told to keep, word for word, every session id, file path, branch, commit hash, decision with its source and open item, and the path of every state page and hand-over note.
 - Behind the summary comes a list that opens with "p4-temportal kept this list across a compaction", handed as additional context of the SessionStart hook that Claude Code runs after a compaction: the files this session wrote or edited, the latest last, built from the session's tool calls and carried from one compaction to the next.
 - After a compaction, read the state page or hand-over note that list names before going on, and trust the list over the summary for where a file is.
+- A conclusion the summary states as a limit or a rule is a claim: check it again in this session before a decision of ezexe's rests on it.
 - A minute after a turn ended with none begun since, the module compacts the session itself once its context is at or past `temportal.compact_at` in `.claude/p4/p4.json`, which is 70 percent unless set, and 0 starts none.
 - What must outlast any summary belongs in a file: a state page in this session's scratchpad, or a finding kept with `phi.py note`.
 
