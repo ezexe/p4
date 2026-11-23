@@ -105,6 +105,30 @@ def on(home=""):
         return True
 
 
+def new_on(home=""):
+    """False when `phi.new_issues` is false, read as `on` reads `phi.issues`: no session is then told to publish a
+    new issue."""
+    try:
+        import p4conf
+        if not home:
+            name = p4conf.env_name("phi.new_issues")
+            return p4conf.env_value("phi.new_issues", os.environ.get(name), True) is not False
+        return p4conf.section(home, "phi", write=False).get("new_issues", True) is not False
+    except Exception:  # noqa: BLE001
+        return True
+
+
+PUBLISHES = (", and the one session that publishes for this tree publishes what needs an issue: `gh issue create` "
+             "is refused in every other session.")
+NO_NEW = (". This project files no new GitHub issue, by `phi.new_issues` false in its p4.json, so no session "
+          "publishes one.")
+
+
+def findings_line(home, line):
+    """FINDINGS_LINE or FINDINGS_READS as a project that files no new issue gets it: with no publisher named."""
+    return line if new_on(home) else line.replace(PUBLISHES, NO_NEW)
+
+
 def now():
     return time.strftime("%Y-%m-%d %H:%M")
 
@@ -500,7 +524,7 @@ def ensure(home, s, text, base, where):
         if not (repos_named(whole, base) or next(repos_at(base), None)):
             return ""
         s["findingsTold"] = now()
-        return FINDINGS_READS
+        return findings_line(home, FINDINGS_READS)
     repos = repos_named(whole, base)
     if not repos:
         return ""
@@ -508,7 +532,7 @@ def ensure(home, s, text, base, where):
     n = next((k for k in named_issues(whole, slug) if issue_state(slug, k) == "OPEN"), 0)
     if not n:                                      # it names none, or each one it names is closed: findings go up
         s["findingsTold"] = now()
-        return FINDINGS_LINE
+        return findings_line(home, FINDINGS_LINE)
     url = f"https://github.com/{slug}/issues/{n}"
     s["issue"] = {"repo": slug, "path": repo, "number": n, "url": url, "time": now(),
                   "base": git(repo, "rev-parse", "HEAD")}

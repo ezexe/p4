@@ -479,6 +479,16 @@ class Guards(unittest.TestCase):
             self.assertEqual(issues.risks(cmd), [], cmd)
         self.assertEqual([k for _, k, _ in issues.risks("git reset --hard && git push -f")], ["reset", "push"])
 
+    def test_a_project_that_files_no_new_issue_has_the_call_asked_at_the_top_and_refused_below(self):
+        """`phi.new_issues` false: `gh issue create` is ezexe's to allow, so the top session gets the card and,
+        with the set in force, a session another session started is refused."""
+        cmd = "gh issue create --title x --body y"
+        p4conf.set_key(self.t.p4, "phi.new_issues", False)
+        self.assertEqual(self.guard("issue-guard", TOP, cmd)["permissionDecision"], "ask")
+        self.on()
+        self.assertEqual(self.guard("issue-guard", self.pusher, cmd)["permissionDecision"], "deny")
+        self.assertEqual(self.guard("issue-guard", TOP, cmd)["permissionDecision"], "ask", "ezexe's own session")
+
     def test_the_brief_is_read_at_the_first_message(self):
         self.assertIs(self.t.session(self.pusher).get("pushes"), True)
         self.assertIs(self.t.session(self.keeper).get("pushes"), False)

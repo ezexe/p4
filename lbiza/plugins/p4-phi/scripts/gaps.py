@@ -362,6 +362,12 @@ def advice(home, store, s, path, root=None, before=""):
             f"`{TIE.format(repo=repo)}`: p4-phi writes that line when the publisher's call that files it carries "
             f"this `Finding:` line with its `source:`, and whoever files it another way writes the line by hand. "
             f"The landing that closes the issue then cuts the memory back to a pointer.")
+    import issues
+    if not issues.new_on(home):
+        up = ("This project files no new GitHub issue, by `phi.new_issues` false in its p4.json: the report carries "
+              "the line up unchanged, and the session that plans this tree's work places the session that carries "
+              "the rule into the plugin.")
+        tied = ""
     return (f"phi (p4-phi): the memory `{name}` you just wrote describes session or plugin behaviour, so it patches "
             f"over a gap in the plugin, whose repository is {repo}.{where} Check whether the plugin does this already; "
             f"if not, write the gap into this turn's report as this one line, with its test and files filled in:\n"

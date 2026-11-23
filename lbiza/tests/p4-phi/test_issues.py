@@ -29,6 +29,7 @@ sys.path.insert(0, SRC)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
 import issues  # noqa: E402
+import p4conf  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, TOP, Tree, context, read, write  # noqa: E402
 import controls  # noqa: E402  after test_phi, whose import of phi.py hands controls.py that module
 
@@ -917,6 +918,18 @@ class RunNowLimit(unittest.TestCase):
             self.assertFalse(os.path.exists(mark), "the test ran on past the limit")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class NewIssues(unittest.TestCase):
+    def test_the_switch_is_read_from_the_store_and_the_findings_line_names_no_publisher(self):
+        with tempfile.TemporaryDirectory() as store:
+            self.assertTrue(issues.new_on(store), "on by default")
+            self.assertEqual(issues.findings_line(store, issues.FINDINGS_LINE), issues.FINDINGS_LINE)
+            p4conf.set_key(store, "phi.new_issues", False)
+            self.assertFalse(issues.new_on(store))
+            got = issues.findings_line(store, issues.FINDINGS_LINE)
+            self.assertNotEqual(got, issues.FINDINGS_LINE)
+            self.assertNotIn(issues.PUBLISHES, got)
 
 
 if __name__ == "__main__":

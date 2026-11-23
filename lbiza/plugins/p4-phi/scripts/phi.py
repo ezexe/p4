@@ -2475,6 +2475,11 @@ def h_issue_guard(payload):
     me = Me(payload)
     if not me.home or not me.id or not issues.on(me.home):
         return None
+    if not issues.new_on(me.home):
+        RAN["issue_guard"] = "no new issue"
+        return cards.raised(cards_on(me), spawned_from(load_session(me.home, me.id)),
+                            "phi (p4-phi): this project files no new GitHub issue, by `phi.new_issues` false in "
+                            "its p4.json, so `gh issue create` is ezexe's to allow.")
     s = load_session(me.home, me.id)
     why = controls.create_refused(me.home, s, me.store) if s.get("sessionId") else ""
     if not why:
