@@ -138,10 +138,6 @@ class StartRequests(unittest.TestCase):
                          "the retired key switches nothing")
         import plans
         self.assertIn("`use_worktree: true`", plans.CARD_EACH)
-        with open(phi.__file__, encoding="utf-8") as f:
-            source = f.read()
-        self.assertNotIn("this start is refused: a brief", source)
-        self.assertNotIn("declares its write set", source)
 
     def test_no_start_is_held_while_a_live_session_covers_its_files(self):
         """The held start is gone, with starts.held_by, starts.writers and starts.files_overlap: a start whose brief

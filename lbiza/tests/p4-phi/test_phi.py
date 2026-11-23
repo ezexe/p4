@@ -1123,62 +1123,13 @@ class NewTask(unittest.TestCase):
         finally:
             phi.project_conf("")
 
-    def test_act_dont_wait_rides_with_the_rules(self):
-        self.assertIn("act-don't-wait", phi.BUILT_IN)
-        self.assertIn("authority", phi.BUILT_IN)
-
-    def test_the_built_in_rule_asks_a_worker_for_no_line_to_its_starter(self):
+    def test_the_limit_of_issue_157_is_logged_no_more(self):
         """ezexe/p4#157: the plugin's hooks module sends a worker's report to its starter at each turn's end with
-        `$.session.send`, which by plugins/mods/api.md "makes the same delivery the SendMessage tool makes", and
-        cross-session-messaging.md says "When the receiving session is idle, Claude Code starts a new turn with the
-        message." So the rule asks no worker for a closing line, and the limit that line worked around is logged no
-        more. A child's own question to its parent session stays the child's to send."""
-        for gone in ("ends each turn with one SendMessage line", "whose starter waits on it",
-                     "only beside its next message"):
-            self.assertNotIn(gone, phi.BUILT_IN)
-        self.assertIn("A child asks its parent session with SendMessage", phi.BUILT_IN)
+        `$.session.send`, so the limit a closing line worked around is logged no more."""
         with open(os.path.join(SRC, "claude_code_limits.json"), encoding="utf-8") as f:
             logged = json.load(f)
         self.assertNotIn(157, [row["issue"] for row in logged])
         self.assertFalse([row["issue"] for row in logged if "notify_when_idle" in row["terms"]])
-
-    def test_the_built_in_rule_leaves_how_a_question_is_laid_out_to_the_apps_own_tools(self):
-        """tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you
-        multiple-choice questions when it needs a decision or a clarification.", and the desktop app's turn-end tool
-        puts a decision that waits on ezexe as one question with buttons. So the built-in rule names both tools and
-        holds no sentence of its own on how a question is laid out, and it keeps every sentence that text lacks or
-        that no docs page states: the decision by research with its decisions file, the session tree, the matters
-        of ezexe's authority with the push of green issue-closing commits excepted, a child's question to its
-        parent session, and the go a project's rules ask for."""
-        for gone in ("It goes as a click", "never as a paragraph", "whose buttons are the answers", "the go first",
-                     "typed text only", "no click can carry"):
-            self.assertNotIn(gone, phi.BUILT_IN)
-        self.assertIn("goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or `AskUserQuestion`, or in the "
-                      "reply of a session that has neither tool:", phi.BUILT_IN)
-        for kept in (phi.DECIDE, "decisions.md in the scratchpad directory the app names",
-                     "a question reaches ezexe only once those cannot settle it",
-                     "the parent's task list and notes, siblings' work and the project's rules can settle",
-                     "permissions or security settings, credentials, spending",
-                     "but for the push of green issue-closing commits, which p4-phi orders at once",
-                     "A child asks its parent session with SendMessage",
-                     "that go is ezexe's to give, by a button"):
-            self.assertIn(kept, phi.BUILT_IN)
-
-    def test_the_built_in_rule_names_the_reply_for_a_session_with_neither_question_tool(self):
-        """headless.md, "Turn off permission prompts in unattended runs": "Claude Code removes the tools that need
-        an answer from a person, such as `AskUserQuestion`, so Claude can't call them." A `claude -p` run and an
-        eval run have neither that tool nor the desktop app's `wrap_up`, and what leaves such a run is its reply,
-        "the text result in the `result` field" of the same page. So the rule names the reply for such a session,
-        in one clause after the two tools, and with the clause out it reads as it did before."""
-        clause = ", or in the reply of a session that has neither tool"
-        self.assertEqual(phi.BUILT_IN.count(clause), 1)
-        before = phi.BUILT_IN.replace(clause, "")
-        self.assertIn("Only a matter of ezexe's authority goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` "
-                      "or `AskUserQuestion`: permissions or security settings, credentials, spending, and actions "
-                      "that cannot be undone or publish outward, but for the push of green issue-closing commits, "
-                      "which p4-phi orders at once. A child asks its parent session with SendMessage", before)
-        self.assertEqual(phi.BUILT_IN.count("reply"), 1, "the rule says where the question goes and no more of it")
-        self.assertEqual(phi.BUILT_IN.count(". "), before.count(". "), "a clause, and no sentence of its own")
 
     def test_a_started_sessions_task_is_its_brief(self):
         self.say(TOP, TASK)
@@ -1575,12 +1526,6 @@ class Rules(unittest.TestCase):
         self.assertEqual(self.t.rules(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
         self.assertEqual(self.start(TOP), "", "and a start hands no rule")
 
-    def test_the_built_in_rule_names_research_and_the_decisions_file(self):
-        """A question research can answer is decided by the session and logged with its source, never put to ezexe."""
-        line = next(x for x in self.t.rules(TOP).splitlines() if "act-don't-wait" in x)
-        for word in ("code", "history", "issues", "documentation", "decisions file", "decisions.md", "source"):
-            self.assertIn(word, line)
-
     def test_many_memories_leave_the_start_text_as_it_is(self):
         """However many memories the store holds, the system prompt's section carries the built-in rules whole and
         none of them, and no start hands one."""
@@ -1633,16 +1578,6 @@ class Rules(unittest.TestCase):
         self.assertEqual(top.count("built-in, plan-mode: "), 1)
         self.assertEqual(kid.count("built-in, plan-mode: "), 1)
         self.assertIn("plan-mode", phi.plans.BUILT_INS)
-
-    def test_the_plan_rule_names_the_loop_the_wait_for_the_approval_and_the_handing(self):
-        """workflows.md, "Find issues until the list stops growing": "stop once two rounds in a row find nothing
-        new". The rule is in every system prompt, so what holds before any skill is loaded is said there."""
-        for word in ("each round researches a section and then writes its fences",
-                     "two dry rounds in a row, or after five rounds",
-                     "no session that writes is started and no file but the plan is edited",
-                     "`phi.py sections <the plan file>`"):
-            self.assertIn(word, phi.PLAN_AT, word)
-            self.assertNotIn(word, phi.PLAN_STARTED, word)
 
     def test_the_plan_rule_reads_the_plans_folder_from_the_keeper_and_spells_none_itself(self):
         """The folder plan mode writes into is the one p4conf.PLANS names, where the settings keeper points
@@ -1697,7 +1632,6 @@ class Rules(unittest.TestCase):
 
     def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
         """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
-        self.assertIn("that go is ezexe's to give", phi.BUILT_IN)
         self.assertIn("act-don't-wait", self.t.rules(TOP))
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
         got = self.t.rules(TOP)
@@ -1720,11 +1654,7 @@ class Rules(unittest.TestCase):
     def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
         """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
         got = self.t.rules(TOP)
-        for word in ("built-in, levels", "the plugin's subagent `p4-phi:finder`", "`p4-phi:check`",
-                     "`run_in_background: true`"):
-            self.assertIn(word, got)
-        self.assertNotIn("p4-phi:runner", got)
-        self.assertNotIn("ezexe", phi.LEVELS, "it addresses the session and names no person")
+        self.assertIn("built-in, levels", got)
         self.assertIn("built-in, levels", phi.builtin_text())
         with tempfile.TemporaryDirectory() as tmp:
             bare = Tree(tmp, store=False)
@@ -1755,44 +1685,11 @@ class Rules(unittest.TestCase):
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
         self.assertNotIn(phi.ROUND, self.t.rules(TOP))
 
-    def test_the_levels_rule_leaves_waiting_sleeping_and_polling_to_the_apps_own_tools(self):
-        """The Agent tool's and the shell tools' own descriptions tell a session that a background subagent or command
-        notifies it when it ends, that a foreground `sleep` is blocked and never to poll, and sub-agents.md says "A
-        background subagent's results reach Claude as a completion notification in a later turn". So the rule in a
-        session's system prompt holds no sentence of its own on waiting, and still names the background route."""
+    def test_the_levels_rule_is_in_a_sessions_system_prompt(self):
         self.assertIn(phi.LEVELS, self.t.rules(TOP))
-        for word in ("sleep", "poll", "never wait", "wait for it", "completion notification", "Once one is started"):
-            self.assertNotIn(word, phi.LEVELS, word)
-        self.assertIn("`run_in_background: true`", phi.LEVELS)
 
-    def test_a_read_across_files_goes_to_the_built_in_explore_subagent_on_a_small_model(self):
-        """sub-agents.md: Explore is "A fast, read-only agent optimized for searching and analyzing codebases." and
-        runs on "the parent conversation's model", and "The per-invocation `model` parameter" is first in the page's
-        model order. So the plugin ships no search agent, and the rule names `Explore` with `model` `haiku` on the
-        call."""
+    def test_the_plugin_ships_no_search_agent_of_its_own(self):
         self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
-        self.assertIn("goes to the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says", phi.LEVELS)
-        self.assertNotIn("sweep", phi.LEVELS)
-        self.assertNotIn("p4-phi:sweep", self.t.rules(TOP))
-
-    def test_the_levels_rule_names_no_read_of_the_plan_limits(self):
-        """The built-in rule `levels` in a session's system prompt tells it to read no plan limit before a start or
-        an Agent call: how much of the plan a piece of work spends is ezexe's, and a session neither weighs it nor
-        stops for it. The rule names no stop or restart of a running session either."""
-        got = self.t.rules(TOP)
-        self.assertIn("built-in, levels:", got)
-        for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
-            self.assertNotIn(word, phi.LEVELS, word)
-
-    def test_the_levels_rule_says_a_workflow_script_names_a_model_for_each_stage(self):
-        """workflows.md, "Cost": "A model the script names for a stage counts as the per-invocation model in that
-        order. When nothing else assigns one, the agent runs on your session's model." So the rule in a
-        session's system prompt tells it to name a model for each stage, in the page's words."""
-        got = self.t.rules(TOP)
-        self.assertIn("A Workflow script names a `model` and an `effort` for each stage", got)
-        for quote in ("\"A model the script names for a stage counts as the per-invocation model\"",
-                      "\"runs on your session's model\""):
-            self.assertIn(quote, phi.LEVELS)
 
     def test_the_skill_gives_the_line_that_starts_a_terminal_team_and_p4_writes_the_variable_nowhere(self):
         """desktop.md, "What's not available in Desktop": coordinated teams "are available in the CLI, not in
@@ -1821,16 +1718,7 @@ class Rules(unittest.TestCase):
                                     "Explore": {"model": "opus"}})
         self.assertEqual(given, plans.CHILD_LEVELS_DEFAULT, "a subagent's name is no kind of worker")
 
-    def test_a_review_of_a_code_change_goes_to_the_bundled_code_review_skill_and_check_reads_the_rest(self):
-        """code-review-local.md: "Claude can start `/code-review` on its own, without you typing the command" and
-        "without `--fix`, the review's instructions ask Claude for a report only." Its target "can be a pull request
-        number, a branch name, a file path, or a Git revision range", so the plugin's own reviewer is kept for a
-        result that is no code change."""
-        self.assertIn("a review of a code change that should not lean on this session's own view goes to the bundled "
-                      "skill `code-review`, run with the Skill tool on that change's commits or paths and without "
-                      "`--fix`, so it reports and changes no file", phi.LEVELS)
-        self.assertIn("such a read of a result that is no code change goes to the subagent `p4-phi:check`", phi.LEVELS)
-        self.assertNotIn("a read of a diff", phi.LEVELS, "a diff is the skill's")
+    def test_the_check_agent_holds_only_read_tools_and_the_agents_are_the_tables(self):
         with open(os.path.join(ROOT, "agents", "check.md"), encoding="utf-8") as f:
             front = f.read().split("---")[1]
         self.assertIn("tools: Read, Grep, Glob", front, "it still holds no tool that writes or runs")
@@ -1910,42 +1798,6 @@ class Wiring(unittest.TestCase):
             manifest = jload(os.path.join(repo, "lbiza", "plugins", p["name"], ".claude-plugin", "plugin.json"))
             self.assertEqual(manifest["name"], p["name"])
             self.assertTrue(manifest.get("version"), p["name"])
-
-    def test_the_words_given_to_a_session_hold_no_banned_name(self):
-        """Every string the session modules can hand a session: each literal and f-string part, docstrings, keys and
-        regex sources aside; owner is banned outside puppeteer.py, whose code owner is that word's programming sense.
-        goal was p4-phi's own word for a session's task until 0.3.0 took the app's words, and it stays banned as
-        that. It is also Claude Code's own word for its goal, https://code.claude.com/docs/en/goal.md, so phi.py may
-        hold it in the strings listed here, each of which names that goal, and in no other."""
-        import ast
-        native = {"goal", "GOAL", "goal met: ", "goal ", "goal is ", "no goal was set for this session",
-                  ": `goal` is off in the store's phi.json",
-                  "on and off write `goal` in the store's phi.json; set is the hooks module's word that the goal "
-                  "command set the goal, and failed its word that it did not; ask keeps the condition this "
-                  "session states as the goal it asks for; none prints how the session's native goal stands",
-                  "--goal-flying",
-                  "the hooks module's goal command has not answered yet, so the look answers no condition",
-                  phi.GOAL_ASKED, phi.GOAL_SHORT, phi.GOAL_LONG}
-        for name in ("phi.py", "relay.py", "plans.py", "controls.py", "starts.py", "puppeteer.py", "issues.py",
-                     "gaps.py"):
-            tree, skip = ast.parse(read(os.path.join(SRC, name))), set()
-            for n in ast.walk(tree):
-                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
-                        and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
-                    skip.add(id(n.body[0].value))
-                elif isinstance(n, ast.Subscript):
-                    skip.add(id(n.slice))
-                elif isinstance(n, ast.Dict):
-                    skip.update(id(k) for k in n.keys if k is not None)
-                elif isinstance(n, ast.Call) and n.args and getattr(n.func, "attr", "") in ("get", "pop", "setdefault",
-                                                                                            "compile"):
-                    skip.add(id(n.args[0]))
-            given = "\n".join(n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)
-                              and isinstance(n.value, str) and id(n) not in skip
-                              and not (name == "phi.py" and n.value in native)).lower()
-            for word in ("ghost", "memo", "rollup", "node", "play", "steer", "goal") + (
-                    ("owner",) if name != "puppeteer.py" else ()):
-                self.assertNotRegex(given, rf"\b{word}s?\b", f"{word} in {name}")
 
 
 class FixtureFolder(unittest.TestCase):

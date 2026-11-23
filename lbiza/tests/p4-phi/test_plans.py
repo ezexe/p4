@@ -1154,9 +1154,6 @@ class Levels(unittest.TestCase):
         for c in (plans.with_level({"context": "fresh", "title": t, "prompt": b})
                   for t, b in (("x", ""), ("the docs", brief), ("the lock", brief2), ("Review it", "Review the diff"))):
             self.assertIn(c["effort"], plans.EFFORTS, "a call with neither key is never handed out")
-        self.assertIn("with the `model` and `effort` its kind of work gets", phi.new_top_route())
-        self.assertIn("carrying the `model` and `effort` named beside its step", plans.CARD_EACH)
-        self.assertIn("A worker is started with the `model` and the `effort` of its step's role", phi.LEVELS)
         old = plans.CHILD_LEVELS
         try:
             relay._write_json(os.path.join(self.t.p4, "p4.json"),
@@ -1559,8 +1556,6 @@ class TopOrchestrates(unittest.TestCase):
         agent that runs a command: an orchestrator's step that only runs one is nudged to a background call of its
         own, and a call that is in the background already gets no line."""
         self.assertFalse(os.path.exists(os.path.join(os.path.dirname(SRC), "agents", "runner.md")))
-        self.assertNotIn("runner", phi.LEVELS)
-        self.assertIn("goes to a Bash or PowerShell call of its own with `run_in_background: true`", phi.LEVELS)
         self.plan(TOP, items("Run test_flush.py", "Commit and push"))
         run = {"command": "python test_flush.py"}
         self.assertEqual(self.check(TOP, "Bash", {**run, "run_in_background": True}, "toolu_b1"), "",

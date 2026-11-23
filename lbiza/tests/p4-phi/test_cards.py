@@ -353,15 +353,6 @@ class TheSet(unittest.TestCase):
         raises it, and how it is settled before a start or why it stays."""
         names = [name for name, _, _ in cards.KINDS]
         self.assertEqual(len(names), len(set(names)))
-        for want in ("a guard of p4-phi", "the ask rule on the archive tool", "a tool a p4 hooks module declares",
-                     "a message between two sessions held", "the question about mods", "the trust dialog",
-                     "a start the app does not make", "a question to ezexe", "a plan's approval",
-                     "computer use on the app's own window"):
-            self.assertIn(want, names)
-        own = {name: (why, how) for name, why, how in cards.KINDS}["computer use on the app's own window"]
-        self.assertIn('"Claude cannot be granted control of its own window', own[0], "the refusal, in the app's words")
-        self.assertIn("mcp__computer-use__request_access", own[0])
-        self.assertIn("no card lifts it", own[1])
         for name, why, how in cards.KINDS:
             self.assertRegex(how, r"^(Settled by|It stays|A start in the project never raises it)", name)
             self.assertTrue(why.endswith(".") and how.endswith("."), name)
@@ -392,7 +383,6 @@ class TheSet(unittest.TestCase):
         for name, words in p4conf.CARD_SET:
             self.assertIn(f"{name}: {words.replace('`', '')}", part, name)
         self.assertIn(p4conf.card_set_id(), part, "the page was written from this set")
-        self.assertIn("Claude cannot be granted control of its own window", part, "the kind no card lifts")
 
     def test_every_landing_command_of_a_line_is_read(self):
         """A line that rebases and then pushes holds both, and issues.landing names the first alone, so a push

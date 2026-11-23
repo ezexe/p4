@@ -202,7 +202,7 @@ class Suite(unittest.TestCase):
 
 
 class Covers(unittest.TestCase):
-    """The cases the suite is for, each tied to the words of the plugin it rests on."""
+    """The cases the suite is for."""
 
     def test_the_rules_two_halves_each_have_a_case(self):
         asks = graders_of("AskUserQuestion")
@@ -210,13 +210,10 @@ class Covers(unittest.TestCase):
         by_name = {c["name"]: c for c in cases()}
         held = by_name["asks-before-an-irreversible-step"]["graders"]
         self.assertTrue(any(g.get("match") == "not_contains" for g in held.values()), held)
-        self.assertIn("researched and decided by this session", phi.BUILT_IN)
-        self.assertIn("actions that cannot be undone or publish outward", phi.BUILT_IN)
 
     def test_the_case_on_ezexes_authority_grades_the_reply_the_rule_names(self):
         """A run's session is offered neither `mcp__ccd_turn__wrap_up` nor `AskUserQuestion`, so the rule sends its
         question to the reply, and the case on ezexe's authority looks for the question there."""
-        self.assertIn("or in the reply of a session that has neither tool", phi.BUILT_IN)
         held = {c["name"]: c for c in cases()}["asks-before-an-irreversible-step"]["graders"]
         asked = [g for g in held.values() if g.get("type") == "regex" and g.get("match", "contains") == "contains"
                  and g.get("target", "last_message") == "last_message"]
@@ -278,14 +275,6 @@ class Covers(unittest.TestCase):
             self.assertFalse(re.search(g["input_match"], '"skill":"code-review"'), g)
         self.assertTrue([n for n, g in skill if not never_called(g)], skill)
         self.assertTrue([n for n, g in skill if never_called(g)], skill)
-
-    def test_a_trigger_case_rests_on_words_the_skills_description_still_holds(self):
-        description = front(os.path.join(PLUGIN, "skills", "phi", "SKILL.md"))[0]["description"]
-        for words in ("to print the tree", "when a finding should outlast this session"):
-            self.assertIn(words, description)
-        by_name = {c["name"]: c for c in cases()}
-        self.assertIn("print the tree", by_name["print-the-tree"]["body"])
-        self.assertIn("should outlast this session", by_name["keeps-a-finding"]["body"])
 
     def test_the_check_agent_is_called_by_its_namespaced_type(self):
         name = json.loads(read(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))["name"]

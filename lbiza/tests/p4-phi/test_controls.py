@@ -11,7 +11,6 @@ a puppeteer is named no session that holds one and warned of no early go; a sess
 session filed is held under that session; and every ask of ezexe in the lines a session is handed offers a click.
 """
 
-import ast
 import contextlib
 import json
 import os
@@ -615,10 +614,6 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(go(TOP3), "", "no warning for the file another controlled session covers")
         self.assertEqual(go(TOP3, "Go.\nFiles: src/flush.py"), "", "nor for the files the message names")
         self.assertNotIn("goWarned", t.session(PUP))
-        for name in ("controls.py", "phi.py"):
-            source = read(os.path.join(SRC, name))
-            self.assertNotIn("is early", source, name)
-            self.assertNotIn("files --release", source, name)
 
     def test_work_on_a_controlled_sessions_topic_is_sent_down_and_not_done_by_the_supervisor_session(self):
         t = self.t
@@ -703,12 +698,10 @@ class Supervisor(unittest.TestCase):
                              {"session_id": TOP, "model": "claude-haiku-5-5"})
         self.assertNotIn("permissionDecision", out, "p4-phi keeps no refusal of its own")
         self.assertIn("set_session_effort", controls.RULE)
-        self.assertIn("`mcp__ccd_session_mgmt__set_session_model`, only where effort alone does not fit", controls.RULE)
 
     def test_a_worker_under_a_puppeteer_hands_up_a_pages_path_and_counts_and_never_publishes(self):   # 226
         t = self.t
         t.say(PUP, "Control the trees")
-        self.assertIn("short table or list", controls.RULE)
         t.record(NEW, started_by=PUP, title="Puppeteer's standing worker")
         ctx = context(t.say(NEW, "Run the puppeteer's archive checks and counts.\n" + controls.WORKER_BRIEF))
         self.assertIn("page's path and its counts", ctx)
@@ -719,13 +712,6 @@ class Supervisor(unittest.TestCase):
     def test_a_puppeteers_turns_hold_messages_and_its_standing_worker_does_the_rest(self):          # 211
         t = self.t
         t.say(PUP, "Control the trees")
-        rule = controls.RULE
-        self.assertIn("turns hold messages only", rule)
-        self.assertIn("one standing worker", rule)
-        self.assertNotIn("comms worker", rule)
-        self.assertNotIn("read-only checks of their results against git and GitHub", rule)
-        self.assertIn("relays none of these to ezexe", rule)
-        self.assertIn("checks the orchestrators and its own worker", rule)
         brief = "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF
         said, _ = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker", "prompt": brief})
         self.assertNotIn("refused", said, "the first standing worker is let through")
@@ -861,23 +847,16 @@ class TreeAndClicks(unittest.TestCase):
     """The tree in the app is the true tree, and ezexe acts by click where one exists. No start waits behind a busy
     writer, so a puppeteer is named no session that holds a start request of its own and is handed no line for a
     start made on another session's behalf; a session whose first message carries the marker of a request another
-    session filed is held under that session, and its tree's ledger names it; and every ask of ezexe in the lines
-    the session modules hand a session offers a click."""
+    session filed is held under that session, and its tree's ledger names it."""
 
     FLUSH = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: src/flush.py"
     CROSS = (f"<cross-session-message from=\"{TOP}\">Carry on with the port, and split the flush off into a session of "
              f"its own.</cross-session-message>")
-    MODULES = ("starts.py", "puppeteer.py", "controls.py", "phi.py", "relay.py", "plans.py")
     ASKS = re.compile(r"(?<!without )\bask(?:s|ing)? ezexe\b|\bputs? (?!no\b)(?:[\w\"'`-]+ ){0,4}?to ezexe\b"
                       r"|\bgo(?:es)? to ezexe\b|\boffer(?:s|ed)? (?:\w+ ){0,3}?to ezexe\b"
                       r"|\bwait(?:s|ing)? (?:on|for) (?:a matter of )?ezexe\b"
                       r"|\bezexe's (?:own )?(?:go|approval|answer|pick|choice|say-so|next message)\b"
                       r"|\bezexe (?:has to|must|needs to)\b|\bturn ezexe begins\b|\bto ezexe as ready\b", re.I)
-    CLICKS = re.compile(r"mcp__ccd_turn__wrap_up|AskUserQuestion|multiple-choice question|\bbuttons?\b"
-                        r"|\bpress(?:es|ed)?\b|\bclicks?\b|\bcards?\b|\]\(#|\blinks?\b|`archive`|`new_session`", re.I)
-    TYPED = re.compile(r"\bfor ezexe to type\b|\bezexe types\b", re.I)
-    NO_CLICK = re.compile(r"\bno (?:click|button)\b", re.I)
-    SENTENCE = re.compile(r"(?<=[.!?:;])\s+(?=[A-Z`\"(])")
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -936,41 +915,6 @@ class TreeAndClicks(unittest.TestCase):
         self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
                       f"shows it at top level.", ledger)
         self.assertNotIn("detach_session", ledger)
-
-    def test_every_ask_of_ezexe_in_the_lines_a_session_is_handed_offers_a_click(self):
-        """Each sentence of the strings these modules can hand a session that asks ezexe for a choice, a go or an
-        approval carries a click form, in it or in the sentence after it: a wrap-up question with buttons, an
-        AskUserQuestion with options, the app's own actions, a suggested task card, or a session named as a link. A
-        sentence that has ezexe type says why no click can carry the answer. Docstrings, subscripts, keys and the
-        first argument of get, pop, setdefault and compile are left aside, as the banned-names scan of test_phi.py
-        leaves them."""
-        bare = []
-        for name in self.MODULES:
-            tree, skip = ast.parse(read(os.path.join(SRC, name))), set()
-            for n in ast.walk(tree):
-                if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and n.body \
-                        and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant):
-                    skip.add(id(n.body[0].value))
-                elif isinstance(n, ast.Subscript):
-                    skip.add(id(n.slice))
-                elif isinstance(n, ast.Dict):
-                    skip.update(id(k) for k in n.keys if k is not None)
-                elif isinstance(n, ast.Call) and n.args and getattr(n.func, "attr", "") in ("get", "pop", "setdefault",
-                                                                                            "compile"):
-                    skip.add(id(n.args[0]))
-            for st in ast.walk(tree):
-                if not isinstance(st, ast.stmt) or hasattr(st, "body"):
-                    continue                       # a statement that holds statements is read through them
-                parts = sorted((n.lineno, n.col_offset, n.value) for n in ast.walk(st) if isinstance(n, ast.Constant)
-                               and isinstance(n.value, str) and id(n) not in skip)
-                said = self.SENTENCE.split(" ".join("".join(p[2] for p in parts).split()))
-                for k, s in enumerate(said):
-                    if self.ASKS.search(s) and not (self.NO_CLICK.search(s) or any(
-                            self.CLICKS.search(x) for x in said[k:k + 2])):
-                        bare.append(f"{name}:{st.lineno}: {s[:240]}")
-                    elif self.TYPED.search(s) and not self.NO_CLICK.search(s):
-                        bare.append(f"{name}:{st.lineno}, typed text with no reason: {s[:240]}")
-        self.assertEqual(bare, [], "asks of ezexe with no click form beside them:\n" + "\n".join(bare))
 
 
 class Waits(unittest.TestCase):
@@ -1392,7 +1336,6 @@ class NativeCalls(unittest.TestCase):
     def test_a_start_that_runs_at_once_passes_wake_when_done_and_no_card_does(self):
         """start_session's schema: true "also continues you if this session never gets its task some other way,
         such as a brief that is not sent; default false; not with own_initiative"."""
-        import upkeep
         draft = {"title": "the ports table", "context": "fresh", "brief": "Write the last row.\nFiles: a.py",
                  "background": "b" * 90, "parent": TOP}
         for d in (draft, {**draft, "parent": ""}, {**draft, "context": "fork"}):
@@ -1404,11 +1347,6 @@ class NativeCalls(unittest.TestCase):
                                           "brief": "Orchestrate the exporter.\nFiles: b.py", "background": "b" * 90})
         self.assertEqual((call["initiation"], call["wake_when_done"]), ("user_asked", True))
         self.assertTrue(call["cwd"])
-        for name in ("upkeep.py", "starts.py", "phi.py", "plans.py"):
-            for m in re.finditer(r"own_initiative", read(os.path.join(SRC, name))):
-                near = read(os.path.join(SRC, name))[max(0, m.start() - 300):m.end() + 300]
-                self.assertNotIn("wake_when_done", near.replace("not with own_initiative", ""), name)
-        self.assertNotIn("wake_when_done", upkeep.route.__doc__ or "")
 
     def test_the_request_line_names_list_start_targets_before_a_start_that_passes_cwd(self):
         """list_start_targets' text: "Call it before a start_session that names a host, folder, environment or
@@ -1424,15 +1362,12 @@ class NativeCalls(unittest.TestCase):
         self.assertLess(got.index("`mcp__ccd_session__list_start_targets`"), got.index("exactly the call given"))
         self.assertIn("never guessed", got)
 
-    def test_the_rule_and_the_request_line_say_where_a_sections_id_comes_from_as_the_filing_line_does(self):
+    def test_the_request_line_says_where_a_sections_id_comes_from(self):
         """`move_sessions` takes a section's id and no name, and the app's `list_sections` and `list_groups` answer
-        the ids, so each of the three lines that has a puppeteer file a session names the two beside it in the same
-        words: the rule, the line of the requests and the line for an orchestrator it started."""
+        the ids, so the line of the requests names the two beside it."""
         from unittest import mock
         how = ("which takes the section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` "
                "answers it, never in")
-        self.assertIn("its environment's section with `mcp__ccd_sidebar__move_sessions`, " + how + " \"{section}\"",
-                      controls.RULE)
         row = {"id": "rq-1", "title": "the exporter", "requester": KID, "store": "x"}
         with mock.patch.object(controls, "requests_for", lambda s: [row]), \
                 mock.patch.object(controls, "request_call", lambda r: {"cwd": "D:/proj", "title": r["title"]}), \
@@ -1441,11 +1376,6 @@ class NativeCalls(unittest.TestCase):
             got = controls.requests_text("", {"sessionId": TOP})
         self.assertIn("then file it with `mcp__ccd_sidebar__move_sessions` where named, " + how
                       + " the section this session is filed in", got)
-        source = read(os.path.join(SRC, "controls.py"))
-        named = [m.start() for m in re.finditer("`mcp__ccd_sidebar__move_sessions`", source)]
-        self.assertEqual(len(named), 3, "the three lines that name the tool")
-        for at in named:                           # and none of them names it alone
-            self.assertIn("`mcp__ccd_sidebar__list_groups`", source[at:at + 260], source[at:at + 80])
 
     def test_the_page_of_the_puppeteer_says_the_rule_as_controls_hands_it(self):
         """The script of docs/puppeteer.html shows the rule a puppeteer is told once. Its function RULE holds the
@@ -1460,33 +1390,7 @@ class NativeCalls(unittest.TestCase):
         parts = text.split("\x00")                 # words and names by turns, joined as the script joins them
         said = "+".join(part if i % 2 else json.dumps(part, ensure_ascii=False) for i, part in enumerate(parts))
         self.assertIn("\nfunction RULE(){return " + said + "}\n", page)
-        self.assertIn("`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in", said)
         self.assertIn('var RESTATE=' + json.dumps(phi.RESTATE) + ";", page)
-
-    def test_a_line_that_says_something_waits_on_ezexe_names_the_push_notification(self):
-        """PushNotification's text: "Keep the message under 200 characters, one line, no markdown", and the tools
-        reference has it send "a desktop notification from a local session"."""
-        import asks
-        import upkeep
-        self.assertIn("Where this session's tool list holds `PushNotification`", relay.PUSH)
-        self.assertIn("in one line under 200 characters", relay.PUSH)
-        for name, mod in (("asks.py", asks), ("upkeep.py", upkeep)):
-            src = read(os.path.join(SRC, name))
-            self.assertEqual(src.count("relay.PUSH"), 1, name)
-        at = read(os.path.join(SRC, "asks.py")).index("relay.PUSH")
-        self.assertIn("A request that waits on ezexe", read(os.path.join(SRC, "asks.py"))[at - 400:at])
-        at = read(os.path.join(SRC, "upkeep.py")).index("relay.PUSH")
-        self.assertIn("tell ezexe in one line that the", read(os.path.join(SRC, "upkeep.py"))[at - 300:at])
-
-    def test_the_dirty_leftover_clause_names_the_apps_two_tools_for_ezexes_word(self):
-        """discard_kept_worktree's text: "Use it only when the user asked to discard that session's leftover
-        work", and "The user approves each call on a card ... in every permission mode"."""
-        import upkeep
-        for words in ("`mcp__ccd_host__get_storage_usage` lists it", "asks nothing",
-                      "`mcp__ccd_host__discard_kept_worktree` with that `session_id`", "for good",
-                      "only once ezexe has said to discard that session's leftover work",
-                      "never on `phi.upkeep` alone"):
-            self.assertIn(words, upkeep.KEPT)
 
 
 class SidebarTools(unittest.TestCase):

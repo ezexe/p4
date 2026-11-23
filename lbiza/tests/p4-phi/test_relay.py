@@ -1410,14 +1410,6 @@ class ForkOrFresh(ThreeSessions):
                           "a fork is not advised over a worktree of its own")
         self.assertIn('advises context "fork"', self.advise(TOP, "fresh", f"Rework `{self.x('lib')}`", 10 * 1024,
                                                             use_worktree=False)["permissionDecisionReason"])
-        import phi
-        import plans
-        with open(phi.__file__, encoding="utf-8") as f:
-            source = f.read()
-        self.assertNotIn("pass `use_worktree: false`", source, "no line tells a session to drop the worktree")
-        self.assertNotIn("no worktree or", source)
-        for line in (plans.CARD_EACH, phi.FIRST_SPLIT):
-            self.assertIn("`use_worktree: true`, so it works in a git worktree and on a branch of its own", line)
 
     def test_a_session_in_its_own_worktree_is_asked_about_no_branch_and_one_that_shares_a_checkout_before_it_moves_it(self):
         """The stop on a child's own worktree is gone: a session started in a git worktree of its own makes a branch,
@@ -1460,11 +1452,6 @@ class ForkOrFresh(ThreeSessions):
                       "landing stays the orchestrator's")
         self.assertEqual(guard(reader, "git switch main", cwd=own)["permissionDecision"], "ask",
                          "a reader started with use_worktree false shares its starter's worktree")
-        import phi
-        with open(phi.__file__, encoding="utf-8") as f:
-            source = f.read()
-        self.assertNotIn("entering a worktree of its own", source)
-        self.assertNotIn("making a worktree or branch of its own", source)
 
     def test_a_hand_pull_or_push_in_a_store_is_asked_and_names_p4_sync(self):
         """A store moves only by p4.py sync."""

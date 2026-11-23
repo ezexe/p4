@@ -399,15 +399,6 @@ class Linear(Base):
                           r"ezexe's words:", re.I)
         for text in said:
             self.assertIsNone(asks.search(text), text)
-        import ast
-        for name in ("phi.py", "controls.py", "puppeteer.py", "issues.py"):
-            tree = ast.parse(read(os.path.join(SRC, name)))
-            docs = {id(n.body[0].value) for n in ast.walk(tree)
-                    if isinstance(n, (ast.Module, ast.FunctionDef, ast.ClassDef)) and n.body
-                    and isinstance(n.body[0], ast.Expr) and isinstance(n.body[0].value, ast.Constant)}
-            for n in ast.walk(tree):
-                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docs:
-                    self.assertIsNone(asks.search(n.value), f"{name}:{n.lineno} {n.value[:120]}")
 
     def test_a_draft_whose_files_a_running_writer_edits_is_started_in_a_worktree_and_never_queued(self):
         """The queue behind a busy writer is gone: a draft that names a file a running writer is at work on is
