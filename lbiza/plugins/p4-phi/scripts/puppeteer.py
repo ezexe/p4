@@ -489,15 +489,16 @@ def signature(home, top, roots):
     """One hash over the modification times of everything a ledger is made from: every session.json, since any of
     them can join the subtree, the other files of the sessions in it, the start requests, the issue states last
     read, and the app's session records."""
-    base = os.path.join(home, "phi", "sessions")
-    parts = [_stat(base), _stat(starts.path_of(home)), _stat(states_path(home))]
-    try:
-        names = sorted(os.listdir(base))
-    except OSError:
-        names = []
-    parts += [_stat(os.path.join(base, n, "session.json")) for n in names]
     import progress                                # it imports this module at its head, so it is read here
-    parts += [_stat(os.path.join(base, n, progress.TEAM)) for n in names]   # a lead can stand outside the subtree
+    parts = [_stat(starts.path_of(home)), _stat(states_path(home))]
+    for base in relay.session_bases(home):         # the root's flat sessions and those of each node's store
+        try:
+            names = sorted(os.listdir(base))
+        except OSError:
+            names = []
+        parts.append(_stat(base))
+        parts += [_stat(os.path.join(base, n, "session.json")) for n in names]
+        parts += [_stat(os.path.join(base, n, progress.TEAM)) for n in names]   # a lead can stand outside the subtree
     ids = set()
     for sid, _, _ in subtree(home, top):
         ids.add(sid)
@@ -856,7 +857,8 @@ def routes_path(home, sid):
 def all_routes(home):
     """{route id: route row} of every route registered in the store and not withdrawn since."""
     out = {}
-    for p in sorted(glob.glob(os.path.join(home, "phi", "sessions", "*", "routes.jsonl"))):
+    for p in sorted(p for base in relay.session_bases(home)
+                    for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))):
         for r in relay._rows(p):
             rid = r.get("id")
             if r.get("kind") == "route" and rid:
@@ -939,7 +941,7 @@ def route_of(home, s, commit):
 def register_routes(home, top, net=False):
     """Registers each landed topic under an orchestrator once, beside the ledger, when its records back it. Returns
     the routes this call registered."""
-    rows = [r for p in glob.glob(os.path.join(home, "phi", "sessions", "*", "routes.jsonl"))
+    rows = [r for base in relay.session_bases(home) for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))
             for r in relay._rows(p) if r.get("kind") == "route"]
     held, taken = {r.get("session") for r in rows}, {r.get("issue") for r in rows}
     new = []

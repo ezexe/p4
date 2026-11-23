@@ -1048,7 +1048,7 @@ def _rebase(home, sid, room, fair_cut, touches, path, held):
                 by[nid] = by.get(nid, 0) + 1
             named = ", ".join(f"{n} on {page_of(home, nid)}" for nid, n in sorted(by.items())[:3])
             more = (f", and the pages of {len(by) - 3} more sessions under "
-                    f"{os.path.dirname(_dir(home, sid)).replace(chr(92), '/')}") \
+                    f"{os.path.join(home, 'phi').replace(chr(92), '/')}") \
                 if len(by) > 3 else ""
             bits.append(f"phi (p4-phi): deprecation or replacement notes not shown: {len(far)}, from the sessions "
                         f"beside this one at anchor v{version}. They do not touch this session's task or open "
@@ -1286,7 +1286,23 @@ def child_paths(home, s):
 # the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, node.json, plan.json and
 # anchor.json are tracked, and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
 # tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
-# layout hook that seeds the rest of .gitignore runs beside this one at a start.
+# layout hook that seeds the rest of .gitignore runs beside this one at a start. A node's store is a plain folder of
+# the root store, with no git of its own, so each pattern that opens `phi/` has a twin that opens `.claude/**/phi/`.
+
+NESTED = ".claude/**/"           # what a pattern of a node's store has before its `phi/`
+
+
+def _twins(lines):
+    """Each line, and after each that opens `phi/` or `!phi/` its twin for every node's store, in the same order."""
+    out = []
+    for x in lines:
+        out.append(x)
+        if x.startswith("phi/"):
+            out.append(NESTED + x)
+        elif x.startswith("!phi/"):
+            out.append("!" + NESTED + x[1:])
+    return tuple(out)
+
 
 IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md", "phi/rules.md",
            "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock",
@@ -1307,11 +1323,13 @@ IGNORED = ("phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/session
            "phi/ready-to-archive.md",
            # what one hook read from the app's records, kept so the next reads one file: this machine's alone
            "phi/.cache/")
+IGNORED = _twins(IGNORED)
 TRACKED_MARK = "p4-phi-tracked"
 
 
 FILTER_ATTR = "phi/** filter=p4path"
 ARCHIVE_ATTR = "phi/archive/** -filter"      # the archive is kept verbatim: no path in it is rewritten
+ATTRS = (FILTER_ATTR, ARCHIVE_ATTR, NESTED + FILTER_ATTR, NESTED + ARCHIVE_ATTR)   # a node's store's files as the root's
 
 
 def _path_filter(home, g=None):
@@ -1334,7 +1352,7 @@ def _path_filter(home, g=None):
     except OSError:
         text = ""
     have = {x.strip() for x in text.splitlines()}
-    missing = [x for x in (FILTER_ATTR, ARCHIVE_ATTR) if x not in have]
+    missing = [x for x in ATTRS if x not in have]
     if not missing:
         return False
     with open(ga, "a", encoding="utf-8", newline="\n") as f:
@@ -1362,7 +1380,7 @@ def _ignore_lines(home):
 # While phi.track is off nothing of the session tree is ever committed, so all of it is ignored, under its own
 # marker line; when tracking is turned on the block comes out again, and the per-machine lines of IGNORED stay.
 UNTRACKED_MARK = "# the session tree, while phi.track is off (p4-phi)"
-UNTRACKED = ("phi/sessions/", "phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl")
+UNTRACKED = _twins(("phi/sessions/", "phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl"))
 
 
 def tree_ignore(home, tracked):
@@ -1437,7 +1455,8 @@ def track(home, first_only=False, wait=False):
     attrs = _path_filter(home, g)
     if not first:
         if deadline - time.time() >= TRACK_ADD_LEFT_S:   # a git stopped mid-add would leave its index.lock behind
-            g("add", "-A", "--", "phi", *([".gitignore"] if changed else []), *([".gitattributes"] if attrs else []))
+            g("add", "-A", "--", *_tracked(home), *([".gitignore"] if changed else []),
+              *([".gitattributes"] if attrs else []))
         return False
     _owe(gd, [".gitignore"] if changed else [], [".gitattributes"] if attrs else [])
     if wait:
@@ -1446,6 +1465,11 @@ def track(home, first_only=False, wait=False):
     if time.time() >= float(state.get("next") or 0) and not _track_running(gd):
         _start_track_first(home)
     return False
+
+
+def _tracked(home):
+    """What the store's git takes of the session tree: phi/, and `.claude` beside it where the store holds nodes."""
+    return ["phi"] + ([".claude"] if os.path.isdir(os.path.join(home, ".claude")) else [])
 
 
 TRACK_ADD_LEFT_S = 2.0           # the least of the hook's budget a staging add starts with
@@ -1522,7 +1546,7 @@ def track_first(home):
             return False
         landed = git("log", "-1", "--format=%H", "--fixed-strings", f"--grep={TRACK_SUBJECT}")
         if not (landed and landed.returncode == 0 and landed.stdout.strip()):
-            paths = ["phi"] + [x for x in st.get("owed") or [] if os.path.exists(os.path.join(home, x))]
+            paths = _tracked(home) + [x for x in st.get("owed") or [] if os.path.exists(os.path.join(home, x))]
             if _path_filter(home, git) and ".gitattributes" not in paths:
                 paths.append(".gitattributes")
             why, r = "", None

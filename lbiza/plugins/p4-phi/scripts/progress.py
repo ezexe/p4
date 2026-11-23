@@ -213,7 +213,7 @@ def build(home, top):
             nodes.append(dict(node(home, sid, 0, s), apart=True))
             sources += [os.path.join(relay._dir(home, sid), name) for name in WATCHED]
     return {"top": top, "nodes": nodes, "sources": [p.replace("\\", "/") for p in sources[:SOURCES]],
-            "folders": [os.path.join(home, "phi", "sessions").replace("\\", "/")]}
+            "folders": [b.replace("\\", "/") for b in relay.session_bases(home) if os.path.isdir(b)]}
 
 
 def write(home, sid):

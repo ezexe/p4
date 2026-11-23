@@ -4459,11 +4459,7 @@ def reparent(home, sid, under, source="reparented"):
 
 
 def tree_text(home):
-    sessions = {}
-    for p in glob.glob(os.path.join(home, "phi", "sessions", "*", "session.json")):
-        d = read_json(p)
-        if d.get("sessionId"):
-            sessions[d["sessionId"]] = d
+    sessions = relay._sessions(home)               # the flat sessions and those of every node's store
     gone_ = {k for k, d in sessions.items() if d.get("archived") or relay.archived_in_app(d)}
     started = {}
     for s in sorted(sessions.values(), key=lambda s: s.get("createdAt", "")):
@@ -4792,11 +4788,7 @@ def main(argv=None):
             if not sid:
                 print("phi: name the session, or run this from inside it", file=sys.stderr)
                 return 2
-            every = {}
-            for p in glob.glob(os.path.join(me.home, "phi", "sessions", "*", "session.json")):
-                d = read_json(p)
-                if d.get("sessionId"):
-                    every[d["sessionId"]] = d
+            every = relay._sessions(me.home)
             if sid not in every:
                 print(f"phi: no session {sid} in this store", file=sys.stderr)
                 return 2
