@@ -5,9 +5,10 @@ since a session writes nothing under `.claude` with its own tools. With it off t
 nothing. With it on, beside every message a session that started others gets, and at the turn the hooks module starts
 for it, p4-phi hands the exact acts that are due for those sessions, and the setting is ezexe's standing word for each:
 
-  archive      a started session that is finished, with no open step, no background task and its last report handed,
-               and whose commits are all on its repository's default branch on the remote, is named by its whole
-               title with the exact archive call. One whose work is not landed gets the landing line first.
+  archive      a started session that is finished, with no open step and its last report handed, and whose commits
+               are all on its repository's default branch on the remote, is taken through its closing ceremony, the
+               plan moved, the closing message answered and its unfinished row settled, and is then named by its
+               whole title with the exact archive call. One whose work is not landed gets the landing line first.
                The archive is the app's own tool: desktop.md, "Work across sessions", has Claude "archive a session",
                and says "You get an approval card before Claude archives a session, except in Auto mode and Bypass
                permissions mode". So nothing archives here: the line names the call, and the settings keeper takes
@@ -82,6 +83,14 @@ FIT_WORDS = 3                    # content words a step shares with a live worke
 # Words that make no fit: the words every brief of this project carries, and everyday words no task has to itself.
 EVERYDAY = plans.SIBLING_STOP | st.COMMON | frozenset("own owns owned itself".split())
 NO_ASK = ("auto", "bypassPermissions")   # the permission modes the app archives in without its card
+CLOSE_ASKS = 2                   # closing messages one session is sent before it is left to ezexe
+CLOSE_LOOKS = 2                  # messages this session gets after one with no turn of the asked session ended
+CLOSE_S = 300                    # seconds after a closing message with no turn of the asked session ended
+RETRY_S = 120                    # seconds a refused archive waits before its one retry is handed
+# How the app's own answer to an archive call it did not make opens, seen on 2026-11-23 in the desktop app on Claude
+# Code 2.1.326 with two endings, "it still has live work" and "the app is keeping it for the user". It tells the
+# app's answer from a call that never reached the app, such as one denied for its input, and is read for no cause.
+NOT_ARCHIVED = re.compile(r"was not archived", re.I)
 
 
 def on():
@@ -100,7 +109,7 @@ def path(home, sid):
 def load(home, sid):
     d = relay._read_json(path(home, sid))
     for k, kind in (("items", list), ("waits", list), ("named", list), ("wokeFor", list), ("terminals", list),
-                    ("tried", dict),
+                    ("tried", dict), ("closing", dict), ("refused", dict),
                     ("scanned", dict), ("swept", dict), ("mains", dict)):
         if not isinstance(d.get(k), kind):
             d[k] = kind()
@@ -294,13 +303,28 @@ def working(home, sid):
 def finished(home, sid, s):
     """True when a started session's work is over by p4-phi's records: a turn of it ended and none runs, its last
     turn was shown done, its task list holds steps and none is open, or p4-phi counts it as archived already, and no
-    session under it still works or holds an open step."""
+    session under it still works or holds an open step. Where its starter handed it a closing message, the done
+    mark is read from the turn that had ended at the first such hand, kept as `since` in the starter's upkeep.json,
+    since the answer to a closing message shows no work and every turn's end takes the mark off. That holds only
+    while every turn since was begun by a message of its starter's and changed no file, by the turn rows' own
+    `by`, `from` and `delta`: a turn anybody else began, or one that changed a file, is work, and the session is
+    then read by its latest turn's own mark."""
     turns = relay._rows(os.path.join(relay._dir(home, sid), "turns.jsonl"))
     if not turns or working(home, sid):
         return False
     steps = plans.load(home, sid).get("steps") or []
     still = [x for x in steps if x.get("status") != "completed"]
-    over = bool(turns[-1].get("done")) or (bool(steps) and not still) or bool(s.get("doneRetired") or s.get("stale"))
+    above = relay._parent(s)
+    asked = load(home, above)["closing"].get(sid) if above else None
+    since = str(asked.get("since") or "") if isinstance(asked, dict) else ""
+    at = max((i for i, r in enumerate(turns) if since and str(r.get("id") or "") == since), default=None)
+    later = turns[at + 1:] if at is not None else []
+    if at is None or any(r.get("by") != "session" or str(r.get("from") or "") != above
+                         or (r.get("delta") or {}).get("files") for r in later):
+        shown = turns[-1]                          # no closing hand, or a turn since that is no answer to its starter
+    else:
+        shown = turns[at]
+    over = bool(shown.get("done")) or (bool(steps) and not still) or bool(s.get("doneRetired") or s.get("stale"))
     if not over or still:
         return False
     for k, ks in relay._sessions(home).items():
@@ -1028,12 +1052,164 @@ def made_commits(trees):
     return False
 
 
+CLOSE_SAID = ("Closing before this session's archive. Stop every background task, watch and subscription this "
+              "session started and that still runs: a background command, a subagent or a monitor with `TaskStop` "
+              "and its id, a scheduled task with `CronDelete`, and a pending wakeup with `ScheduleWakeup` and "
+              "`stop` true. Start nothing and set no wait. Then say in this turn's reply what was still running "
+              "and that it is stopped, or that nothing ran, and that this session is ready for its archive. That "
+              "reply is all: send no message for it.")
+
+
+def plan_act(d, k, ks, name, hand):
+    """The ceremony's step before the closing message: the plan the started session `k` wrote, its `planFile`,
+    still lies in the folder of plans being worked. Its act, or None once the file is gone from there, as a move
+    into `complete`, `todo` or `unplanned` leaves it. Handed TRIES times at most."""
+    plan = str(ks.get("planFile") or "")
+    key = f"plan:{k}"
+    n = int(d["tried"].get(key) or 0)
+    if not plan or not os.path.isfile(plan):
+        return None
+    if n >= TRIES:
+        return ()
+    if hand:
+        d["tried"][key] = n + 1
+    return (key, "plan", True,
+            f"plan: {name} is finished and landed, and its plan `{plan}` still lies among the plans being worked. "
+            f"Close it first, as p4-temportal's skill `plan-planner` says under `Moving a plan`: STATUS on line 2, "
+            f"then the move into `complete` under its title's name. The plan in `complete` is the record ezexe goes "
+            f"back to. Its closing message and its archive follow.{left_words(n)}")
+
+
+def left_words(n):
+    """The words that close a ceremony step's line at its last hand, so a step p4-phi leaves is told to ezexe."""
+    return (f" This is the {TRIES}rd time p4-phi hands it: if it stays open, tell ezexe so in one line, and "
+            f"p4-phi hands it no more.") if n + 1 >= TRIES else ""
+
+
+def close_state(home, d, k):
+    """How the closing of the started session `k` stands: '' while no closing message was handed, 'asked' while no
+    turn of it has ended since, 'answered' once one has, and 'silent' once CLOSE_LOOKS later messages found it
+    idle with none or CLOSE_S seconds passed with none, as a message its session holds for approval leaves it."""
+    c = d["closing"].get(k)
+    if not isinstance(c, dict):
+        return ""
+    if str(PHI.last_turn_row(home, k).get("id") or "") != str(c.get("turn") or ""):
+        return "answered"
+    late = bool(c.get("at")) and time.time() - float(c["at"]) > CLOSE_S
+    return "silent" if late or int(c.get("looks") or 0) >= CLOSE_LOOKS else "asked"
+
+
+def close_act(home, d, k, name, hand):
+    """The closing step before the archive of the started session `k`, as (its act or None, whether the ceremony
+    goes on). The first act is the closing message for the starter to send. One that was answered while a
+    background task still ran is sent once more, CLOSE_ASKS in all. After that, or where a session with such a
+    task did not answer, ezexe is told once and the ceremony stops, since the app archives no session with live
+    background work. A session that did not answer and whose last turn's end listed no task goes on."""
+    held = PHI.puppeteer.held_tasks(home, k)
+    state = close_state(home, d, k)
+    c = d["closing"].get(k) if isinstance(d["closing"].get(k), dict) else {}
+    asks = int(c.get("asks") or 0)
+    if state == "asked":
+        if hand:
+            c["looks"] = int(c.get("looks") or 0) + 1
+        return None, False
+    if not state or (state == "answered" and held and asks < CLOSE_ASKS):
+        if hand:
+            ended = str(PHI.last_turn_row(home, k).get("id") or "")
+            d["closing"][k] = {"since": str(c.get("since") or ended), "turn": ended, "asks": asks + 1,
+                               "looks": 0, "at": time.time(), "time": now()}
+        ran = f" Its last turn's end listed as still running: {'; '.join(held)}." if held else ""
+        again = " It answered the first and these still ran, so this is the second and the last." if asks else ""
+        return (f"close:{k}:{asks + 1}", "close", True,
+                f"close: {name} is finished and landed, and it is closed before its archive. Send it these words "
+                f"by `SendMessage` to `{k}`, as they stand: \"{CLOSE_SAID}\"{ran}{again} Its archive is handed at "
+                f"the turn after its reply."), False
+    if held:
+        key = f"held:{k}"
+        if int(d["tried"].get(key) or 0) >= 1:
+            return None, False
+        if hand:
+            d["tried"][key] = 1
+        how = "did not answer its closing message" if state == "silent" else f"answered {asks} closing messages"
+        return (key, "held", False,
+                f"held: {name} {how}, and its last turn's end still listed {'; '.join(held)}. The app archives no "
+                f"session with live background work, so p4-phi hands no archive of it: tell ezexe so in one line, "
+                f"with those tasks."), False
+    return None, True
+
+
+def settle_act(home, d, k, ks, name, hand):
+    """The ceremony's step before the archive call: what the started session `k` left unfinished, kept on its
+    record by puppeteer.archive_check, is not settled. Its act, or None where it left nothing or the row is
+    settled. That check runs once, at the turn the session was shown done, so the line names what
+    puppeteer.unfinished reads now, after the closing message. Handed TRIES times at most."""
+    left = ks.get("unfinishedAtArchive")
+    if not isinstance(left, dict) or left.get("settled"):
+        return None
+    key = f"settle:{k}"
+    n = int(d["tried"].get(key) or 0)
+    if n >= TRIES:
+        return ()
+    if hand:
+        d["tried"][key] = n + 1
+    now_left = [str(x) for x in PHI.puppeteer.unfinished(home, k)][:6] if hand else None   # read at a hand alone
+    what = ("Take up what of it still stands, or say what took it up" if now_left is None else
+            f"Of it this still stands: {'; '.join(now_left)}. Take each up or say what took it up" if now_left
+            else "Nothing of it stands now, so say that it was closed before its archive")
+    return (key, "settle", True,
+            f"settle: {name} left work unfinished at the turn it was shown done, which the ledger holds as its "
+            f"row. {what}, and settle the row with `{PHI.commands()} settle {k} \"<what took it up>\"`. Its "
+            f"archive follows.{left_words(n)}")
+
+
+def keep_refused(home, s, calls):
+    """At a turn's end: for each session the turn made an archive call of, the answer to the last such call. One
+    the app answered as not archived, NOT_ARCHIVED, is kept in upkeep.json as `refused`, with how many calls were
+    so answered, the app's words as they stand and the time. One that worked takes the session off the list, as
+    does the app's own archive of it, and a call that failed before the app answered, as one denied for its input
+    or on a card ezexe declined, changes nothing and spends no retry. The words are kept and never read for a
+    cause. True when the record changed."""
+    if not on() or not s.get("sessionId"):
+        return False
+    last = {}
+    for c in calls or []:
+        if isinstance(c, dict) and c.get("name") == ARCHIVE:
+            k = str((c.get("input") or {}).get("session_id") or "")
+            if k and k != "self":
+                last[k] = c
+    sid = s["sessionId"]
+    with relay.locked(path(home, sid)):
+        d = load(home, sid)
+        before = repr(d["refused"])
+        for k in list(d["refused"]):
+            v = relay._session(home, k)
+            if not v or v.get("archived") or relay.archived_in_app(v):
+                d["refused"].pop(k)
+        for k, c in last.items():
+            if not c.get("failed"):
+                d["refused"].pop(k, None)
+                continue
+            if not NOT_ARCHIVED.search(str(c.get("result") or "")):
+                continue                           # it never reached the app's own answer
+            was = d["refused"].get(k) if isinstance(d["refused"].get(k), dict) else {}
+            d["refused"][k] = {"n": int(was.get("n") or 0) + 1, "at": time.time(), "time": now(),
+                               "said": " ".join(str(c.get("result") or "").split())[:300]}
+        if repr(d["refused"]) == before:
+            return False
+        save(home, sid, d)
+    return True
+
+
 def archive_acts(home, s, d, hand):
     out, sid = [], s["sessionId"]
     told = unread(home, s)
     mode = str((PHI.app_record(sid) if sid.startswith("local_") else {}).get("permissionMode") or "")
-    for k, ks in started(home, sid).items():
-        if k in told or not finished(home, k, ks) or PHI.puppeteer.held_tasks(home, k):
+    live = started(home, sid)
+    if hand:
+        for gone in [k for k in d["closing"] if k not in live]:
+            d["closing"].pop(gone)
+    for k, ks in live.items():
+        if k in told or not finished(home, k, ks):
             continue
         ok, why, trees = landing(home, k, ks)
         if ok and not made_commits(trees) and driver(home, k, ks):
@@ -1053,6 +1229,30 @@ def archive_acts(home, s, d, hand):
                         f"log`: a message of a worker reaches this session only when this turn ends, and a new "
                         f"commit is the one sign of it. It is archived at the turn after."))
             continue
+        step = plan_act(d, k, ks, name, hand)
+        ready = step is None
+        if ready:
+            step, ready = close_act(home, d, k, name, hand)
+        if ready:
+            step = settle_act(home, d, k, ks, name, hand)
+            ready = step is None
+        if not ready:                              # a step of the ceremony is open: its act, or nothing once left
+            if step:
+                out.append(step)
+            continue
+        said = d["refused"].get(k) if isinstance(d["refused"].get(k), dict) else {}
+        calls = int(said.get("n") or 0)
+        if calls >= 2:
+            if not int(d["tried"].get(f"refused:{k}") or 0):
+                if hand:
+                    d["tried"][f"refused:{k}"] = 1
+                out.append((f"refused:{k}", "refused", False,
+                            f"refused: {name} was not archived at two calls, the second after it had been idle. "
+                            f"The app's answer, as it stands: \"{said.get('said')}\". Tell ezexe so in one line "
+                            f"with the session's name and that answer, and p4-phi hands the call no more."))
+            continue
+        if calls and time.time() - float(said.get("at") or 0) < RETRY_S:
+            continue                               # refused a moment ago: it is taken as still busy
         key = f"archive:{k}"
         n = int(d["tried"].get(key) or 0)
         if n >= TRIES:
@@ -1063,14 +1263,19 @@ def archive_acts(home, s, d, hand):
         after = (f" Once the call returns, remove what it leaves on disk: {cmds_text(cmds)}. {LEAVE}{whole()}") if cmds else ""
         card = "" if mode in NO_ASK else (" This session does not run in auto or bypass permissions mode, so the "
                                           "app shows ezexe its approval card for the call: that card is the app's.")
-        last = (f" This is the {TRIES}rd time p4-phi hands it: if the app refuses again, as it does for a session "
-                f"that is pinned, open on screen or still working, tell ezexe so in one line, and p4-phi hands it "
-                f"no more.") if n + 1 >= TRIES else ""
+        again = (f" The app answered the last call: \"{said.get('said')}\". p4-phi takes that as a session that "
+                 f"was still busy, and this is the one retry, now that it has been idle.") if calls else ""
+        last = (f" This is the {TRIES}rd time p4-phi hands it, and it hands it no more.") if n + 1 >= TRIES else ""
+        closed = ("answered" if close_state(home, d, k) == "answered" else
+                  "sent and not answered, with no background task listed at its last turn's end")
         out.append((key, "archive", True,
-                    f"archive: {name} is finished and landed: no open step, no background task, its last report "
-                    f"handed, and every commit of it on its repository's default branch on the remote. Call "
-                    f"`{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and landed\" now.{card}{after}{TELL}"
-                    f"{last}"))
+                    f"archive: {name} is finished, landed and closed: no open step, its plan moved, its closing "
+                    f"message {closed}, its last report handed, and every commit of it on its repository's default "
+                    f"branch on the remote. Call `{ARCHIVE}` with `session_id` `{k}` and `reason` \"finished and "
+                    f"landed\" now.{again} Where the call is denied with words that quote an input holding "
+                    f"`session`, make the call once more with that input as quoted. Where the app answers that the "
+                    f"session was not archived, make no further call in this turn and say the app's answer to "
+                    f"ezexe in one line, as it stands.{card}{after}{TELL}{last}"))
     return out
 
 

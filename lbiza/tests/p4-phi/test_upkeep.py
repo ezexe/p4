@@ -98,10 +98,16 @@ class Base(unittest.TestCase):
             r = git(self.wt, "push", "-q", "origin", "HEAD:main")
             self.assertEqual(r.returncode, 0, r.stderr)
 
-    def finish(self, report=REPORT, uuid="u1"):
-        """The worker shows its turn done and ends it."""
+    def finish(self, report=REPORT, uuid="u1", closed=True):
+        """The worker shows its turn done and ends it. With `closed` and upkeep on, the closing step before its
+        archive is kept as answered already, so a test of another act reads the archive line at the next message."""
         self.assertEqual(self.t.cli(KID, "done", "ran the exporter's tests and they passed").returncode, 0)
         self.t.stop(KID, BRIEF, report=report, uuid=uuid)
+        if closed and p4conf.upkeep_on(self.t.p4):
+            d = upkeep.load(self.t.p4, TOP)
+            d["closing"][KID] = {"turn": "the turn before its closing message", "asks": 1, "looks": 0,
+                                 "time": "2026-11-23 10:00"}
+            upkeep.save(self.t.p4, TOP, d)
 
     def archive_in_app(self, host=KID):
         """The app's record of a session as the archive tool leaves it."""
@@ -272,6 +278,221 @@ class Archive(Base):
         seen = [len(self.lines(self.said(), "archive:")) for _ in range(4)]
         self.assertEqual(seen, [1, 1, 1, 0])
         self.assertIn(f"archive:{KID}", self.t.cli(TOP, "upkeep").stdout)
+
+
+class Closing(Base):
+    """The ceremony before an archive: the plan moved, one closing message answered, the unfinished row settled.
+    Seen on 2026-11-23: a planner left a nine-minute background wait running after its report, and the app
+    answered its archive call "it still has live work"."""
+
+    def answer(self, uuid, tasks=(), words="Closing before this session's archive. Stop what you started."):
+        """A turn of the worker's that a message of its starter's began, as the app delivers one, which ends with
+        `tasks` still running."""
+        said = (f"Another Claude session sent a message:\n<cross-session-message from=\"{TOP}\" from-name=\"top\">"
+                f"{words}</cross-session-message>")
+        write(os.path.join(self.t.dir(KID), "origin.json"), json.dumps({"promptId": uuid, "kind": "peer"}))
+        r = self.t.hook("user-prompt-submit", KID, {"hook_event_name": "UserPromptSubmit", "prompt": said,
+                                                    "prompt_id": uuid})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = test_phi.transcript(os.path.join(self.tmp, KID + uuid + ".jsonl"), said, (), "Nothing runs. Ready.",
+                                   uuid)
+        r = self.t.hook("stop", KID, {"hook_event_name": "Stop", "transcript_path": path,
+                                      "last_assistant_message": "Nothing runs. Ready.",
+                                      "background_tasks": [{"id": t, "type": "shell", "status": "running",
+                                                            "description": "sleep 540", "command": "sleep 540"}
+                                                           for t in tasks]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        row = self.t.turns(KID)[-1]
+        self.assertEqual((row.get("by"), row.get("from")), ("session", TOP), "the row says whose message began it")
+
+    def record(self, **fields):
+        """Fields put on the worker's own record, as its hooks keep them."""
+        p = os.path.join(self.t.dir(KID), "session.json")
+        write(p, json.dumps({**jload(p), **fields}))
+
+    def test_the_closing_message_is_handed_first_and_the_archive_after_the_sessions_next_turn(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        got = self.said()
+        close = self.lines(got, "close:")
+        self.assertEqual((len(close), self.lines(got, "archive:")), (1, []), got)
+        self.assertIn(f"`SendMessage` to `{KID}`", close[0])
+        self.assertEqual(upkeep.load(self.t.p4, TOP)["closing"][KID]["asks"], 1)
+        self.answer("u2")
+        got = self.said()
+        self.assertEqual((len(self.lines(got, "archive:")), self.lines(got, "close:")), (1, []), got)
+
+    def test_a_task_that_still_runs_is_named_and_asked_for_once_more_and_then_left_to_ezexe(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        self.assertEqual(len(self.lines(self.said(), "close:")), 1)
+        self.answer("u2", tasks=("bg11111111",))
+        again = self.lines(self.said(), "close:")
+        self.assertEqual(len(again), 1, "answered, and a task still ran")
+        self.assertIn("bg11111111", again[0])
+        self.assertEqual(upkeep.load(self.t.p4, TOP)["closing"][KID]["asks"], 2)
+        self.answer("u3", tasks=("bg11111111",))
+        got = self.said()
+        held = self.lines(got, "held:")
+        self.assertEqual((len(held), self.lines(got, "close:"), self.lines(got, "archive:")), (1, [], []), got)
+        self.assertIn("bg11111111", held[0])
+        got = self.said()
+        self.assertEqual((self.lines(got, "held:"), self.lines(got, "archive:")), ([], []), "told once, no archive")
+
+    def test_a_session_that_does_not_answer_is_archived_where_nothing_of_it_ran(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        seen = []
+        for _ in range(4):
+            got = self.said()
+            seen.append((len(self.lines(got, "close:")), len(self.lines(got, "archive:"))))
+        self.assertEqual(seen, [(1, 0), (0, 0), (0, 0), (0, 1)], "one ask, two quiet messages, then the archive")
+
+    def test_a_closing_message_unanswered_for_five_minutes_counts_as_not_answered(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        self.assertEqual(len(self.lines(self.said(), "close:")), 1)
+        d = upkeep.load(self.t.p4, TOP)
+        d["closing"][KID]["at"] -= upkeep.CLOSE_S + 1
+        upkeep.save(self.t.p4, TOP, d)
+        self.assertEqual(upkeep.close_state(self.t.p4, d, KID), "silent")
+        self.t.stop(TOP, TASK, report="The closing message is sent.", uuid="t2")
+        got = self.look("--net")
+        self.assertTrue(str(got.get("upkeep") or "").startswith("phi (p4-phi): upkeep is due"), "a quiet starter is woken")
+        self.assertEqual(len(self.lines(self.said(got["upkeep"]), "archive:")), 1, "nothing of it ran: the archive")
+
+    def test_a_turn_given_other_work_after_the_closing_message_is_read_by_its_own_mark(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        self.said()
+        self.answer("u2")
+        self.assertTrue(upkeep.finished(self.t.p4, KID, self.t.session(KID)))
+        self.answer("u2b", words="Thank you, that is all.")
+        self.assertTrue(upkeep.finished(self.t.p4, KID, self.t.session(KID)), "its starter's word after is no work")
+        self.t.say(KID, "One more thing: check the empty table.")
+        self.t.stop(KID, "One more thing: check the empty table.", report="Looking at it.", uuid="u3")
+        self.assertFalse(upkeep.finished(self.t.p4, KID, self.t.session(KID)), "new work, and no done mark")
+        self.assertEqual(self.lines(self.said(), "archive:"), [])
+
+    def test_a_second_closing_message_keeps_the_turn_its_done_mark_is_read_from(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.", closed=False)
+        self.said()
+        first = upkeep.load(self.t.p4, TOP)["closing"][KID]["since"]
+        self.answer("u2", tasks=("bg11111111",))
+        self.said()
+        kept = upkeep.load(self.t.p4, TOP)["closing"][KID]
+        self.assertEqual((kept["since"], kept["asks"]), (first, 2))
+        self.assertTrue(upkeep.finished(self.t.p4, KID, self.t.session(KID)), "the answer undoes no done mark")
+
+    def test_the_closing_message_is_an_act_a_turn_is_started_for(self):
+        self.turn_on()
+        self.commit(push=False)
+        self.finish(report="The last row is written now.", closed=False)
+        self.assertEqual(len(self.lines(self.said(), "land first:")), 1)
+        self.t.stop(TOP, TASK, report="Waiting on the landing.", uuid="t2")
+        self.assertEqual(git(self.wt, "push", "-q", "origin", "HEAD:main").returncode, 0)
+        got = self.look("--net")
+        self.assertTrue(str(got.get("upkeep") or "").startswith("phi (p4-phi): upkeep is due"), got)
+        self.assertEqual(len(self.lines(self.said(got["upkeep"]), "close:")), 1)
+
+    def test_a_plan_still_among_the_plans_being_worked_is_closed_before_the_closing_message(self):
+        self.turn_on()
+        self.commit()
+        plan = os.path.join(self.t.p4, "temportal", "plan-planner", "the-last-row.md")
+        write(plan, "# The last row\n")
+        self.finish(report="The last row is written now.", closed=False)
+        self.record(planFile=plan.replace("\\", "/"))
+        got = self.said()
+        self.assertEqual((len(self.lines(got, "plan:")), self.lines(got, "close:"), self.lines(got, "archive:")),
+                         (1, [], []), got)
+        os.makedirs(os.path.join(os.path.dirname(plan), "complete"))
+        os.replace(plan, os.path.join(os.path.dirname(plan), "complete", "the-last-row.md"))
+        got = self.said()
+        self.assertEqual((self.lines(got, "plan:"), len(self.lines(got, "close:"))), ([], 1), "moved: the next step")
+
+    def test_an_unfinished_row_is_settled_before_the_archive_call(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.")
+        self.record(unfinishedAtArchive={"time": "2026-11-23 10:00", "items": ["plan step \"Run it\" is open"]})
+        got = self.said()
+        self.assertEqual((len(self.lines(got, "settle:")), self.lines(got, "archive:")), (1, []), got)
+        self.record(unfinishedAtArchive={"time": "2026-11-23 10:00", "items": ["plan step \"Run it\" is open"],
+                                         "settled": "the next plan took it up"})
+        self.assertEqual(len(self.lines(self.said(), "archive:")), 1)
+
+
+class Refused(Base):
+    """An archive the app refuses is taken as a session still busy: its words are kept as they stand, the call is
+    handed once more after the session has been idle, and after a second refusal ezexe is told once. Seen on
+    2026-11-23: each refusal fell while the session's own records showed a turn open or a background task
+    running, and the same call went through minutes later."""
+
+    BUSY = ("Session local_kid (\"the worker\") was not archived: the app is keeping it for the user (pinned or "
+            "in use). Wait or ask the user; they can also archive it from the sidebar.")
+    DENIED = ("The server-side auto mode classifier gave no verdict for mcp__ccd_session_mgmt__archive_session: a "
+              "hook changed this call's input after auto mode reviewed it.")
+
+    def ends(self, uuid, *calls):
+        """A turn of the starter's that made these archive calls of the worker, each as (answer, failed)."""
+        made = [(ARCHIVE, {"session_id": KID}, said) + (("failed",) if failed else ()) for said, failed in calls]
+        self.t.stop(TOP, TASK, calls=made, report="Called it.", uuid=uuid)
+        return upkeep.load(self.t.p4, TOP)["refused"]
+
+    def idle(self):
+        """The refusal as one of RETRY_S ago."""
+        d = upkeep.load(self.t.p4, TOP)
+        d["refused"][KID]["at"] -= upkeep.RETRY_S + 1
+        upkeep.save(self.t.p4, TOP, d)
+
+    def ready(self):
+        self.turn_on()
+        self.commit()
+        self.finish(report="The last row is written now.")
+        self.assertEqual(len(self.lines(self.said(), "archive:")), 1)
+
+    def test_a_refused_call_is_kept_with_the_apps_words_and_handed_once_more_after_the_session_was_idle(self):
+        self.ready()
+        kept = self.ends("t5", (self.BUSY, True))
+        self.assertEqual((kept[KID]["n"], kept[KID]["said"]), (1, self.BUSY))
+        self.assertEqual(self.lines(self.said(), "archive:"), [], "refused a moment ago: no call is handed")
+        self.idle()
+        again = self.lines(self.said(), "archive:")
+        self.assertEqual(len(again), 1, "the one retry")
+        self.assertIn(self.BUSY, again[0], "the app's words are passed on as they stand")
+
+    def test_a_second_refusal_is_told_to_ezexe_once_and_the_call_is_handed_no_more(self):
+        self.ready()
+        self.ends("t5", (self.BUSY, True))
+        self.idle()
+        self.assertEqual(len(self.lines(self.said(), "archive:")), 1)
+        self.assertEqual(self.ends("t6", (self.BUSY, True))[KID]["n"], 2)
+        self.idle()
+        got = self.said()
+        told = self.lines(got, "refused:")
+        self.assertEqual((len(told), self.lines(got, "archive:")), (1, []), got)
+        self.assertIn(self.BUSY, told[0])
+        got = self.said()
+        self.assertEqual((self.lines(got, "refused:"), self.lines(got, "archive:")), ([], []), "once, and no more")
+
+    def test_a_call_denied_for_its_input_and_made_again_is_no_refusal(self):
+        self.ready()
+        self.assertEqual(self.ends("t4", (self.DENIED, True)), {}, "it never reached the app: no retry is spent")
+        self.assertEqual(self.ends("t5", (self.DENIED, True), ("Archived session local_kid.", False)), {})
+        self.ends("t6", (self.BUSY, True))
+        self.assertEqual(self.ends("t7", ("Archived session local_kid.", False)), {}, "a call that worked clears it")
+
+    def test_with_upkeep_off_no_answer_is_kept(self):
+        self.t.stop(TOP, TASK, calls=[(ARCHIVE, {"session_id": KID}, self.BUSY, "failed")], report="Called it.",
+                    uuid="t5")
+        self.assertFalse(os.path.exists(upkeep.path(self.t.p4, TOP)), "no record of upkeep is made")
 
 
 class Sweep(Base):

@@ -188,7 +188,7 @@ Read `goal.md` in this skill's folder when a line from p4-phi names this session
 
 ## Upkeep of a session tree
 
-Read `upkeep.md` in this skill's folder when a line from p4-phi says upkeep is due, when the project's `phi.upkeep` is on, or before an `upkeep` command: it holds each act of upkeep and what stays ezexe's.
+Read `upkeep.md` in this skill's folder when a line from p4-phi says upkeep is due, when the project's `phi.upkeep` is on, or before an `upkeep` command: it holds each act of upkeep and what stays ezexe's. A session that is sent the closing message before its archive stops what it started, says in that turn's reply what was still running and that it is ready, and starts nothing after it.
 
 ## What it does not do
 

@@ -2945,6 +2945,12 @@ def h_stop(payload):
         row["done"] = clean(done["text"])[:400]
     if upkeep.keep_sweep(s, turn.get("calls")):    # the sweep's schedule, or a worker asked for its idle notice
         RAN["schedule"] = upkeep.schedule_runs(s)
+    if UPKEEP:
+        try:                                       # the app's answer to an archive call that failed, kept as it is
+            if upkeep.keep_refused(me.home, s, turn.get("calls")):
+                RAN["refused"] = True
+        except Exception as e:  # noqa: BLE001  a record it cannot write never costs the turn its end
+            log_failure("refused", {}, e)
     if s.get("toldBy"):
         row["by"] = s["toldBy"]                    # whose words began the turn, where the prompt's origin said
         if s.get("toldFrom"):
