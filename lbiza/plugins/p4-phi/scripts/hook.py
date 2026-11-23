@@ -125,6 +125,7 @@ phi/**/*.lock
 phi/sessions/*/.calls/
 phi/.agents/
 phi/.nudge/
+.venv/
 __pycache__/
 *.pyc
 *.png
@@ -137,6 +138,8 @@ phi/models/ranker.pt
 # is never tracked. The chain itself, phi/models/ranker-anchor.pt and phi/models/ranker.rNNN.phid, and the pretrained
 # base are tracked in git LFS through the store's .gitattributes, so a blanket *.pt or *.phid here would hide the very
 # files the other machines pull.
+# .venv/ is the store's Python environment, which storeenv.py builds on this machine and git never tracks: Python's
+# venv page says an environment is "Not checked into source control systems such as Git".
 # inject is "rules-facts" by default: only the rule and fact lines reach the model. A paid validation over two seeds
 # with a Haiku judge decides it. Every line shown, inject: true, is never better than Claude Code with no line on the
 # general tasks, is worse on one lesson task on both seeds and on held-out short turns, 0.373 and 0.360 against 0.393

@@ -226,7 +226,7 @@ class Layout(Base):
         self.assertEqual(tail[1:], ["temportal/notebook/.out/", "phi/models/deps.json", "phi/models/near.json", "phi/models/lookups.db*", "phi/models/view/", ".layout.lock",
                                     ".settings.lock", "claude-settings.json", "phi/claude-code-watch.pending.json*",
                                     "phi/sessions/*/log.jsonl", "phi/sessions/*/session.md", "phi/sessions.md",
-                                    "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", "*.pyc",
+                                    "phi/rules.md", "phi/catchup.json", "phi/**/*.tmp", "phi/**/*.lock", "phi/sessions/*/.calls/", "phi/.agents/", "phi/.nudge/", ".venv/", "*.pyc",
                                     "phi/models/ranker.pt"])
         self.assertEqual(self.gitignore(), got, "a second run adds nothing")
         self.assertEqual(hook.seed_gitignore(os.path.join(self.p4, ".gitignore")), [])
