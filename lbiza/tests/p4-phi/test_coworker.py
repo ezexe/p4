@@ -431,6 +431,7 @@ class Coworker(unittest.TestCase):
         for word in ("Work in E:/repo, on the branch that is checked out, and make no worktree and no branch.",
                      f'python -I -X utf8 {phi} commit --checkout E:/repo -m "<message>" -- <path> ...',
                      "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+                     "Run no `git stash`, `git reset`, `git switch` or `git checkout <branch>`",
                      f"write your report to {one['report']} and end.", f"land section 1 of the plan `"):
             self.assertIn(word, brief, word)
         self.assertNotIn("worktree of its own", brief)

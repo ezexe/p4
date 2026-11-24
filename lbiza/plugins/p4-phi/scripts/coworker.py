@@ -534,6 +534,8 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
              "removed and no other:",
              f'python -I -X utf8 {PHI} commit --checkout {checkout} -m "<message>" -- <path> ...',
              "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+             "Run no `git stash`, `git reset`, `git switch` or `git checkout <branch>`: other workers' changes "
+             "are in this checkout too. To show a test fails before its fix, run it before you write the fix.",
              "Publish no issue: a finding goes into the report as one line that opens `Finding:`.",
              f"When every check passes, write your report to {report} and end.", ""]
     goal = (f"/goal {plain(done)}, as the brief {brief_file} says, and the report {report} is written; or a part "
