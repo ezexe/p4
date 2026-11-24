@@ -130,7 +130,7 @@ def _tasks(plan):
 
 def leaves(home, sid):
     """What works under a session with no session folder, in this order: its subagents, its teammates, its
-    reading teams and terminal workers whose node names it as parent,
+    terminal workers whose node names it as parent,
     each {level: "subagent" | "teammate" | "terminal", name, state}, and a node's with its `address`."""
     d = relay._dir(home, sid)
     out = []
@@ -145,11 +145,11 @@ def leaves(home, sid):
     safe = relay._safe(sid)
     for name, store in relay.nodes(home).items() if safe else ():
         n = relay.node_record(home, name)
-        if n.get("parent") != safe or n.get("kind") not in ("reader", "worker"):
+        if n.get("parent") != safe or n.get("kind") != "worker":
             continue
         report = os.path.join(store, "phi", f"report-{name}.md")
         out.append({"level": "terminal", "name": name, "address": place_of(home, store)[0],
-                    "state": "reported" if n["kind"] == "worker" and os.path.isfile(report) else "started"})
+                    "state": "reported" if os.path.isfile(report) else "started"})
     return out
 
 

@@ -1394,8 +1394,12 @@ def start_draft(home, s, did, base):
         raise ValueError("an orchestrator's draft is started with the call the draft printed")
     node = relay.nodes(home).get(s["sessionId"]) or home
     name = coworker.draft_name(d["title"], d["id"])
-    one = coworker.worker(name, d["brief"], "The task of the brief is done and its checks pass", base, home,
-                          s["sessionId"], node)
+    planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
+    done = "The plan of the brief is written and put to ezexe" if planner else \
+        "The task of the brief is done and its checks pass"
+    one = coworker.worker(name, d["brief"], done, base, home, s["sessionId"], node, team=planner,
+                          mode="plan" if planner else coworker.LAND_MODE,
+                          prompt=coworker.planner_task(d["title"]) if planner else "")
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
     coworker.write([one], base, home)

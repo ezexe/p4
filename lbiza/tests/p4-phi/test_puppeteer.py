@@ -912,6 +912,27 @@ class Terminal(Base):
         self.assertEqual(waited.returncode, 0, waited.stderr)
         self.assertIn("is there", waited.stdout)
 
+    def test_a_planners_draft_starts_in_plan_mode_with_the_team_variable_and_p4_temportal_on(self):
+        t = self.t
+        t.say(TOP, TASK)
+        did = "drf-0123456789"
+        os.makedirs(os.path.join(t.dir(TOP), "drafts"), exist_ok=True)
+        write(os.path.join(t.dir(TOP), "drafts", did + ".json"), json.dumps({
+            "id": did, "title": "Plan the ports table move", "parent": TOP, "verdict": "start", "context": "fresh",
+            "brief": "Plan the ports table move.\nThis session starts in plan mode.\nFiles: none", "gate": []}))
+        r = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        name = coworker.draft_name("Plan the ports table move", did)
+        folder = os.path.join(relay.nodes(t.p4)[name], "phi")
+        with open(os.path.join(folder, f"start-{name}.ps1" if os.name == "nt" else f"start-{name}.sh"),
+                  encoding="utf-8") as f:
+            start = f.read()
+        self.assertIn("--permission-mode plan", start)
+        self.assertIn(coworker.TEAMS, start)
+        self.assertNotIn("/goal", start)
+        with open(os.path.join(folder, "coworker-settings.json"), encoding="utf-8") as f:
+            self.assertTrue(json.load(f)["enabledPlugins"]["p4-temportal@p4-marketplace"])
+
     def test_a_session_another_session_started_is_an_orchestrator_whether_or_not_it_started_one(self):
         s = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
         self.assertTrue(puppeteer.orchestrator(self.t.p4, s))

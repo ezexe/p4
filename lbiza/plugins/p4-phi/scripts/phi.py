@@ -3775,14 +3775,8 @@ def main(argv=None):
             p.add_argument("plan", nargs="?", default="",
                            help="the plan file whose groups of sections are printed, each with its coworker; "
                                 "left out with --wait --report")
-            p.add_argument("--for", dest="planner", default="",
-                           help="the session id of the planner the coworkers send their lists to, this session's "
-                                "when left out")
             p.add_argument("--checkout", default="", help="the repository the coworkers and workers run in, the "
                                                           "folder this is run from when left out")
-            p.add_argument("--start", action="store_true",
-                           help="give each coworker a node, a store nested in the planner's, write its settings "
-                                "file and start file there, and print the terminal call that starts each")
             p.add_argument("--land", action="store_true",
                            help="give the terminal worker that lands each group not landed a node, write its start "
                                 "file, brief and settings file there with its report's name, and print the "
@@ -3975,7 +3969,7 @@ def main(argv=None):
                 print(line)
             return 0
         if a.cmd == "sections":                    # an approved plan's runs: what `coworkers --land` prints
-            a.cmd, a.planner, a.checkout, a.start, a.land, a.wait, a.report = "coworkers", "", "", False, True, None, ""
+            a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, ""
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
@@ -3986,59 +3980,13 @@ def main(argv=None):
                       f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
                 return 0
             plan = os.path.abspath(a.plan) if a.plan else ""
-            if not plan or not os.path.isfile(plan):
-                print(f"phi: no plan file at {plan}", file=sys.stderr)
-                return 2
-            checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
-            who = safe_id(a.planner or me.id)
-            planner_sid = who
-            title = str((load_session(me.home, who) or {}).get("title") or "") if who else ""
-            who = title or ("" if a.planner else who)
-            if a.planner and not who:
-                print(f"phi: no session {a.planner} with a title is in this store, so the coworkers would have "
-                      "nobody to send their lists to", file=sys.stderr)
-                return 2
-            mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
-            # each terminal session is a node nested in the store that holds the planner's folder
-            node_of = {"home": me.home, "starter": planner_sid,
-                       "store": relay.nodes(me.home).get(planner_sid) or me.home}
-
-            def started(found):
-                """Writes each new node's files and prints the call that starts it, and for a name that has a node
-                already, that its session was started; the entries written."""
-                new = [one for one in found if one.get("folder")]
-                coworker.write(new, checkout, me.home)
-                for one in found:
-                    if one.get("started"):
-                        print(f"phi: a session named `{one['name']}` was started already, from its node "
-                              f"{one['started']}, so nothing is written for it", file=sys.stderr)
-                return new
-            if a.land:                             # a terminal worker for each group not landed, in LAND_MODE
-                try:
-                    found = coworker.land(plan, checkout, who, mode, claim=True, **node_of)
-                except ValueError as e:
-                    print(f"phi: {e}", file=sys.stderr)
+            if a.wait is not None and not a.land:  # a round's wait on named coworkers, which only reads
+                who = str((load_session(me.home, safe_id(me.id)) or {}).get("title") or me.id) if me.id else ""
+                names = a.wait
+                if not names:
+                    print("phi: name each coworker to wait for", file=sys.stderr)
                     return 2
-                if not found:
-                    print("phi: no section of that plan is left to land: each names no files or holds its "
-                          "`Evidence:`", file=sys.stderr)
-                    return 2
-                new = started(found)
-                if not new:
-                    return 2
-                for one in new:
-                    print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
-                          f"{one['report']}")
-                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
-                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
-                return 0
-            if a.wait is not None:                 # a round's wait, which only reads
-                # the names the starter answered with, since a mend can move a section into another group
-                try:
-                    names = a.wait or [one["name"] for one in coworker.drafts(plan, checkout, who) if one["team"]]
-                except ValueError as e:
-                    print(f"phi: {e}", file=sys.stderr)
-                    return 2
+                checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
                 how, waited = coworker.watch(names, me.home, checkout)
                 print({"quiet": f"phi: no coworker wrote a line for {coworker.QUIET} seconds, after {waited} seconds",
                        "silent": f"phi: no coworker wrote a line in {waited} seconds, so the round did not begin: "
@@ -4054,8 +4002,40 @@ def main(argv=None):
                         head, _, body = said.partition("\n")
                         print(f"phi: the last list `{name}` sent, at {head}:\n{body}")
                 return 0
+            if not plan or not os.path.isfile(plan):
+                print(f"phi: no plan file at {plan}", file=sys.stderr)
+                return 2
+            checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
+            mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
+            if a.land:                             # a terminal worker for each group not landed, in LAND_MODE
+                # each terminal session is a node nested in the store that holds this session's folder
+                node_of = {"home": me.home, "starter": safe_id(me.id),
+                           "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
+                try:
+                    found = coworker.land(plan, checkout, "", mode, claim=True, **node_of)
+                except ValueError as e:
+                    print(f"phi: {e}", file=sys.stderr)
+                    return 2
+                if not found:
+                    print("phi: no section of that plan is left to land: each names no files or holds its "
+                          "`Evidence:`", file=sys.stderr)
+                    return 2
+                new = [one for one in found if one.get("folder")]
+                coworker.write(new, checkout, me.home)
+                for one in found:
+                    if one.get("started"):
+                        print(f"phi: a session named `{one['name']}` was started already, from its node "
+                              f"{one['started']}, so nothing is written for it", file=sys.stderr)
+                if not new:
+                    return 2
+                for one in new:
+                    print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
+                          f"{one['report']}")
+                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
+                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
+                return 0
             try:
-                found = coworker.drafts(plan, checkout, who, mode, claim=a.start, **node_of)
+                found = coworker.drafts(plan, checkout)
             except ValueError as e:
                 print(f"phi: {e}", file=sys.stderr)
                 return 2
@@ -4063,23 +4043,12 @@ def main(argv=None):
                 print("phi: no section of that plan names files on a `Files:` line, so it has no group to read",
                       file=sys.stderr)
                 return 2
-            if a.start:
-                if not started(found) and any(one.get("started") for one in found):
-                    return 2
-                if mode not in upkeep.NO_ASK:      # a mode that asks, or none the app's record names
-                    print(f"phi: this session's permission mode is {f'`{mode}`' if mode else 'not known'}, so each "
-                          "coworker may ask in its tab before an edit or a command: these coworkers only read, so "
-                          "say so to the planner, which lands their groups by integrator subagents")
             for one in found:
                 nums = ", ".join(one["sections"])
-                if not one["team"]:
-                    print(f"sections {nums}, {one['fences']} fences and no check: one `p4-phi:check` reads them, "
-                          "which the planner starts")
-                    continue
-                print(f"coworker `{one['name']}`: sections {nums}, {one['fences']} fences, a team of three")
-                if one.get("folder"):
-                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
-                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
+                if one["team"]:
+                    print(f"sections {nums}, {one['fences']} fences: a team of three reads them")
+                else:
+                    print(f"sections {nums}, {one['fences']} fences and no check: one `p4-phi:check` reads them")
             return 0
         if a.cmd == "gaps":                        # the behaviour memories no landed feature carries yet
             import gaps

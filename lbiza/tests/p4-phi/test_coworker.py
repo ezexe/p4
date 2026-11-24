@@ -53,83 +53,63 @@ class Coworker(unittest.TestCase):
         """The folder `phi` of the planner's i-th child store."""
         return relay.store_of(self.home, i).replace("\\", "/") + "/phi"
 
-    def drafts(self, path=None, checkout="E:/repo", mode="auto", windows=True, claim=True):
-        return coworker.drafts(path or self.path, checkout, WHO, mode, self.home, PLANNER, self.home, claim=claim,
-                               windows=windows)
+    def drafts(self, path=None, checkout="E:/repo"):
+        return coworker.drafts(path or self.path, checkout)
 
     def land(self, path=None, mode="auto", claim=True):
         return coworker.land(path or self.path, "E:/repo", WHO, mode, self.home, PLANNER, self.home, claim=claim,
                              windows=True)
 
-    def test_each_group_that_earns_a_team_is_one_start_file_in_its_node_in_the_checkout(self):
+    def test_drafts_print_each_group_with_its_sections_fences_and_whether_it_earns_a_team_and_make_nothing(self):
         first, second = self.drafts()
-        name = first["name"]
-        self.assertRegex(name, r"^cw-the-exporter-s-m-1-[0-9a-f]{4}$")
         self.assertEqual((first["sections"], first["fences"], first["team"]), (["1"], 5, True))
-        self.assertEqual((second["name"], second["sections"]), (name.replace("-m-1-", "-m-2-"), ["2"]))
-        self.assertEqual((first["folder"], second["folder"]), (self.node(1), self.node(2)))
-        other = os.path.join(self.base, "other", "plan.md")
-        os.makedirs(os.path.dirname(other))
-        with open(other, "w", encoding="utf-8") as f:
-            f.write(PLAN)
-        self.assertNotEqual(coworker.drafts(other, "E:/repo", WHO)[0]["name"], name, "another plan of one title")
-        self.assertEqual(first["file"], f"start-{name}.ps1")
-        self.assertEqual(len(first["lines"]), 4)
-        self.assertIn("'CLAUDE_CODE_HOST_SESSION_ID'", first["lines"][0])
-        self.assertEqual(first["lines"][1], "$env:CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS = '1'")
-        self.assertEqual(first["lines"][2], "Set-Location 'E:\\repo'")
-        run = first["lines"][3]
-        level = plans.CHILD_LEVELS["static"]
-        at = first["folder"].replace("/", "\\")
-        self.assertRegex(first["session"], r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$")
-        for word in (f"claude --name {name} --session-id {first['session']} --model {level['model']} ",
-                     f"--effort {level['effort']} ", "--permission-mode auto ",
-                     f"--settings '{at}\\coworker-settings.json' '"):
-            self.assertIn(word, run, word)
-        for word in (" -p ", "--worktree", "--add-dir"):
-            self.assertNotIn(word, run, word)
-        self.assertEqual(first["typed"], f"& '{at}\\start-{name}.ps1'")
-        n = relay.node_record(self.home, name)
-        self.assertEqual((n["kind"], n["parent"], n["sections"], n["session"]),
-                         ("reader", PLANNER, ["1"], first["session"]))
-
-    def test_a_task_names_its_sections_reads_in_the_checkout_and_holds_no_character_a_shell_reads(self):
-        first = self.drafts()[0]
-        said = first["lines"][3].split("coworker-settings.json' '", 1)[1][:-1]
-        self.assertNotRegex(said, r"['\"`$;|&<>\\]")
-        self.assertIn("section 1 of the plan file " + self.path.replace("\\", "/"), said)
-        self.assertIn("judge them against this folder, the checkout.", said)
-        self.assertNotIn("worktree", said)
-        self.assertIn("the session named Plan: the exporter s  move   HOME,", said)
-
-    def test_the_script_is_a_posix_shells_elsewhere_and_names_no_mode_where_none_is_known(self):
-        first = self.drafts(checkout="/repo", mode="", windows=False)[0]
-        self.assertEqual(first["file"], f"start-{first['name']}.sh")
-        self.assertTrue(first["lines"][0].startswith("unset CLAUDE_CODE_HOST_SESSION_ID "))
-        self.assertEqual(first["lines"][1:3], ["export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "cd '/repo'"])
-        self.assertNotIn("--permission-mode", first["lines"][3])
-        self.assertEqual(first["typed"], f"sh '{self.node()}/start-{first['name']}.sh'")
-
-    def test_drafts_with_claim_false_makes_no_folder_and_an_entry_holds_its_name_alone(self):
-        found = self.drafts(claim=False)
-        self.assertEqual([sorted(one) for one in found], [["fences", "name", "sections", "team"]] * 2)
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
+        self.assertEqual((second["sections"], second["fences"], second["team"]), (["2"], 5, True))
+        self.assertEqual([sorted(one) for one in (first, second)], [["fences", "sections", "team"]] * 2)
         self.assertEqual([sorted(one) for one in self.land(claim=False)], [["name", "sections"]] * 2)
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
-
-    def test_one_small_group_of_prose_earns_no_team_and_gets_no_start_file(self):
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing is made")
         with open(self.path, "w", encoding="utf-8") as f:
             f.write(SMALL)
-        self.assertEqual(coworker.drafts(self.path, "E:/repo", WHO),
-                         [{"sections": ["1"], "fences": 1, "team": False}])
+        self.assertEqual(self.drafts(), [{"sections": ["1"], "fences": 1, "team": False}])
         self.assertEqual(len(self.land()), 1, "a terminal worker lands a group that earns no team")
 
+    def test_a_planners_task_names_its_title_asks_for_three_readers_and_holds_no_character_a_shell_reads(self):
+        said = coworker.planner_task("Plan: the exporter's \"move\" $HOME")
+        self.assertNotRegex(said, r"['\"`$;|&<>\\]")
+        self.assertIn("plan-planner", said)
+        self.assertIn("fences, sources and checks", said)
+        self.assertIn("ExitPlanMode", said)
+        self.assertIn("the exporter s  move   HOME", said)
+
+    def test_a_planner_is_a_worker_in_plan_mode_with_the_team_variable_a_prompt_and_p4_temportal_on(self):
+        found = coworker.worker("tw-plan-0001", "Plan the move.", "The plan is put", "/repo", self.home, PLANNER,
+                                self.home, windows=False, team=True, mode="plan",
+                                prompt=coworker.planner_task("the move"))
+        self.assertEqual(found["file"], "start-tw-plan-0001.sh")
+        self.assertEqual(found["lines"][1:3], ["export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "cd '/repo'"])
+        run = found["lines"][3]
+        self.assertIn("--permission-mode plan ", run)
+        self.assertNotIn("/goal", run, "a planner's turn ends on ExitPlanMode, not on a goal")
+        self.assertIn("Write the plan for the move in plan mode", run)
+        self.assertIn(found["brief_file"], run, "its prompt names its brief")
+        self.assertEqual(found["typed"], f"sh '{self.node()}/start-tw-plan-0001.sh'")
+        self.assertTrue(found["temportal"])
+        coworker.write([found], "/repo")
+        with open(os.path.join(found["folder"], "coworker-settings.json"), encoding="utf-8") as f:
+            on = json.load(f)["enabledPlugins"]
+        self.assertEqual(on, {"p4-phi@p4-marketplace": False, "p4-temportal@p4-marketplace": True})
+        plain = coworker.worker("tw-plain-0002", "Do it.", "It is done", "/repo", self.home, PLANNER, self.home,
+                                windows=False)
+        self.assertFalse(plain["temportal"])
+        self.assertNotIn(coworker.TEAMS, "\n".join(plain["lines"]))
+        self.assertIn("--permission-mode bypassPermissions ", plain["lines"][-1])
+
     def test_the_files_are_written_into_the_node_with_p4s_two_plugins_off_and_no_other_setting(self):
-        found = self.drafts(checkout=self.base)
+        found = self.land()
         wrote = coworker.write(found, self.base)
         self.assertEqual(sorted(os.listdir(found[0]["folder"])),
-                         sorted(["coworker-settings.json", found[0]["file"], relay.NODE]))
-        self.assertEqual(len(wrote), 4)
+                         sorted(["coworker-settings.json", found[0]["file"], os.path.basename(found[0]["brief_file"]),
+                                 relay.NODE]))
+        self.assertEqual(len(wrote), 6)
         with open(os.path.join(found[0]["folder"], "coworker-settings.json"), encoding="utf-8") as f:
             settings = json.load(f)
         self.assertEqual(list(settings), ["enabledPlugins"])
@@ -259,25 +239,13 @@ class Coworker(unittest.TestCase):
             self.assertEqual(f.read().rstrip("\n"), found[0]["brief"])
 
     def test_a_second_start_of_one_name_writes_nothing_and_names_the_node(self):
-        first = self.drafts()
+        first = self.land()
         coworker.write(first, self.base)
-        again = self.drafts()
+        again = self.land()
         self.assertEqual([one["started"] for one in again], [one["folder"] for one in first])
         self.assertFalse([one for one in again if one.get("file")])
         self.assertEqual(coworker.write(again, self.base), [])
         self.assertEqual(len(relay.stores(self.home)), 3, "no further store")
-        landed = self.land()
-        self.assertEqual([one["started"] for one in self.land()], [one["folder"] for one in landed])
-
-    def test_a_reading_teams_start_lines_are_the_scripts_with_no_worktree_and_its_session(self):
-        first = self.drafts()[0]
-        name = first["name"]
-        task = coworker.task(self.path, [s for s in coworker.sections.parse(PLAN, "E:/repo")[1] if s["n"] == "1"], WHO)
-        same = coworker.script(name, "E:/repo", "auto", task, first["folder"], windows=True,
-                               team=True, session=first["session"])
-        self.assertEqual((first["file"], first["lines"], first["typed"]), same)
-        self.assertNotIn("--worktree", first["lines"][3])
-        self.assertIn(coworker.TEAMS, first["lines"][1])
 
     def send(self, to, message, at="2026-11-23T10:00:00Z", name="SendMessage"):
         return {"type": "assistant", "timestamp": at,
@@ -381,9 +349,7 @@ class Coworker(unittest.TestCase):
             self.assertFalse(coworker.stopped("cw-none", home, here))
 
     def test_a_path_that_holds_a_quote_is_refused_before_any_claim_and_a_read_only_draft_raises_nothing(self):
-        self.assertEqual(len(coworker.drafts(self.path, "E:/it's/repo", WHO)), 2, "nothing is made, nothing checked")
-        with self.assertRaises(ValueError):
-            self.drafts(checkout="E:/it's/repo")
+        self.assertEqual(len(coworker.drafts(self.path, "E:/it's/repo")), 2, "nothing is made, nothing checked")
         with self.assertRaises(ValueError):
             coworker.land(self.path, "E:/it's/repo", WHO, "auto", self.home, PLANNER, self.home, claim=True)
         self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing claimed")
@@ -433,59 +399,43 @@ class Coworker(unittest.TestCase):
     def test_kept_takes_the_checkout_from_the_node_so_a_wait_works_from_any_folder(self):
         from unittest import mock
         config = os.path.join(self.base, "config")
-        first = self.drafts()[0]
-        lead = os.path.join(config, "projects", "E--repo", first["session"] + ".jsonl")
+        session = "0c0ffee0-0000-4000-8000-000000000002"
+        relay.claim(self.home, self.home, "cw-b", "reader", PLANNER, ["1"], session=session, checkout="E:/repo")
+        lead = os.path.join(config, "projects", "E--repo", session + ".jsonl")
         os.makedirs(os.path.dirname(lead))
         open(lead, "w").close()
         began = 1_000_000.0
         os.utime(lead, (began - 500, began - 500))
-        self.assertEqual(relay.node_record(self.home, first["name"])["checkout"], "E:/repo")
+        self.assertEqual(relay.node_record(self.home, "cw-b")["checkout"], "E:/repo")
         with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": config}):
-            self.assertEqual(coworker.kept(first["name"], self.home, "E:/elsewhere"), [lead])
+            self.assertEqual(coworker.kept("cw-b", self.home, "E:/elsewhere"), [lead])
             now = [began]
-            self.assertEqual(coworker.watch([first["name"]], self.home, "E:/elsewhere", first=20,
+            self.assertEqual(coworker.watch(["cw-b"], self.home, "E:/elsewhere", first=20,
                                             clock=lambda: now[0], sleep=lambda s: now.__setitem__(0, now[0] + s)),
                              ("silent", 20), "a line from before the watch")
 
-    def test_the_command_prints_the_groups_and_with_start_writes_each_node_and_the_call_that_starts_it(self):
+    def test_the_command_prints_the_groups_and_with_land_writes_each_node_and_the_call_that_starts_it(self):
         command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", self.path,
                    "--p4", self.home, "--session", "cli-0001", "--checkout", self.base]
         ran = subprocess.run(command, capture_output=True, text=True, timeout=60)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertEqual(len(ran.stdout.strip().split("\n")), 2, "one line a group")
-        self.assertFalse(os.path.isdir(os.path.join(self.home, ".claude")), "with no --start it only prints")
-        # `--for` names the planner by its record's title, which the task then holds, and its nodes are its own
-        record = os.path.join(self.home, "phi", "sessions", "cli-0002")
-        os.makedirs(record)
-        with open(os.path.join(record, "session.json"), "w", encoding="utf-8") as f:
-            json.dump({"sessionId": "cli-0002", "title": "Plan: the move"}, f)
-        ran = subprocess.run(command + ["--for", "cli-0002", "--start"], capture_output=True, text=True, timeout=60)
-        self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
-        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', ran.stdout, "each runs in the checkout")
+        self.assertFalse(os.path.isdir(os.path.join(self.home, ".claude")), "with no --land it only prints")
+        land = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(land.returncode, 0, land.stderr)
+        self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
+        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', land.stdout, "each runs in the checkout")
         relay.forget(self.home)
         self.assertEqual(len(relay.stores(self.home)), 3)
-        folder = self.node(1)
-        start = sorted(n for n in os.listdir(folder) if n.startswith("start-"))[0]
-        with open(os.path.join(folder, start), encoding="utf-8") as f:
-            text = f.read()
-        self.assertIn("the session named Plan: the move,", text)
-        self.assertIn("--session-id ", text)
-        self.assertNotIn("--worktree", text)
-        self.assertEqual(relay.node_record(self.home, start[6:].rsplit(".", 1)[0])["parent"], "cli-0002")
-        again = subprocess.run(command + ["--for", "cli-0002", "--start"], capture_output=True, text=True, timeout=60)
-        self.assertEqual(again.returncode, 2, "a plan's coworkers are started once")
-        self.assertIn("was started already", again.stderr)
-        land = subprocess.run(command + ["--for", "cli-0002", "--land"], capture_output=True, text=True, timeout=60)
-        self.assertEqual(land.returncode, 0, "a landing worker needs no mode of its starter's")
-        self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
+        again = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(again.returncode, 2, "a plan's workers are started once")
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,
                               timeout=60)
         self.assertEqual(none.returncode, 2)
-        nobody = subprocess.run(command + ["--for", "cli-9999"], capture_output=True, text=True, timeout=60)
-        self.assertEqual(nobody.returncode, 2)
-        old = subprocess.run(command + ["--write", self.base], capture_output=True, text=True, timeout=60)
-        self.assertEqual(old.returncode, 2, "--write is gone")
+        for gone in ("--start", "--for"):
+            old = subprocess.run(command + [gone] + (["cli-0002"] if gone == "--for" else []), capture_output=True,
+                                 text=True, timeout=60)
+            self.assertEqual(old.returncode, 2, f"{gone} is gone")
 
 
 if __name__ == "__main__":

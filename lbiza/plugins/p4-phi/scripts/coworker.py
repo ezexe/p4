@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""coworker.py: a plan's groups of sections as the coworkers that read and land them, for `phi.py coworkers`.
+"""coworker.py: the terminal sessions p4-phi starts, for `phi.py coworkers`, `sections` and `draft --start`.
 
-A coworker is a terminal session that leads an agent team for one group of a plan's sections, sections.groups, and
-reads that group in the checkout; a terminal worker lands a group there once ezexe approved the plan. Each is a node:
-relay.claim makes it a store nested in its starter's, where its start file, settings file, brief and report are, and
-it runs in the checkout and reaches them by their whole paths. The pages, read on 2026-11-23:
+A terminal worker is a node, relay.claim makes it a store nested in its starter's, where its start file, settings
+file, brief and report are, and it runs in the checkout and reaches them by their whole paths: one worker lands each
+group of an approved plan's sections, sections.groups, and one starts for each draft that has a parent. A planner is
+such a worker started in plan mode with the team variable set, which forms its three reading teammates in its own
+session. `drafts` only prints a plan's groups. The pages, read on 2026-11-23:
 - agent-teams.md: "In non-interactive mode with the `-p` flag, including Agent SDK sessions, Claude doesn't spawn
   teammates", so the run is interactive, and a team is enabled by "setting the
   `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` environment variable to `1`", which the start file does in its own shell.
@@ -24,7 +25,6 @@ import json
 import os
 import re
 import time
-import uuid
 
 import p4conf
 import plans
@@ -38,14 +38,16 @@ TEAMS = "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"
 PLAIN = re.compile(r"[^\w .,:#/-]")               # a task line holds no quote of any kind and no shell character
 
 
-def settings(checkout):
-    """The settings file's text: p4-phi and p4-temportal off, and `claudeMdExcludes` naming, with forward slashes,
+def settings(checkout, temportal=False):
+    """The settings file's text: p4-phi and p4-temportal off, p4-temportal left on with `temportal`, which a planner
+    needs for the skill `plan-planner`, and `claudeMdExcludes` naming, with forward slashes,
     each CLAUDE.local.md in a folder above `checkout` that holds the line p4conf.LINE, the key left out where there
     is none. Such a file's import resolves outside the checkout, and Claude Code then asks "Allow external CLAUDE.md
     file imports?" and starts nothing; with the file excluded an interactive `claude` asked nothing, on 2026-11-23.
     memory.md's "Exclude specific CLAUDE.md files" is the key; no setting approves the import, and the session has
     the p4 plugins off, so it needs no store text."""
-    d = {"enabledPlugins": {f"{n}@{p4conf.MARKET}": False for n in ("p4-phi", "p4-temportal")}}
+    d = {"enabledPlugins": {f"{n}@{p4conf.MARKET}": bool(temportal and n == "p4-temportal")
+                            for n in ("p4-phi", "p4-temportal")}}
     out, at = [], os.path.abspath(checkout)
     while True:
         up = os.path.dirname(at)
@@ -75,13 +77,6 @@ def _named(prefix, title, numbers, path):
     return f"{prefix}-{stem}-" + "-".join(numbers) + f"-{mark}"
 
 
-def name_of(title, group, path):
-    """A coworker's name, which names its session and its node: lower-case letters, digits and
-    hyphens, made of the plan's title, its sections' numbers and four characters of a hash of the plan's path, so
-    two plans of one title make two names."""
-    return _named("cw", title, [s["n"] for s in group], path)
-
-
 def worker_name(plan, numbers):
     """A terminal worker's name, which names its session and its files: `tw-` and the rest as name_of builds it,
     from the title of the plan file `plan` and the section numbers `numbers`."""
@@ -98,28 +93,12 @@ def level():
     return out
 
 
-def task(path, group, who):
-    """A coworker's task, one line with no quote and no shell character: the team, the sections, what each lens
-    judges, where the list goes and that it stays open. The team reads in the checkout, with no worktree."""
-    nums = ", ".join(s["n"] for s in group)
-    part = f"section{'s' if len(group) > 1 else ''} {nums}"
-    return (f"Form an agent team of three teammates named fences, sources and checks. Each teammate runs on the "
-            f"model of this session and only reads files. All three read the Context and {part} of the plan file "
-            f"{plain(path)} and judge them against this folder, the checkout. They open no file under the folders complete, todo or unplanned. The teammate fences "
-            f"checks that each fenced edit applies to the file it names as that file stands here. The teammate "
-            f"sources checks each Documented line and each Observed line against the source it names, a file and "
-            f"line here or a live page, tries to show each Assumed line from the code or a page, and sends you each "
-            f"live page with the words quoted from it, which you have one web-fetch subagent read before the "
-            f"challenge. The teammate checks reads each Checks line, names what it would not prove and what those "
-            f"sections leave out, and traces each new hook from its event to its handler. Each gives its findings "
-            f"with file and line, then they challenge each other once and drop what does not hold. Change no file "
-            f"until the session named below says the plan is approved. After each round send one list of the "
-            f"findings that held, each on one line with its section and its reason, an "
-            f"Assumed line that was shown on a line that opens Observed with its source, and a finding on a section "
-            f"outside {part} on a line that opens Other, or the one word clean, with SendMessage to the session "
-            f"named {plain(who)}, or to the session ListAgents lists under the name nearest to that. Close the list "
-            f"by saying how many agents ran and the minutes the round took by the clock. Then stay open and shut no "
-            f"teammate down, since later rounds and the word to land come by message from that session.")
+def planner_task(title):
+    """A planner's prompt, one line with no quote and no shell character: the plan of the brief in plan mode by the
+    skill plan-planner, a team of three that only reads, the rounds in this session and the plan put to ezexe."""
+    return (f"Write the plan for {plain(title)} in plan mode by the skill plan-planner. Form three teammates named "
+            f"fences, sources and checks that only read, run the rounds of the plan in this session, and put the "
+            f"plan to ezexe with ExitPlanMode.")
 
 
 def script(name, checkout, mode, said, folder, windows=None, team=True, extra=(), session=""):
@@ -177,57 +156,25 @@ def _undo(home, found):
             relay.unclaim(home, one["name"])
 
 
-def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=False, windows=None):
+def drafts(path, checkout):
     """One entry for each group of the plan at `path`, in the plan's order: its sections, its fences and whether it
-    earns a team, and for a group that does, the coworker's name. `who` is the planner's title, where the lists go.
-    With `claim`, each such group gets a node, relay.claim in the store `store` of its starter `starter`, and its
-    entry the node's folder, the session id, the start file's name and lines and the line typed into its tab; a
-    name that has a node already gets `started`, its node's folder, and nothing else. Every path is checked before
-    the first claim, and the nodes claimed are removed again where anything fails after. Without `claim` nothing is
-    made and nothing is checked."""
+    earns a team. Nothing is made and nothing is checked: a planner reads it to write its Distribution."""
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
-    out = []
-    for group in sections.groups(found):
-        one = {"sections": [s["n"] for s in group], "fences": sections.fences(group), "team": sections.team(group)}
-        if one["team"]:
-            one["name"] = name_of(title, group, path)
-            if claim:
-                one["said"] = task(path, group, who)
-        out.append(one)
-    if not claim:
-        return out
-    _quoted(checkout, home, store, *[one["said"] for one in out if one.get("said")])
-    try:
-        for one in out:
-            said = one.pop("said", "")
-            if not one["team"]:
-                continue
-            folder, there = _node(home, store, one["name"], "reader", starter, one["sections"], checkout,
-                                  str(uuid.uuid4()))
-            if there:
-                one["started"] = there
-                continue
-            one["folder"] = folder
-            one["session"] = str(relay.node_record(home, one["name"]).get("session") or "")
-            one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, said, folder, windows,
-                                                             session=one["session"])
-    except Exception:
-        _undo(home, out)
-        raise
-    return out
+    return [{"sections": [s["n"] for s in group], "fences": sections.fences(group), "team": sections.team(group)}
+            for group in sections.groups(found)]
 
 
 def write(found, checkout, home=""):
-    """The settings file, settings(checkout), each coworker's or worker's start file and each worker's brief,
+    """The settings file, settings(checkout), each worker's start file and each worker's brief,
     written into the node folder of each entry that has one. The paths written. Where a write fails, what this call
     wrote is removed and, with `home`, the nodes of those entries too, and the error goes out."""
-    text, wrote = settings(checkout), []
+    wrote = []
     try:
         for one in found:
             if not one.get("folder"):
                 continue
-            files = {SETTINGS_FILE: text}
+            files = {SETTINGS_FILE: settings(checkout, bool(one.get("temportal")))}
             if one.get("file"):
                 files[one["file"]] = "\n".join(one["lines"])
             if one.get("brief"):
@@ -353,11 +300,13 @@ def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
 
 
 def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=None, team=False, mode=LAND_MODE,
-           extra=()):
+           extra=(), prompt=""):
     """The node of one terminal worker and its brief, goal and start file in it, as one entry: `name`, and either
     `started`, the folder of a node that holds that name already, or `folder`, `brief` and `brief_file`, `report`,
     `goal`, and the start file's `file`, `lines` and the line `typed` in its tab. `done` is what the goal waits
-    for, one sentence with no quote. The worker has no worktree and no p4 plugin, and its goal is its prompt."""
+    for, one sentence with no quote. The worker has no worktree and no p4 plugin, and its goal is its prompt. With
+    `prompt`, a planner's, that line stands in place of the goal, closed with the brief's file, and the settings file
+    leaves p4-temportal on for the skill plan-planner."""
     windows = upkeep.WINDOWS if windows is None else windows
     checkout = checkout.replace("\\", "/")
     _quoted(checkout, home, store)
@@ -378,13 +327,15 @@ def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=N
     goal = (f"/goal {plain(done)}, as the brief {brief_file} says, and the report {report} is written; or a part "
             f"does not fit the tree and the report says which and why. Stop after {TURNS} turns, and write the "
             "report first with what is done and what is not.")
+    if prompt:
+        goal = f"{prompt} The brief is {brief_file}, and the report {report} is written when the plan is put."
     try:
         file, lines, typed = script(name, checkout, mode, goal, folder, windows, team=team, extra=extra)
     except Exception:
         relay.unclaim(home, name)
         raise
     one.update(brief="\n".join([*where, brief]), brief_file=brief_file, report=report, goal=goal,
-               file=file, lines=lines, typed=typed)
+               file=file, lines=lines, typed=typed, temportal=bool(prompt))
     return one
 
 
