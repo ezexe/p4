@@ -195,7 +195,8 @@ class Coworker(unittest.TestCase):
                         f.write(row)
             return sleep
         clock = [0.0]
-        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleeper(clock), longest=100)
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleeper(clock), longest=100,
+                                      quiet=0)
         self.assertEqual(how, "ended")
         self.assertGreaterEqual(clock[0], 20, "the old row did not end the wait")
         clock = [0.0]
@@ -207,6 +208,43 @@ class Coworker(unittest.TestCase):
         clock = [0.0]
         how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleeper(clock), longest=100)
         self.assertEqual(how, "done", "a report ends the wait whatever the log holds")
+
+    def test_a_result_row_that_more_rows_follow_or_a_log_still_written_ends_no_wait(self):
+        report = os.path.join(self.base, "report-g.md")
+        log = os.path.join(self.base, "log-g.jsonl")
+        turn = json.dumps({"type": "result", "subtype": "success", "is_error": False})
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("{}" + chr(10))
+
+        def sleep(_):
+            clock[0] += 10
+            if clock[0] == 10:                    # a goal turn ends and the next one begins
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(turn + chr(10) + json.dumps({"type": "assistant"}) + chr(10))
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleep, longest=40, quiet=0)
+        self.assertEqual(how, "long", "a result row with rows after it is a goal turn, not the run's end")
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(turn + chr(10))
+        tick = lambda _: clock.__setitem__(0, clock[0] + 10)  # noqa: E731
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=tick, longest=30, quiet=3600)
+        self.assertEqual(how, "long", "a log written within the quiet window is still a run")
+        clock = [0.0]
+        offset_log = os.path.join(self.base, "log-h.jsonl")
+        with open(offset_log, "w", encoding="utf-8") as f:
+            f.write("{}" + chr(10))
+
+        def ends(_):
+            clock[0] += 10
+            if clock[0] == 10:                    # the run's last row, then nothing
+                with open(offset_log, "a", encoding="utf-8") as f:
+                    f.write(turn + chr(10))
+                old = time.time() - 3600
+                os.utime(offset_log, (old, old))
+        how, _ = coworker.wait_report(report + ".x", log=offset_log, clock=lambda: clock[0], sleep=ends, longest=60,
+                                      quiet=90)
+        self.assertEqual(how, "ended", "a last result row in a log quiet past the window is the run's end")
 
     def test_the_files_are_written_into_the_node_with_p4s_two_plugins_off_and_no_other_setting(self):
         found = self.land()

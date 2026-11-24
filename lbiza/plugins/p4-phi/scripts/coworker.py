@@ -414,9 +414,10 @@ def draft_name(title, did):
 GOAL_TAIL = 1 << 20              # the most of a log's end read for its last result row
 
 
-def last_result(log, offset=0):
+def last_result(log, offset=0, final=False):
     """The last `result` row of the stream-json log `log` written past byte `offset`, {} where there is none or the
-    file is not there. Lines that are no JSON object (a stderr line, a BOM) are skipped."""
+    file is not there. Lines that are no JSON object (a stderr line, a BOM) are skipped. With `final`, the row only
+    where it is the last JSON row of the log, since a run under `/goal` may write a `result` row for a turn and go on."""
     try:
         with open(log, "rb") as f:
             f.seek(0, 2)
@@ -434,15 +435,18 @@ def last_result(log, offset=0):
             continue
         if isinstance(row, dict) and row.get("type") == "result":
             return row
+        if final and isinstance(row, dict):
+            return {}
     return {}
 
 
-def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, sleep=time.sleep, log=""):
+def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, sleep=time.sleep, log="", quiet=QUIET):
     """A terminal worker's wait, as (how it ended, the seconds waited): `done` as soon as its report file is there
     and was written after the wait began, so the first report of a worker that went on working is no answer to a wait
     made after it, whatever the claim time of its node `name`. `ended` where `log` names a stream-json log that got a
     `result` row after the wait began (past the log's size when it began, so a resumed run is not ended by the old
-    run's row) and the report is not there, as a run that an error ended does. `long` after `longest` seconds. It
+    run's row), that row is the log's last JSON row and the log was last written `quiet` seconds ago or more, and the report is
+    not there, as a run that an error ended does; a run under `/goal` can write a `result` row for a turn and go on. `long` after `longest` seconds. It
     reads no transcript."""
     since = time.time()
     start = clock()
@@ -456,15 +460,21 @@ def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, slee
             return os.path.getmtime(report) >= since - 1      # a file system's times can be a second coarse
         except OSError:
             return False
+    def ended():
+        try:
+            idle = time.time() - os.path.getmtime(log) if log else -1
+        except OSError:
+            return False
+        return idle >= quiet and bool(last_result(log, offset, final=True))
     while clock() - start < longest:
         if written():
             return "done", int(clock() - start)
-        if log and last_result(log, offset):
+        if ended():
             return "ended", int(clock() - start)
         sleep(10)
     if written():
         return "done", int(clock() - start)
-    return ("ended" if log and last_result(log, offset) else "long"), int(clock() - start)
+    return ("ended" if ended() else "long"), int(clock() - start)
 
 
 def last_list(name, who, home, checkout):

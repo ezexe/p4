@@ -1027,6 +1027,8 @@ class Terminal(Base):
             with open(log, "a", encoding="utf-8") as f:
                 f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
                                     "result": "Credit balance is too low"}) + "\n")
+            old = time.time() - 3600                # the run ended past the quiet window
+            os.utime(log, (old, old))
         threading.Thread(target=later, daemon=True).start()
         r = t.cli(TOP, "coworkers", "--wait", "--report", report)
         self.assertEqual(r.returncode, 0, r.stderr)
