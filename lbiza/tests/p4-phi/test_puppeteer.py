@@ -1022,15 +1022,22 @@ class Terminal(Base):
         import threading
         import time
 
+        stop = threading.Event()
+
         def later():
-            time.sleep(1)
-            with open(log, "a", encoding="utf-8") as f:
-                f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
-                                    "result": "Credit balance is too low"}) + "\n")
-            old = time.time() - 3600                # the run ended past the quiet window
-            os.utime(log, (old, old))
+            # The row is written again until the CLI is done, so one lands past the offset its wait began at however
+            # slowly the process starts: a single row written once raced a slow runner and the wait ran an hour.
+            while not stop.wait(1):
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                                        "result": "Credit balance is too low"}) + "\n")
+                old = time.time() - 3600            # the run ended past the quiet window
+                os.utime(log, (old, old))
         threading.Thread(target=later, daemon=True).start()
-        r = t.cli(TOP, "coworkers", "--wait", "--report", report)
+        try:
+            r = t.cli(TOP, "coworkers", "--wait", "--report", report)
+        finally:
+            stop.set()
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("ended:", r.stdout)
         self.assertIn("Credit balance is too low", r.stdout)
