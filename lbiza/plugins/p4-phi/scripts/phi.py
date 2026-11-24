@@ -3009,12 +3009,15 @@ def wave_outcomes(home, reports, first, how, quiet=None, clock=time.time, sleep=
     had = {r.get("name") for r in read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
            if r.get("event") == "outcome"}
     wrote = []
+    quiet = coworker.QUIET if quiet is None else quiet
+    start = clock()                     # one deadline for the wave's logs: what one wait spent, the next has less of
     for report in reports:
         tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
         if tab in had or not (report == first and how in ("done", "ended") or os.path.exists(report)):
             continue
         log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
-        worker_outcome(home, tab, how if report == first else "done", result_of(log, quiet, clock, sleep), log)
+        left = max(0, quiet - (clock() - start))
+        worker_outcome(home, tab, how if report == first else "done", result_of(log, left, clock, sleep), log)
         wrote.append(tab)
     return wrote
 
@@ -4715,7 +4718,8 @@ def main(argv=None):
                 if going:
                     print(f"Then wait, as one background command: `{commands()} coworkers --wait --report "
                           + " ".join(going) + "`; when it returns, land the plan again to start what it frees.")
-                return 0 if new else 2
+                # runs that all wait for a slot are a normal state: 2 only where nothing starts and nothing waits
+                return 0 if new or any(one.get("waits") for one in found) else 2
             try:
                 found = coworker.drafts(plan, checkout)
             except ValueError as e:

@@ -2875,6 +2875,22 @@ class TerminalWorker(unittest.TestCase):
         self.assertEqual(phi.result_of(os.path.join(self.base, "none.jsonl"), quiet=90,
                                        clock=lambda: now[0], sleep=sleep), {})
 
+    def test_wave_outcomes_waits_one_quiet_for_all_its_logs_and_not_one_for_each(self):
+        reports = []
+        for k in range(3):
+            name = "tw-q%d" % k
+            report, log = os.path.join(self.base, "report-%s.md" % name), os.path.join(self.base, "log-%s.jsonl" % name)
+            write(report, "done")
+            write(log, json.dumps({"type": "assistant"}) + "\n")
+            reports.append(report)
+        now = [0.0]
+
+        def sleep(s_):
+            now[0] += s_
+        wrote = phi.wave_outcomes(self.home, reports, reports[0], "done", quiet=10, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(len(wrote), 3)
+        self.assertEqual(now[0], 10, "one QUIET for the wave, not 30")
+
     def run_phi_report(self, report):
         env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app}
         return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", "--wait",
@@ -3166,6 +3182,13 @@ class Slots(unittest.TestCase):
         self.assertEqual(pick("land", {})["pool"], "api", "the API slots are still free")
         named = {"mode": "print", "pool": "max", "said": "print max"}
         self.assertEqual(phi.slot_assigner(self.home, "")("x", named)["profile"], "")
+
+    def test_a_land_whose_ready_runs_all_wait_for_slots_exits_zero(self):
+        self.conf({"worker_slots": {"api": 0, "max": 0}})
+        ran = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertIn("waits for a slot: ", ran.stdout)
+        self.assertNotIn("worker `", ran.stdout, "nothing started")
+        self.assertEqual(ran.returncode, 0, ran.stderr + ran.stdout)
 
     def test_running_workers_take_slots_a_low_pool_has_none_and_a_budget_caps_the_api_credit(self):
         self.conf({"worker_slots": {"api": 1, "max": 1}, "worker_api_budget_usd": 1.0})
