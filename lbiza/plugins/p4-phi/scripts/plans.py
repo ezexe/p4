@@ -700,6 +700,43 @@ def said_level(brief):
     return out
 
 
+# the planning verbs of PLANNING anywhere in a title or a task line, not only at its start: "README line: write the
+# plan" and "The verifier's plan, drafted" are a planner's as "Plan the move" is
+PLANNING_ANY = re.compile(r"\b(?:enter\s+plan\s+mode\b|(?:research|write|draft|loop|revise|refine|put|present|submit"
+                          r"|make)\s+" + PLAN_OBJECT + r"|plan\s+(?:the|a|an|how|for|of)\b)", re.I)
+
+
+def is_planner(title, task=""):
+    """True where a drafted worker is a planner: its title or its starter's task says its session starts in plan
+    mode, PLANNER, or plans, as PLANNING reads a line's start or PLANNING_ANY a planning verb anywhere in a line,
+    with no line that names plan code, PLAN_CODE. child_kind reads only the start of the whole text, so a planner
+    whose title opens with another word, or whose plan-mode lines come from its task, was taken for a builder."""
+    text = str(title or "") + "\n" + str(task or "")
+    if PLANNER.search(text):
+        return True
+    lines = [x for x in text.split("\n") if x.strip()]
+    if any(PLAN_CODE.search(x) for x in lines):
+        return False
+    return any(PLANNING.search(x) or PLANNING_ANY.search(x) for x in lines)
+
+
+def own_level(text):
+    """The `model` and `effort` a draft's text or a task names itself: its `Model:` and `Effort:` lines, and a
+    `Model and effort:` line that says it was named by the parent session. The line with_level writes from the
+    kind of work is no such choice, so it is skipped and the worker keeps the integrator's level."""
+    out = {}
+    text = str(text or "")
+    for line in text.split("\n"):
+        if ONE_LEVEL.search(line) and "named by the parent session" in line:
+            for k, v in said_level(line).items():
+                out.setdefault(k, v)
+    for key, value in SAID_LEVEL.findall(text):
+        key = key.lower()
+        if (key == "effort" and value.lower() in EFFORTS) or (key == "model" and MODEL_ID.match(value)):
+            out.setdefault(key, value.lower() if key == "effort" else value)
+    return out
+
+
 PARENT_EFFORT = ""            # phi.Me sets it: the effort the session of this hook runs at, '' where nothing names it
 
 
