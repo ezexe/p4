@@ -239,8 +239,8 @@ class Linear(Base):
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
         prompt = call_in(context(t.say(TOP, RETRY + ", in `lib/x.py`")))["prompt"]
-        # the folder as the test line spells it: norm form, as test_files gives it, where Files: is spelled on disk
-        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1).lower()
+        # the test line spells the folder on disk, as the Files: line does
+        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1)
         self.assertIn(f"Run these test files, and no whole suite: `{at}/test_x.py`, `{at}/test_y.py`.", prompt)
         self.assertIn("Done looks like: the change made, those test files passing, committed and reported.", prompt)
         self.assertNotIn("test_z.py", prompt)
@@ -532,15 +532,16 @@ class TermsAndGuides(Base):
         t.say(TOP, TASK)
         real = os.path.join(t.tmp, "ReadMe.MD")
         write(real, "x")
-        want = os.path.realpath(real).replace("\\", "/")
         lower = real.lower().replace("\\", "/")
         missing = os.path.join(t.tmp, "Not-There.md").lower().replace("\\", "/")
         self.assertEqual(puppeteer.spelled(missing), missing)
         if os.path.exists(lower):                    # a case-insensitive file system
-            self.assertEqual(puppeteer.spelled(lower), want)
+            got = puppeteer.spelled(lower)
+            self.assertTrue(got.endswith("/ReadMe.MD"), got)
+            self.assertEqual(got.lower(), lower.lower(), "the same path, no link followed")
             d = puppeteer.prompter(t.p4, t.session(TOP), RETRY,
                                    {"within": False, "routes": [], "paths": [lower, missing]}, t.proj)
-            self.assertIn(f"Files: `{want}`, `{missing}`", d["brief"])
+            self.assertIn(f"Files: `{got}`, `{missing}`", d["brief"])
             self.assertEqual(d["paths"], [lower, missing], "the paths comparisons read are unchanged")
         else:
             self.skipTest("the file system is case-sensitive")

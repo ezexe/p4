@@ -1239,13 +1239,22 @@ def test_files(base, paths):
 
 
 def spelled(p):
-    """A path as it is spelled on disk where it is there, with forward slashes; else `p` as given."""
+    """A path as it is spelled on disk where it is there, with forward slashes; else `p` as given. Each part is
+    matched against the names its folder lists, so a case-insensitive file system gives the spelling it holds, and
+    no link is followed: os.path.realpath fixes no case on macOS and turns /var into /private/var there."""
     try:
-        if os.path.lexists(p):
-            return os.path.realpath(p).replace("\\", "/")
+        if not os.path.lexists(p):
+            return p
+        drive, rest = os.path.splitdrive(os.path.abspath(p))
+        parts = [x for x in rest.replace("\\", "/").split("/") if x]
+        at = drive.upper() + "/" if drive else "/"
+        for part in parts:
+            names = os.listdir(at)
+            got = part if part in names else next((n for n in names if n.lower() == part.lower()), part)
+            at = os.path.join(at, got)
+        return at.replace("\\", "/")
     except (OSError, ValueError):
-        pass
-    return p
+        return p
 
 
 def prompter(home, s, req, read, base):
@@ -1286,7 +1295,8 @@ def prompter(home, s, req, read, base):
         lines += checkout_lines(base)
     tests = test_files(base, paths)
     if tests:                                       # the tests the change touches, and no whole suite
-        lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
+        lines += ["Run these test files, and no whole suite: "
+                  + ", ".join(f"`{spelled(t) if os.path.isabs(t) else t}`" for t in tests) + ".",
                   "Done looks like: the change made, those test files passing, committed and reported.",
                   "Report when done."]
     else:
