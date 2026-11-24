@@ -800,5 +800,97 @@ class Waves(unittest.TestCase):
                                            sleep=lambda s: now.__setitem__(0, now[0] + s))[1], "long")
 
 
+TOP3 = ("# Top plan\n\n## Context\n\nNo planner.\n\n" + "".join(
+    f"## {k}. Part {k}\n\n- **Files:** `src/p{k}.py`\n- **Depends on:** none\n- **Done when:** MARK{k}\n\n"
+    for k in (1, 2, 3)))
+
+
+class SectionPlanners(unittest.TestCase):
+    def setUp(self):
+        base = tempfile.TemporaryDirectory(prefix="p4-phi-sections-")
+        self.addCleanup(base.cleanup)
+        self.base = os.path.realpath(base.name)
+        self.path = os.path.join(self.base, "top.md")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(self.home)
+
+    def runs(self):
+        return {r["n"]: r for r in coworker.section_runs(self.path, "E:/repo", self.home)[1]}
+
+    def start(self, size=2):
+        free = [size - sum(r["state"] == "running" for r in self.runs().values())]
+
+        def pick(text, runner):
+            self.assertEqual(runner["mode"], "interactive")
+            free[0] -= 1
+            return {"mode": "interactive", "profile": "", "pool": "max"} if free[0] >= 0 else None
+        found = coworker.section_plans(self.path, "E:/repo", self.home, PLANNER, pick, windows=False)
+        coworker.write([o for o in found if o.get("folder")], "E:/repo", self.home)
+        relay.forget(self.home)
+        return found
+
+    def test_three_briefs_start_two_planners_on_two_slots_and_the_third_when_one_reports(self):
+        first = self.start()
+        self.assertEqual([o["sections"] for o in first if o.get("folder")], [["1"], ["2"]])
+        self.assertEqual([o["sections"] for o in first if o.get("waits")], [["3"]])
+        self.assertEqual({k: r["state"] for k, r in self.runs().items()},
+                         {"1": "running", "2": "running", "3": "ready"})
+        self.assertEqual([o for o in self.start() if o.get("folder")], [], "both slots are taken")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        third = [o for o in self.start() if o.get("folder")]
+        self.assertEqual([o["sections"] for o in third], [["3"]])
+
+    def test_each_planners_brief_and_start_hold_only_its_own_brief_and_route_it_to_plan_mode(self):
+        for one in [o for o in self.start(3) if o.get("folder")]:
+            n = one["sections"][0]
+            with open(one["brief_file"], encoding="utf-8") as f:
+                brief = f.read()
+            self.assertIn(f"MARK{n}", brief)
+            for k in "123".replace(n, ""):
+                self.assertNotIn(f"MARK{k}", brief)
+                self.assertNotIn(f"Part {k}", one["goal"])
+            self.assertIn("--permission-mode plan", one["lines"][-1])
+            self.assertIn("export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", one["lines"])
+            self.assertNotIn(" -p ", one["lines"][-1])
+            self.assertIn("Plan file:", brief)
+
+    def test_a_brief_waits_while_a_planner_it_depends_on_has_no_report(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3.replace("`src/p3.py`\n- **Depends on:** none", "`src/p3.py`\n- **Depends on:** 1"))
+        first = self.start(3)
+        self.assertEqual([o["sections"] for o in first if o.get("folder")], [["1"], ["2"]])
+        self.assertEqual(self.runs()["3"]["state"], "waiting")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(self.runs()["3"]["state"], "ready")
+
+    def test_collect_lists_each_sections_plan_file_report_and_read_line(self):
+        first = self.start()
+        made = os.path.join(self.base, "quiet-fox.md").replace("\\", "/")
+        with open(made, "w", encoding="utf-8") as f:
+            f.write("# T\n\nRead: one group, 2 rounds, clean\n")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"The rounds are logged.\n- Plan file: `{made}`\n")
+        got = {c["n"]: c for c in coworker.collect(self.path, "E:/repo", self.home)}
+        self.assertEqual(got["1"]["plan"], made)
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"Plan file saved below.\n**Plan file:** {made}\n")
+        self.assertEqual(coworker.collect(self.path, "E:/repo", self.home)[0]["plan"], made, "bold markup too")
+        self.assertEqual((got["1"]["state"], got["1"]["read"]), ("done", "Read: one group, 2 rounds, clean"))
+        self.assertEqual(got["1"]["report"], first[0]["report"].replace("\\", "/"))
+        self.assertEqual((got["2"]["plan"], got["2"]["report"], got["2"]["state"]), ("", "", "running"))
+        self.assertEqual(got["3"]["state"], "ready")
+
+    def test_a_sections_own_model_and_effort_set_its_planners_level(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3.replace("MARK2", "MARK2\n- Model: claude-opus-5-5\n- Effort: high"))
+        found = {o["sections"][0]: o for o in self.start(3) if o.get("folder")}
+        self.assertIn("--model claude-opus-5-5 --effort high", found["2"]["lines"][-1])
+        self.assertIn("--model claude-sonnet-5-5", found["1"]["lines"][-1])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

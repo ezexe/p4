@@ -514,6 +514,96 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
     return one
 
 
+PLANNER_PREFIX = "tp"                     # a section planner's name: tp-<section>-<n>-<mark>
+PLANNER_RUNNER = {"mode": "interactive", "pool": "max", "team": True, "said": "interactive"}
+
+
+def section_runs(path, checkout, home=""):
+    """(the top plan's title, one entry for each brief not landed, in the plan's order): {"name", "n", "head",
+    "needs", "text" (the planner's brief), "folder", "report", "state"}. The state: `done` where the
+    planner's node holds its report, which it writes before ExitPlanMode; `running` where its node is there and
+    no report; `ready` where it never started and every `Depends on:` is a section whose planner is done or no
+    section of the plan; `waiting` for the rest."""
+    with open(path, encoding="utf-8") as f:
+        title, found = sections.parse(f.read(), checkout)
+    nodes = relay.nodes(home) if home else {}
+    out = []
+    for s in found:
+        if s["landed"]:
+            continue
+        name = _named(PLANNER_PREFIX, s["head"], [s["n"]], path)
+        folder = (nodes.get(name) or "").replace("\\", "/")
+        one = {"name": name, "n": s["n"], "head": s["head"], "needs": list(s["after"]),
+               "text": sections.plan_brief(title, s), "folder": folder, "state": "todo",
+               "report": f"{folder}/report-{name}.md" if folder else ""}
+        if folder:
+            one["state"] = "done" if os.path.exists(one["report"]) else "running"
+        out.append(one)
+    by = {r["n"]: r for r in out}
+    for r in out:
+        if r["state"] == "todo":
+            r["state"] = "ready" if all(d not in by or by[d]["state"] == "done" for d in r["needs"]) else "waiting"
+    return title, out
+
+
+def section_plans(path, checkout, home, starter, settings, windows=None):
+    """One entry for each ready brief: the interactive planner that plans it, started once ezexe has the top plan,
+    as worker() makes it (a node, its brief, goal and start file, its pool settings), or `waits` where
+    `settings` (phi.slot_assigner's) has no slot for it, with no node claimed. Call it again, once a report is
+    there, to start what that frees."""
+    plan, checkout = os.path.abspath(path).replace("\\", "/"), checkout.replace("\\", "/")
+    _quoted(plan, checkout, home)
+    title, every = section_runs(plan, checkout, home)
+    with open(plan, encoding="utf-8") as f:
+        by = {s["n"]: s for s in sections.parse(f.read(), checkout)[1]}
+    out = []
+    try:
+        for r in every:
+            if r["state"] != "ready":
+                continue
+            st = settings(r["text"], PLANNER_RUNNER)
+            if st is None:
+                out.append({"name": r["name"], "sections": [r["n"]], "waits": True})
+                continue
+            one = worker(r["name"], r["text"], "The plan of the brief is written and put to ezexe", checkout, home,
+                         starter, [r["n"]], windows, team=True, mode="plan",
+                         prompt=planner_task(sections.plan_name(title, by[r["n"]])),
+                         profile=st["profile"], headless=False, level=plans.own_level(r["text"]) or None)
+            one.update(settings=st, sections=[r["n"]])
+            out.append(one)
+    except Exception:
+        _undo(home, out)
+        raise
+    return out
+
+
+def collect(path, checkout, home=""):
+    """One entry for each brief, in the plan's order: {"name", "n", "head", "state", "plan" (the file the planner's
+    report names on its line `Plan file:`, "" where there is none), "report" (where the planner reported, else ""),
+    "read" (the plan's line that opens `Read:`, else "")}, for the orchestrator to review and put to ezexe."""
+    out = []
+    for r in section_runs(path, checkout, home)[1]:
+        plan, read = "", ""
+        if r["state"] == "done":
+            try:
+                with open(r["report"], encoding="utf-8") as f:
+                    text = f.read()
+                for m in re.finditer(r"(?im)^[ \t>*-]*plan file(?:\*\*[ \t]*:|[ \t]*:(?:\*\*)?)[ \t]*`?([^`\r\n]*?)`?[ \t]*$",
+                                     text):                # one colon is required, so prose that opens "Plan file" is no line
+                    plan = m.group(1).strip().replace("\\", "/")
+                    if os.path.isfile(plan):
+                        break
+                    plan = ""
+                with open(plan, encoding="utf-8") as f:
+                    read = next((x.strip() for x in f.read().splitlines() if x.startswith("Read:")), "")
+            except OSError:
+                pass
+        out.append({"name": r["name"], "n": r["n"], "head": r["head"], "state": r["state"],
+                    "plan": plan if plan and os.path.isfile(plan) else "",
+                    "report": r["report"] if r["state"] == "done" else "", "read": read})
+    return out
+
+
 def draft_name(title, did):
     """A drafted worker's name: `tw-`, the title's slug cut at 24 characters, and the draft id's last four."""
     stem = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:24].strip("-") or "work"
