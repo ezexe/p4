@@ -166,3 +166,93 @@ class Sections(unittest.TestCase):
         self.assertTrue(sections.team([self.section(1, 2, "`python -m pytest tests/test_a.py`")]))
         self.assertTrue(sections.team([self.section(1, 3), self.section(2, 2)]))
 
+
+
+PIECES = """# Pieces
+
+## 1. The reader
+
+- **Files:** `src/a.py`, `tests/test_a.py`
+- **Depends on:** none
+- **Checks:** `python -m pytest tests/test_a.py`
+- **Runner:** print api
+
+## 2. The writer
+
+- **Files:** `src/b.py`
+- **Depends on:** none
+- **Checks:** `python -m pytest tests/test_b.py`
+- **Runner:** print max
+- Model: claude-opus-5-5
+- Effort: high
+
+## 3. The joiner
+
+- **Files:** `src/c.py`
+- **Depends on:** 1, 2
+- **Checks:** `python -m pytest tests/test_c.py`
+- **Runner:** team
+
+## 4. The second writer
+
+- **Files:** `src/b.py`, `src/d.py`
+- **Depends on:** 2
+- **Checks:** `python -m pytest tests/test_d.py`
+
+## 5. The docs
+
+- **Files:** `README.md`
+- **Depends on:** 3, 4
+"""
+
+
+class Waves(unittest.TestCase):
+    """A plan written as pieces: runs joined by shared files only, `Depends on:` as waves, and the three readers'
+    checks."""
+
+    def found(self, text=PIECES):
+        return sections.parse(text)[1]
+
+    def test_a_depends_on_orders_runs_into_waves_and_only_a_shared_file_joins_two_sections(self):
+        found = self.found()
+        runs = [[s["n"] for s in r] for r in sections.file_runs(found)]
+        self.assertEqual(runs, [["1"], ["2", "4"], ["3"], ["5"]], "2 and 4 share src/b.py; 1 and 3 share nothing")
+        waves = [[[s["n"] for s in r] for r in w] for w in sections.waves(found)]
+        self.assertEqual(waves, [[["1"], ["2", "4"]], [["3"]], [["5"]]])
+        self.assertEqual([[s["n"] for s in r] for r in sections.ready(found)], [["1"], ["2", "4"]])
+        self.assertEqual([[s["n"] for s in r] for r in sections.ready(found, met={"1", "2", "4"})],
+                         [["1"], ["2", "4"], ["3"]], "ready reads needs only; the caller drops what started")
+
+    def test_a_landed_section_is_met_and_a_need_the_plan_lacks_holds_nothing(self):
+        text = PIECES.replace("## 1. The reader\n", "## 1. The reader\n\n**Evidence:** abc1234\n")
+        text = text.replace("- **Depends on:** 1, 2", "- **Depends on:** 1, 2, 9")
+        found = self.found(text)
+        self.assertEqual(sections.needs([s for s in found if s["n"] == "3"]), ["1", "2", "9"])
+        self.assertNotIn(["3"], [[s["n"] for s in r] for r in sections.ready(found)], "2 is not met")
+        self.assertIn(["3"], [[s["n"] for s in r] for r in sections.ready(found, met={"2", "4"})])
+
+    def test_a_runner_line_names_mode_pool_team_and_the_sections_own_level(self):
+        by = {s["n"]: s["runner"] for s in self.found()}
+        self.assertEqual((by["1"]["mode"], by["1"]["pool"], by["1"]["team"]), ("print", "api", False))
+        self.assertEqual((by["2"]["mode"], by["2"]["pool"]), ("print", "max"))
+        self.assertEqual(by["2"]["level"], {"model": "claude-opus-5-5", "effort": "high"})
+        self.assertEqual((by["3"]["mode"], by["3"]["team"]), ("interactive", True))
+        self.assertEqual(by["4"], {})
+        self.assertEqual(sections.runner_of("- **Runner:** `print max`, Opus at high\n")["pool"], "max")
+
+    def test_lint_flags_a_shared_file_with_no_order_a_missing_dependency_and_a_section_with_no_check(self):
+        self.assertEqual([lens for lens, _ in sections.lint(PIECES)], ["checks"], "only section 5 has no check")
+        clash = PIECES.replace("- **Depends on:** 2\n", "- **Depends on:** none\n")
+        lines = sections.lint(clash)
+        self.assertIn("fences", [lens for lens, _ in lines])
+        self.assertTrue(any("sections 2 and 4 both write src/b.py" in line for _, line in lines), lines)
+        reads = PIECES.replace("## 3. The joiner\n", "## 3. The joiner\n\nIt reads `src/d.py` for its names.\n")
+        self.assertTrue(any(lens == "sources" and "names src/d.py, which section 4 writes" in line
+                            for lens, line in sections.lint(reads)), sections.lint(reads))
+        ghost = PIECES.replace("- **Depends on:** 3, 4", "- **Depends on:** 3, 4, 8")
+        self.assertTrue(any("depends on section 8, which the plan does not hold" in line
+                            for _, line in sections.lint(ghost)))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

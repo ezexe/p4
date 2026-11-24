@@ -3,8 +3,10 @@
 
 A plan is shaped by p4-temportal's skill plan-planner: each section that changes files names them on a line
 `**Files:**`, the sections that land before it on a line `**Depends on:**`, and what proves it on a line
-`**Checks:**`. Sections that share a file or depend on one another are one worker's run, landed in the plan's order,
-and every other section is a run of its own. Each run is one start call, an integrator's, since its fences are
+`**Checks:**`, and its runner on a line `**Runner:**`. For reading, sections that share a file or depend on one
+another are one run, runs(), joined into groups of five fences, groups(). For landing, only a shared file joins two
+sections, file_runs(), and a `Depends on:` puts the later run in a later wave, waves() and ready(); lint() is what
+the plan's three readers check. Each run is one start call, an integrator's, since its fences are
 written: the skill sub-agentic's table has the integrator land "written fences".
 """
 
@@ -21,6 +23,10 @@ NUMBER = re.compile(r"(\d+)\b")
 LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$"
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
+# `Runner: print api`, `print max`, `interactive` or `team`: the kind of worker a section is the brief of
+RUNNER = re.compile(LINE % r"runner")
+RUNNERS = {"print api": ("print", "api"), "print max": ("print", "max"), "print": ("print", ""),
+           "interactive": ("interactive", "max"), "team": ("interactive", "max")}
 EVIDENCE = re.compile(LINE % r"evidence")      # a landed section holds this line; progress.py reads it for the pane too
 # plan-planner, "What every section of a plan holds": `**Assumed:**` stands after `**Observed:**`, with one line for
 # each thing the section takes to be so, or the one word `none`.
@@ -45,6 +51,26 @@ def assumed_of(body):
         elif line.strip() or said:
             break
     return sum(1 for x in said if not NOTHING.match(x))
+
+
+def runner_of(body):
+    """The runner a section names on its `Runner:` line, as {"mode", "pool", "team", "said"} with its `Model:` and
+    `Effort:` lines as `level`, or {} where it names none: `print api`, `print max`, `print`, `interactive` or
+    `team`, read from the line's first words, so `Runner: print max, opus at high` names the Max plan."""
+    import plans
+    m = RUNNER.search(body)
+    out = {}
+    if m:
+        said = re.sub(r"[`*]", "", m.group(1)).strip().lower()
+        for key in sorted(RUNNERS, key=len, reverse=True):
+            if re.match(re.escape(key) + r"(?![\w-])", said):
+                mode, pool = RUNNERS[key]
+                out = {"mode": mode, "pool": pool, "team": key == "team", "said": key}
+                break
+    level = plans.said_level(body)
+    if level:
+        out["level"] = level
+    return out
 
 
 def parse(text, base=""):
@@ -77,7 +103,7 @@ def parse(text, base=""):
                     "checks": checks.group(1).rstrip(".") if checks and not starts.NO_FILES.match(checks.group(1))
                     else "",
                     "fences": len(FENCE.findall(raw[m.end():end])), "assumed": assumed_of(body),
-                    "landed": bool(EVIDENCE.search(body))})
+                    "landed": bool(EVIDENCE.search(body)), "runner": runner_of(body), "body": body})
     return (top.group(1) if top else "plan"), out
 
 
@@ -96,6 +122,106 @@ def runs(sections):
     for s in sections:
         out.setdefault(run[s["n"]], []).append(s)
     return list(out.values())
+
+
+def file_runs(sections):
+    """The sections as the runs one worker each lands, in the plan's order: two sections are in one run only where
+    they share a file, so a `Depends on:` orders runs into waves, waves(), and joins none. A landed section is in
+    none."""
+    sections = [s for s in sections if not s.get("landed")]
+    run = {s["n"]: k for k, s in enumerate(sections)}
+    for i, a in enumerate(sections):
+        for b in sections[:i]:
+            if any(relay.overlap(p, q) for p in a["files"] for q in b["files"]):
+                old, new = run[a["n"]], run[b["n"]]
+                run = {n: new if r == old else r for n, r in run.items()}
+    out = {}
+    for s in sections:
+        out.setdefault(run[s["n"]], []).append(s)
+    return list(out.values())
+
+
+def needs(run):
+    """The section numbers a run waits for: each `Depends on:` of its sections that is no section of the run."""
+    own = {s["n"] for s in run}
+    return sorted({d for s in run for d in s["after"] if d not in own}, key=lambda x: int(x))
+
+
+def ready(sections, met=()):
+    """The runs of file_runs whose every need is met: a section is met where it holds its `Evidence:` or is in
+    `met`, the numbers of sections whose worker reported done. A need that names no section of the plan is met,
+    as a landed section's is, so a typo does not hold a run forever; lint() names it."""
+    have = {s["n"] for s in sections}
+    done = {s["n"] for s in sections if s.get("landed")} | set(met)
+    return [run for run in file_runs(sections) if all(d in done or d not in have for d in needs(run))]
+
+
+def waves(sections):
+    """The runs of file_runs as waves, each a list of runs that start together once the waves before it are done:
+    wave 1 is every run with no open need. Runs whose needs never close, a cycle, make a last wave of their own."""
+    left, done, out = file_runs(sections), {s["n"] for s in sections if s.get("landed")}, []
+    have = {s["n"] for s in sections}
+    while left:
+        now = [r for r in left if all(d in done or d not in have for d in needs(r))]
+        if not now:
+            out.append(left)
+            break
+        out.append(now)
+        done |= {s["n"] for r in now for s in r}
+        left = [r for r in left if r not in now]
+    return out
+
+
+HOT = re.compile(r"(?:^|/)(?:README\.md|SKILL\.md|CHANGELOG\.md|plugin\.json|marketplace\.json)$", re.I)
+
+
+def _reaches(sections):
+    """{n: every section n depends on, directly or through others}."""
+    after = {s["n"]: set(s["after"]) for s in sections}
+    out = {}
+    for n in after:
+        seen, todo = set(), list(after[n])
+        while todo:
+            d = todo.pop()
+            if d not in seen:
+                seen.add(d)
+                todo += list(after.get(d, ()))
+        out[n] = seen
+    return out
+
+
+def lint(text, base=""):
+    """The three readers' checks of a plan written as pieces, as (lens, line) pairs: `fences` where two sections
+    that no `Depends on:` orders write one file, so they would run at once; `sources` where a section names a file
+    another section writes and depends on it neither way, or names a section that is not there; `checks` where a
+    section has no check of its own."""
+    _, found = parse(text, base)
+    have = {s["n"] for s in found}
+    reach = _reaches(found)
+    ordered = lambda a, b: b["n"] in reach[a["n"]] or a["n"] in reach[b["n"]]   # noqa: E731
+    out = []
+    for i, a in enumerate(found):
+        for b in found[:i]:
+            shared = sorted({p for p in a["files"] for q in b["files"] if relay.overlap(p, q)})
+            if shared and not ordered(a, b):
+                out.append(("fences", f"sections {b['n']} and {a['n']} both write {', '.join(shared)} and no "
+                                      f"`Depends on:` orders them: put the file in one section or add "
+                                      f"`Depends on: {b['n']}` to section {a['n']}"))
+    for a in found:
+        for d in a["after"]:
+            if d not in have:
+                out.append(("sources", f"section {a['n']} depends on section {d}, which the plan does not hold"))
+        for b in found:
+            if a is b or ordered(a, b):
+                continue
+            named = sorted(p for p in b["files"] if not HOT.search(p) and re.search(
+                r"(?<![\w/.-])" + re.escape(p) + r"(?![\w/-])", a["body"].replace(a["said"], "")))
+            if named:
+                out.append(("sources", f"section {a['n']} names {', '.join(named)}, which section {b['n']} writes, "
+                                       f"and states no `Depends on: {b['n']}`"))
+        if not a["checks"]:
+            out.append(("checks", f"section {a['n']} has no `Checks:` line of its own"))
+    return out
 
 
 def fences(group):

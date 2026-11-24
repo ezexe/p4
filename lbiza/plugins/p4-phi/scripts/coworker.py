@@ -152,7 +152,7 @@ def profile_lines(profile, windows, folder=""):
 
 
 def script(name, checkout, mode, said, folder, windows=None, team=True, extra=(), session="", profile="",
-           resume=False, headless=True):
+           resume=False, headless=True, level=None):
     """A coworker's start script, as (its file's name, its lines, the line typed into the tab): what a desktop
     session's shell hands down is cleared and `claude` starts in the checkout, with no worktree, and the settings
     file of `folder`. With `headless`, it is `claude -p` with `--output-format stream-json --verbose`, its output
@@ -160,7 +160,7 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
     variable where `team`. `session` adds `--session-id <uuid>`, or with `resume` `--resume <uuid>` in a file named
     `resume-<name>`, since both together would fork the session. `extra` flags, each a word spelled as the shell
     reads it, follow. A quote in the prompt `said` is refused as one in a path is, since the prompt stands between
-    quotes."""
+    quotes. `level`, {"model", "effort"} from a brief's own `Model:` and `Effort:` lines, is laid over level()."""
     windows = upkeep.WINDOWS if windows is None else windows
     named = profile_lines(profile, windows, folder)
     sep = "\\" if windows else "/"
@@ -170,7 +170,9 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
             raise ValueError(f"a start file's paths hold no quote: {path}")
     if resume and not session:
         raise ValueError("a resume names the session it continues")
-    lv = level()
+    lv = {**globals()["level"](), **{k: v for k, v in (level or {}).items() if k in ("model", "effort") and v}}
+    if lv.get("effort") in plans.EFFORTS:
+        lv["effort"] = plans.capped(lv["effort"])
     flags = "".join(f" --{k} {lv[k]}" for k in ("model", "effort") if str(lv.get(k) or "inherit") != "inherit")
     log = f"{at}{sep}{LOG.format(name)}"
     run = (f"claude{' -p' if headless else ''} --name {name}"
@@ -328,34 +330,86 @@ LAND_MODE = "bypassPermissions"
 
 def land(path, checkout, who, mode, home="", starter="", claim=False, windows=None, profile="",
          headless=True, settings=None):
-    """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
-    that lands it, started once ezexe approved the plan. `name` and `sections`, and with `claim` the node relay.claim
+    """One entry for each run of the plan at `path` that is ready, plan_runs, in the plan's order: the terminal
+    worker that lands it, started once ezexe approved the plan, so every run whose `Depends on:` is met starts at
+    once and the next wave is the next call's. `name` and `sections`, and with `claim` the node relay.claim
     makes for it under its starter `starter`, and in the node's folder the `brief` text and its
     file, the `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in
     its tab; a name that has a node already gets `started`, its node's folder, and nothing else. The worker has no
     worktree, no team (none spawns under -p), no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one. It
     starts in LAND_MODE, and `mode`, its starter's, is not read. With `settings`, a function of the title and brief
-    that returns phi.worker_settings' dict, each worker's profile and mode are its own and its entry holds them as
-    `settings`; `profile` and `headless` are then not read."""
+    and the run's `Runner:` that returns phi.worker_settings' dict, or None where no pool has a slot for the run,
+    each worker's profile and mode are its own and its entry holds them as `settings`; a run with None gets `waits`
+    and no node. `profile` and `headless` are then not read. A section's `Model:` and `Effort:` lines set its
+    worker's, and `Runner: team` an interactive worker's team."""
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
     if claim:                                      # every path before the first claim
         _quoted(plan, checkout, home)
-    with open(path, encoding="utf-8") as f:
-        title, found = sections.parse(f.read(), checkout)
-    out = []
-    for group in sections.groups(found):
-        nums = [s["n"] for s in group]
-        out.append({"name": worker_name(path, nums), "sections": nums, "group": group})
+    title = plan_title(path)
+    every = plan_runs(path, checkout, home)
+    out = [{"name": r["name"], "sections": r["sections"], "group": r["group"], "runner": r["runner"]}
+           for r in every if r["state"] == "ready"]
     if not claim:
-        return [{k: v for k, v in one.items() if k != "group"} for one in out]
+        return [{k: v for k, v in one.items() if k not in ("group", "runner")} for one in out]
     try:
         for one in out:
             _worker(one, plan, title, checkout, mode, home, starter, windows, profile, headless, settings)
     except Exception:
         _undo(home, out)
         raise
+    order = {r["name"]: k for k, r in enumerate(every)}
+    out += [{"name": r["name"], "sections": r["sections"], "started": r["folder"]}
+            for r in every if r["state"] in ("running", "ended")]
+    return sorted(out, key=lambda one: order[one["name"]])
+
+
+def plan_title(path):
+    with open(path, encoding="utf-8") as f:
+        return sections.parse(f.read())[0]
+
+
+def plan_runs(path, checkout, home=""):
+    """Every run of the plan at `path`, in the plan's order, landed ones too, so a run keeps its name from wave to
+    wave: the sections that share a file, sections.file_runs, each as {"name", "sections", "group", "needs",
+    "runner", "state", "folder", "report"}. `sections` are the run's sections not landed, `group` those sections
+    whole and `needs` the sections of other runs it waits for. The state: `landed` where every section holds its
+    `Evidence:`; `done` where its worker's node holds its report; `ended` where its log's last row is a final
+    result and no report came; `running` where its node is there and neither; `ready` where it was never started
+    and every need is met, a met section being landed or in a run that is landed or done; `waiting` for the rest."""
+    with open(path, encoding="utf-8") as f:
+        _, found = sections.parse(f.read(), checkout)
+    by_n = {s["n"]: s for s in found}
+    nodes = relay.nodes(home) if home else {}
+    out = []
+    for run in sections.file_runs([dict(s, landed=False) for s in found]):
+        real = [by_n[s["n"]] for s in run]
+        left = [s for s in real if not s.get("landed")]
+        name = worker_name(path, [s["n"] for s in run])
+        one = {"name": name, "sections": [s["n"] for s in left], "group": left, "needs": sections.needs(run),
+               "runner": next((s["runner"] for s in run if s.get("runner")), {}), "folder": "", "report": ""}
+        folder = (nodes.get(name) or "").replace("\\", "/")
+        if not left:
+            one["state"] = "landed"
+        elif folder:
+            one.update(folder=folder, report=f"{folder}/report-{name}.md")
+            if os.path.exists(one["report"]):
+                one["state"] = "done"
+            elif last_result(f"{folder}/{LOG.format(name)}", final=True):
+                one["state"] = "ended"
+            else:
+                one["state"] = "running"
+        else:
+            one["state"] = "todo"
+        out.append(one)
+    met = {s["n"] for s in found if s.get("landed")}
+    for r, run in zip(out, sections.file_runs([dict(s, landed=False) for s in found])):
+        if r["state"] in ("landed", "done"):
+            met |= {s["n"] for s in run}
+    for r in out:
+        if r["state"] == "todo":
+            r["state"] = "ready" if all(d in met or d not in by_n for d in r["needs"]) else "waiting"
     return out
 
 
@@ -363,18 +417,23 @@ def _worker(one, plan, title, checkout, mode, home, starter, windows, profile=""
             settings=None):
     """The node of one terminal worker of land(), and its brief, goal and start file in it."""
     group, nums = one.pop("group"), one["sections"]
+    runner = one.pop("runner", None) or next((s["runner"] for s in group if s.get("runner")), {})
     many = "s" if len(group) > 1 else ""
     done = f"Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed, its Checks pass"
     brief = sections.brief(plan, title, group, checkout, [])
     if settings:
-        one["settings"] = settings(title + "\n" + brief)
+        one["settings"] = settings(title + "\n" + brief, runner)
+        if one["settings"] is None:                # no pool has a free slot: the run waits, and nothing is claimed
+            one["waits"] = True
+            return
         profile, headless = one["settings"]["profile"], one["settings"]["mode"] == "print"
     one.update(worker(one["name"], brief, done, checkout, home, starter, nums, windows, profile=profile,
-                      headless=headless))
+                      headless=headless, team=bool(runner.get("team")) and not headless,
+                      level=runner.get("level")))
 
 
 def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, team=False, mode=LAND_MODE,
-           extra=(), prompt="", profile="", plan_file="", headless=True):
+           extra=(), prompt="", profile="", plan_file="", headless=True, level=None):
     """The node of one terminal worker and its brief, goal and start file in it, as one entry: `name`, and either
     `started`, the folder of a node that holds that name already, or `folder`, `brief` and `brief_file`, `report`,
     `goal`, the `session` id (a uuid4 kept in its node.json), its `log`, and the start file's `file`, `lines` and the
@@ -411,7 +470,7 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
     elif prompt:
         goal = f"{prompt} The brief is {brief_file}, and the report {report} is written when the plan is put."
     try:
-        kw = dict(team=team, extra=extra, session=session, profile=profile, headless=headless)
+        kw = dict(team=team, extra=extra, session=session, profile=profile, headless=headless, level=level)
         file, lines, typed = script(name, checkout, mode, goal, folder, windows, **kw)
         rfile, rlines, rtyped = script(name, checkout, mode, goal, folder, windows, resume=True, **kw)
     except Exception:
@@ -495,6 +554,43 @@ def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, slee
     if written():
         return "done", int(clock() - start)
     return ("ended" if ended() else "long"), int(clock() - start)
+
+
+def wait_any(reports, longest=LONGEST, clock=time.time, sleep=time.sleep, quiet=QUIET):
+    """The wait of a wave: (the report that came first, how it ended, the seconds waited), as wait_report reads
+    each of `reports` (each beside its worker's log in its node), so the session that lands a plan starts the next
+    wave as soon as one worker of this one is through, rather than at the last. `done` where a report is there,
+    since each names a worker the last land printed as running, so one written before the wait began counts, `ended` where a log got a final `result` row past its size when the wait began, idle
+    `quiet` seconds, and its report is not there; (`""`, `long`, seconds) after `longest` seconds."""
+    start = clock()
+    logs = {}
+    for report in reports:
+        tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+        log = os.path.join(os.path.dirname(report), LOG.format(tab))
+        try:
+            logs[report] = (log, os.path.getsize(log))
+        except OSError:
+            logs[report] = (log, 0)
+
+    def one():
+        for report in reports:
+            if os.path.exists(report):             # a wave's reports are of workers that ran at its land
+                return report, "done"
+            log, offset = logs[report]
+            try:
+                idle = time.time() - os.path.getmtime(log)
+            except OSError:
+                continue
+            if idle >= quiet and last_result(log, offset, final=True):
+                return report, "ended"
+        return "", ""
+    while clock() - start < longest:
+        report, how = one()
+        if how:
+            return report, how, int(clock() - start)
+        sleep(10)
+    report, how = one()
+    return report, how or "long", int(clock() - start)
 
 
 def last_list(name, who, home, checkout):
