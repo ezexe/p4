@@ -394,13 +394,13 @@ def grandfather(home, today=None):
     return names
 
 
-def normal(text, sep=False):
+def normal(text, sep=True):
     """`text` with its paths normalised: either slash is `/`, repeated separators are one, and a `./` segment is
     gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`
-    or `+` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`); one before `.` is a
-    separator, as in `complete\\.closed.jsonl`. One before `?` or `*` is an escape, or a separator where `sep` is
-    true: names_complete reads a line both ways, as PowerShell reads `plan-planner\\?omplete` as a path."""
-    out = re.sub(r"\\(?=[|(){}+])" if sep else r"\\(?=[|(){}+?*])", "", str(text or ""))
+    or `+` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`). One before any other
+    character is a separator where `sep` is true, as PowerShell and Windows read it, and an escape, dropped, where
+    it is false, as bash reads `comp\\lete`: names_complete reads a line both ways."""
+    out = re.sub(r"\\(?=[|(){}+])" if sep else r"\\(?=[\s\S])", "", str(text or ""))
     out = re.sub(r"/{2,}", "/", out.replace("\\", "/"))
     out = re.sub(r"/\.(?=/)", "", out)
     out = re.sub(r"(?<![\w.])\./", "", out)
@@ -537,7 +537,7 @@ VALUE_LINE = re.compile(r"(?i)[ \t]*(?:set|add)-content[ \t]+(?:-path[ \t]+)?" +
 EXPANDS = re.compile(r"[$`]")       # an unquoted heredoc and a `@"` here-string run a `$(...)` and a backtick
 
 
-def data_out(cmd):
+def data_out(cmd, tool=""):
     """`cmd` without the body of its heredoc or here-string where the whole command is one of these shapes and
     nothing else, and `cmd` as it is otherwise:
     - `cat > <path> <<D`, `cat >> <path> <<D`, `tee <path> <<D` or `tee -a <path> <<D`, with `D` bare or in one pair
@@ -546,11 +546,13 @@ def data_out(cmd):
     - `@'` or `@"` on a line of its own, the body, then `'@` or `"@` and only `| Set-Content <path>`,
       `| Add-Content <path>` or `| Out-File <path>` (with `-Path`, `-FilePath` and `-Encoding <word>`); or
       `Set-Content`/`Add-Content -Path <path> -Value @'`, the body ending at `'@` and nothing after.
-    A body that an unquoted heredoc or a `@"` here-string would expand (`$` or a backtick) is no data. The path
+    A heredoc shape is data only for the `Bash` tool and a here-string shape only for `PowerShell`: bash reads
+    `@'` as an open quote, and a PowerShell tab reached by `mcp__terminal__run_in_terminal` runs a heredoc's body
+    lines, so on any other tool no shape is data. A body that an unquoted heredoc or a `@"` here-string would expand (`$` or a backtick) is no data. The path
     stays in the line, so a target under complete/ is read as a path."""
     text = str(cmd or "")
     lines = text.split("\n")
-    m = HEREDOC_LINE.fullmatch(lines[0])
+    m = HEREDOC_LINE.fullmatch(lines[0]) if tool == "Bash" else None
     if m:
         word, quoted = m.group("w") or m.group("b"), bool(m.group("q"))
         for end in range(1, len(lines)):
@@ -559,6 +561,8 @@ def data_out(cmd):
                         and (quoted or not EXPANDS.search("\n".join(lines[1:end])))):
                     return lines[0]
                 return text
+        return text
+    if tool != "PowerShell":
         return text
     o, v = HERESTRING_OPEN.fullmatch(lines[0]), VALUE_LINE.fullmatch(lines[0])
     if not (o or v):
@@ -575,7 +579,7 @@ def data_out(cmd):
     return text
 
 
-def names_complete(cmd, cwd):
+def names_complete(cmd, cwd, tool=""):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
     matches it, with a separator beside it (`complete/`, `/complete`, `/comp*`), or quoted alone as a path's part
@@ -584,9 +588,9 @@ def names_complete(cmd, cwd):
     `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
     `complete` outside a quote is a segment too. The line is read by shell_words first, so `comp''lete`,
     ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`. It is read four ways, an escaped quote
-    toggling the quote state or not and a backslash before `?` or `*` an escape or a separator, and refused where
-    any reading names `complete`."""
-    data = data_out(cmd)
+    toggling the quote state or not and a backslash an escape or a separator, and refused where any reading names
+    `complete`. `tool` says which shape of data_out counts."""
+    data = data_out(cmd, tool)
     return any(_names_complete(normal(shell_words(data, escq), sep), cwd)
                for escq in (True, False) for sep in (False, True))
 
@@ -701,7 +705,7 @@ def guard(tool, tool_input, cwd=None):
         return None
     if tool in SHELLS:
         cmd = str(inp.get("command") or "")
-        if not names_complete(cmd, cwd) or is_close_line(cmd, cwd) or is_read_only(cmd):
+        if not names_complete(cmd, cwd, tool) or is_close_line(cmd, cwd) or is_read_only(cmd):
             return None
         return ("phi (p4-phi): this command is refused: it names a `complete` folder, which a plan enters only "
                 "by `phi.py plan close <plan> --checkout <repo>`, past the gate of its Evidence and its `## Audit`. "

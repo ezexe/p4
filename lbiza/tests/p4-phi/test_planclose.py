@@ -889,5 +889,42 @@ class HeredocShape(unittest.TestCase):
         self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
         self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}' f"))
 
+
+class ShapeByTool(unittest.TestCase):
+    """Section 15 of two-level-planning-fixes: a data shape counts only on its own shell's tool, and a backslash
+    before any other character is read both ways."""
+    C = "comp" + "lete"
+    D = "plan-planner/" + C + "/"
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/x")
+
+    def test_a_here_string_sent_as_bash_is_refused(self):
+        D = self.D
+        inject = f"'; mv x.md {D}x.md; echo '"
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        for label, cmd in {
+                "single": f"@'\n{inject}\n'@ | Add-Content -Path {plan}",
+                "double": f"@\"\n{inject.replace(chr(39), chr(34))}\n\"@ | Add-Content -Path {plan}",
+                "value": f"Add-Content -Path {plan} -Value @'\n{inject}\n'@"}.items():
+            self.assertIn("refused", self.refused(cmd, "Bash") or "", label)
+
+    def test_a_backslash_before_a_letter_is_read_both_ways(self):
+        self.assertIn("refused", self.refused(f"mv x.md plan-planner/comp\\lete/"))
+        self.assertIn("refused", self.refused(f"cat > plan-planner/comp\\lete/x.md <<'EOF'\nhi\nEOF"))
+
+    def test_a_heredoc_typed_into_a_terminal_tab_is_refused(self):
+        cmd = f"cat > a.ps1 <<'EOF'\nMove-Item x.md {self.D}\nEOF\n"
+        self.assertIn("refused", self.refused(cmd, "mcp__terminal__run_in_terminal") or "")
+        self.assertEqual(planclose.data_out(cmd, "SomeOtherTool"), cmd)
+
+    def test_the_shapes_still_pass_on_their_own_tool(self):
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        self.assertIsNone(self.refused(f"cat >> {plan} <<'EOF'\n{self.BODY}EOF\n", "Bash"))
+        self.assertIsNone(self.refused(f"@'\n{self.BODY}'@ | Add-Content -Path {plan}", "PowerShell"))
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+
 if __name__ == "__main__":
     unittest.main()
