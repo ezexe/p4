@@ -64,6 +64,8 @@ class Supervisor(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = t = Tree(self._tmp.name)
+        import p4conf
+        p4conf.set_key(t.p4, "phi.upkeep", False)              # these tests read the lines of a store with upkeep off
         self.other = os.path.join(t.tmp, "other")              # a second environment, with its own store
         self.store2 = os.path.join(self.other, ".claude", "p4")
         os.makedirs(self.store2)

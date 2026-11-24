@@ -46,6 +46,8 @@ class Tree_(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = Tree(self._tmp.name)
+        import p4conf
+        p4conf.set_key(self.t.p4, "phi.upkeep", False)         # the test reads the lines of a store with upkeep off
         self.t.record(TOP, title="top")
         self.t.record(KID, TOP, title="the child")
         self.t.say(TOP, "Build it")
