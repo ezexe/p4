@@ -667,7 +667,8 @@ class Guards(unittest.TestCase):
             self.assertIsNone(self.guard("cards-guard", TOP, other), other)
         import hook
         for tool in ("Bash", "PowerShell"):
-            self.assertEqual(hook.PHI_CHECK[tool][0], "cards-guard", "ahead of every other check of a shell call")
+            self.assertEqual(hook.PHI_CHECK[tool][:2], ("plan-guard", "cards-guard"),
+                             "plan-guard first, then cards-guard ahead of every other check of a shell call")
         spaced = f'python "x/phi.py"      cards    on  {sid}'
         self.assertEqual(self.guard("cards-guard", TOP, spaced)["permissionDecision"], "ask", "however it is spaced")
         module = os.path.join(os.path.dirname(SRC), "hooks", "register.ts")

@@ -648,7 +648,7 @@ class Coworker(unittest.TestCase):
         land = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
         self.assertEqual(land.returncode, 0, land.stderr)
         self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
-        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', land.stdout, "each runs in the checkout")
+        self.assertNotIn('"cwd"', land.stdout, "a tab passes no cwd: its start file sets the location")
         relay.forget(self.home)
         self.assertEqual(len(relay.nodes(self.home)), 2)
         again = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
