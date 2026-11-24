@@ -3968,6 +3968,10 @@ def remove_main(argv):
 
 COMMIT_TRIES = 100                             # repeats of a git call whose output names index.lock
 COMMIT_WAIT = 0.1                              # seconds between them
+# What git says when another process holds a lock it needs: the index's, or a ref's, as two commits at once race for
+# HEAD and the later one is told "cannot lock ref 'HEAD': is at <new> but expected <old>" (seen on macOS CI,
+# 2026-11-24); a repeat of `git commit --only` builds on the new HEAD.
+GIT_LOCKED = re.compile(r"index\.lock|cannot lock ref|\.lock': File exists", re.I)
 
 
 def git_again(args, cwd, tries=COMMIT_TRIES, wait=COMMIT_WAIT):
@@ -3976,7 +3980,7 @@ def git_again(args, cwd, tries=COMMIT_TRIES, wait=COMMIT_WAIT):
     for k in range(tries + 1):
         ran = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, encoding="utf-8",
                              errors="replace")
-        if ran.returncode == 0 or "index.lock" not in ran.stdout + ran.stderr:
+        if ran.returncode == 0 or not GIT_LOCKED.search(ran.stdout + ran.stderr):
             return ran, False
         if k < tries:
             time.sleep(wait)

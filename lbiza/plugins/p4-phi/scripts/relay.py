@@ -133,6 +133,7 @@ NODE = "node.json"               # <node folder>/node.json: {id, kind, parent, p
 NODE_PATH_MAX = 180              # the longest folder path claim makes, so the files under it stay within Windows' 260
 TREE = "tree"                    # <root>/phi/tree/<ancestor ids...>/<id>: a node's folder, nested by parent
 _TREE = {}                       # by the root store: [the folders it listed with their times], and {id: (rel, node.json)}
+RACY_NS = 2_000_000_000          # a folder time this close to a walk is no proof the folder is unchanged since
 _MIGRATING = set()               # the roots this process is migrating, so a read inside the migration does not start it
 _TMP = re.compile(r"\.tmp-\d+-[0-9a-f]{8}\Z")      # a folder a claim is still making
 
@@ -194,8 +195,17 @@ def _tree(home):
     if key not in _MIGRATING and os.path.isdir(old) and _old_stores(old):
         migrate_nested(home)
         head = (_stamp(os.path.join(home, "phi")), _stamp(old))
+    walked_at = time.time_ns()
     walk = _walk(home)
-    _TREE[key] = (head, [(d, _stamp(d)) for d in walk[1]], walk[0])
+    stamps = [(d, _stamp(d)) for d in walk[1]]
+    # A folder whose time is within RACY_NS of the walk may change again in the same tick of the file system's
+    # clock, which on Windows moves in steps of about 16 ms, and the change would leave its time as it was: such a
+    # walk is not kept, so the next call walks again, as git treats a racily clean index entry.
+    racy = any(m is not None and m >= walked_at - RACY_NS for m in [*head, *(m for _, m in stamps)])
+    if not racy:
+        _TREE[key] = (head, stamps, walk[0])
+    else:
+        _TREE.pop(key, None)
     return walk[0]
 
 

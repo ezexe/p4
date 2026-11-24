@@ -3074,6 +3074,20 @@ class CommitCommand(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), before)
         self.assertEqual(self.commit("m").returncode, 2, "no path")
 
+    def test_a_commit_told_that_another_process_moved_head_is_run_again(self):
+        """Seen on macOS CI, 2026-11-24: of two commits at once the later was told "cannot lock ref 'HEAD': is at
+        <new> but expected <old>" and gave up; git_again runs it again, as it does for index.lock."""
+        from unittest import mock
+        told = [subprocess.CompletedProcess([], 128, "", "fatal: cannot lock ref 'HEAD': is at 1 but expected 2\n"),
+                subprocess.CompletedProcess([], 0, "ok", "")]
+        with mock.patch.object(phi.subprocess, "run", side_effect=told) as run, mock.patch.object(phi.time, "sleep"):
+            ran, locked = phi.git_again(["commit"], ".", tries=3, wait=0)
+        self.assertEqual((ran.returncode, locked, run.call_count), (0, False, 2))
+        with mock.patch.object(phi.subprocess, "run",
+                               return_value=subprocess.CompletedProcess([], 1, "", "nothing to commit")) as run:
+            self.assertEqual(phi.git_again(["commit"], ".", tries=3, wait=0)[0].returncode, 1)
+        self.assertEqual(run.call_count, 1, "another failure is not repeated")
+
     def test_two_processes_started_at_once_on_two_paths_both_commit_each_holding_its_own(self):
         for k in range(4):
             self.put("a.txt", f"a{k}\n")

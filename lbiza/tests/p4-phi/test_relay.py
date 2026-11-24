@@ -2064,6 +2064,17 @@ class Nodes(unittest.TestCase):
         write(os.path.join(folder, "w9", relay.NODE), json.dumps({"id": "w9", "parent": "kid"}))
         self.assertEqual(sorted(relay.nodes(self.home)), ["kid", "w9"], "no forget() needed")
 
+    def test_a_folder_added_in_the_same_tick_of_the_clock_as_the_walk_is_seen(self):
+        """Seen on Windows CI, 2026-11-24: a folder made right after a walk left its parent's time as it was, since
+        the file system's clock moves in steps; a walk whose folders are that fresh is not kept."""
+        folder = relay.claim(self.home, "kid", "session", "top")
+        with mock.patch.object(relay, "_stamp", lambda path: 1 if path else None):   # every time the same, as in one tick
+            with mock.patch.object(relay.time, "time_ns", lambda: 1 + relay.RACY_NS // 2):
+                self.assertEqual(sorted(relay.nodes(self.home)), ["kid"])
+                os.makedirs(os.path.join(folder, "w9"))
+                write(os.path.join(folder, "w9", relay.NODE), json.dumps({"id": "w9", "parent": "kid"}))
+                self.assertEqual(sorted(relay.nodes(self.home)), ["kid", "w9"], "a racy walk is walked again")
+
     def test_two_processes_that_claim_at_once_get_two_folders_for_two_ids_and_one_for_one(self):
         code = ("import sys; sys.path.insert(0, sys.argv[1]); import relay; "
                 "print(relay.claim(sys.argv[2], sys.argv[3], 'session', 'top'))")
