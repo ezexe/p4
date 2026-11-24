@@ -629,13 +629,15 @@ class Module(unittest.TestCase):
             import asks
             import controls
             import puppeteer
+            import progress
         finally:
             sys.path.remove(SCRIPTS)
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as home:
             folder = phi.session_dir(home, "s1").replace("\\", "/")
             pages = [controls.board_path(home, "s1"), asks.page_path(home, "s1"), puppeteer.ledger_path(home, "s1")]
             self.assertEqual([os.path.dirname(page) for page in pages], [folder] * 3)
-            names = [os.path.basename(page) for page in pages]
+            # the Workers page comes first: progress.page writes it beside progress.json, in the same folder
+            names = [progress.WORKERS] + [os.path.basename(page) for page in pages]
         text = self.text()
         self.assertEqual(re.findall(r"file: '([^']+)'", text), names)
         self.assertEqual(text.count("$.ui.open("), 1, "the command's own open, and none at a session's start")

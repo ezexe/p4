@@ -2679,8 +2679,18 @@ def worker_outcome(home, name, how, result):
 def worker_balance(home):
     """`phi.py balance`: per mode, the starts, the done and failed counts, the total and mean cost and the mean turns,
     from the rows of worker-starts.jsonl, and a line for all."""
+    import coworker
     rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
     mode_of_ = {r.get("name"): r.get("mode") for r in rows_ if r.get("event") == "start"}
+    log_of = {r.get("name"): r.get("log") for r in rows_ if r.get("event") == "start" and r.get("log")}
+    # A worker writes its report a turn or more before its run's final result row, so an outcome row a wait made at
+    # the report holds no cost: the cost and turns are read from the log's final result where the row lacks them.
+    for r in rows_:
+        if r.get("event") == "outcome" and "total_cost_usd" not in r and log_of.get(r.get("name")):
+            last = coworker.last_result(log_of[r["name"]], final=True)
+            for k in ("total_cost_usd", "num_turns", "is_error", "subtype"):
+                if k in last:
+                    r.setdefault(k, last[k])
     out = []
     for mode in WORKER_MODES + ("all",):
         starts_ = [r for r in rows_ if r.get("event") == "start" and mode in ("all", r.get("mode"))]
@@ -2727,17 +2737,21 @@ def worker_profile(home):
 
 def worker_profile_set(home, name=None):
     """`phi.py worker_profile`: with no name it writes nothing and says how the key stands; with a name it writes it
-    to the store's phi/phi.json, and `off` writes the empty string, keeping the file's other keys. Returns the line
-    that says how the key stands as read back."""
+    to the store's phi/phi.json, `off` writes the empty string, and `default` removes the key, so each mode's pair,
+    WORKER_PAIRS, applies again; the file's other keys are kept. Returns the line that says how the key stands as
+    read back."""
     path = os.path.join(home, "phi", "phi.json")
     if name is not None:
         want = "" if name == "off" else name
-        if want and not re.fullmatch(r"[A-Za-z0-9_-]+", want):
+        if want and want != "default" and not re.fullmatch(r"[A-Za-z0-9_-]+", want):
             raise ValueError("a worker profile's name holds letters, digits, _ and - only")
         d = read_json(path)
         if not d and os.path.exists(path) and os.path.getsize(path) > 2:
             raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
-        d["worker_profile"] = want
+        if want == "default":
+            d.pop("worker_profile", None)
+        else:
+            d["worker_profile"] = want
         write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     now_ = worker_profile(home)
     return (f"worker_profile is {now_ or 'off'} in {path.replace(chr(92), '/')}"

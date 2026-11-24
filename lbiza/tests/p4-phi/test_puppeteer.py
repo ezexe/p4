@@ -1063,6 +1063,12 @@ class Terminal(Base):
         self.assertEqual(jload(path), {"book": False, "worker_profile": ""})
         self.assertEqual(phi.worker_profile(t.p4), "")
         self.assertEqual(t.cli(TOP, "worker_profile", "bad name").returncode, 2)
+        r = t.cli(TOP, "worker_profile", "default")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(path), {"book": False}, "default removes the key and keeps the others")
+        self.assertEqual(phi.worker_settings(t.p4, TOP)["profile_from"], "the pair of print")
+        write(path, json.dumps({"book": False, "worker_mode": "interactive"}))
+        self.assertEqual(phi.worker_settings(t.p4, TOP)["profile"], "", "an interactive worker pairs with off")
 
     def test_a_session_another_session_started_is_an_orchestrator_whether_or_not_it_started_one(self):
         s = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}

@@ -2803,6 +2803,23 @@ class TerminalWorker(unittest.TestCase):
         self.assertIn("interactive: 0 starts, 0 done, 0 failed", bal.stdout)
         self.assertIn("all: 1 starts, 1 done", bal.stdout)
 
+    def test_balance_reads_the_cost_from_the_log_where_the_result_row_came_after_the_wait(self):
+        """Seen live on 2026-11-24: a worker writes its report, the wait ends and records its outcome, and the run's
+        final result row, with the cost, lands in the log a turn later."""
+        self.mode("local_plan0001", "auto")
+        self.assertEqual(self.run_phi("--land").returncode, 0)
+        (start,) = self.rows()
+        write(start["log"], json.dumps({"type": "assistant", "message": {"id": "m1", "content": []}}) + "\n")
+        write(start["report"], "done")
+        self.assertEqual(self.run_phi_report(start["report"]).returncode, 0)
+        self.assertNotIn("total_cost_usd", self.rows()[-1], "no result row yet when the wait ended")
+        with open(start["log"], "a", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                "total_cost_usd": 0.5, "num_turns": 4}) + "\n")
+        bal = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "balance", "--p4",
+                              self.home, "--session", "local_plan0001"], capture_output=True, text=True, timeout=60)
+        self.assertIn("print: 1 starts, 1 done, 0 failed, cost 0.5000 total 0.5000 mean, turns 4.0 mean", bal.stdout)
+
     def run_phi_report(self, report):
         env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app}
         return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", "--wait",
