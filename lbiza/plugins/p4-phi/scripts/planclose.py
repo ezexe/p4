@@ -541,8 +541,9 @@ def bare(word):
 
 
 def same_file(word, cwd, path):
-    """True where the path `word`, joined to `cwd` where it is relative, resolves to the file `path`."""
-    p = bare(word)
+    """True where the path `word`, joined to `cwd` where it is relative, resolves to the file `path`. Either slash
+    is read as a separator, as PowerShell reads one on every system, so `\\home\\x\\phi.py` resolves on Linux too."""
+    p = normal(bare(word))
     if cwd and not os.path.isabs(p):
         p = os.path.join(cwd, p)
     try:
