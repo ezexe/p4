@@ -281,6 +281,25 @@ class Waves(unittest.TestCase):
                             for lens, line in lines), lines)
         self.assertEqual([lens for lens, _ in sections.lint(PIECES)], ["checks"], "no cycle in a plan with none")
 
+    def test_lint_leaves_a_landed_section_out_of_the_fences_and_sources_checks(self):
+        plan = """# Landed beside open
+
+## 1. Landed
+**Evidence:** abc1234
+- **Files:** `src/x.py`
+- **Depends on:** none
+- **Checks:** `t1`
+
+## 2. Open
+It reads src/x.py for its names.
+- **Files:** `src/x.py`
+- **Depends on:** none
+- **Checks:** `t2`
+"""
+        self.assertEqual(sections.lint(plan), [], "a landed section runs with nothing")
+        open_both = plan.replace("**Evidence:** abc1234\n", "")
+        self.assertEqual({lens for lens, _ in sections.lint(open_both)}, {"fences", "sources"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

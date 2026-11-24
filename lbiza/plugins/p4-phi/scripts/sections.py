@@ -244,6 +244,8 @@ def lint(text, base=""):
     out = []
     for i, a in enumerate(found):
         for b in found[:i]:
+            if a["landed"] or b["landed"]:         # a landed section runs with nothing
+                continue
             shared = sorted({p for p in a["files"] for q in b["files"] if relay.overlap(p, q)})
             if shared and not ordered(a, b):
                 out.append(("fences", f"sections {b['n']} and {a['n']} both write {', '.join(shared)} and no "
@@ -254,7 +256,7 @@ def lint(text, base=""):
             if d not in have:
                 out.append(("sources", f"section {a['n']} depends on section {d}, which the plan does not hold"))
         for b in found:
-            if a is b or ordered(a, b):
+            if a is b or a["landed"] or b["landed"] or ordered(a, b):
                 continue
             named = sorted(p for p in b["files"] if not HOT.search(p) and re.search(
                 r"(?<![\w/.-])" + re.escape(p) + r"(?![\w/-])", a["body"].replace(a["said"], "")))
