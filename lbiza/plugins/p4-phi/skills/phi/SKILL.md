@@ -161,7 +161,7 @@ A planner runs with p4-phi off, so it keeps no `team.json` and has no row in the
 Once ezexe approved the plan the sections are landed by terminal workers started by `phi.py coworkers "<plan>" --land`, which run as `claude -p` in `bypassPermissions` where `worker_mode` is `print`, with a stream-json `log-<name>.jsonl` and a resume file in their node, and whose report file `--wait --report` waits for.
 A teammate reaches a live page through its lead: it sends the lead the page with the words to find, and the lead has one `web-fetch` subagent read it, since a teammate was seen with no tool that fetches a page.
 No part of p4 writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into a settings file: every terminal session of the project reads that file, and with the variable on each subagent Claude names starts as a teammate.
-When the answer is back, the session closes the tab with `mcp__terminal__stop_terminal_tab` and `close: true`, and where ezexe typed in the tab the app refuses that close, so the session asks ezexe to close it.
+When the answer is back, the session leaves the tab open, a lead's or a worker's, interactive or `-p`, so ezexe can read what ran there: no session calls `mcp__terminal__stop_terminal_tab` on such a tab, with `close: true` or without, unless ezexe asks for it.
 The app's own notice about a message the session sent, which opens with `[Cross-session delivery notice]` or `[Cross-session idle notice]`, is no message of ezexe's and no work: p4-phi drafts no start for it and keeps it as a notification.
 
 ## What a `Files:` line says
