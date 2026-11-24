@@ -947,7 +947,8 @@ class SectionPlanners(unittest.TestCase):
 
     def test_collect_lists_each_sections_plan_file_report_and_read_line(self):
         first = self.start()
-        made = os.path.join(self.base, "quiet-fox.md").replace("\\", "/")
+        made = os.path.join(coworker.p4conf.sub(self.home, "plans"), "quiet-fox.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(made), exist_ok=True)
         with open(made, "w", encoding="utf-8") as f:
             f.write("# T\n\nRead: one group, 2 rounds, clean\n")
         with open(first[0]["report"], "w", encoding="utf-8") as f:
@@ -961,6 +962,40 @@ class SectionPlanners(unittest.TestCase):
         self.assertEqual(got["1"]["report"], first[0]["report"].replace("\\", "/"))
         self.assertEqual((got["2"]["plan"], got["2"]["report"], got["2"]["state"]), ("", "", "running"))
         self.assertEqual(got["3"]["state"], "ready")
+
+    def _report_naming(self, other):
+        first = self.start()
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"- Plan file: `{other}`\n")
+
+    def test_collect_copies_a_plan_from_another_folder_into_the_plans_folder(self):
+        other = os.path.join(self.base, "elsewhere", "linked-horizon.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w", encoding="utf-8") as f:
+            f.write("# T\n\nRead: from afar\n")
+        self._report_naming(other)
+        got = coworker.collect(self.path, "E:/repo", self.home)[0]
+        copy = os.path.join(coworker.p4conf.sub(self.home, "plans"), "linked-horizon.md").replace("\\", "/")
+        self.assertEqual((got["plan"], got["moved_from"], got["read"]), (copy, other, "Read: from afar"))
+        self.assertTrue(os.path.isfile(copy))
+        again = coworker.collect(self.path, "E:/repo", self.home)[0]       # the same text there is the copy
+        self.assertEqual((again["plan"], again["moved_from"]), (copy, other))
+
+    def test_collect_never_overwrites_a_different_file_of_that_name(self):
+        other = os.path.join(self.base, "elsewhere", "linked-horizon.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w", encoding="utf-8") as f:
+            f.write("new text\n")
+        folder = coworker.p4conf.sub(self.home, "plans")
+        os.makedirs(folder, exist_ok=True)
+        there = os.path.join(folder, "linked-horizon.md")
+        with open(there, "w", encoding="utf-8") as f:
+            f.write("old text\n")
+        self._report_naming(other)
+        got = coworker.collect(self.path, "E:/repo", self.home)[0]
+        self.assertEqual((got["plan"], got["moved_from"]), (other, ""))
+        with open(there, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "old text\n")
 
     def test_a_sections_own_model_and_effort_set_its_planners_level(self):
         with open(self.path, "w", encoding="utf-8") as f:

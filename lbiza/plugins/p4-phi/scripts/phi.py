@@ -4778,6 +4778,8 @@ def main(argv=None):
                 for c in coworker.collect(plan, checkout, me.home):
                     print(f"section {c['n']} `{c['name']}` ({c['state']}): plan {c['plan'] or 'none yet'}, report "
                           f"{c['report'] or 'none yet'}" + (f"\n  {c['read']}" if c["read"] else ""))
+                    if c["moved_from"]:
+                        print(f"  the plan was brought in from {c['moved_from']} into the plans folder")
                     if c["state"] == "done" and c["plan"]:
                         print(f"  once ezexe approves it: `{commands()} coworkers \"{c['plan']}\" --checkout "
                               f"\"{checkout}\" --land --planner {c['name']}`")

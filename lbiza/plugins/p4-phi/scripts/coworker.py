@@ -622,13 +622,34 @@ def section_plans(path, checkout, home, starter, settings, windows=None):
     return out
 
 
+def _bring_in(plan, home):
+    """(the plan's path, where it was brought in from): `plan` copied into the store's plans folder under its name
+    where it lies outside that folder. A file of that name there with the same text is the copy; one with other text
+    is left alone and (plan, "") comes back."""
+    folder = os.path.abspath(p4conf.sub(os.path.abspath(home), "plans"))
+    src = os.path.abspath(plan)
+    if os.path.normcase(os.path.dirname(src)) == os.path.normcase(folder):
+        return plan, ""
+    dest = os.path.join(folder, os.path.basename(src))
+    if os.path.isfile(dest):
+        with open(src, "rb") as a, open(dest, "rb") as b:
+            same = a.read() == b.read()
+        return (dest.replace("\\", "/"), plan) if same else (plan, "")
+    os.makedirs(folder, exist_ok=True)
+    shutil.copyfile(src, dest)
+    return dest.replace("\\", "/"), plan
+
+
 def collect(path, checkout, home=""):
     """One entry for each brief, in the plan's order: {"name", "n", "head", "state", "plan" (the file the planner's
     report names on its line `Plan file:`, "" where there is none), "report" (where the planner reported, else ""),
-    "read" (the plan's line that opens `Read:`, else "")}, for the orchestrator to review and put to ezexe."""
+    "read" (the plan's line that opens `Read:`, else ""), "moved_from"}, for the orchestrator to review and put to
+    ezexe. A plan file outside the store's plans folder is copied into it under the same name, and "plan" is the copy
+    and "moved_from" the original; where a file of that name is there with other text it is never overwritten, "plan"
+    stays the original and "moved_from" is ""."""
     out = []
     for r in section_runs(path, checkout, home)[1]:
-        plan, read = "", ""
+        plan, read, moved = "", "", ""
         if r["state"] == "done":
             try:
                 with open(r["report"], encoding="utf-8") as f:
@@ -639,12 +660,14 @@ def collect(path, checkout, home=""):
                     if os.path.isfile(plan):
                         break
                     plan = ""
+                if plan and home:
+                    plan, moved = _bring_in(plan, home)
                 with open(plan, encoding="utf-8") as f:
                     read = next((x.strip() for x in f.read().splitlines() if x.startswith("Read:")), "")
             except OSError:
                 pass
         out.append({"name": r["name"], "n": r["n"], "head": r["head"], "state": r["state"],
-                    "plan": plan if plan and os.path.isfile(plan) else "",
+                    "plan": plan if plan and os.path.isfile(plan) else "", "moved_from": moved,
                     "report": r["report"] if r["state"] == "done" else "", "read": read})
     return out
 
