@@ -752,6 +752,12 @@ class DotAndNested(unittest.TestCase):
         self.assertIn("refused", planclose.guard("Write", {"file_path": path}))
         self.assertEqual(planclose.normal("plan-planner\\.\\complete"), "plan-planner/complete")
 
+    def test_a_nested_shell_glob_in_a_quote_counts(self):
+        self.assertIn("refused", self.refused("sh -c 'mv x comp*'"))
+        self.assertIn("refused", self.refused("bash -c \"mv x comp*\""))
+        self.assertIn("refused", self.refused("powershell -Command \"Move-Item x.md comp*\"", "PowerShell"))
+        self.assertIn("refused", self.refused("pwsh -c 'Move-Item x.md comp*'", "PowerShell"))
+
     def test_a_quoted_glob_with_no_nested_shell_is_none(self):
         self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
         self.assertIsNone(self.refused("echo 'a comp* b'"))

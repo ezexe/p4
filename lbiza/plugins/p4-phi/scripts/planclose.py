@@ -60,6 +60,10 @@ SHELLS = ("Bash", "PowerShell", "mcp__terminal__run_in_terminal")
 # quotes, brackets and the marks of a chain, a redirection or an option's value
 RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
 QUOTES = ("'", '"')
+# a nested shell a line runs, where a glob in a quote is a path the inner shell expands
+NESTED = re.compile(r"(?i)\b(?:sh|bash|zsh|dash)(?:\.exe)?\b[^\n]*?\s-\w*c\b|\bcmd(?:\.exe)?\s+/[ck]\b"
+                    r"|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s-(?:c|command|ec|encodedcommand)\b"
+                    r"|-EncodedCommand\b|\bInvoke-Expression\b|\biex\b")
 PLANS_FOLDER = "plan-planner"
 UNDER_COMPLETE = re.compile(r"(?i)(?:^|/)plan-planner/complete(?:/|$)")
 # what keeps a shell line from being one command alone: a chain (`;`, `|`, `&`, a newline, a backtick or a `$(`),
@@ -526,12 +530,15 @@ def names_complete(cmd, cwd):
     ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`."""
     line = normal(shell_words(cmd))
     planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
+    nested = bool(NESTED.search(line))      # a nested shell expands a glob inside the quote it is given in
     for m in RUN.finditer(line):
         if not is_complete(m.group(0)):
             continue
         before = line[m.start() - 1] if m.start() else ""
         after = line[m.end()] if m.end() < len(line) else ""
         if "/" in (before, after):
+            return True
+        if nested and planners and m.group(0).lower() != COMPLETE:
             return True
         if before and before in QUOTES and after == before:
             return True
