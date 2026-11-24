@@ -804,5 +804,90 @@ class Heredocs(unittest.TestCase):
         self.assertIn("refused", self.guard(cmd))
 
 
+class HeredocShape(unittest.TestCase):
+    """Section 13 of two-level-planning-fixes: a heredoc or a here-string is data in one whole-command shape only,
+    and an ambiguous escape is read both ways. The bypass cases are the review's probe1.py."""
+    C = "comp" + "lete"
+    D = "plan-planner/" + C + "/"
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/x")
+
+    def test_each_bypass_of_the_review_is_refused(self):
+        D = self.D
+        cases = {
+            "newline sh": f"cat <<EOF |\nmv x.md {D}\nEOF\nsh",
+            "continued sh": f"cat <<EOF \\\n| sh\nmv x.md {D}\nEOF",
+            "quoted sh": f"cat <<EOF | \"sh\"\nmv x.md {D}\nEOF",
+            "dash": f"cat <<EOF | dash\nmv x.md {D}\nEOF",
+            "ksh": f"cat <<EOF | ksh\nmv x.md {D}\nEOF",
+            "$SHELL": f"cat <<EOF | $SHELL\nmv x.md {D}\nEOF",
+            "py": f"py - <<EOF\nimport shutil; shutil.move('x.md', '{D}x.md')\nEOF",
+            "python3.12": f"python3.12 - <<EOF\nimport shutil; shutil.move('x.md', '{D}x.md')\nEOF",
+            "source": f"source <(cat <<EOF\nmv x.md {D}\nEOF\n)",
+            "dot stdin": f". /dev/stdin <<EOF\nmv x.md {D}\nEOF",
+            "xargs": f"xargs mv <<EOF\nx.md\n{D}\nEOF",
+            "while read": f"while read a b; do mv \"$a\" \"$b\"; done <<EOF\nx.md {D}x.md\nEOF",
+            "patch": f"patch -p0 <<EOF\n--- /dev/null\n+++ {D}x.md\n@@ -0,0 +1 @@\n+x\nEOF",
+            "awk": f"awk '{{system($0)}}' <<EOF\nmv x.md {D}\nEOF",
+            "file then sh": f"cat > s <<EOF\nmv x.md {D}\nEOF\nsh s",
+            "delimiter EOF-X": f"cat <<EOF-X\nhi\nEOF-X\nmv x.md {D}\nEOF",
+            "delimiter quoted suffix": f"cat <<'EOF'x\nhi\nEOFx\nmv x.md {D}\nEOF",
+            "opener in comment": f"# <<EOF\nmv x.md {D}\nEOF",
+            "opener in quote": f"echo '<<EOF'\nmv x.md {D}\nEOF",
+            "arithmetic shift": f"echo $((1<<FOO))\nmv x.md {D}\nFOO",
+            "opener then mv": f"cat <<EOF; mv x.md {D}\nhi\nEOF",
+            "unquoted body runs": f"cat > a.txt <<EOF\n$(mv x.md {D})\nEOF",
+            "tee into": f"tee {D}x.md <<EOF\nhi\nEOF",
+            "cat into": f"cat > {D}x.md <<'EOF'\nhi\nEOF",
+        }
+        for label, cmd in cases.items():
+            self.assertIn("refused", self.refused(cmd) or "", label)
+
+    def test_each_here_string_bypass_is_refused(self):
+        D = self.D
+        cases = {
+            "sink": f"@'\nx\n'@ | Set-Content {D}x.md",
+            "second command": f"@'\nx\n'@ | Set-Content a.txt; Move-Item a.txt {D}",
+            "then run": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1; & ./s.ps1",
+            "dot-source": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1; . ./s.ps1",
+            "pass through": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1 -PassThru | ForEach-Object {{ $_ }}",
+            "opener in comment": f"# @'\nMove-Item x.md {D}\n'@ | Set-Content x'",
+            "next line runs": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1\npwsh -File s.ps1",
+            "iex": f"@'\nMove-Item x.md {D}\n'@ | iex",
+            "expanding body": f"@\"\n$(Move-Item x.md {D})\n\"@ | Set-Content a.txt",
+        }
+        for label, cmd in cases.items():
+            self.assertIn("refused", self.refused(cmd, "PowerShell") or "", label)
+
+    def test_the_shapes_of_data_pass(self):
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        for cmd, tool in (
+                (f"cat >> {plan} <<'EOF'\n{self.BODY}EOF\n", "Bash"),
+                (f"tee -a {plan} <<'EOF'\n{self.BODY}EOF", "Bash"),
+                (f"@'\n{self.BODY}'@ | Add-Content -Path {plan}", "PowerShell"),
+                (f"@'\n{self.BODY}'@ | Out-File -Encoding utf8 {plan}", "PowerShell"),
+                (f"Add-Content -Path {plan} -Value @'\n{self.BODY}'@", "PowerShell"),
+                (f"cat > E:/x/cmd/notes.md <<'EOF'\nsee {self.D}\nEOF", "Bash")):
+            self.assertIsNone(self.refused(cmd, tool), cmd)
+
+    def test_a_target_under_complete_is_refused_in_each_shape(self):
+        self.assertIn("refused", self.refused(f"cat > {self.PLANS}/{self.C}/x.md <<'EOF'\nhi\nEOF"))
+        self.assertIn("refused", self.refused(f"@'\nhi\n'@ | Set-Content {self.PLANS}/{self.C}/x.md", "PowerShell"))
+
+    def test_an_escaped_quote_is_read_both_ways(self):
+        self.assertIn("refused", self.refused('mv "a\\\\" "plan-planner/comp"lete/'))
+        self.assertIn("refused", self.refused('Move-Item "a\\" "plan-planner/comp"lete/', "PowerShell"))
+        self.assertIn("refused", self.refused("mv 'a\\\"' \"plan-planner/comp\"lete/"))
+        self.assertIsNone(self.refused("grep \"a\\\"b[a-z]*|x\" f"))
+
+    def test_a_backslash_before_a_wildcard_is_read_both_ways(self):
+        self.assertIn("refused", self.refused("Remove-Item plan-planner\\?omplete\\x.md", "PowerShell"))
+        self.assertIn("refused", self.refused("Remove-Item plan-planner\\*lete\\x.md", "PowerShell"))
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}' f"))
+
 if __name__ == "__main__":
     unittest.main()

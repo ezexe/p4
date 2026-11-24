@@ -394,12 +394,13 @@ def grandfather(home, today=None):
     return names
 
 
-def normal(text):
+def normal(text, sep=False):
     """`text` with its paths normalised: either slash is `/`, repeated separators are one, and a `./` segment is
-    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`,
-    `+`, `?` or `*` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`); one before `.` is a
-    separator, as in `complete\\.closed.jsonl`."""
-    out = re.sub(r"\\(?=[|(){}+?*])", "", str(text or ""))
+    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`
+    or `+` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`); one before `.` is a
+    separator, as in `complete\\.closed.jsonl`. One before `?` or `*` is an escape, or a separator where `sep` is
+    true: names_complete reads a line both ways, as PowerShell reads `plan-planner\\?omplete` as a path."""
+    out = re.sub(r"\\(?=[|(){}+])" if sep else r"\\(?=[|(){}+?*])", "", str(text or ""))
     out = re.sub(r"/{2,}", "/", out.replace("\\", "/"))
     out = re.sub(r"/\.(?=/)", "", out)
     out = re.sub(r"(?<![\w.])\./", "", out)
@@ -486,14 +487,18 @@ def _braces(word):
     return done + words
 
 
-def shell_words(cmd):
+def shell_words(cmd, escq=True):
     """The shell line `cmd` read as a shell reads its words, so a guard sees the path it builds: a PowerShell
     backtick escape is its character (``comp`lete``); a word of more than one part with no whitespace in a quote
     loses its quotes (`comp''lete`, `"plan-planner/comp"lete`), while a word quoted whole, or whose quote holds a
     space, keeps them; a brace list is read as its words (`{complete,todo}/` is `complete/ todo/`); and a trailing
     dot of a path part (`complete./`), or a trailing space of one inside a quote, is dropped, as Windows does. A
-    name built from a variable is left as it is."""
-    line = re.sub(r'`"|(?<=\\)"', ESCQ, str(cmd or ""))     # an escaped quote toggles no quote state
+    name built from a variable is left as it is. An escaped quote (`\\"`, a backtick before `"`) toggles no quote
+    state where `escq` is true and does where it is false: bash's `\\\\"` closes a quote and PowerShell has no `\\"`
+    escape, so names_complete reads a line both ways."""
+    line = str(cmd or "")
+    if escq:
+        line = re.sub(r'`"|(?<=\\)"', ESCQ, line)     # an escaped quote toggles no quote state
     line = re.sub(r"`(.)", r"\1", line, flags=re.S)
     out = []
     for word in _split(line):
@@ -521,42 +526,53 @@ def in_quote(line, at):
     return bool(quote)
 
 
-# a command that reads a heredoc or a here-string as code: its text counts as command words
-INTERPRETER = re.compile(r"(?i)(?:^|[\s|;&(/\\])(?:bash|sh|zsh|pwsh|powershell|cmd|python3?|node|perl|ruby|eval"
-                         r"|iex|invoke-expression)(?:\.exe)?(?![\w.-])")
-HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_]\w*)\2")
-HERESTRING = re.compile(r"(?s)@(['\"])[ \t]*\r?\n.*?\r?\n[ \t]*\1@(?P<tail>[^\n]*)")
-TEXT_SINK = re.compile(r"(?i)\b(?:set-content|add-content|out-file)\b")
+# the one shape a heredoc or a here-string is data in: the whole command is a write of its text to a path
+PATH = r"""(?:"[^"$`\r\n]*"|'[^'\r\n]*'|[^\s;|&<>()$`"'#]+)"""
+HEREDOC_LINE = re.compile(r"(?i)[ \t]*(?:cat[ \t]*>>?|tee(?:[ \t]+-a)?)[ \t]+" + PATH + r"[ \t]+<<(-?)[ \t]*"
+                          r"(?:(?P<q>['\"])(?P<w>[A-Za-z_]\w*)(?P=q)|(?P<b>[A-Za-z_]\w*))[ \t]*\r?")
+SINK = (r"[ \t]*\|(?:[ \t]*(?:set-content|add-content|out-file)(?:[ \t]+(?:-path[ \t]+|-filepath[ \t]+)?" + PATH
+        + r"|[ \t]+-encoding[ \t]+\w+)+)[ \t]*\r?")
+HERESTRING_OPEN = re.compile(r"@(['\"])[ \t]*\r?")
+VALUE_LINE = re.compile(r"(?i)[ \t]*(?:set|add)-content[ \t]+(?:-path[ \t]+)?" + PATH + r"[ \t]+-value[ \t]+@(['\"])[ \t]*\r?")
+EXPANDS = re.compile(r"[$`]")       # an unquoted heredoc and a `@"` here-string run a `$(...)` and a backtick
 
 
 def data_out(cmd):
-    """`cmd` without the text of its heredocs (`<<EOF`, `<<'EOF'`, `<<-EOF`) and PowerShell here-strings
-    (`@'...'@`, `@"..."@`) that are data: a heredoc's line holds no shell, interpreter or `eval`, and a here-string
-    is piped to `Set-Content`, `Add-Content` or `Out-File` and to no `Invoke-Expression`, `iex` or shell. A
-    redirect target or a `-Path` stays in the line, so it is read as a path."""
-    def herestring(m):
-        tail = m.group("tail")
-        if TEXT_SINK.search(tail) and not INTERPRETER.search(tail):
-            return "@''@" + tail
-        return m.group(0)
-
-    lines = str(cmd or "").split("\n")
-    out, i = [], 0
-    while i < len(lines):
-        line = lines[i]
-        out.append(line)
-        i += 1
-        marks = HEREDOC.findall(line)
-        data = bool(marks) and not INTERPRETER.search(line)
-        for dash, _, word in marks:
-            while i < len(lines):
-                body = lines[i].rstrip("\r")
-                i += 1
-                if (body.lstrip("\t") if dash else body) == word:
-                    break
-                if not data:
-                    out.append(body)
-    return HERESTRING.sub(herestring, "\n".join(out))
+    """`cmd` without the body of its heredoc or here-string where the whole command is one of these shapes and
+    nothing else, and `cmd` as it is otherwise:
+    - `cat > <path> <<D`, `cat >> <path> <<D`, `tee <path> <<D` or `tee -a <path> <<D`, with `D` bare or in one pair
+      of quotes and nothing else on that line, the body running to a line that is exactly `D`, and only blank
+      lines after it;
+    - `@'` or `@"` on a line of its own, the body, then `'@` or `"@` and only `| Set-Content <path>`,
+      `| Add-Content <path>` or `| Out-File <path>` (with `-Path`, `-FilePath` and `-Encoding <word>`); or
+      `Set-Content`/`Add-Content -Path <path> -Value @'`, the body ending at `'@` and nothing after.
+    A body that an unquoted heredoc or a `@"` here-string would expand (`$` or a backtick) is no data. The path
+    stays in the line, so a target under complete/ is read as a path."""
+    text = str(cmd or "")
+    lines = text.split("\n")
+    m = HEREDOC_LINE.fullmatch(lines[0])
+    if m:
+        word, quoted = m.group("w") or m.group("b"), bool(m.group("q"))
+        for end in range(1, len(lines)):
+            if (lines[end].rstrip("\r").lstrip("\t") if m.group(1) else lines[end].rstrip("\r")) == word:
+                if (all(not x.strip() for x in lines[end + 1:])
+                        and (quoted or not EXPANDS.search("\n".join(lines[1:end])))):
+                    return lines[0]
+                return text
+        return text
+    o, v = HERESTRING_OPEN.fullmatch(lines[0]), VALUE_LINE.fullmatch(lines[0])
+    if not (o or v):
+        return text
+    quote = (o or v).group(1)
+    for end in range(1, len(lines)):
+        if lines[end].startswith(quote + "@"):      # PowerShell ends a here-string at the first such line
+            rest = lines[end][2:]
+            tail_ok = re.fullmatch(SINK, rest, re.I) if o else not rest.strip()
+            if (tail_ok and all(not x.strip() for x in lines[end + 1:])
+                    and (quote == "'" or not EXPANDS.search("\n".join(lines[1:end])))):
+                return lines[0] + "\n" + lines[end]
+            return text
+    return text
 
 
 def names_complete(cmd, cwd):
@@ -567,8 +583,15 @@ def names_complete(cmd, cwd):
     separator beside it, as in `-m "audit complete"` or `grep complete`, is none. A glob outside a quote, as in
     `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
     `complete` outside a quote is a segment too. The line is read by shell_words first, so `comp''lete`,
-    ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`."""
-    line = normal(shell_words(data_out(cmd)))
+    ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`. It is read four ways, an escaped quote
+    toggling the quote state or not and a backslash before `?` or `*` an escape or a separator, and refused where
+    any reading names `complete`."""
+    data = data_out(cmd)
+    return any(_names_complete(normal(shell_words(data, escq), sep), cwd)
+               for escq in (True, False) for sep in (False, True))
+
+
+def _names_complete(line, cwd):
     planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
     nested = bool(NESTED.search(line))      # a nested shell expands a glob inside the quote it is given in
     for m in RUN.finditer(line):
