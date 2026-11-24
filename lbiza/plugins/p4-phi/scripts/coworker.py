@@ -314,14 +314,16 @@ LAND_MODE = "bypassPermissions"
 
 
 def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None, profile="",
-         headless=True):
+         headless=True, settings=None):
     """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
     that lands it, started once ezexe approved the plan. `name` and `sections`, and with `claim` the node relay.claim
     makes for it in the store `store` of its starter `starter`, and in the node's folder the `brief` text and its
     file, the `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in
     its tab; a name that has a node already gets `started`, its node's folder, and nothing else. The worker has no
     worktree, no team (none spawns under -p), no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one. It
-    starts in LAND_MODE, and `mode`, its starter's, is not read."""
+    starts in LAND_MODE, and `mode`, its starter's, is not read. With `settings`, a function of the title and brief
+    that returns phi.worker_settings' dict, each worker's profile and mode are its own and its entry holds them as
+    `settings`; `profile` and `headless` are then not read."""
     windows = upkeep.WINDOWS if windows is None else windows
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
@@ -337,20 +339,25 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
         return [{k: v for k, v in one.items() if k != "group"} for one in out]
     try:
         for one in out:
-            _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile, headless)
+            _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile, headless, settings)
     except Exception:
         _undo(home, out)
         raise
     return out
 
 
-def _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile="", headless=True):
+def _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile="", headless=True,
+            settings=None):
     """The node of one terminal worker of land(), and its brief, goal and start file in it."""
     group, nums = one.pop("group"), one["sections"]
     many = "s" if len(group) > 1 else ""
     done = f"Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed, its Checks pass"
-    one.update(worker(one["name"], sections.brief(plan, title, group, checkout, []), done, checkout, home, starter,
-                      store, nums, windows, profile=profile, headless=headless))
+    brief = sections.brief(plan, title, group, checkout, [])
+    if settings:
+        one["settings"] = settings(title + "\n" + brief)
+        profile, headless = one["settings"]["profile"], one["settings"]["mode"] == "print"
+    one.update(worker(one["name"], brief, done, checkout, home, starter, store, nums, windows, profile=profile,
+                      headless=headless))
 
 
 def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=None, team=False, mode=LAND_MODE,

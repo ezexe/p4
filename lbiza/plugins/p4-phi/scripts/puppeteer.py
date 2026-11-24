@@ -1395,7 +1395,8 @@ def start_draft(home, s, did, base):
     node = relay.nodes(home).get(s["sessionId"]) or home
     name = coworker.draft_name(d["title"], d["id"])
     planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
-    headless = phi.worker_mode(home) == "print"
+    settings = phi.worker_settings(home, s["sessionId"], d["title"] + "\n" + d["brief"])
+    headless = settings["mode"] == "print"
     plan_file = (os.path.join(home, *p4conf.PLANS.split("/"), f"{name}.md").replace("\\", "/")
                  if planner and headless else "")
     if plan_file:
@@ -1408,12 +1409,14 @@ def start_draft(home, s, did, base):
                           team=planner and not headless,
                           mode="plan" if planner and not headless else coworker.LAND_MODE,
                           prompt=coworker.planner_task(d["title"], plan_file) if planner else "",
-                          profile=phi.worker_profile(home), plan_file=plan_file, headless=headless)
+                          profile=settings["profile"], plan_file=plan_file, headless=headless)
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
     coworker.write([one], base, home)
     checkout = base.replace("\\", "/")
-    out = [f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
+    out = [phi.worker_start(home, settings, name, s["sessionId"], "plan" if planner else "work", one.get("log") or "",
+                            one["report"]),
+           f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
                                   f"{one['log']}" if headless else
                                   f"session {one['session']}, its report {one['report']}"),
            "`mcp__terminal__run_in_terminal` with " + json.dumps(

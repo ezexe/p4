@@ -2775,6 +2775,40 @@ class TerminalWorker(unittest.TestCase):
             self.assertNotIn("started already", ran.stderr)
             self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
 
+    def rows(self):
+        return phi.read_rows(os.path.join(self.home, "phi", "worker-starts.jsonl"))
+
+    def test_land_appends_a_start_row_and_a_wait_appends_an_outcome_row_and_balance_sums_them_per_mode(self):
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("mode print (the piece of work), profile p4-workers (the pair of print)", ran.stdout)
+        (start,) = self.rows()
+        self.assertEqual((start["event"], start["mode"], start["profile"], start["kind"], start["starter"]),
+                         ("start", "print", "p4-workers", "land", "local_plan0001"))
+        self.assertTrue(start["log"].endswith(f"log-{start['name']}.jsonl"))
+        write(start["log"], json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                        "total_cost_usd": 0.25, "num_turns": 6, "duration_ms": 900}) + "\n")
+        write(start["report"], "done")
+        waited = self.run_phi_report(start["report"])
+        self.assertEqual(waited.returncode, 0, waited.stderr)
+        out = self.rows()[-1]
+        self.assertEqual((out["event"], out["name"], out["how"], out["total_cost_usd"], out["num_turns"],
+                          out["is_error"], out["subtype"], out["duration_ms"]),
+                         ("outcome", start["name"], "done", 0.25, 6, False, "success", 900))
+        bal = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "balance", "--p4",
+                              self.home, "--session", "local_plan0001"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(bal.returncode, 0, bal.stderr)
+        self.assertIn("print: 1 starts, 1 done, 0 failed, cost 0.2500 total 0.2500 mean, turns 6.0 mean", bal.stdout)
+        self.assertIn("interactive: 0 starts, 0 done, 0 failed", bal.stdout)
+        self.assertIn("all: 1 starts, 1 done", bal.stdout)
+
+    def run_phi_report(self, report):
+        env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app}
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", "--wait",
+                               "--report", report, "--p4", self.home, "--session", "local_plan0001"],
+                              capture_output=True, text=True, timeout=60, env=env)
+
     def test_wait_report_passes_over_a_report_older_than_the_wait(self):
         import coworker
         report = os.path.join(self.base, "report-tw-the-exporter-s-m-1-2-abcd.md")
