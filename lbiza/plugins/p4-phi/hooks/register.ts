@@ -236,11 +236,6 @@ const STEP_TOOL = 'mcp__ccd_turn__update_plan'
 const APP_FILE = 'app.json'
 const APP_SELF = 'mcp__ccd_session_mgmt__get_session'
 const APP_LIST = 'mcp__ccd_session_mgmt__list_sessions'
-// The app's tools for the sidebar, asked for a puppeteer, whose filing p4-phi otherwise reads from the app's
-// `claude_desktop_config.json`: the sections with their ids, and where that answers nothing the custom groups,
-// whose ids are the same.
-const APP_SECTIONS = 'mcp__ccd_sidebar__list_sections'
-const APP_GROUPS = 'mcp__ccd_sidebar__list_groups'
 // The most sessions one answer lists, the least time between two rounds of calls, and how long one call is waited
 // for. Python believes the file for phi.APP_FRESH_S, which is longer than the time between two rounds.
 const APP_MOST = 100
@@ -255,12 +250,10 @@ const APP_CALL_MS = 5_000
 // the native goal this session is to be given, answered once: the one the session asked for with the tool `goal`,
 // or a worker's from its brief where a store's phi.json turns `goal` on.
 // `app_tools` is true unless that file turns `app_tools` off: the app's own tools are asked after such a look.
-// `app_sections` is true with it for a puppeteer: the sidebar's sections are asked for too.
 type Answer = {
   // What `phi.py progress` prints: the file that holds the tree, and whether the run rewrote it.
   path?: string
   app_tools?: boolean
-  app_sections?: boolean
   withholds?: unknown
   dir?: string
   starter?: string
@@ -482,10 +475,8 @@ export function paneAfterClose(isOpen: boolean, e: { id: string; origin?: { kind
 }
 
 // The app's own tools: one of them rejected or refused a call, so none is called again while the module lives.
-// The calls not yet settled, since a call given up on can still be running, and when the last round began. The
-// sidebar's tools are another server's, which a session can lack by itself.
+// The calls not yet settled, since a call given up on can still be running, and when the last round began.
 let isAppAbsent = false
-let isSidebarAbsent = false
 let appFlying = 0
 let appAt = Number.NEGATIVE_INFINITY
 
@@ -767,7 +758,7 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
     if (answer?.goal) setGoal($, answer.goal)
     else if (prompt) wake($, prompt)
     // The app's own tools are asked after a look that starts no turn, unless the store turns them off.
-    if (answer?.app_tools === true && !answer.goal && !prompt) void askApp($, answer.app_sections === true)
+    if (answer?.app_tools === true && !answer.goal && !prompt) void askApp($)
     arm($, dueAfter() - ((await $.clock.now()) - now))
   } catch (error) {
     note($, `the watcher's timer failed: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
@@ -1570,15 +1561,13 @@ async function appCall($: EngineInterface, tool: string, input: Record<string, u
       return undefined
     }
     if (out.deny !== undefined) {
-      if (tool.startsWith('mcp__ccd_sidebar__')) isSidebarAbsent = true
-      else isAppAbsent = true
+      isAppAbsent = true
       note($, `${tool} was refused, so the app's tools are not asked again: ${out.deny.slice(0, 200)}`)
     }
 
     return answered(out)
   } catch (error) {
-    if (tool.startsWith('mcp__ccd_sidebar__')) isSidebarAbsent = true
-    else isAppAbsent = true
+    isAppAbsent = true
     note($, `${tool} is no tool of this session: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
 
     return undefined
@@ -1597,19 +1586,11 @@ async function appFile($: EngineInterface, sessionId: string): Promise<string | 
   return folder === undefined ? undefined : `${folder}/${APP_FILE}`
 }
 
-// The sidebar's sections for a puppeteer's filing: `list_sections`, and where that answers nothing, as while no
-// window of the app is open, `list_groups`. Nothing where the session has neither tool.
-async function askSections($: EngineInterface): Promise<unknown> {
-  const sections = isSidebarAbsent ? undefined : await appCall($, APP_SECTIONS, {})
-
-  return sections !== undefined || isSidebarAbsent ? sections : appCall($, APP_GROUPS, {})
-}
-
 // One round of calls after a look that answered `app_tools`: this session as the app holds it, and the sessions
-// linked to it, written as the tools answered them, with the sidebar's sections where the look asked for them. No
+// linked to it, written as the tools answered them. No
 // round runs while a turn of the main conversation does, nor within a minute of the last, nor while a call of an
 // earlier round has not settled. Nothing waits on it.
-async function askApp($: EngineInterface, withSections = false): Promise<void> {
+async function askApp($: EngineInterface): Promise<void> {
   try {
     if (isAppAbsent || isInTurn || appFlying > 0) return
     const now = await $.clock.now()
@@ -1621,9 +1602,8 @@ async function askApp($: EngineInterface, withSections = false): Promise<void> {
     const linked = isAppAbsent
       ? undefined
       : await appCall($, APP_LIST, { linked: true, include_archived: true, limit: APP_MOST })
-    const sections = withSections ? await askSections($) : undefined
-    if (own === undefined && linked === undefined && sections === undefined) return
-    await $.fs.write(file, `${JSON.stringify({ at: now, self: own, sessions: linked, sections })}\n`)
+    if (own === undefined && linked === undefined) return
+    await $.fs.write(file, `${JSON.stringify({ at: now, self: own, sessions: linked })}\n`)
   } catch (error) {
     note($, `the app's tools were not asked: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   }

@@ -1802,7 +1802,7 @@ def controlled_out(home, s):
     a turn's end goes to the session that started one, and so does the report its hooks module sends, so nothing
     tells a puppeteer of these, and no idle notice can be asked of a session the app runs: controls.idle_watch."""
     out = []
-    for e in PHI.controls.controlled(s):
+    for e in PHI.controls.controlled(s, home):
         k, store = str(e.get("sessionId") or ""), str(e.get("store") or "") or home
         if k and relay._parent(relay._session(store, k)) != s["sessionId"] and working(store, k):
             out.append(k)
@@ -1896,7 +1896,7 @@ def has_tree(home, sid):
     with a session it controls, which the sweep's schedule covers."""
     return any(relay._parent(v) == sid for v in relay._sessions(home).values()) \
         or any(t.get("agent") for _, t in plans._tasks(plans.load(home, sid))) \
-        or bool(PHI.controls.controlled(relay._session(home, sid)))
+        or bool(PHI.controls.controlled(relay._session(home, sid), home))
 
 
 def text(home, s, by="user", store=""):

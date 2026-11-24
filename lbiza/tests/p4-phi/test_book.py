@@ -42,28 +42,19 @@ class Supervisor(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = t = Tree(self._tmp.name)
         t.record(PUP, title="Control the exporter and the importer trees, and tell ezexe where each stands")
-        t.record(TOP, title="Build the narwhal exporter")
+        t.record(TOP, started_by=PUP, title="Build the narwhal exporter")
         t.record(TOP3, title="An orchestrator nobody put under the puppeteer")
         t.record(KID, started_by=TOP, title="the flush child")
         t.record(KID2, started_by=TOP, title="the retry check")
-        self.file("puppeteers", PUP)
 
     def tearDown(self):
         self._tmp.cleanup()
-
-    def file(self, section, *sids):
-        """The app's own file: `sids` filed in one sidebar section."""
-        write(os.path.join(self.t.tmp, "claude_desktop_config.json"), json.dumps(
-            {"preferences": {"epitaxyPrefs": {"dframe-group-scopes": {"acct/org": {
-                "groups": [{"id": "cg-1", "name": section, "mode": "code"}],
-                "assignments": {"code:" + s: "cg-1" for s in sids}}}}}}))
 
     def tree(self, handed="1"):
         """The puppeteer over TOP, KID holding src/flush.py, and KID2's first message, whose context is returned."""
         t = self.t
         t.say(TOP, "Build the narwhal exporter")
         t.say(PUP, "Control the trees")
-        self.assertEqual(t.cli(PUP, "controls", TOP).returncode, 0)
         t.say(KID, "Task:\nBuild the flush's batching.\nFiles: src/flush.py")
         return context(t.say(KID2, "Task:\nCheck the flush's retry and report.\nFiles: none",
                              P4_PHI_BOOK=handed))
@@ -112,7 +103,7 @@ class Supervisor(unittest.TestCase):
         page = read(book.page_path(t.p4, KID2))
         self.assertIn(f"\"the flush child\" `{KID}`, worker under `{TOP}`: files src/flush.py; issue ezexe/p4#245",
                       page)
-        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator: workers `{KID}`, `{KID2}`", page)
+        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator under `{PUP}`: workers `{KID}`, `{KID2}`", page)
         self.assertIn(f"`{PUP}`, puppeteer", page)
         self.assertIn(f"work off this session's task goes to its parent \"Build the narwhal exporter\" `{TOP}`", page)
         self.assertIn(f"\"the retry check\" `{KID2}`", page.split("## This session")[1])
@@ -138,7 +129,7 @@ class Supervisor(unittest.TestCase):
         worker = self.tree()                         # KID2's first look: a worker's book
         self.assertIn(f"\"the flush child\" `{KID}`, worker under `{TOP}`: files src/flush.py", worker,
                       "a sibling keeps its title, its role and its parent")
-        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator: workers `{KID}`, `{KID2}`", worker,
+        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator under `{PUP}`: workers `{KID}`, `{KID2}`", worker,
                       "and so does its parent")
         self.assertNotIn("Linked sessions now", worker, "it started none of them")
         first = self.book_of(TOP, "what came in?")   # TOP's first look: it started KID and KID2
@@ -153,7 +144,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn("`mcp__ccd_session_mgmt__list_sessions` with `linked` true its title, folder and branch", page)
         for gone in ("the flush child", "the retry check", f"\n- `{KID2}`"):
             self.assertNotIn(gone, page)
-        self.assertIn(f"orchestrator: workers `{KID}`, `{KID2}`", page.split("## This session")[1],
+        self.assertIn(f"orchestrator under `{PUP}`: workers `{KID}`, `{KID2}`", page.split("## This session")[1],
                       "its own entry still names the sessions it started, by id")
         self.assertEqual(self.book_of(TOP, "carry on"), "", "nothing changed: nothing said")
         self.assertEqual(t.cli(KID2, "shard", "src/retry.py").returncode, 0)     # KID2 holds something now
@@ -179,7 +170,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"\"the writer child\" `{KID3}`, worker under `{TOP}`", self.book_of(KID2, "who is new?"),
                       "and a sibling's book names it whole")
         pup = self.book_of(PUP, "where does each tree stand?")
-        self.assertIn(f"\"Build the narwhal exporter\" `{TOP}`, orchestrator", pup, "a tree it controls, not started")
+        self.assertIn(f"\n- `{TOP}`: workers `{KID}`", pup, "the orchestrator it started, by its id alone")
         self.assertIn(f"\"the flush and batch child\" `{KID}`, worker under `{TOP}`", pup)
 
     def test_a_later_message_is_handed_only_the_entries_that_changed_and_the_page(self):
@@ -249,12 +240,11 @@ class Supervisor(unittest.TestCase):
         TOP2, KID4 = "local_top00002", "local_kid00004"
         CLI.setdefault(TOP2, "66660000-0000-4000-8000-000000000000")
         CLI.setdefault(KID4, "66661000-0000-4000-8000-000000000000")
-        t.record(TOP2, title="Build the importer elsewhere", cwd=other)
+        t.record(TOP2, started_by=PUP, title="Build the importer elsewhere", cwd=other)
         t.record(KID4, started_by=TOP2, title="the parser child", cwd=other)
         t.say(TOP2, "Build the importer", proj=other)
         t.say(KID4, "Task:\nBuild the quote parser.\nFiles: src/parse.py", proj=other)
         self.tree()
-        self.assertEqual(t.cli(PUP, "controls", TOP, TOP2).returncode, 0)
         t.say(KID2, "and now?", P4_PHI_BOOK="1")
         page = read(book.page_path(t.p4, KID2))
         self.assertIn(f"\"the parser child\" `{KID4}`, worker under `{TOP2}`: files src/parse.py", page)
@@ -457,7 +447,6 @@ class Supervisor(unittest.TestCase):
         inside = self.worktree(repo, os.path.join(repo, ".claude", "worktrees", "batch"), "batch")
         t.say(TOP, "Build the narwhal exporter")
         t.say(PUP, "Control the trees")
-        self.assertEqual(t.cli(PUP, "controls", TOP).returncode, 0)
         t.record(KID, started_by=TOP, title="the flush child", cwd=repo)
         t.say(KID, "Task:\nBuild the flush's batching.\nFiles: src/flush.py", proj=repo)
         t.record(KID3, started_by=TOP, title="the batch child", cwd=inside)

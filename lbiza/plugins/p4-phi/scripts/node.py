@@ -81,22 +81,13 @@ def top(s, sessions):
     return not above or above not in sessions
 
 
-def _controlled(s):
-    try:
-        import controls
-        return controls.controlled(s)
-    except Exception:                                 # node.py used where controls.py cannot be read
-        return [e for e in s.get("controls") or [] if isinstance(e, dict) and e.get("sessionId")]
-
-
 def level(s, sessions):
     """"puppeteer", "orchestrator" or "worker", from the store's records alone. A top is a puppeteer where it
-    controls a session or holds a standing worker, else an orchestrator; any other session is an orchestrator
-    where it started sessions, else a worker."""
-    if top(s, sessions):
-        return "puppeteer" if _controlled(s) or s.get("standingWorker") else "orchestrator"
+    started a session, else an orchestrator; any other session is an orchestrator."""
     sid = s.get("sessionId")
-    return "orchestrator" if any(_parent(v) == sid for v in sessions.values()) else "worker"
+    if top(s, sessions):
+        return "puppeteer" if any(_parent(v) == sid for v in sessions.values()) else "orchestrator"
+    return "orchestrator"
 
 
 def place_of(home, store):

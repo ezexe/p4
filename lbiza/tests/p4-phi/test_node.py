@@ -125,18 +125,18 @@ class Level(unittest.TestCase):
         r = node.record(self.home, "lost", sessions)
         self.assertEqual((r["address"], r["parent"]), ("1", ""))
 
-    def test_level_gives_each_of_the_three(self):
-        sessions = {"top": rec("top"), "ctl": rec("ctl", controls=[{"sessionId": "w"}]),
-                    "stand": rec("stand", standingWorker="w"), "mid": rec("mid", "top"), "leaf": rec("leaf", "mid"),
-                    "coworker": rec("coworker", "mid", standingKind="coworker")}
+    def test_level_gives_the_two_a_record_has(self):
+        sessions = {"top": rec("top"), "ctl": rec("ctl"), "mid": rec("mid", "ctl"), "leaf": rec("leaf", "mid"),
+                    "alone": rec("alone", "gone")}
         got = {k: node.level(v, sessions) for k, v in sessions.items()}
-        self.assertEqual(got, {"top": "orchestrator", "ctl": "puppeteer", "stand": "puppeteer", "mid": "orchestrator",
-                               "leaf": "worker", "coworker": "worker"})
+        self.assertEqual(got, {"top": "orchestrator", "ctl": "puppeteer", "mid": "orchestrator",
+                               "leaf": "orchestrator", "alone": "orchestrator"})
 
     def test_level_needs_no_module_but_node_py(self):
         import subprocess
         code = ("import sys; sys.path.insert(0, sys.argv[1]); sys.modules['controls'] = None; import node; "
-                "s = {'a': {'sessionId': 'a', 'controls': [{'sessionId': 'b'}]}}; print(node.level(s['a'], s))")
+                "s = {'a': {'sessionId': 'a'}, 'b': {'sessionId': 'b', 'spawnedFrom': {'sessionId': 'a'}}}; "
+                "print(node.level(s['a'], s))")
         r = subprocess.run([sys.executable, "-I", "-c", code, str(SRC)], capture_output=True, text=True)
         self.assertEqual(r.stdout.strip(), "puppeteer", r.stderr)
 

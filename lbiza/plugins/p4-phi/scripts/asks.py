@@ -261,7 +261,7 @@ def on_message(home, s, req, last_turn=None):
     have = rows(home, sid)
     t = last_turn if isinstance(last_turn, dict) else {}
     turn = str(t.get("id") or "")
-    ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s)}
+    ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s, home)}
     if "known" in state:
         for k in [k for k in ctl if k not in state["known"]]:
             ks = relay._session(ctl[k], k) if ctl[k] else {}
@@ -363,7 +363,7 @@ def on_send(home, s, target, message=""):
     if not target or target == sid:
         return
     have = rows(home, sid)
-    ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s)}
+    ctl = {e["sessionId"]: e.get("store") or home for e in controls.controlled(s, home)}
     r = _credit(have, message)
     if not r and target in ctl:
         now = relay._read_json(_state_path(home, sid)).get("now") or ""

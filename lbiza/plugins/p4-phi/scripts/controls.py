@@ -1,26 +1,15 @@
 """controls.py: a puppeteer and the sessions it controls.
 
-ezexe files an orchestrator in the sidebar section "puppeteers", which makes it a puppeteer: it controls
-the top-level orchestrators of one or more environments, an environment being a project with its own store. The
-sessions it controls are its controlled sessions, and each stays at the top of its own tree, in its own section.
-The watcher every orchestrator has is puppeteer.py's and is another thing.
+A puppeteer is known by the session tree: a session nobody started that started an orchestrator which is still live.
+The orchestrators it started stay attached under it, as its workers, and each is the top of a tree of its own. The
+watcher every orchestrator has is puppeteer.py's and is another thing.
 
-  the filing   p4-phi's hooks are command hooks, which call none of the app's tools, but the app keeps the sidebar
-               on disk: claude_desktop_config.json, beside the claude-code-sessions folder, holds
-               preferences.epitaxyPrefs["dframe-group-scopes"], each scope with `groups`, each group an `id` and a
-               `name`, and `assignments`, which maps `code:<sessionId>` to a group id. p4-phi reads the filing there
-               each time it matters and keeps no copy of its own. A file that is missing or shaped otherwise makes
-               nobody a puppeteer. Unless phi.json turns `app_tools` off, the plugin's hooks module asks the app's own
-               tools, and a session's section is read first from what they answered: phi.app_group, from `group` of
-               `get_session` and `list_sessions`, and phi.section_id, from `list_sections` or `list_groups`. The file
-               is read for a session they did not answer. Nothing stops a session from filing itself, since the app asks nobody:
-               the rule rests on ezexe's filing, and p4-phi says once, in the session and on its record, that it
-               saw the session there, and tells every session it lists which session controls it.
-  the record   `controls` on the puppeteer's session.json lists the sessions it controls, each with the
-               store its tree lives in. That session.json is where every orchestrator's is: the store of the
-               folder it was opened in. A controlled session's own hook finds the puppeteer that lists it
-               and keeps its id as `puppeteer` on its own record. Each side reads the other's store and neither
-               writes into it.
+  the link     the app nests a session under the session that calls the start tool, and no tool moves it after. So the
+               sessions a puppeteer controls are read, never recorded by hand: the live sessions whose record names
+               it as their starter, by the store's records and by the app's newest records for one that has sent no
+               message yet. `controlled` gives them, each as a row of its sessionId and the store its folder is in,
+               and `puppeteer_of` gives a session's puppeteer: its starter, where nobody started that starter. Each
+               side reads the other's store and neither writes into it.
   the board    <the puppeteer's folder>/board.md, rewritten by its hooks and the `controls` command: each
                controlled session in a line with the path of its page, the requests addressed to the
                puppeteer, the `Finding:` lines of the reports of the controlled trees, the feedback and user memories
@@ -55,9 +44,6 @@ The watcher every orchestrator has is puppeteer.py's and is another thing.
   requests    a controlled session that would start a new orchestrator writes `request ... --to-puppeteer`
                into its own store; the puppeteer's hooks read it there, and what became of it is kept on
                the puppeteer's record, where the hook of the session that filed it reads it.
-  the tree     the app nests a session under the session that calls the start tool, and no tool moves it after, so a
-               puppeteer starts only new orchestrators and its one standing worker. A worker of a controlled tree
-               is that tree's own to start, as a start or as the suggested task card its session shows.
 """
 
 import hashlib
@@ -75,11 +61,9 @@ import starts
 
 PHI = None                       # phi.py's own module, handed over when phi.py imports this one
 
-SECTION = "puppeteers"           # p4.json phi.puppeteer_section; "" turns the rule off
 REASON_MIN = 12                  # characters of a reason that says something
 RECENT = 120                     # the app's newest records looked through for sessions a puppeteer started
 SHARE = 2                        # content words a message shares with a controlled session's topic to be sent there
-_SECTIONS = {}                   # the app's file, read once a process: under "all", each session's section by its id
 UPKEEP = False                   # phi.project_conf sets it from p4.json phi.upkeep
 
 
@@ -93,50 +77,6 @@ def _conf(store, key):
         return p4conf.section(store, "phi", write=False).get(key) if store else None
     except Exception:  # noqa: BLE001
         return None
-
-
-def section_name(store):
-    """The section's name for this project: p4.json phi.puppeteer_section when it is a string, else the default."""
-    name = _conf(store, "puppeteer_section")
-    return name.strip() if isinstance(name, str) else SECTION
-
-
-def sections():
-    """Each session's sidebar section by its sessionId, as the app's own file assigns it."""
-    if "all" in _SECTIONS:
-        return _SECTIONS["all"]
-    out = {}
-    for root in PHI.app_roots():
-        d = PHI.read_json(os.path.join(os.path.dirname(root.rstrip("/\\")), "claude_desktop_config.json"))
-        scopes = d.get("preferences") if isinstance(d, dict) else None
-        scopes = scopes.get("epitaxyPrefs") if isinstance(scopes, dict) else None
-        scopes = scopes.get("dframe-group-scopes") if isinstance(scopes, dict) else None
-        for scope in (scopes.values() if isinstance(scopes, dict) else []):
-            given = scope.get("assignments") if isinstance(scope, dict) else None
-            groups = scope.get("groups") if isinstance(scope, dict) else None
-            names = {g.get("id"): g.get("name") for g in (groups if isinstance(groups, list) else [])
-                     if isinstance(g, dict) and isinstance(g.get("name"), str)}
-            for key, gid in (given.items() if isinstance(given, dict) else []):
-                if isinstance(key, str) and key.startswith("code:") and gid in names:
-                    out.setdefault(key[5:], names[gid])
-        if out:
-            break
-    _SECTIONS["all"] = out
-    return out
-
-
-def section_of(sid):
-    """The sidebar section a session is filed in, '' for none: as the app's own tools answered the hooks module,
-    where they did, else as the app's file assigns it."""
-    held = PHI.app_group(sid)
-    return held["name"] if held is not None else sections().get(str(sid or ""), "")
-
-
-def is_puppeteer(s, store=""):
-    """True for a puppeteer: an orchestrator the app's file shows filed in the section."""
-    sid = str(s.get("sessionId") or "") if isinstance(s, dict) else ""
-    want = section_name(store).lower()
-    return bool(want and sid and not PHI.spawned_from(s) and section_of(sid).strip().lower() == want)
 
 
 def full_title(sid, s=None):
@@ -166,12 +106,40 @@ def page_of(store, sid):
     return PHI.page_path(store, sid) if store else ""
 
 
-def controlled(s):
-    return [e for e in s.get("controls") or [] if isinstance(e, dict) and e.get("sessionId")]
+def _children(home, sid):
+    """The live desktop sessions `sid` started: by the store's records, and by the app's newest records for one
+    that has sent no message yet."""
+    sid = str(sid or "")
+    if not sid:
+        return []
+    out = [k for k, v in relay._sessions(home).items() if PHI.spawned_from(v) == sid and live(k)] if home else []
+    return out + [k for k in started_by(sid) if k not in out]
 
 
-def _set(s, rows):
-    s["controls"], s["_controlsSet"] = rows, True
+def controlled(s, home=""):
+    """The sessions a puppeteer controls: the live desktop sessions it started, each as a row with the store its
+    folder is in. Nothing records them by hand."""
+    sid = str(s.get("sessionId") or "") if isinstance(s, dict) else ""
+    if not sid or PHI.spawned_from(s):
+        return []
+    home = home or store_of(sid)
+    return [{"sessionId": k, "store": store_of(k) or home, "time": ""} for k in _children(home, sid)]
+
+
+def is_puppeteer(s, store=""):
+    """True for a puppeteer: a session nobody started that started an orchestrator which is still live."""
+    return bool(controlled(s, store))
+
+
+def puppeteer_of(s, store=""):
+    """The sessionId and store of the session that started this one, where nobody started that one, and two
+    empty strings otherwise."""
+    pid = PHI.spawned_from(s) if isinstance(s, dict) else ""
+    if not pid:
+        return "", ""
+    pstore = store_of(pid) or store
+    p = PHI.load_session(pstore, pid) if pstore else {}
+    return (pid, pstore) if p.get("sessionId") and not PHI.spawned_from(p) else ("", "")
 
 
 # --- where a controlled session stands ---------------------------------------------------------------------------------
@@ -319,18 +287,16 @@ def last_report(store, sid):
 # --- the puppeteer and its controlled sessions ----------------------------------------------------------------
 
 RULE = (
-    "This session is a puppeteer: ezexe filed it in the sidebar section \"{section}\", so it controls the "
-    "orchestrators of other trees, which stay at the top of their own trees as its siblings. Record them with "
-    "`{cmd} controls <sessionId> ...`; `{cmd} controls` prints where each stands. Its board is {board}, and what "
+    "This session is a puppeteer: it is a session nobody started that started an orchestrator, so it controls the "
+    "orchestrators it started, which stay attached under it as its workers. `{cmd} controls` prints where each "
+    "stands. Its board is {board}, and what "
     "p4-phi cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers "
     "directly where it can, the decisions that are ezexe's, the archive calls, {archives}, "
     "and the start of each new orchestrator. The app continues it with a short note when a session it started ends a turn, and "
     "p4-phi hands it one line per controlled session's turn; it relays none of these to ezexe and acts only on what "
     "is ezexe's. Work ezexe gives it on a controlled session's topic goes straight to that orchestrator in one "
     "SendMessage holding {restate}, a `Files:` line and what done looks like, and that session briefs and starts a "
-    "worker of its own for it. A topic none covers gets a new orchestrator that this session starts and files in "
-    "its environment's section with `mcp__ccd_sidebar__move_sessions`, which takes the section's id as "
-    "`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in \"{section}\". "
+    "worker of its own for it. A topic none covers gets a new orchestrator that this session starts. "
     "Every other task "
     "goes to its one standing worker, which it starts under itself with the line `{worker}` in the brief: archive "
     "checks, never the archiving, store record corrections, landing checks, counts, audits, and the issues that "
@@ -355,14 +321,13 @@ ARCHIVES_UPKEEP = ("which its upkeep line names for each finished, landed sessio
 PAIR_ASKS = (" The app asks ezexe on its approval card before any archive call on its tree, except in Auto mode and "
              "Bypass permissions mode.")
 PAIR = (
-    "This session is controlled by a puppeteer: \"{title}\" `{pid}`, which ezexe filed in the sidebar "
-    "section \"{section}\", lists this one among the sessions it controls. This session stays at the top of its own "
-    "tree, in its own section, and orchestrates that tree itself. That puppeteer is the one address for a decision "
+    "This session is controlled by a puppeteer: \"{title}\" `{pid}` started it, and this session stays attached "
+    "under it. This session orchestrates its own tree itself. That puppeteer is the one address for a decision "
     "of ezexe's authority, a press the app requires or an outcome ezexe should hear; a message about a file, an "
     "issue or a piece of work goes straight to the session that holds that file, owns that issue or started that "
     "work, as the address book names it, never through the puppeteer.{asks}")
-PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` dropped it from the "
-             "sessions it controls, or left the sidebar section. This session starts its own new orchestrators.")
+PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` no longer controls it. This "
+             "session starts its own new orchestrators.")
 ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line here says to start a new "
        "orchestrator, start none: write `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, "
        "the brief holding a line `Files: <paths>`. Its puppeteer \"{title}\" starts it or declines it with "
@@ -464,21 +429,6 @@ def worker_first(home, s, prompt, store):
             said += ISSUES_FIRST
         return said
     return ""
-
-
-def mark_puppeteer(home, cli):
-    """A file named by the puppeteer's CLI session id, which the plugin's hooks module reads so each of its edits
-    and shell calls reaches phi.py, not only the ones its filters pass."""
-    name = PHI.SAFE.sub("_", str(cli or ""))[:80]
-    if not home or not name:
-        return
-    path = os.path.join(home, "phi", ".puppeteers", name)
-    if not os.path.exists(path):
-        try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            open(path, "a", encoding="utf-8").close()
-        except OSError:
-            pass
 
 
 def tool_line(s, store):
@@ -643,53 +593,8 @@ def board_path(home, sid):
 
 def rule_text(home, s):
     archives, asks = ARCHIVES_UPKEEP if UPKEEP else ARCHIVES
-    return RULE.format(section=section_of(s["sessionId"]), cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
+    return RULE.format(cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
                        restate=PHI.RESTATE, worker=WORKER_BRIEF, archives=archives, asks=asks)
-
-
-def control(home, s, add=(), drop=()):
-    """Records or drops the sessions a puppeteer controls, and returns the lines to print."""
-    rows, out = controlled(s), []
-    for sid in [PHI.safe_id(x) for x in drop]:
-        if any(e["sessionId"] == sid for e in rows):
-            rows = [e for e in rows if e["sessionId"] != sid]
-            out.append(f"dropped from control: {sid}")
-    for sid in [PHI.safe_id(x) for x in add]:
-        if sid == s["sessionId"]:
-            raise ValueError("a puppeteer does not control itself")
-        if not PHI.app_record(sid):
-            raise ValueError(f"the app holds no record of {sid}")
-        store = store_of(sid)
-        held = PHI.load_session(store, sid) if store else {}
-        rec = PHI.app_record(sid)
-        if PHI.spawned_from(held) if held.get("sessionId") else (PHI.spawned_from(rec)
-                                                                 and not rec.get("lineageDetached")):
-            raise ValueError(f"{sid} was started by another session: a puppeteer controls "
-                             f"orchestrators, and a worker is reached through its orchestrator")
-        if not any(e["sessionId"] == sid for e in rows):
-            rows.append({"sessionId": sid, "store": store, "time": PHI.now()})
-            out.append(f"controlled: \"{full_title(sid)}\" `{sid}`" + (f", store {store}" if store else ""))
-    _set(s, rows)
-    PHI.save_session(home, s)
-    return out
-
-
-def puppeteer_of(s, store=""):
-    """The sessionId and store of the puppeteer that lists an orchestrator under `controls`, and two
-    empty strings when none does."""
-    sid = str(s.get("sessionId") or "") if isinstance(s, dict) else ""
-    want = section_name(store).lower()
-    if not want or not sid or PHI.spawned_from(s):
-        return "", ""
-    for pid, name in sorted(sections().items()):
-        if pid == sid or name.strip().lower() != want:
-            continue
-        pstore = store_of(pid)
-        p = PHI.load_session(pstore, pid) if pstore else {}
-        if p.get("sessionId") and not PHI.spawned_from(p) and not p.get("handedTo") \
-                and any(e["sessionId"] == sid for e in controlled(p)):
-            return pid, pstore
-    return "", ""
 
 
 def pair_text(s, store=""):
@@ -699,18 +604,20 @@ def pair_text(s, store=""):
     held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
     if pid and held.get("sessionId") != pid:
         s["puppeteer"] = {"sessionId": pid, "time": PHI.now()}
-        return "phi (p4-phi): " + PAIR.format(title=full_title(pid), pid=pid, section=section_of(pid),
-                                              cmd=PHI.commands(), asks="" if UPKEEP else PAIR_ASKS)
+        return "phi (p4-phi): " + PAIR.format(title=full_title(pid), pid=pid, cmd=PHI.commands(),
+                                              asks="" if UPKEEP else PAIR_ASKS)
     if not pid and held.get("sessionId"):
         s.pop("puppeteer", None)
         return "phi (p4-phi): " + PAIR_OVER.format(title=full_title(held["sessionId"]), pid=held["sessionId"])
     return ""
 
 
-def ask_text(s):
-    """The line that turns a controlled session's own start of a new orchestrator into a request."""
+def ask_text(s, pid=""):
+    """The line that turns a controlled session's own start of a new orchestrator into a request. `pid` is its
+    puppeteer where its record does not hold it yet."""
     held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
-    return ASK.format(cmd=PHI.commands(), title=full_title(held["sessionId"])) if held.get("sessionId") else ""
+    pid = held.get("sessionId") or pid
+    return ASK.format(cmd=PHI.commands(), title=full_title(pid)) if pid else ""
 
 
 def issues_coworker(home, worker):
@@ -786,74 +693,15 @@ def started_by(sid):
     return out
 
 
-def filing(store, s):
-    """Where a new orchestrator of an environment is filed: the section its controlled siblings are in."""
-    for e in controlled(s):
-        if e.get("store") == store and section_of(e["sessionId"]):
-            name = section_of(e["sessionId"])
-            gid = PHI.section_id(name, e["sessionId"])     # known where the hooks module asked the app's tools
-            return f"the section \"{name}\"" + (f" of the id `{gid}`" if gid else "")
-    return "the ungrouped list under its project"
-
-
-def take_started(home, s):
-    """An orchestrator this puppeteer started is recorded as controlled, and the section to file it
-    in is named."""
-    rows, lines = controlled(s), []
-    have = {e["sessionId"] for e in rows}
-    for sid in started_by(s["sessionId"]):
-        store = store_of(sid)
-        k = PHI.load_session(store, sid) if store else {}
-        if sid in have or not k.get("sessionId") or PHI.spawned_from(k):
-            continue                               # not arrived yet, or a child of this puppeteer's own
-        where = filing(store, s)
-        rows.append({"sessionId": sid, "store": store, "time": PHI.now(), "started": True})
-        have.add(sid)
-        lines.append(f"\"{full_title(sid, k)}\" `{sid}` is an orchestrator this puppeteer started, so it "
-                     f"is controlled. File it in {where} with `mcp__ccd_sidebar__move_sessions`, which takes the "
-                     f"section's id as `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers "
-                     f"it, never in \"{section_of(s['sessionId'])}\".")
-    if lines:
-        _set(s, rows)
-    return lines
-
-
-def announce(home, s):
-    """An orchestrator ezexe started directly in a store where this puppeteer controls a session,
-    named once. The app's own record decides it: a session whose record names the session that started it is a
-    worker, even when its session.json was written before that record was read."""
-    told, lines = [x for x in s.get("announced") or [] if isinstance(x, str)], []
-    have = {e["sessionId"] for e in controlled(s)} | {s["sessionId"]}
-    first = {}
-    for e in controlled(s):
-        if e.get("store"):
-            first[e["store"]] = min(first.get(e["store"], "9"), str(e.get("time") or ""))
-    for store, since in first.items():
-        for sid, k in sorted(relay._sessions(store).items()):
-            if sid in have or sid in told or PHI.spawned_from(k) or out_of_tree(k) \
-                    or not sid.startswith("local_") or str(k.get("createdAt") or "") < since \
-                    or is_puppeteer(k, store):
-                continue
-            rec = PHI.app_record(sid)
-            if not rec or PHI.spawned_from(rec):   # no record yet, or one that names the session that started it
-                continue
-            told.append(sid)
-            lines.append(f"\"{full_title(sid, k)}\" `{sid}` is a new orchestrator in {store} that this puppeteer "
-                         f"does not control: `{PHI.commands()} controls {sid}` takes it under control.")
-    if lines:
-        s["announced"] = told[-200:]
-    return lines
-
-
 # --- reports by reference -----------------------------------------------------------------------------------------------
 
-def reports(s, rows=None):
+def reports(s, rows=None, home=""):
     """One line for each controlled session whose last turn ended since the puppeteer last looked, with
     its page's path, never the report's text. Each reporting session goes on `rows` too, as its sessionId, state
     and first line. The caller saves what was seen."""
     seen = dict(s.get("controlSeen") or {}) if isinstance(s.get("controlSeen"), dict) else {}
     lines = []
-    for e in controlled(s):
+    for e in controlled(s, home):
         sid, store = e["sessionId"], e.get("store") or ""
         when, first = last_report(store, sid)
         if not when or seen.get(sid) == when:
@@ -902,12 +750,12 @@ def effort_text(rows):
 
 # --- the board ------------------------------------------------------------------------------------------------------------
 
-def requests_for(s):
+def requests_for(s, home=""):
     """The open requests controlled sessions addressed to this puppeteer, read where they lie, not yet
     answered."""
     answered = s.get("requestAnswers") if isinstance(s.get("requestAnswers"), dict) else {}
     out, stores = [], []
-    for e in controlled(s):
+    for e in controlled(s, home):
         if e.get("store") and e["store"] not in stores:
             stores.append(e["store"])
     for store in stores:
@@ -917,13 +765,13 @@ def requests_for(s):
     return out
 
 
-def findings(s):
+def findings(s, home=""):
     """Each `Finding:` line of the kept reports of the sessions a puppeteer controls and of the sessions of
     their trees, as the session that reported it, that session's record and the line. Oldest first and each line once,
     under the session that reported it first, the deeper one when two did in the same minute, since a parent session
     passes its children's lines up unchanged."""
     rows = []
-    for e in controlled(s):
+    for e in controlled(s, home):
         top, store = e["sessionId"], e.get("store") or ""
         every = relay._sessions(store) if store else {}
         chains = {k: PHI.chain_of(store, k) for k in every}
@@ -955,7 +803,7 @@ def board(home, s):
              f"What is not here is kept with `phi.py note`: `--kind decision` or `--kind waiting` puts it under Waiting "
              f"on, `--kind parked` under Parked, and any other kind under Notes.", "",
              "## Controlled sessions", ""]
-    for e in controlled(s):
+    for e in controlled(s, home):
         k, store = e["sessionId"], e.get("store") or ""
         state, against = standing(store, k)
         when, first = last_report(store, k)
@@ -963,14 +811,14 @@ def board(home, s):
                      + (": " + "; ".join(against) if against else "") + "."
                      + (f" Last report {when}: {first}" if when else "")
                      + (f" Page: {page_of(store, k)}" if store else ""))
-    if not controlled(s):
+    if not controlled(s, home):
         lines.append("None yet.")
 
     def of_kind(kind):
         return [f"- {PHI.clean(n.get('claim'))} Source: {PHI.clean(n.get('source'))}. Kept {n.get('time', '')}."
                 for n in notes if PHI.clean(n.get("kind")) == kind]
     lines += ["", "## Waiting on", ""] + (of_kind("decision") + of_kind("waiting") or ["Nothing."])
-    asked = requests_for(s)
+    asked = requests_for(s, home)
     answers = s.get("requestAnswers") if isinstance(s.get("requestAnswers"), dict) else {}
     lines += ["", "## Requests to this puppeteer", ""]
     lines += [f"- {r['id']} \"{r.get('title')}\" from \"{full_title(r.get('requester'))}\": open." for r in asked]
@@ -984,7 +832,7 @@ def board(home, s):
         lines += ["", "## Ledger of requests", "",
                   f"{len(have)} request{'s' if len(have) != 1 else ''} to this puppeteer, each with the session that "
                   f"holds it and its state, whole on {asks.page_path(home, sid)}."]
-    found = [f for f in findings(s) if not published(f[2], notes)]
+    found = [f for f in findings(s, home) if not published(f[2], notes)]
     lines += ["", "## Findings", ""]
     if found:
         lines += ["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. "
@@ -1028,24 +876,21 @@ def rules_changed(s, text):
 def controls_text(home, s):
     """Where each controlled session stands."""
     lines = []
-    for e in controlled(s):
+    for e in controlled(s, home):
         state, against = standing(e.get("store") or "", e["sessionId"])
         lines.append(f"- \"{full_title(e['sessionId'])}\" `{e['sessionId']}`, store {e.get('store') or 'unknown'}: "
                      f"{state}" + (": " + "; ".join(against) if against else ""))
     if not lines:
-        lines.append("no session is controlled yet: `controls <sessionId> ...` records the orchestrators ezexe "
-                     "put under this one")
-    if s.get("puppeteerSeen"):
-        lines.append(f"p4-phi first saw this session in the section at {s['puppeteerSeen']}.")
+        lines.append("no session is controlled yet: this session has started no orchestrator that is still live")
     lines.append(f"The board: {board_path(home, s['sessionId'])}")
     return "\n".join(lines)
 
 
-def waited_on(s):
+def waited_on(s, home=""):
     """The full titles of the controlled sessions a puppeteer may still be waiting on: each one the app has
     not archived that is working, has something open, or is not shown done."""
     out = []
-    for e in controlled(s):
+    for e in controlled(s, home):
         state, _ = standing(e.get("store") or "", e["sessionId"])
         if state in ("working", "open", "not shown done"):
             out.append(full_title(e["sessionId"]))
@@ -1063,8 +908,8 @@ def boundary(home, s):
     a controlled tree that has closed, or every controlled session idle with no request waiting. Never while a
     controlled session waits on the puppeteer's answer. It says to keep what is not on the board with `note`, and
     asks nothing of ezexe. The caller saves what was told."""
-    rows = controlled(s)
-    if not rows or requests_for(s):
+    rows = controlled(s, home)
+    if not rows or requests_for(s, home):
         return ""
     states, closed, ready = [], [], []
     for e in rows:
@@ -1138,7 +983,7 @@ def idle_watch(home, s):
     """The line that tells a puppeteer what brings it back when a controlled session that works ends its turn, and an
     empty string where none is new: a session is named once for its stretch of work, and again once it works after
     a later report. It hands no call, since none serves a session the app runs. The caller saves what was told."""
-    rows = controlled(s)
+    rows = controlled(s, home)
     told = s.get("idleWatch") if isinstance(s.get("idleWatch"), dict) else {}
     new, mine, others = {}, [], []
     for e in rows:
@@ -1185,47 +1030,6 @@ def compacted(home, s):
 
 # --- a successor ------------------------------------------------------------------------------------------------------------
 
-def hand(home, s, new):
-    """The old puppeteer marks its hand-over to a successor."""
-    new = PHI.safe_id(new)
-    if new == s["sessionId"] or not PHI.app_record(new):
-        raise ValueError(f"the app holds no record of a successor {new}")
-    s["handedTo"] = {"sessionId": new, "time": PHI.now()}
-    PHI.save_session(home, s)
-    return (f"handed over to \"{full_title(new)}\" `{new}`: it runs `controls --from {s['sessionId']}`, then keeps "
-            f"this session's outcome with `note`, and "
-            + ("its upkeep line names this session's archive call once it is finished and landed" if UPKEEP else
-               "the app asks ezexe on its approval card before it archives this session, except in Auto mode and "
-               "Bypass permissions mode"))
-
-
-def take(home, s, old):
-    """The successor takes over the old puppeteer's controlled sessions and its notes."""
-    old = PHI.safe_id(old)
-    ostore = store_of(old)
-    o = PHI.load_session(ostore, old) if ostore else {}
-    if (o.get("handedTo") or {}).get("sessionId") != s["sessionId"]:
-        raise ValueError(f"{old} has not handed over to this session: it runs `controls --hand {s['sessionId']}` "
-                         f"first")
-    rows = controlled(s)
-    have = {e["sessionId"] for e in rows}
-    rows += [e for e in controlled(o) if e["sessionId"] not in have and e["sessionId"] != s["sessionId"]]
-    s["handedFrom"] = {"sessionId": old, "time": PHI.now()}
-    for k in ("rulesChanged", "requestAnswers"):
-        if o.get(k) and not s.get(k):
-            s[k] = o[k]
-    _set(s, rows)
-    PHI.save_session(home, s)
-    n = 0
-    for note in PHI.load_notes(ostore, old):
-        try:
-            n += bool(PHI.note_add(home, s["sessionId"], note.get("claim"),
-                                   note.get("source") or f"handed over from {old}", note.get("kind") or ""))
-        except ValueError:
-            pass
-    return (f"took over {len(rows)} controlled session{'s' if len(rows) != 1 else ''} and {n} note"
-            f"{'s' if n != 1 else ''} from \"{full_title(old, o)}\" `{old}`")
-
 
 # --- requests through the puppeteer ------------------------------------------------------------------------------
 
@@ -1251,25 +1055,22 @@ def request_call(r):
 
 def requests_text(home, s):
     """The requests addressed to this puppeteer, handed at a turn ezexe began: each with its exact call."""
-    rows = requests_for(s)
+    rows = requests_for(s, home)
     if not rows:
         return ""
-    lines = [f"- {r['id']} \"{r['title']}\" from \"{full_title(r['requester'])}\" `{r['requester']}`, to be filed in "
-             f"{filing(r['store'], s)}: `mcp__ccd_session__start_session` with "
+    lines = [f"- {r['id']} \"{r['title']}\" from \"{full_title(r['requester'])}\" `{r['requester']}`: "
+             f"`mcp__ccd_session__start_session` with "
              f"{json.dumps(request_call(r), ensure_ascii=False)}" for r in rows]
     return ("phi (p4-phi): controlled sessions ask this puppeteer for new orchestrators. This turn ezexe "
             "began. Each call passes `cwd`, and the start tool's text has `mcp__ccd_session__list_start_targets` "
             "list the valid names, so call that first, once: a folder it does not list is named to ezexe in one "
-            "line and never guessed. For each either start it with exactly the call given and then file it with "
-            "`mcp__ccd_sidebar__move_sessions` where named, which takes the section's id as "
-            "`mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers it, never in the section "
-            "this session is filed in, or decline "
-            f"it with `{PHI.commands()} controls --decline <request id> \"<why>\"` and one line to ezexe. p4-phi "
-            "records a started one as controlled at this session's next hook:\n" + "\n".join(lines))
+            "line and never guessed. For each either start it with exactly the call given, or decline "
+            f"it with `{PHI.commands()} controls --decline <request id> \"<why>\"` and one line to ezexe. A started "
+            "one stays attached under this session, which p4-phi reads as controlled:\n" + "\n".join(lines))
 
 
 def decline(home, s, rid, why):
-    row = next((r for r in requests_for(s) if r.get("id") == rid), None)
+    row = next((r for r in requests_for(s, home) if r.get("id") == rid), None)
     if not row:
         raise ValueError(f"no open request {rid} is addressed to this puppeteer")
     if len(PHI.clean(why)) < REASON_MIN:
@@ -1300,10 +1101,10 @@ def answers_text(home, s):
 
 # --- work sent down to a controlled session --------------------------------------------------------------------------------
 
-def route_down(s, words_):
+def route_down(s, words_, home=""):
     """The line that sends ezexe's message to a puppeteer on to the controlled session whose topic covers
     it, and an empty string when no controlled session's topic covers it."""
-    best = covering(s, words_)
+    best = covering(s, words_, home)
     if not best:
         return ""
     sid = best["sessionId"]
@@ -1313,13 +1114,13 @@ def route_down(s, words_):
             f"and to whom>\" --source \"<the message>\" --kind waiting` until its report comes.")
 
 
-def covering(s, words_):
+def covering(s, words_, home=""):
     """The running session a puppeteer controls whose topic covers some words, as its row of `controls`, and None
     when none does: the live one whose full title and task share the most content words with them, SHARE at
     least."""
     said = plans.words(words_)
     best, score = None, SHARE - 1
-    for e in controlled(s):
+    for e in controlled(s, home):
         store = e.get("store") or ""
         k = PHI.load_session(store, e["sessionId"]) if store else {}
         if out_of_tree(k) if k else True:
@@ -1365,7 +1166,7 @@ def open_issues_text(home, s):
         return ""
     told = s.get("openIssues") if isinstance(s.get("openIssues"), dict) else {}
     closed, done = [], {}
-    for e in controlled(s):
+    for e in controlled(s, home):
         sid, store = e["sessionId"], e.get("store") or ""
         if PHI.app_record(sid).get("isArchived"):
             closed.append(sid)
@@ -1384,7 +1185,7 @@ def open_issues_text(home, s):
     more, rows, lines = len(rows) - OPEN_SHOWN, rows[:OPEN_SHOWN], []
     for slug, x in rows:
         n, title = int(x["number"]), PHI.clean(x.get("title"))
-        e = covering(s, title)
+        e = covering(s, title, home)
         where = (f"send it to \"{full_title(e['sessionId'])}\" `{e['sessionId']}`, whose topic covers it" if e else
                  "no running orchestrator's topic covers it, so start a new orchestrator for it")
         lines.append(f"- {slug}#{n} \"{title}\", https://github.com/{slug}/issues/{n}: {where}")

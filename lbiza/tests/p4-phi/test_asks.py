@@ -81,17 +81,12 @@ class Trees(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.t = t = Tree(self._tmp.name)
         t.record(PUP, title="Control the exporter and the importer trees, and tell ezexe where each stands")
-        t.record(TOP, title="Build the narwhal exporter")
-        t.record(TOP3, title="Build the importer")
-        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps(
-            {"preferences": {"epitaxyPrefs": {"dframe-group-scopes": {"acct/org": {
-                "groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
-                "assignments": {"code:" + PUP: "cg-1"}}}}}}))
+        t.record(TOP, started_by=PUP, title="Build the narwhal exporter")
+        t.record(TOP3, started_by=PUP, title="Build the importer")
         for k, task in ((TOP, "Build the narwhal exporter"), (TOP3, "Build the importer")):
             t.say(k, task)
             t.stop(k, task, report="Started on it.", uuid="s0")
         t.say(PUP, "Control the exporter and the importer trees")
-        self.assertEqual(t.cli(PUP, "controls", TOP, TOP3).returncode, 0)
         for path in (asks.log_path(t.p4, PUP), os.path.join(t.dir(PUP), "asks.json")):
             if os.path.exists(path):                # "Control the trees" is ezexe's first request: each test starts
                 os.remove(path)                     # with an empty ledger
@@ -199,9 +194,8 @@ class Ledger(Trees):
         new = "local_new00009"
         CLI.setdefault(new, "77779000-0000-4000-8000-000000000000")
         t.say(PUP, BILLING)
-        t.record(new, title="Billing dashboard with monthly invoice charts")
+        t.record(new, started_by=PUP, title="Billing dashboard with monthly invoice charts")
         t.say(new, BILLING)
-        self.assertEqual(t.cli(PUP, "controls", new).returncode, 0)
         t.stop(PUP, BILLING, report="Started the billing dashboard's orchestrator.", uuid="o1")
         t.say(PUP, ACCOUNT)
         got = asks.rows(t.p4, PUP)
@@ -238,10 +232,14 @@ class PuppeteerRouting(Trees):
 class RoutingMarks(Trees):
     """The app's marks are read at the start of a message's body, past its leading reminders, and nowhere else."""
 
-    def test_a_controlled_orchestrator_handed_work_by_another_session_still_gets_its_draft(self):
+    def test_an_orchestrator_handed_work_by_another_session_still_gets_its_draft(self):
         t = self.t
-        ctx = context(t.say(TOP, marked("Rename the retry helper in `src/export/flush.py` for the ports table and "
-                                        "update its callers across the exporter", sender=PUP)))
+        top4 = "local_top00004"
+        CLI.setdefault(top4, "77774000-0000-4000-8000-000000000000")
+        t.record(top4, title="Build the ports table")
+        t.say(top4, "Build the ports table")
+        ctx = context(t.say(top4, marked("Rename the retry helper in `src/export/flush.py` for the ports table and "
+                                         "update its callers across the exporter", sender=PUP)))
         self.assertIn(DRAFT, ctx, "the marks hold back only a puppeteer's routing")
 
     def test_a_slash_commands_wrapper_is_no_message_of_ezexes(self):
@@ -303,9 +301,8 @@ class LedgerCloses(Trees):
         top2, wk = "local_top00002", "local_wkr00002"
         CLI.setdefault(top2, "77772000-0000-4000-8000-000000000000")
         CLI.setdefault(wk, "77772100-0000-4000-8000-000000000000")
-        t.record(top2, title="Build the ports table", cwd=other)
+        t.record(top2, started_by=PUP, title="Build the ports table", cwd=other)
         t.say(top2, "Build the ports table", proj=other)
-        self.assertEqual(t.cli(PUP, "controls", top2).returncode, 0)
         t.record(wk, started_by=top2, title="the ports writer", cwd=other)
         t.say(wk, "Task:\nWrite the ports rows.\nFiles: src/ports.py", proj=other)
         self.assertEqual(t.cli(wk, "done", "the rows were written", proj=other).returncode, 0)
@@ -410,9 +407,8 @@ class LedgerCloses(Trees):
         new = "local_new00008"
         CLI.setdefault(new, "77778000-0000-4000-8000-000000000000")
         t.say(PUP, BILLING)
-        t.record(new, title="Ledger of invoices")
+        t.record(new, started_by=PUP, title="Ledger of invoices")
         t.say(new, "Lay out the ledger")
-        self.assertEqual(t.cli(PUP, "controls", new).returncode, 0)
         t.stop(PUP, BILLING, report="Started its orchestrator.", uuid="u2")
         t.say(PUP, ACCOUNT)
         got = {r["id"]: r for r in asks.rows(t.p4, PUP)}

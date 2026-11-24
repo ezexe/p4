@@ -46,14 +46,14 @@ class P4Conf(unittest.TestCase):
         self.assertFalse(hasattr(p4conf, "keep_settings"))
 
     def test_a_key_read_when_set_is_not_called_unknown(self):
-        """phi.child_levels, phi.puppeteer_section and phi.clear_at are read when a project sets them and are
+        """phi.child_levels and phi.clear_at are read when a project sets them and are
         never written by default, so a later change to the code's values reaches every store."""
         import contextlib
         import io
-        for key in ("child_levels", "puppeteer_section", "clear_at"):
+        for key in ("child_levels", "clear_at"):
             self.assertNotIn(key, p4conf.DEFAULTS["phi"])
         with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"puppeteer_section": "", "clear_at": 9, "child_levels": {}}}, f)
+            json.dump({"phi": {"clear_at": 9, "child_levels": {}}}, f)
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             s = p4conf.load(self.p4)

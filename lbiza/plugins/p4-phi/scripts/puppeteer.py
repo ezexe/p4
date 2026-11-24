@@ -407,7 +407,7 @@ def controlled_repos(home, s):
     most: the repository of each issue a session of a controlled tree holds, then the repository of each controlled
     session's folder and those nested one or two folders under it."""
     held, at = [], []
-    for e in _phi().controls.controlled(s):
+    for e in _phi().controls.controlled(s, home):
         store = str(e.get("store") or "")
         if not store:
             continue
@@ -1691,7 +1691,7 @@ def on_prompt(home, s, req, base):
         _, found, _ = meta_pass(home)
         parts.append(meta_text(home, s, found))
     refresh(home, s["sessionId"])
-    if _phi().controls.controlled(s) and own_message(home, s, req):
+    if _phi().controls.controlled(s, home) and own_message(home, s, req):
         return "\n\n".join(p for p in parts if p), ""   # the puppeteer's own orchestration: no start draft
     read = prompty(home, s, req, base)
     if not read["work"] or (read["own"] and not read["owner"] and not read["readings"]) \

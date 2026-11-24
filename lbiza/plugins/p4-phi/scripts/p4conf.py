@@ -67,7 +67,7 @@ OPEN = ()
 
 # Keys read when a project sets them and never written by default, so a later change to the code's own value reaches
 # every store: kept as set, never called unknown.
-READ_WHEN_SET = ("phi.child_levels", "phi.puppeteer_section", "phi.clear_at", "phi.cards", "phi.worktree_python",
+READ_WHEN_SET = ("phi.child_levels", "phi.clear_at", "phi.cards", "phi.worktree_python",
                  "phi.worktree_lines")
 
 # The top-level keys of p4.json that are another plugin's sections: p4-temportal's `scratchpad` and `temportal`, and the
@@ -297,7 +297,7 @@ ENV_NAMES = {"phi.watch_s": "P4_PHI_WATCH_SECONDS"}
 # What a key's reader takes where its default does not say: "num" a number, "strs" a list of strings, "levels" plans.child_levels' kinds.
 ENV_SCHEMA = {
     "phi.home": str,
-    "phi.child_levels": "levels", "phi.puppeteer_section": str,
+    "phi.child_levels": "levels",
     "phi.worktree_python": str, "phi.worktree_lines": "strs",
     "phi.clear_at": "num",
 }
