@@ -1063,6 +1063,12 @@ class Terminal(Base):
         self.assertEqual(jload(path), {"book": False, "worker_profile": ""})
         self.assertEqual(phi.worker_profile(t.p4), "")
         self.assertEqual(t.cli(TOP, "worker_profile", "bad name").returncode, 2)
+        r = t.cli(TOP, "worker_profile", "default")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(path), {"book": False}, "default removes the key and keeps the others")
+        self.assertEqual(phi.worker_settings(t.p4, TOP)["profile_from"], "the pair of print")
+        write(path, json.dumps({"book": False, "worker_mode": "interactive"}))
+        self.assertEqual(phi.worker_settings(t.p4, TOP)["profile"], "", "an interactive worker pairs with off")
 
     def test_a_session_another_session_started_is_an_orchestrator_whether_or_not_it_started_one(self):
         s = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
@@ -1070,6 +1076,126 @@ class Terminal(Base):
         self.assertFalse(puppeteer.orchestrator(self.t.p4, {"sessionId": TOP}), "one nobody started needs a task")
         self.assertTrue(puppeteer.orchestrator(self.t.p4, {"sessionId": TOP, "task": "Build it"}))
         self.assertFalse(puppeteer.orchestrator(self.t.p4, {}))
+
+
+class WorkerSettings(Base):
+    """A session's own worker mode and profile, the paired defaults and the rule by the piece of work."""
+
+    LAND = "Fix the ports table writer.\nFiles: src/writer.py"
+    TEAM = "Review the ports table move with an agent team.\nFiles: none"
+    APPROVE = ("Plan the ports table move.\nThis session starts in plan mode and ezexe approves it with "
+               "ExitPlanMode.\nFiles: none")
+
+    def start(self, host, brief, title="Fix the ports table", did="drf-0123456789"):
+        """Starts a draft of `host` with `brief`; the text of its start file."""
+        t = self.t
+        t.say(host, TASK)
+        os.makedirs(os.path.join(t.dir(host), "drafts"), exist_ok=True)
+        write(os.path.join(t.dir(host), "drafts", did + ".json"), json.dumps({
+            "id": did, "title": title, "parent": host, "verdict": "start", "context": "fresh", "brief": brief,
+            "gate": []}))
+        r = t.cli(host, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.out = r.stdout
+        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        with open(os.path.join(folder, [f for f in os.listdir(folder) if f.startswith("start-")][0]),
+                  encoding="utf-8") as f:
+            return f.read()
+
+    def test_worker_for_writes_a_sessions_override_default_removes_it_and_a_bad_word_exits_2(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.record(TOP2, title="the other top")
+        t.say(TOP2, TASK)
+        r = t.cli(TOP, "worker_for")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("mode print (the default), profile p4-workers (the pair of print)", r.stdout)
+        r = t.cli(TOP, "worker_for", "--mode", "interactive")
+        self.assertIn("mode interactive (the session's workerMode), profile off (the pair of interactive)", r.stdout)
+        self.assertEqual(t.session(TOP)["workerMode"], "interactive")
+        self.assertEqual(phi.worker_settings(t.p4, TOP)["mode"], "interactive")
+        self.assertEqual(phi.worker_settings(t.p4, TOP2)["mode"], "print", "another session's own")
+        r = t.cli(TOP, "worker_for", "--profile", "p4-bill")
+        self.assertIn("profile p4-bill (the session's workerProfile)", r.stdout)
+        self.assertEqual(t.cli(TOP, "worker_for", "--profile", "off").returncode, 0)
+        self.assertEqual(t.session(TOP)["workerProfile"], "")
+        r = t.cli(TOP, "worker_for", "--session", TOP2, "--mode", "interactive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(t.session(TOP2)["workerMode"], "interactive")
+        r = t.cli(TOP, "worker_for", "--mode", "default", "--profile", "default")
+        self.assertIn("mode print (the default)", r.stdout)
+        self.assertNotIn("workerMode", t.session(TOP))
+        self.assertNotIn("workerProfile", t.session(TOP))
+        for args in (("--mode", "tab"), ("--profile", "bad name"), ("--session", "local_nobody", "--mode", "print")):
+            bad = t.cli(TOP, "worker_for", *args)
+            self.assertEqual(bad.returncode, 2, args)
+            self.assertIn("phi:", bad.stderr)
+
+    def test_two_sessions_of_one_store_start_their_workers_in_their_own_modes(self):
+        t = self.t
+        t.record(TOP2, title="the docs top")
+        t.say(TOP, TASK)
+        t.say(TOP2, TASK)
+        self.assertEqual(t.cli(TOP, "worker_for", "--mode", "interactive").returncode, 0)
+        self.assertEqual(t.cli(TOP2, "worker_for", "--mode", "print").returncode, 0)
+        one = self.start(TOP, self.LAND, did="drf-0123456789")
+        self.assertIn("mode interactive (the session's workerMode)", self.out)
+        two = self.start(TOP2, self.LAND, did="drf-0123456790")
+        self.assertIn("mode print (the session's workerMode)", self.out)
+        self.assertNotIn("claude -p", one)
+        self.assertIn("claude -p", two)
+
+    def test_the_paired_defaults_and_the_explicit_profile_that_wins(self):
+        t = self.t
+        # PowerShell's `$env:ANTHROPIC_PROFILE = 'p4-workers'` or sh's `export ANTHROPIC_PROFILE=p4-workers`
+        self.assertRegex(self.start(TOP, self.LAND), r"ANTHROPIC_PROFILE ?= ?'?p4-workers")
+        self.assertIn("mode print (the piece of work), profile p4-workers (the pair of print)", self.out)
+        self.setUp()
+        t = self.t
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"worker_mode": "interactive"}))
+        self.assertNotIn("ANTHROPIC_PROFILE", self.start(TOP, self.LAND))
+        for mode in ("print", "interactive"):
+            self.setUp()
+            t = self.t
+            write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"worker_mode": mode, "worker_profile": "p4-bill"}))
+            self.assertIn("p4-bill", self.start(TOP, self.LAND), mode)
+        self.setUp()
+        t = self.t
+        t.say(TOP, TASK)
+        self.assertEqual(t.cli(TOP, "worker_for", "--profile", "off").returncode, 0)
+        self.assertNotIn("ANTHROPIC_PROFILE", self.start(TOP, self.LAND))
+        self.assertIn("profile off (the session's workerProfile)", self.out)
+
+    def test_worker_mode_for_reads_the_piece_and_an_explicit_mode_overrides_it(self):
+        import plans
+        self.assertEqual(plans.worker_mode_for(self.LAND)[0], "print")
+        self.assertEqual(plans.worker_mode_for(self.TEAM)[0], "interactive")
+        self.assertEqual(plans.worker_mode_for(self.APPROVE)[0], "interactive")
+        self.assertEqual(plans.worker_mode_for("Plan it.\nThis session starts in plan mode.\nFiles: none")[0], "print")
+        self.assertEqual(plans.worker_mode_for("Fix it in a tab ezexe steers.")[0], "interactive")
+        self.assertEqual(plans.worker_mode_for("Fix it in an interactive tab.")[0], "interactive")
+        self.assertEqual(plans.worker_mode_for("Document worker_mode, print or interactive, and ExitPlanMode in the "
+                                               "README.\nFiles: README.md")[0], "print",
+                         "a landing brief that only names the modes lands headless")
+        t = self.t
+        t.say(TOP, TASK)
+        self.assertEqual(phi.worker_settings(t.p4, TOP, self.TEAM)["mode"], "interactive")
+        write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"worker_mode": "print"}))
+        s = phi.worker_settings(t.p4, TOP, self.TEAM)
+        self.assertEqual((s["mode"], s["mode_from"]), ("print", "phi.json worker_mode"))
+        self.assertEqual(t.cli(TOP, "worker_for", "--mode", "interactive").returncode, 0)
+        s = phi.worker_settings(t.p4, TOP, self.LAND)
+        self.assertEqual((s["mode"], s["mode_from"]), ("interactive", "the session's workerMode"))
+
+    def test_each_start_appends_one_row_with_its_settings_and_the_rules_reason(self):
+        t = self.t
+        self.start(TOP, self.TEAM, title="Review the ports table")
+        (row,) = phi.read_rows(os.path.join(t.p4, "phi", "worker-starts.jsonl"))
+        self.assertEqual((row["event"], row["mode"], row["profile"], row["starter"], row["mode_from"]),
+                         ("start", "interactive", "", TOP, "the piece of work"))
+        self.assertIn("agent team", row["reason"])
+        self.assertTrue(row["report"].endswith(f"report-{row['name']}.md"))
+        self.assertIn("mode interactive (the piece of work), profile off (the pair of interactive)", self.out)
 
 
 class Parallel(Base):

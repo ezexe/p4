@@ -84,6 +84,7 @@ GOAL = False                     # phi.json `goal`: true has a worker's line `Do
 WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
 WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
 WORKER_MODES = ("print", "interactive")
+WORKER_PAIRS = {"print": "p4-workers", "interactive": ""}   # the profile a mode pairs with where nothing sets one
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
@@ -2619,26 +2620,138 @@ def switch(home, key, on):
     return "on" if read_json(path).get(key) is True else "off", path.replace(chr(92), "/")
 
 
+def worker_settings(home, sid="", text=""):
+    """The mode and profile a terminal worker of the session `sid` starts with, for the piece of work `text`, as
+    {"mode", "profile", "mode_from", "profile_from", "reason"}. The mode: the session's `workerMode`, else phi.json's
+    `worker_mode`, else plans.worker_mode_for(text), else WORKER_MODE. The profile: the session's `workerProfile`,
+    else phi.json's `worker_profile` where the key is set, else the mode's pair, WORKER_PAIRS."""
+    conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
+    rec = load_session(home, safe_id(sid)) if home and sid else {}
+    reason = ""
+    if rec.get("workerMode") in WORKER_MODES:
+        mode, mode_from = rec["workerMode"], "the session's workerMode"
+    elif conf.get("worker_mode") in WORKER_MODES:
+        mode, mode_from = conf["worker_mode"], "phi.json worker_mode"
+    elif text:
+        mode, reason = plans.worker_mode_for(text)
+        mode_from = "the piece of work"
+    else:
+        mode, mode_from = WORKER_MODE, "the default"
+    if isinstance(rec.get("workerProfile"), str):
+        profile, profile_from = rec["workerProfile"], "the session's workerProfile"
+    elif isinstance(conf.get("worker_profile"), str):
+        profile, profile_from = conf["worker_profile"], "phi.json worker_profile"
+    else:
+        profile, profile_from = WORKER_PAIRS[mode], f"the pair of {mode}"
+    return {"mode": mode, "profile": profile, "mode_from": mode_from, "profile_from": profile_from,
+            "reason": reason}
+
+
+def worker_line(settings):
+    """The one line a start prints for its settings."""
+    return (f"mode {settings['mode']} ({settings['mode_from']}), profile {settings['profile'] or 'off'} "
+            f"({settings['profile_from']})")
+
+
+def worker_record(home, row):
+    """One row of `<home>/phi/worker-starts.jsonl`: a start or the outcome of a wait."""
+    append_line(os.path.join(home, "phi", "worker-starts.jsonl"), {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), **row})
+
+
+def worker_start(home, settings, name, starter, kind, log, report):
+    """The row a start of a terminal worker appends, and the line it prints."""
+    worker_record(home, {"event": "start", "name": name, "starter": starter, "kind": kind, "mode": settings["mode"],
+                         "profile": settings["profile"], "mode_from": settings["mode_from"],
+                         "profile_from": settings["profile_from"], "reason": settings["reason"],
+                         "log": log, "report": report})
+    return worker_line(settings)
+
+
+def worker_outcome(home, name, how, result):
+    """The row a `--wait --report` appends when its wait ends, with the cost and turns of the log's last result."""
+    row = {"event": "outcome", "name": name, "how": how}
+    for k in ("total_cost_usd", "num_turns", "is_error", "subtype", "duration_ms"):
+        if k in result:
+            row[k] = result[k]
+    worker_record(home, row)
+
+
+def worker_balance(home):
+    """`phi.py balance`: per mode, the starts, the done and failed counts, the total and mean cost and the mean turns,
+    from the rows of worker-starts.jsonl, and a line for all."""
+    import coworker
+    rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
+    mode_of_ = {r.get("name"): r.get("mode") for r in rows_ if r.get("event") == "start"}
+    log_of = {r.get("name"): r.get("log") for r in rows_ if r.get("event") == "start" and r.get("log")}
+    # A worker writes its report a turn or more before its run's final result row, so an outcome row a wait made at
+    # the report holds no cost: the cost and turns are read from the log's final result where the row lacks them.
+    for r in rows_:
+        if r.get("event") == "outcome" and "total_cost_usd" not in r and log_of.get(r.get("name")):
+            last = coworker.last_result(log_of[r["name"]], final=True)
+            for k in ("total_cost_usd", "num_turns", "is_error", "subtype"):
+                if k in last:
+                    r.setdefault(k, last[k])
+    out = []
+    for mode in WORKER_MODES + ("all",):
+        starts_ = [r for r in rows_ if r.get("event") == "start" and mode in ("all", r.get("mode"))]
+        outs = [r for r in rows_ if r.get("event") == "outcome" and (mode == "all" or mode_of_.get(r.get("name")) == mode)]
+        costs = [r["total_cost_usd"] for r in outs if isinstance(r.get("total_cost_usd"), (int, float))]
+        turns = [r["num_turns"] for r in outs if isinstance(r.get("num_turns"), (int, float))]
+        failed = sum(1 for r in outs if r.get("is_error") is True or r.get("how") == "ended")
+        done = sum(1 for r in outs if r.get("how") == "done" and r.get("is_error") is not True)
+        out.append(f"{mode}: {len(starts_)} starts, {done} done, {failed} failed, cost {sum(costs):.4f} total"
+                   f" {sum(costs) / len(costs) if costs else 0:.4f} mean, turns {sum(turns) / len(turns) if turns else 0:.1f} mean")
+    return "\n".join(out)
+
+
+def worker_for(home, sid, mode=None, profile=None):
+    """`phi.py worker_for`: with no mode and profile it prints; with them it writes the session `sid`'s `workerMode`
+    and `workerProfile` (`default` removes the key, `off` for a profile is the empty string). The lines say the
+    effective mode and profile and where each came from. ValueError on a bad word or an unknown session."""
+    rec = load_session(home, safe_id(sid))
+    if not rec:
+        raise ValueError(f"no session {sid} in this store")
+    if mode is not None and mode != "default" and mode not in WORKER_MODES:
+        raise ValueError("a worker mode is print, interactive or default")
+    if profile is not None and profile not in ("off", "default") and not re.fullmatch(r"[A-Za-z0-9_-]+", profile):
+        raise ValueError("a worker profile's name holds letters, digits, _ and - only")
+    if mode is not None or profile is not None:
+        if mode is not None:
+            rec.pop("workerMode", None)
+            if mode != "default":
+                rec["workerMode"] = mode
+        if profile is not None:
+            rec.pop("workerProfile", None)
+            if profile != "default":
+                rec["workerProfile"] = "" if profile == "off" else profile
+        save_session(home, rec)
+    s = worker_settings(home, sid)
+    return f"worker settings of {sid}: " + worker_line(s)
+
+
 def worker_profile(home):
-    """The Anthropic profile a terminal worker names: `worker_profile` of the store's phi/phi.json where it is a
-    string, an empty one for off, else WORKER_PROFILE."""
-    v = read_json(os.path.join(home, "phi", "phi.json")).get("worker_profile") if home else None
-    return v if isinstance(v, str) else WORKER_PROFILE
+    """The Anthropic profile a terminal worker names where no session sets one: `worker_profile` of the store's
+    phi/phi.json where it is a string, an empty one for off, else the pair of worker_mode(home), WORKER_PAIRS."""
+    return worker_settings(home)["profile"]
 
 
 def worker_profile_set(home, name=None):
     """`phi.py worker_profile`: with no name it writes nothing and says how the key stands; with a name it writes it
-    to the store's phi/phi.json, and `off` writes the empty string, keeping the file's other keys. Returns the line
-    that says how the key stands as read back."""
+    to the store's phi/phi.json, `off` writes the empty string, and `default` removes the key, so each mode's pair,
+    WORKER_PAIRS, applies again; the file's other keys are kept. Returns the line that says how the key stands as
+    read back."""
     path = os.path.join(home, "phi", "phi.json")
     if name is not None:
         want = "" if name == "off" else name
-        if want and not re.fullmatch(r"[A-Za-z0-9_-]+", want):
+        if want and want != "default" and not re.fullmatch(r"[A-Za-z0-9_-]+", want):
             raise ValueError("a worker profile's name holds letters, digits, _ and - only")
         d = read_json(path)
         if not d and os.path.exists(path) and os.path.getsize(path) > 2:
             raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
-        d["worker_profile"] = want
+        if want == "default":
+            d.pop("worker_profile", None)
+        else:
+            d["worker_profile"] = want
         write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     now_ = worker_profile(home)
     return (f"worker_profile is {now_ or 'off'} in {path.replace(chr(92), '/')}"
@@ -3807,7 +3920,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "worker_mode", "cards", "conf", "sections",
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "worker_mode", "worker_for", "balance", "cards", "conf", "sections",
                  "coworkers", "progress", "spend", "node"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
@@ -3866,6 +3979,11 @@ def main(argv=None):
             p.add_argument("mode", nargs="?", default=None,
                            help="print starts a terminal worker as `claude -p` with a stream-json log, "
                                 "interactive as an interactive tab; left out it prints how the key stands")
+        if name == "worker_for":
+            p.add_argument("--mode", default=None, help="print, interactive or default (removes the key) for the "
+                                                         "session; left out it is not changed")
+            p.add_argument("--profile", default=None, help="a profile name, off or default (removes the key) for "
+                                                            "the session; left out it is not changed")
         if name == "cards":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on puts the set of what p4-phi settles with no approval card in force for the "
@@ -3963,6 +4081,16 @@ def main(argv=None):
         if a.cmd == "worker_mode":                 # the project's setting, which needs no session
             print(worker_mode_set(me.home, a.mode))
             return 0
+        if a.cmd == "worker_for":                  # a session's own override, this one's or the named one's
+            try:
+                print(worker_for(me.home, me.id, a.mode, a.profile))
+            except ValueError as e:
+                print(f"phi: {e}", file=sys.stderr)
+                return 2
+            return 0
+        if a.cmd == "balance":                     # the starts and outcomes of the terminal workers, per mode
+            print(worker_balance(me.home))
+            return 0
         if a.cmd == "app_tools":                   # the project's setting, which needs no session and makes no folder
             print(app_tools_switch(me.home, a.act == "on" if a.act else None))
             return 0
@@ -4045,6 +4173,7 @@ def main(argv=None):
                 tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
                 log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
                 how, waited = coworker.wait_report(report, me.home, tab, log=log)
+                worker_outcome(me.home, tab, how, coworker.last_result(log))
                 if how == "ended":
                     r = coworker.last_result(log)
                     print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "
@@ -4087,8 +4216,10 @@ def main(argv=None):
                 node_of = {"home": me.home, "starter": safe_id(me.id),
                            "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
                 try:
-                    found = coworker.land(plan, checkout, "", mode, claim=True, profile=worker_profile(me.home),
-                                          headless=worker_mode(me.home) == "print", **node_of)
+                    found = coworker.land(plan, checkout, "", mode, claim=True,
+                                          # landing is headless work by the rule, so a section's own words, which
+                                          # may name modes, pick no mode: only a set mode does
+                                          settings=lambda text: worker_settings(me.home, me.id, ""), **node_of)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
@@ -4108,7 +4239,9 @@ def main(argv=None):
                     print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
                           f"{one['report']}")
                     print(f"  session {one['session']}"
-                          + (f", its log {one['log']}" if worker_mode(me.home) == "print" else ""))
+                          + (f", its log {one['log']}" if one["settings"]["mode"] == "print" else ""))
+                    print("  " + worker_start(me.home, one["settings"], one["name"], safe_id(me.id), "land",
+                                              one.get("log") or "", one["report"]))
                     print("`mcp__terminal__run_in_terminal` with " + json.dumps(
                         {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
                     print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "

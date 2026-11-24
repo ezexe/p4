@@ -19,8 +19,10 @@ import relay
 import sections
 import starts
 import transcript
+import workerlog
 
 FILE = "progress.json"
+WORKERS = "workers.md"           # the page of the session's -p workers, workerlog.render, beside progress.json
 NODES = 64                       # the most sessions one file holds
 STEPS = 24                       # the most steps of one session, and the most sections of one plan
 SOURCES = 400                    # the most files the module watches
@@ -157,9 +159,11 @@ def node(home, sid, depth, s):
             "plan": plan_of(s), "team": team_of(home, sid)}
 
 
-def build(home, top):
+def build(home, top, found=None):
     """The tree of the session `top` as data: a node for it and for each session under it that p4-phi's records do
-    not hold as closed, in tree order, the files they were read from, and the folder every session's folder is in."""
+    not hold as closed, in tree order, the files they were read from, with the log of each worker `found` (the
+    workers of `top` by default), and the folder every session's folder is in."""
+    found = workerlog.workers(home, top) if found is None else found
     nodes, sources = [], []
     for sid, depth, s in puppeteer.subtree(home, top):
         if depth and puppeteer.closed(s):
@@ -180,8 +184,29 @@ def build(home, top):
         if any(mate["state"] not in OVER for mate in team_of(home, sid)):
             nodes.append(dict(node(home, sid, 0, s), apart=True))
             sources += [os.path.join(relay._dir(home, sid), name) for name in WATCHED]
+    sources += [w["log"] for w in found]
     return {"top": top, "nodes": nodes, "sources": [p.replace("\\", "/") for p in sources[:SOURCES]],
             "folders": [b.replace("\\", "/") for b in relay.session_bases(home) if os.path.isdir(b)]}
+
+
+def page(folder, text):
+    """workers.md in `folder`, written only where it differs, and removed where `text` is empty; whether it changed."""
+    path = os.path.join(folder, WORKERS)
+    try:
+        with open(path, encoding="utf-8") as f:
+            held = f.read()
+    except OSError:
+        held = ""
+    if held == text:
+        return False
+    if text:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    else:
+        os.remove(path)
+    return True
 
 
 def write(home, sid):
@@ -192,10 +217,12 @@ def write(home, sid):
     if not sid or not os.path.isfile(os.path.join(folder, "session.json")):
         return {}
     path = os.path.join(folder, FILE)
-    m = build(home, sid)
+    found = workerlog.workers(home, sid)
+    m = build(home, sid, found)
     changed = relay._read_json(path) != m
     if changed:
         relay._write_json(path, m)
+    changed = page(folder, workerlog.render(found)) or changed
     return {"path": path.replace("\\", "/"), "changed": changed}
 
 

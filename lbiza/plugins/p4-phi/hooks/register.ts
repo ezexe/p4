@@ -203,8 +203,12 @@ const PANE = 'p4-phi'
 const PANE_TITLE = 'p4-phi'
 // The pages the pane shows, in its order, each a file python writes into the session's folder in the store:
 // controls.board_path, asks.page_path and puppeteer.ledger_path. A session has the ones its part gives it: a
-// puppeteer the first two, an orchestrator the last, a worker none.
+// puppeteer the first two, an orchestrator the last, a worker none. The workers page, `workers.md`, is the one a
+// session gets whose `-p` workers (terminal workers that `phi.py` started as `claude -p`) it started: scripts/
+// progress.py writes it beside progress.json from each worker's stream-json log, with the worker's error first,
+// and it is left out where the session has none. The pane only reads it.
 const PAGES = [
+  { name: 'workers', file: 'workers.md', title: 'Workers' },
   { name: 'board', file: 'board.md', title: 'Board' },
   { name: 'asks', file: 'asks.md', title: 'Requests of ezexe' },
   { name: 'ledger', file: 'ledger.md', title: 'Sessions' },
@@ -1407,6 +1411,8 @@ async function progress($: EngineInterface): Promise<void> {
       await update($, grown, () => nodes)
       treed = now
     }
+    // A run that changed anything may have rewritten the workers page too, so the pages are read again.
+    if (answer.changed === true) await page($)
   } catch (error) {
     note($, `the pane's tree was not read: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
   } finally {
