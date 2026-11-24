@@ -2782,7 +2782,7 @@ class TerminalWorker(unittest.TestCase):
         self.mode("local_plan0001", "auto")
         ran = self.run_phi("--land")
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertIn("mode print (the piece of work), profile p4-workers (the pair of print)", ran.stdout)
+        self.assertIn("mode print (the default), profile p4-workers (the pair of print)", ran.stdout)
         (start,) = self.rows()
         self.assertEqual((start["event"], start["mode"], start["profile"], start["kind"], start["starter"]),
                          ("start", "print", "p4-workers", "land", "local_plan0001"))

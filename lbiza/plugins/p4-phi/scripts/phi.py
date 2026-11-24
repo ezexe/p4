@@ -4203,7 +4203,9 @@ def main(argv=None):
                            "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
                 try:
                     found = coworker.land(plan, checkout, "", mode, claim=True,
-                                          settings=lambda text: worker_settings(me.home, me.id, text), **node_of)
+                                          # landing is headless work by the rule, so a section's own words, which
+                                          # may name modes, pick no mode: only a set mode does
+                                          settings=lambda text: worker_settings(me.home, me.id, ""), **node_of)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2

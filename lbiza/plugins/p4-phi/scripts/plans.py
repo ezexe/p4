@@ -607,18 +607,23 @@ DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|inv
 # mode, where it holds and writes the plan
 PLANNER = re.compile(r"(?im)^[ \t>*-]*(?:this session|it) starts in plan mode\b")
 REVIEWS = re.compile(r"^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*", re.I)
-# a brief that says ezexe steers, watches or approves in the worker's own tab, or names ExitPlanMode
-STEERED = re.compile(r"\b(?:ezexe|the user)\s+(?:steers|watches|approves)\b|\binteractive(?:ly)?\b|\bExitPlanMode\b", re.I)
+# a brief that says ezexe steers or watches the worker's own tab, or names an interactive tab or session for it; the
+# bare word `interactive` is no such sign, since a landing section that documents worker_mode holds it
+STEERED = re.compile(r"\b(?:ezexe|the user)\s+(?:steers|watches)\b|\b(?:in|an?)\s+interactive\s+(?:tab|session)\b",
+                     re.I)
+# a planner's brief that says ezexe approves its plan in its tab, which only an interactive session can ask
+APPROVES = re.compile(r"\b(?:ezexe|the user)\s+approves\b|\bExitPlanMode\b", re.I)
 
 
 def worker_mode_for(text):
     """(`interactive` or `print`, the reason) for a piece of work by its brief: interactive where it wants an agent
-    team, TEAMS, or a planner or tab ezexe steers, PLANNER with STEERED or STEERED alone; print for the rest, since
+    team, TEAMS, a planner whose plan ezexe approves in its tab, PLANNER with APPROVES, or a tab ezexe steers,
+    STEERED; print for the rest, since
     headless landing, test and check work runs on the API credit."""
     text = str(text or "")
     if TEAMS.search(text):
         return "interactive", "the brief wants an agent team, which forms only in an interactive session"
-    if PLANNER.search(text) and STEERED.search(text):
+    if PLANNER.search(text) and APPROVES.search(text):
         return "interactive", "a planner that puts its plan to ezexe with ExitPlanMode needs a person in its tab"
     if STEERED.search(text):
         return "interactive", "ezexe steers this tab"

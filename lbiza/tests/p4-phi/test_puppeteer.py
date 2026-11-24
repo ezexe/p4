@@ -1166,6 +1166,10 @@ class WorkerSettings(Base):
         self.assertEqual(plans.worker_mode_for(self.APPROVE)[0], "interactive")
         self.assertEqual(plans.worker_mode_for("Plan it.\nThis session starts in plan mode.\nFiles: none")[0], "print")
         self.assertEqual(plans.worker_mode_for("Fix it in a tab ezexe steers.")[0], "interactive")
+        self.assertEqual(plans.worker_mode_for("Fix it in an interactive tab.")[0], "interactive")
+        self.assertEqual(plans.worker_mode_for("Document worker_mode, print or interactive, and ExitPlanMode in the "
+                                               "README.\nFiles: README.md")[0], "print",
+                         "a landing brief that only names the modes lands headless")
         t = self.t
         t.say(TOP, TASK)
         self.assertEqual(phi.worker_settings(t.p4, TOP, self.TEAM)["mode"], "interactive")
