@@ -123,9 +123,10 @@ def _rows(path):
 # --- a node's store: the store each started session, terminal worker and reading team gets ------------------------
 #
 # ezexe/phi's docs/p4/nested-store.md:61-63: a child's store is `.claude/p4` under its parent's store, and nothing
-# makes a `p4` directly inside a `p4`. The i-th child is `.claude/p4` for i = 1 and `.claude/p4-<i>` for i >= 2, so
-# siblings sit at one depth. A store made before that holds the i-th child at `.claude` i times and `p4`
-# (old_store_of): the walk still reads it, and claim() never takes a place either layout holds. The home every
+# makes a `p4` directly inside a `p4`. The i-th child is `.claude/p4` for i = 1 and `.claude/<i>/.claude/p4` for
+# i >= 2, so siblings sit at one depth and every store is a `p4` directly under a `.claude`. A store made before
+# that holds the i-th child at `.claude` i times and `p4` (old_store_of): the walk still reads it, and claim()
+# never takes a place either layout holds. The home every
 # function is handed stays the tree's root store; a node is found from its id, never from the folder a session runs
 # in, since a session started inside a nested store waits at Claude Code's trust question for every new folder.
 
@@ -134,13 +135,13 @@ NODE_PATH_MAX = 180              # the longest store path claim makes, so the fi
 _TREE = {}                       # by the root store: [the stores' paths under it], and {id: (path, node.json)}
 
 
-SIBLING = re.compile(r"p4(?:-([2-9]|[1-9]\d+))?\Z")      # `p4`, the first child, and `p4-<i>` for i from 2
+PLACE = re.compile(r"(?:[2-9]|[1-9]\d+)\Z")             # the folder `<i>` of the i-th child, i from 2, no leading zero
 
 
 def store_of(parent, i):
-    """The store of the i-th child, i from 1, of the store `parent`: `.claude/p4`, then `.claude/p4-2`,
-    `.claude/p4-3`, ..., all at one depth."""
-    return os.path.join(parent, ".claude", "p4" if i == 1 else f"p4-{i}")
+    """The store of the i-th child, i from 1, of the store `parent`: `.claude/p4`, then `.claude/2/.claude/p4`,
+    `.claude/3/.claude/p4`, ..., all at one depth."""
+    return os.path.join(parent, ".claude", "p4") if i == 1 else os.path.join(parent, ".claude", str(i), ".claude", "p4")
 
 
 def old_store_of(parent, i):
@@ -160,24 +161,35 @@ def _walk(home):
     while todo:
         rel = todo.pop()
         rels.append(rel)
-        at, kids = os.path.join(home, rel) if rel else home, []
+        at, kids, found, chain, first = os.path.join(home, rel) if rel else home, [], [], [], None
         while True:
             at = os.path.join(at, ".claude")
             if not os.path.isdir(at):
                 break
             listed.append(at)
-            try:
-                names = [n for n in os.listdir(at) if SIBLING.match(n)]
-            except OSError:
-                names = []
-            for n in sorted(names, key=lambda n: int(SIBLING.match(n).group(1) or 1)):
-                d = _read_json(os.path.join(at, n, "phi", NODE))
-                ident = str(d.get("id") or "")
-                if ident:
-                    kid = os.path.relpath(os.path.join(at, n), home)
-                    kids.append(kid)
-                    if ident not in held:     # an id that stands in two stores is read at the first
-                        held[ident] = (kid, d)
+            if first is None:
+                first = at
+            k = len(chain) + 1                # the old layout: the k-th `.claude` of the chain holds child k
+            chain.append(at)
+            d = _read_json(os.path.join(at, "p4", "phi", NODE))
+            if str(d.get("id") or ""):
+                found.append((k, os.path.join(at, "p4"), d))
+        try:
+            names = [n for n in os.listdir(first) if PLACE.match(n)] if first else []
+        except OSError:
+            names = []
+        for n in names:
+            under = os.path.join(first, n, ".claude")
+            if os.path.isdir(under):
+                listed.append(under)
+                d = _read_json(os.path.join(under, "p4", "phi", NODE))
+                if str(d.get("id") or ""):
+                    found.append((int(n), os.path.join(under, "p4"), d))
+        for _, path, d in sorted(found, key=lambda t: t[0]):
+            kid, ident = os.path.relpath(path, home), str(d["id"])
+            kids.append(kid)
+            if ident not in held:             # an id that stands in two stores is read at the first
+                held[ident] = (kid, d)
         todo.extend(reversed(kids))           # depth first, each store's children in their order
     return rels, held, listed
 

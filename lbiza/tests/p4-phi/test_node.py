@@ -79,7 +79,7 @@ class Address(unittest.TestCase):
             self.assertEqual(node.place_of(self.home, relay.old_store_of(self.home, i))[0], want)
         deep = os.path.join(relay.store_of(self.home, 2), ".claude", "p4")
         self.assertEqual(node.place_of(self.home, deep), ("100101", [2, 1]))
-        self.assertEqual(node.place_of(self.home, os.path.join(self.home, ".claude", "p4-1")), ("1", []))
+        self.assertEqual(node.place_of(self.home, os.path.join(self.home, ".claude", "1", ".claude", "p4")), ("1", []))
 
     def test_two_tops_of_one_store_are_each_1(self):
         found = node.addresses(self.home, {"a": rec("a"), "b": rec("b"), "c": rec("c", "gone")})

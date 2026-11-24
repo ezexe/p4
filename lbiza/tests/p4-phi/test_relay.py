@@ -1969,19 +1969,19 @@ class Nodes(unittest.TestCase):
 
     def test_store_of_gives_siblings_at_one_depth_and_old_store_of_one_more_claude_each(self):
         self.assertEqual(relay.store_of("S", 1), os.path.join("S", ".claude", "p4"))
-        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", "p4-2"))
-        self.assertEqual(relay.store_of("S", 3), os.path.join("S", ".claude", "p4-3"))
+        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", "2", ".claude", "p4"))
+        self.assertEqual(relay.store_of("S", 3), os.path.join("S", ".claude", "3", ".claude", "p4"))
         self.assertEqual(relay.old_store_of("S", 2), os.path.join("S", ".claude", ".claude", "p4"))
 
-    def test_three_sibling_claims_make_p4_p4_2_p4_3_and_nodes_finds_them_and_a_child_of_p4_2(self):
+    def test_three_sibling_claims_x_and_nodes_finds_them_and_a_child_of_p4_2(self):
         got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]
-        self.assertEqual([os.path.basename(g) for g in got], ["p4", "p4-2", "p4-3"])
-        self.assertEqual({os.path.dirname(g) for g in got}, {os.path.join(self.home, ".claude")})
+        self.assertEqual([os.path.relpath(g, self.home).replace("\\", "/") for g in got],
+                         [".claude/p4", ".claude/2/.claude/p4", ".claude/3/.claude/p4"])
         kid = relay.claim(self.home, got[1], "d", "session", "b")
         self.assertEqual(kid, os.path.join(got[1], ".claude", "p4"))
         self.assertEqual(relay.nodes(self.home), {"a": got[0], "b": got[1], "c": got[2], "d": kid})
 
-    def test_a_parent_with_an_old_second_child_gets_p4_3_next(self):
+    def test_a_parent_with_an_old_second_child_gets_place_3_next(self):
         write(os.path.join(relay.old_store_of(self.home, 1), "phi", relay.NODE), json.dumps({"id": "a"}))
         write(os.path.join(relay.old_store_of(self.home, 2), "phi", relay.NODE), json.dumps({"id": "b"}))
         relay.forget(self.home)
