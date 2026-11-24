@@ -933,6 +933,45 @@ class Terminal(Base):
         with open(os.path.join(folder, "coworker-settings.json"), encoding="utf-8") as f:
             self.assertTrue(json.load(f)["enabledPlugins"]["p4-temportal@p4-marketplace"])
 
+    def started_file(self, name_words="Fix the ports table", settings=None):
+        t = self.t
+        if settings is not None:
+            write(os.path.join(t.p4, "phi", "phi.json"), json.dumps(settings))
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        ctx = context(t.say(TOP, RETRY))
+        did = re.search(r"draft (drf-[0-9a-f]{10})", ctx).group(1)
+        self.assertEqual(t.cli(TOP, "draft", "--start", did).returncode, 0)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        name = [f for f in os.listdir(folder) if f.startswith("start-")][0]
+        with open(os.path.join(folder, name), encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_drafted_workers_start_file_names_the_workers_profile_by_default_and_not_when_it_is_off(self):
+        self.assertIn("ANTHROPIC_PROFILE", self.started_file())
+
+    def test_an_empty_profile_in_phi_json_leaves_the_start_file_without_the_line(self):
+        self.assertNotIn("ANTHROPIC_PROFILE", self.started_file(settings={"worker_profile": ""}))
+
+    def test_worker_profile_reads_p4_workers_where_the_key_is_absent_and_the_command_writes_it(self):
+        t = self.t
+        t.say(TOP, TASK)
+        path = os.path.join(t.p4, "phi", "phi.json")
+        self.assertEqual(phi.worker_profile(t.p4), "p4-workers")
+        self.assertIn("worker_profile is p4-workers", t.cli(TOP, "worker_profile").stdout)
+        write(path, json.dumps({"book": False}))
+        r = t.cli(TOP, "worker_profile", "p4-bill")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(path), {"book": False, "worker_profile": "p4-bill"}, "the other keys are kept")
+        self.assertIn("ant auth login --profile p4-bill", r.stdout)
+        self.assertEqual(phi.worker_profile(t.p4), "p4-bill")
+        r = t.cli(TOP, "worker_profile", "off")
+        self.assertIn("worker_profile is off", r.stdout)
+        self.assertEqual(jload(path), {"book": False, "worker_profile": ""})
+        self.assertEqual(phi.worker_profile(t.p4), "")
+        self.assertEqual(t.cli(TOP, "worker_profile", "bad name").returncode, 2)
+
     def test_a_session_another_session_started_is_an_orchestrator_whether_or_not_it_started_one(self):
         s = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
         self.assertTrue(puppeteer.orchestrator(self.t.p4, s))

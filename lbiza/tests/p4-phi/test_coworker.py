@@ -196,6 +196,37 @@ class Coworker(unittest.TestCase):
         self.assertEqual(coworker.draft_name("", "drf-ab12cd34ef"), "tw-work-34ef")
         self.assertLessEqual(len(coworker.draft_name("x" * 80, "drf-0000000000")), len("tw-") + 24 + 5)
 
+    def test_the_start_file_names_the_profile_where_its_credentials_are_and_no_key_anywhere(self):
+        win = coworker.script("tw-a", "E:/repo", "", "the prompt", "E:/n/phi", windows=True, team=False,
+                              profile="p4-workers")[1]
+        self.assertEqual(len(win), 4, "the clearing line, the profile line, the folder, the run")
+        self.assertIn("'CLAUDE_CODE_HOST_SESSION_ID'", win[0])
+        self.assertIn("Test-Path (Join-Path $d 'credentials\\p4-workers.json')", win[1])
+        self.assertIn("$env:ANTHROPIC_PROFILE = 'p4-workers'", win[1])
+        self.assertIn("$env:ANTHROPIC_CONFIG_DIR", win[1])
+        sh = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=False, team=True,
+                             profile="p4-workers")[1]
+        self.assertEqual(sh[1], 'd="${ANTHROPIC_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/anthropic}"; '
+                                '[ -f "$d/credentials/p4-workers.json" ] && export ANTHROPIC_PROFILE=p4-workers')
+        self.assertEqual(sh[2], "export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "ahead of the team variable")
+        for lines in (win, sh):
+            self.assertFalse([x for x in lines if "API_KEY" in x], "no key is named")
+        for windows in (True, False):
+            plain = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=windows, team=False,
+                                    profile="")[1]
+            self.assertFalse([x for x in plain if "ANTHROPIC_PROFILE" in x], "an empty profile is off")
+            for bad in ("p4 workers", "p4;workers", "p4/workers", "a'b"):
+                with self.assertRaises(ValueError):
+                    coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=windows, profile=bad)
+
+    def test_a_worker_and_a_landing_pass_the_profile_to_their_start_file(self):
+        one = coworker.worker("tw-p-0001", "Do it.", "It is done", "E:/repo", self.home, PLANNER, self.home,
+                              windows=True, profile="p4-workers")
+        self.assertTrue(any("ANTHROPIC_PROFILE" in x for x in one["lines"]))
+        found = coworker.land(self.path, "E:/repo", WHO, "auto", self.home, PLANNER, self.home, claim=True,
+                              windows=True, profile="p4-workers")
+        self.assertTrue(all(any("ANTHROPIC_PROFILE" in x for x in f["lines"]) for f in found))
+
     def test_the_brief_names_the_checkout_the_whole_commit_command_and_the_report_file(self):
         one = self.land()[0]
         brief = one["brief"]

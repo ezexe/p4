@@ -484,8 +484,10 @@ Every key is optional, and the file need not exist.
 | `reports_chars` | 6000 |
 | `wait_s` | 2.0 |
 | `goal` | `false` |
+| `worker_profile` | `p4-workers` |
 
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.
+`worker_profile` names the Anthropic profile that the start file of a terminal worker sets as `ANTHROPIC_PROFILE` in its tab, only where that profile's credentials file is there, so the worker's usage is billed to the Claude Console profile ezexe signed in once with `ant auth login --profile <name>`; no key is made, stored or named, and an empty string turns the line off. `phi.py worker_profile <name>` and `phi.py worker_profile off` write it, and `phi.py worker_profile` alone prints how it stands.
 `goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition.
 `phi.py goal on` and `phi.py goal off` write the key and print how it stands, since a session writes nothing under `.claude` with its own tools.
 Where no prompt hook saw a worker's brief, as when the plugin was loaded after the session's first message, the line is kept at the first Stop the plugin sees, where the task is.

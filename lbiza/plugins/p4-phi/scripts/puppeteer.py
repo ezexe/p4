@@ -1399,7 +1399,8 @@ def start_draft(home, s, did, base):
         "The task of the brief is done and its checks pass"
     one = coworker.worker(name, d["brief"], done, base, home, s["sessionId"], node, team=planner,
                           mode="plan" if planner else coworker.LAND_MODE,
-                          prompt=coworker.planner_task(d["title"]) if planner else "")
+                          prompt=coworker.planner_task(d["title"]) if planner else "",
+                          profile=phi.worker_profile(home))
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
     coworker.write([one], base, home)

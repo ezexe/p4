@@ -101,7 +101,27 @@ def planner_task(title):
             f"plan to ezexe with ExitPlanMode.")
 
 
-def script(name, checkout, mode, said, folder, windows=None, team=True, extra=(), session=""):
+PROFILE = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def profile_lines(profile, windows):
+    """The one line of a start file that names the Anthropic profile `profile` for that tab alone, where the
+    profile's credentials file is there: `credentials/<profile>.json` in `ANTHROPIC_CONFIG_DIR`, whose default is
+    `%APPDATA%\\Anthropic` on Windows and, elsewhere, `${XDG_CONFIG_HOME:-$HOME/.config}/anthropic`, an assumption of
+    this file. No key is named: a profile `ant auth login` wrote is a sign-in with none. [] where `profile` is
+    empty; ValueError where it holds a character outside letters, digits, `_` and `-`."""
+    if not profile:
+        return []
+    if not PROFILE.fullmatch(profile):
+        raise ValueError(f"a worker profile's name holds letters, digits, _ and - only: {profile}")
+    if windows:
+        return [f"$d = if ($env:ANTHROPIC_CONFIG_DIR) {{ $env:ANTHROPIC_CONFIG_DIR }} else {{ Join-Path $env:APPDATA 'Anthropic' }}; "
+                f"if (Test-Path (Join-Path $d 'credentials\\{profile}.json')) {{ $env:ANTHROPIC_PROFILE = '{profile}' }}"]
+    return ['d="${ANTHROPIC_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/anthropic}"; '
+            f'[ -f "$d/credentials/{profile}.json" ] && export ANTHROPIC_PROFILE={profile}']
+
+
+def script(name, checkout, mode, said, folder, windows=None, team=True, extra=(), session="", profile=""):
     """A coworker's start script, as (its file's name, its lines, the line typed into the tab): what a desktop
     session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout, with no
     worktree, and the settings file of `folder`. `session` adds
@@ -109,6 +129,7 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
     flags, each a word spelled as the shell reads it, after those. A quote in the prompt `said` is refused as one in
     a path is, since the prompt stands between quotes."""
     windows = upkeep.WINDOWS if windows is None else windows
+    named = profile_lines(profile, windows)
     sep = "\\" if windows else "/"
     here, at = checkout.replace("\\", "/").replace("/", sep), folder.replace("\\", "/").replace("/", sep)
     for path in (here, at, said):
@@ -124,9 +145,9 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
         names = ", ".join(f"'{n}'" for n in upkeep.CARRIED)
         return (f"start-{name}.ps1",
                 [f"foreach ($n in {names}) {{ Remove-Item -Path ('Env:' + $n) -ErrorAction SilentlyContinue }}",
-                 *([f"$env:{TEAMS} = '1'"] if team else []), f"Set-Location '{here}'", run],
+                 *named, *([f"$env:{TEAMS} = '1'"] if team else []), f"Set-Location '{here}'", run],
                 f"& '{at}\\start-{name}.ps1'")
-    return (f"start-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", *([f"export {TEAMS}=1"] if team else []),
+    return (f"start-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", *named, *([f"export {TEAMS}=1"] if team else []),
                                  f"cd '{here}'", run], f"sh '{at}/start-{name}.sh'")
 
 
@@ -260,7 +281,7 @@ TURNS = 60                                     # the goal page: a goal with no t
 LAND_MODE = "bypassPermissions"
 
 
-def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None):
+def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None, profile=""):
     """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
     that lands it, started once ezexe approved the plan. `name` and `sections`, and with `claim` the node relay.claim
     makes for it in the store `store` of its starter `starter`, and in the node's folder the `brief` text and its
@@ -283,24 +304,24 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
         return [{k: v for k, v in one.items() if k != "group"} for one in out]
     try:
         for one in out:
-            _worker(one, plan, title, checkout, mode, home, starter, store, windows)
+            _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile)
     except Exception:
         _undo(home, out)
         raise
     return out
 
 
-def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
+def _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile=""):
     """The node of one terminal worker of land(), and its brief, goal and start file in it."""
     group, nums = one.pop("group"), one["sections"]
     many = "s" if len(group) > 1 else ""
     done = f"Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed, its Checks pass"
     one.update(worker(one["name"], sections.brief(plan, title, group, checkout, []), done, checkout, home, starter,
-                      store, nums, windows))
+                      store, nums, windows, profile=profile))
 
 
 def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=None, team=False, mode=LAND_MODE,
-           extra=(), prompt=""):
+           extra=(), prompt="", profile=""):
     """The node of one terminal worker and its brief, goal and start file in it, as one entry: `name`, and either
     `started`, the folder of a node that holds that name already, or `folder`, `brief` and `brief_file`, `report`,
     `goal`, and the start file's `file`, `lines` and the line `typed` in its tab. `done` is what the goal waits
@@ -330,7 +351,8 @@ def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=N
     if prompt:
         goal = f"{prompt} The brief is {brief_file}, and the report {report} is written when the plan is put."
     try:
-        file, lines, typed = script(name, checkout, mode, goal, folder, windows, team=team, extra=extra)
+        file, lines, typed = script(name, checkout, mode, goal, folder, windows, team=team, extra=extra,
+                                    profile=profile)
     except Exception:
         relay.unclaim(home, name)
         raise

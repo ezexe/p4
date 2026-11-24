@@ -81,6 +81,7 @@ TURNS = True
 BOOK = True
 RULES = True
 GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
+WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
@@ -108,7 +109,7 @@ WAIT_S = 2.0                     # how long a handed-over first message waits fo
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
-            "goal": "GOAL", "app_tools": "APP_TOOLS"}
+            "goal": "GOAL", "app_tools": "APP_TOOLS", "worker_profile": "WORKER_PROFILE"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -2615,6 +2616,32 @@ def switch(home, key, on):
     return "on" if read_json(path).get(key) is True else "off", path.replace(chr(92), "/")
 
 
+def worker_profile(home):
+    """The Anthropic profile a terminal worker names: `worker_profile` of the store's phi/phi.json where it is a
+    string, an empty one for off, else WORKER_PROFILE."""
+    v = read_json(os.path.join(home, "phi", "phi.json")).get("worker_profile") if home else None
+    return v if isinstance(v, str) else WORKER_PROFILE
+
+
+def worker_profile_set(home, name=None):
+    """`phi.py worker_profile`: with no name it writes nothing and says how the key stands; with a name it writes it
+    to the store's phi/phi.json, and `off` writes the empty string, keeping the file's other keys. Returns the line
+    that says how the key stands as read back."""
+    path = os.path.join(home, "phi", "phi.json")
+    if name is not None:
+        want = "" if name == "off" else name
+        if want and not re.fullmatch(r"[A-Za-z0-9_-]+", want):
+            raise ValueError("a worker profile's name holds letters, digits, _ and - only")
+        d = read_json(path)
+        if not d and os.path.exists(path) and os.path.getsize(path) > 2:
+            raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
+        d["worker_profile"] = want
+        write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    now_ = worker_profile(home)
+    return (f"worker_profile is {now_ or 'off'} in {path.replace(chr(92), '/')}"
+            + (f": ezexe runs `ant auth login --profile {now_}` once" if now_ else ""))
+
+
 def app_tools_switch(home, on=None):
     """`phi.py app_tools on` and `app_tools off`: writes `app_tools` in the store's phi/phi.json, as `goal on` writes
     its key, and returns the line that says how it stands as read back. With neither it writes nothing and says how
@@ -3753,7 +3780,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "cards", "conf", "sections",
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "cards", "conf", "sections",
                  "coworkers", "progress", "spend", "node"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
@@ -3804,6 +3831,10 @@ def main(argv=None):
                            help="on and off write `app_tools` in the store's phi.json, which is on unless set off "
                                 "and has the hooks module ask the desktop app's own tools for sessions; none "
                                 "prints how the key stands")
+        if name == "worker_profile":
+            p.add_argument("name", nargs="?", default=None,
+                           help="the Anthropic profile a terminal worker names in its tab, which `ant auth login "
+                                "--profile <name>` wrote, or `off` for none; left out it prints how the key stands")
         if name == "cards":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on puts the set of what p4-phi settles with no approval card in force for the "
@@ -3894,6 +3925,9 @@ def main(argv=None):
                 sys.stdout.write(json.dumps({"failed": goal_failed(me.home, safe_id(me.id), a.condition)}) + "\n")
             else:
                 print(goal_text(load_session(me.home, safe_id(me.id)) if me.id else {}))
+            return 0
+        if a.cmd == "worker_profile":              # the project's setting, which needs no session
+            print(worker_profile_set(me.home, a.name))
             return 0
         if a.cmd == "app_tools":                   # the project's setting, which needs no session and makes no folder
             print(app_tools_switch(me.home, a.act == "on" if a.act else None))
@@ -4012,7 +4046,8 @@ def main(argv=None):
                 node_of = {"home": me.home, "starter": safe_id(me.id),
                            "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
                 try:
-                    found = coworker.land(plan, checkout, "", mode, claim=True, **node_of)
+                    found = coworker.land(plan, checkout, "", mode, claim=True, profile=worker_profile(me.home),
+                                          **node_of)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
