@@ -1590,6 +1590,28 @@ test('git opens the check only as a word of a shell command, and so does what ma
   expect(seen.checks.length).toBe(git.length + 2)
 })
 
+test('a call into plan-planner/complete reaches the check, with no git word and no paths marker, and a plain ls does not', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  await $.tool.check(bash('ls'))
+  await $.tool.check(bash('ls .claude/p4/temportal/plan-planner'))
+  await $.tool.check(call('Write', { file_path: '/work/project/notes/plan.md', content: 'plan-planner/complete' }))
+  expect(seen.checks).toEqual([])
+
+  const into = [
+    bash('mv .claude/p4/temportal/plan-planner/a.md .claude/p4/temportal/plan-planner/complete/a.md'),
+    bash('move C:\\p\\plan-planner\\complete\\a.md'),
+    call('PowerShell', { command: 'Move-Item a.md .claude\\p4\\temportal\\plan-planner\\complete' }),
+    call('Write', { file_path: '/work/project/.claude/p4/temportal/plan-planner/complete/a.md', content: 'x' }),
+    call('Edit', { file_path: 'C:\\p\\plan-planner\\complete\\a.md', old_string: 'a', new_string: 'b' }),
+  ]
+  for (const one of into) await $.tool.check(one)
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Bash', 'Bash', 'PowerShell', 'Write', 'Edit'])
+})
+
 test('a plain shell call starts no python, whatever the store holds', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)

@@ -133,6 +133,9 @@ const IN_BACKGROUND = /"run_in_background":\s?true/
 // raises the one approval card the set has, so the yes is ezexe's own. Between the script's name and the word
 // stand the closing quote, as the call's JSON text escapes it, and a space.
 const CARDS_ON = /phi\.py[^A-Za-z0-9]+cards[^A-Za-z0-9]+on[^A-Za-z0-9]/
+// `plan-planner/complete` or `plan-planner\complete`, which phi.py's plan-guard reads: a plan goes into that folder
+// through `phi.py plan close` alone. In a call's JSON text a backslash is escaped, so any run of them counts.
+const IN_COMPLETE = /plan-planner[\\/]+complete/
 // The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
 const MOST_TOLD = 256
 
@@ -1068,6 +1071,12 @@ async function isChecked(
   if (!isEdit && !isShell) return true
   if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
   if (isShell && CARDS_ON.test(text)) return true
+  // A shell call that names the folder of closed plans, and an edit whose path does: plan-guard's to refuse.
+  if (isShell && IN_COMPLETE.test(text)) return true
+  if (isEdit && isRecord(e.input)) {
+    const paths = [e.input.file_path, e.input.notebook_path, e.input.path]
+    if (paths.some(path => typeof path === 'string' && IN_COMPLETE.test(path))) return true
+  }
   // A session some session's paths are held against, whose edit phi.py's path guard reads.
   if (isEdit && (await $.fs.exists(`${phi}/.paths/on`).catch(() => false))) return true
 
