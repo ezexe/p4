@@ -4523,7 +4523,7 @@ def main(argv=None):
                     print(f"long: {'no report of ' + str(len(reports)) + ' is' if len(reports) > 1 else report + ' is not'}"
                           f" there after {waited} seconds: look at the terminal tab"
                           f"{'s' if len(reports) > 1 else ' `' + tab + '`'}")
-                rest = [r for r in reports if r != report or how == "long"]
+                rest = [r for r in reports if (r != report or how == "long") and not os.path.exists(r)]
                 if len(reports) > 1 and how != "long":
                     print("still running: " + " ".join(rest) if rest else "none still running")
                 if len(reports) > 1:
