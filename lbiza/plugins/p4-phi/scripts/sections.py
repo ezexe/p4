@@ -10,7 +10,6 @@ written: the skill sub-agentic's table has the integrator land "written fences".
 
 import re
 
-import plans
 import puppeteer
 import relay
 import starts
@@ -32,15 +31,6 @@ NOTHING = re.compile(r"^\W*(?:none|nothing)\W*$", re.I)      # the whole of a li
 # group of sections is filled to five fences before a team reads it, which is the fill the first plan read by
 # groups was read at, on 2026-11-23.
 FULL = 5
-# what `phi.py sections` says after the calls it prints: each is a start that runs at once, which the app refuses in
-# a turn ezexe's own message did not begin, where the same call goes out as a card; a planner another session started
-# makes no such call and starts each run as an integrator subagent, which waits on no card
-CARD = ("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each call there "
-        "with `initiation` `own_initiative` and without `wake_when_done`, which shows a card ezexe presses. A planner "
-        "another session started sends none of these calls: it starts one `p4-phi:integrator` subagent for each, "
-        "with the call's `prompt` as its brief, in the one checkout, as the line at its plan's approval says.")
-
-
 def assumed_of(body):
     """How many lines stand under a section's `**Assumed:**`: what follows the label on its own line, and each list
     item beneath it up to the first line that is no item. A line that says `none` counts for nothing."""
@@ -166,20 +156,3 @@ def brief(path, title, run, base="", where=None):
     lines += [f"Done looks like: every fence of section{'s' if many else ''} {nums} landed"
               + (", those checks passing" if checks else "") + ", committed and reported.", "Report when done."]
     return "\n".join(lines)
-
-
-def calls(path, base=""):
-    """One start call for each run of the plan at `path`, in the plan's order."""
-    with open(path, encoding="utf-8") as f:
-        title, sections = parse(f.read(), base)
-    out = []
-    for run in runs(sections):
-        level = {**plans.CHILD_LEVELS["static"], "kind": "static"}      # written fences are an integrator's to land
-        level["effort"] = plans.capped(level["effort"])
-        # the brief names its own level, which plans.child_level lays over the kind call_of would read from its words
-        out.append(puppeteer.call_of({
-            "title": name(title, run), "context": "fresh", "parent": "plan",
-            "brief": plans.level_said(brief(path, title, run, base), level),
-            "background": f"ezexe approved the plan `{path}`, and this start lands {name(title, run)}, whose "
-                          "every edit is a fence there with its source."}))
-    return out

@@ -192,6 +192,30 @@ class Coworker(unittest.TestCase):
         self.assertEqual(one["typed"], f"& '{at}\\start-{name}.ps1'")
         self.assertEqual(relay.node_record(self.home, name)["kind"], "worker")
 
+    def test_a_worker_for_any_brief_is_a_node_with_its_brief_report_and_a_goal_that_waits_on_its_done(self):
+        found = coworker.worker("tw-a-check-0001", "Check the flush.\nFiles: none", "The check is done and passes",
+                                "E:/repo", self.home, PLANNER, self.home, windows=True)
+        self.assertEqual(found["name"], "tw-a-check-0001")
+        self.assertEqual(relay.node_record(self.home, "tw-a-check-0001")["kind"], "worker")
+        self.assertEqual(found["report"], f"{found['folder']}/report-tw-a-check-0001.md")
+        self.assertTrue(found["brief"].endswith("Check the flush.\nFiles: none"))
+        self.assertIn("Publish no issue", found["brief"])
+        self.assertTrue(found["goal"].startswith("/goal The check is done and passes, as the brief "))
+        self.assertIn(found["goal"], found["lines"][-1], "its goal is its prompt")
+        self.assertNotIn(coworker.TEAMS, "\n".join(found["lines"]))
+        for word in ("--worktree", "--add-dir"):
+            self.assertNotIn(word, found["lines"][-1])
+        again = coworker.worker("tw-a-check-0001", "x", "y", "E:/repo", self.home, PLANNER, self.home, windows=True)
+        self.assertEqual(list(again), ["name", "started"], "a name that has a node is not started twice")
+        with self.assertRaises(ValueError):
+            coworker.worker("tw-b-0002", "x", "y", "E:/re'po", self.home, PLANNER, self.home)
+        self.assertIsNone(relay.nodes(self.home).get("tw-b-0002"))
+
+    def test_a_drafted_workers_name_is_tw_the_slug_of_its_title_and_the_last_four_of_its_draft_id(self):
+        self.assertEqual(coworker.draft_name("Fix the Flush: rows & more!", "drf-0123456789"), "tw-fix-the-flush-rows-more-6789")
+        self.assertEqual(coworker.draft_name("", "drf-ab12cd34ef"), "tw-work-34ef")
+        self.assertLessEqual(len(coworker.draft_name("x" * 80, "drf-0000000000")), len("tw-") + 24 + 5)
+
     def test_the_brief_names_the_checkout_the_whole_commit_command_and_the_report_file(self):
         one = self.land()[0]
         brief = one["brief"]

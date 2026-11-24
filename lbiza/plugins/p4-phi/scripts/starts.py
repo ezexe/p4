@@ -214,18 +214,14 @@ def background_of(home, requester, given=""):
     return text
 
 
-CARD = ("a start with no puppeteer to ask is no start request: propose it as a suggested task card, "
-        "`mcp__ccd_session__start_session` with `initiation` `own_initiative`, which ezexe starts in this session, "
-        "and withdraw a card that went stale with `mcp__ccd_session__dismiss_task`")
-
-
 def add(home, requester, title, brief, context="fresh", at=None, background="", to=""):
     """Keeps a start request to the puppeteer `to` and returns its id and True when it is new. The same brief from
     the same session, still pending, is kept once. Its background is the one given or one built from the session
-    that files it, and the files its brief says it covers are kept on it. With no `to` it is refused with CARD,
-    since the app's suggested task card holds every other start."""
+    that files it, and the files its brief says it covers are kept on it. A request is addressed to a puppeteer, so
+    one with no `to` is refused: a worker is drafted and started in the Terminal panel."""
     if not to:
-        raise ValueError(CARD)
+        raise ValueError("a start request is addressed to a puppeteer: a worker is started with `draft` and its "
+                         "`draft --start` line")
     title, brief = " ".join(str(title or "").split()), str(brief or "").strip()
     if len(title) < 3:
         raise ValueError("a start request needs the child's title")

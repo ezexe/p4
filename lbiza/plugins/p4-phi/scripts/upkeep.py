@@ -67,7 +67,6 @@ PHI = None                       # phi.py's own module, handed over when phi.py 
 
 FILE = "upkeep.json"             # in a session's folder: its open items, its waits and what it was told
 ARCHIVE = "mcp__ccd_session_mgmt__archive_session"
-START = "mcp__ccd_session__start_session"
 MARK = plans.UPKEEP_MARK         # opens the prompt of a turn the hooks module starts for upkeep
 TRIES = 3                        # turns one archive call is handed before p4-phi leaves it
 ITEMS = 12                       # items taken from one report
@@ -1314,9 +1313,9 @@ def route(home, s, text, by, store, back="", d=None, hand=False):
     if k:
         return (f"{refused}: send it by `SendMessage` with `to` `{k}`, to \"{title(k, ks)}\", a live session whose "
                 f"task covers it")
-    return (f"{refused}, and no live session's task covers it: show it as the app's card, `{START}` with "
-            f"`initiation` `own_initiative` and a brief that holds its words, and tell ezexe in one line that the "
-            f"card waits. {relay.PUSH[:-1]}")
+    return (f"{refused}, and no live session's task covers it: draft its worker with `{cmd} draft \"<its words>\"` "
+            f"and start it with the `draft --start` line that prints, and tell ezexe in one line that it waits. "
+            f"{relay.PUSH[:-1]}")
 
 
 def item_acts(home, s, d, by, store, hand):
@@ -1475,8 +1474,7 @@ def leftover_acts(home, s, d, hand):
 # The sweep's words are SWEEP, kept here and nowhere else, so no orchestrator writes them by hand.
 # What a session's own calls did is read at each turn's end, keep_sweep: a `CronCreate` whose prompt holds the
 # sweep's opening words begins the schedule, until Claude Code's expiry of a recurring task, and a `CronDelete` of
-# its id ends it; a `SendMessage` with `notify_when_idle` asks a session, until its notice comes as a prompt,
-# notice_came, or Claude Code drops the subscription, "If no notice arrives within 12 hours".
+# its id ends it.
 # Seen in the desktop app on Claude Code 2.1.326: `CronCreate` with CRON, a prompt and `recurring` true answered
 # "Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm.", seven minutes after the mark, where
 # a one-shot answers "Scheduled one-shot task efd4cd1b"; `CronList` listed it as its id, its expression, its next
@@ -1484,14 +1482,8 @@ def leftover_acts(home, s, d, hand):
 # job 72f3dc05."
 # Nothing is built for a session that still runs a `/loop` an older p4-phi handed it: that loop's own words end it.
 CRON_CREATE, CRON_LIST, CRON_DELETE = "CronCreate", "CronList", "CronDelete"
-SEND, NOTIFY = "SendMessage", "notify_when_idle"
 CRON = "7,37 * * * *"            # when the schedule's prompt comes while a session is out: each half hour, off 0 and 30
 EXPIRY_S = 7 * 86400             # scheduled-tasks.md: "Recurring tasks automatically expire 7 days after creation."
-NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arrives within 12 hours"
-# in the call's answer where the app made none: with no message "Nothing was subscribed: notify_when_idle is only
-# supported for Claude sessions on this machine in this release", with success false, and with a message attached
-# "no idle subscription was made", both seen for a session of the desktop app on Claude Code 2.1.326
-NOT_MADE = ("nothing was subscribed", "no idle subscription", '"success":false', '"success": false')
 OPENS = plans.SWEEP_MARK         # the sweep's opening words, which tell its prompt from a message of ezexe's
 SWEEP = (OPENS + " Read each live session with "
          "`mcp__ccd_session_mgmt__list_sessions` and `linked` true. Send on one that stopped with work left, by "
@@ -1502,23 +1494,15 @@ SWEEP = (OPENS + " Read each live session with "
          "read the tasks with `" + CRON_LIST + "` and call `" + CRON_DELETE + "` with the id of the task that "
          "holds these words.")
 JOB = re.compile(r"\b(?:job|task)\s+([0-9A-Za-z]{8})\b")  # the id in `CronCreate`'s answer
-REF = re.compile(r"\s*\[[0-9a-f]+\]\s*\Z")                # the short identifier `ListAgents` adds to a shared name
-# the session an idle notice names, as the app words the prompt: `[Cross-session idle notice] "<name>", which ...`,
-# and the first name in quotes on that line where a notice words it another way, as one of an expired subscription
-NOTICE = re.compile(r"\A\s*(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?\[Cross-session idle notice\][^\n\"]*"
-                    r"\"([^\"\n]+)\"")
-NOTICED_MOST = 40                # the sessions whose notices are counted, the latest kept
 
 
 def keep_sweep(s, calls, at=None):
     """Keeps on a session what its own calls of the turn that just ended did for the sweep. `schedule`: the sweep's
     fixed schedule, with `until`, the time Claude Code ends a recurring task by itself, and `id`, the task's own
     where the answer of `CronCreate` gave one; a `CronDelete` ends the schedule kept where it names that id, or
-    where none was read. `notices`: each session asked for an idle notice, by the name the call gave, with the time
-    Claude Code drops the subscription; a call the app answered with no subscription made keeps none. A turn with
-    no such call leaves what is kept. Returns True when either changed."""
+    where none was read. A turn with no such call leaves what is kept. Returns True when it changed."""
     at = time.time() if at is None else at
-    before = repr((s.get("schedule"), s.get("notices")))
+    before = repr(s.get("schedule"))
     for c in calls or []:
         name, inp = c.get("name"), c.get("input") if isinstance(c.get("input"), dict) else {}
         if name == CRON_CREATE:
@@ -1529,11 +1513,7 @@ def keep_sweep(s, calls, at=None):
             kept = s.get("schedule") if isinstance(s.get("schedule"), dict) else None
             if kept is not None and (not kept.get("id") or str(inp.get("id") or "") == kept.get("id")):
                 s.pop("schedule", None)
-        elif name == SEND and inp.get(NOTIFY) is True:
-            to = REF.sub("", str(inp.get("to") or "")).strip()
-            if to and not any(x in str(c.get("result") or "").lower() for x in NOT_MADE):
-                s["notices"] = {**(s.get("notices") if isinstance(s.get("notices"), dict) else {}), to: at + NOTICE_S}
-    return repr((s.get("schedule"), s.get("notices"))) != before
+    return repr(s.get("schedule")) != before
 
 
 def schedule_runs(s, at=None):
@@ -1541,32 +1521,6 @@ def schedule_runs(s, at=None):
     kept = s.get("schedule") if isinstance(s, dict) else None
     until = kept.get("until") if isinstance(kept, dict) else None
     return isinstance(until, (int, float)) and until > (time.time() if at is None else at)
-
-
-def asked(s, at=None):
-    """The names this session asked for an idle notice that has not come, while Claude Code keeps each subscription."""
-    at = time.time() if at is None else at
-    kept = s.get("notices") if isinstance(s, dict) and isinstance(s.get("notices"), dict) else {}
-    return {k for k, until in kept.items() if isinstance(until, (int, float)) and until > at}
-
-
-def notice_came(s, prompt):
-    """An idle notice that came as a prompt spends the subscription it answers: the session it names is asked no
-    more, and the count of notices that came from it rises, which sweep_acts reads to hand the call anew. Returns
-    that name, '' for any other prompt."""
-    m = NOTICE.match(str(prompt or ""))
-    if not m:
-        return ""
-    name = m.group(1).strip()
-    kept = {k: v for k, v in (s.get("notices") if isinstance(s.get("notices"), dict) else {}).items() if k != name}
-    if kept:
-        s["notices"] = kept
-    else:
-        s.pop("notices", None)
-    came = dict(s.get("noticed") if isinstance(s.get("noticed"), dict) else {})
-    came[name] = int(came.pop(name, 0) or 0) + 1       # the latest last
-    s["noticed"] = dict(list(came.items())[-NOTICED_MOST:])
-    return name
 
 
 def controlled_out(home, s):

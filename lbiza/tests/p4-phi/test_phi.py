@@ -1079,20 +1079,20 @@ class NewTask(unittest.TestCase):
         out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
         return out.get("permissionDecision", ""), out.get("permissionDecisionReason", "")
 
-    def test_a_start_from_a_session_at_phi_max_depth_is_refused_with_the_caps_words(self):
-        """The caps are held at the start: a session as deep as phi.MAX_DEPTH starts none, and one a level above
-        may."""
+    def test_a_start_from_a_session_another_session_started_is_refused_with_the_draft_command_at_any_depth(self):
+        """A desktop session below an orchestrator is what the terminal workers replace: a session another session
+        started starts none, so the depth cap holds nothing a desktop start can reach, and one nobody started may."""
         up = TOP
         for k, sid in enumerate(("local_d1", "local_d2", "local_d3")):
             self.t.record(sid, up, title=f"depth {k + 1}")
             self.say(sid, "Task:\nCheck the exporter. Report when done.\nFiles: none")
             up = sid
-        self.assertEqual(self.start("local_d2"), ("", ""), "two deep: one more level is allowed")
-        decision, why = self.start("local_d3")
-        self.assertEqual(decision, "deny")
-        self.assertEqual(why, "phi (p4-phi): this start is refused: " + phi.caps_text(
-            self.t.p4, phi.load_session(self.t.p4, "local_d3")))
-        self.assertIn("This session is 3 deep in the session tree, the most p4-phi allows", why)
+        self.assertEqual(self.start(TOP), ("", ""), "a session nobody started keeps its start")
+        for sid in ("local_d1", "local_d2", "local_d3"):
+            decision, why = self.start(sid)
+            self.assertEqual(decision, "deny", sid)
+            self.assertIn("draft --start", why, sid)
+            self.assertIn("--to-puppeteer", why, sid)
 
     def test_a_start_from_a_session_with_phi_max_children_live_sessions_is_refused(self):
         """A session with phi.MAX_CHILDREN live sessions of its own starts no ninth, and one with fewer may."""
@@ -3037,15 +3037,15 @@ class Partition(unittest.TestCase):
     WRITE = "Port the exporter's flush to the new writer and run its suite. Report when done.\nFiles: "
 
     def test_a_writers_start_with_no_files_line_is_denied(self):
-        out = self.start(KID2, "Port the exporter's flush to the new writer and run its suite. Report when done.")
+        out = self.start(TOP, "Port the exporter's flush to the new writer and run its suite. Report when done.")
         self.assertTrue(self.deny(out), out)
         self.assertIn("Files:", out["permissionDecisionReason"])
 
-    def test_a_start_whose_path_a_running_sibling_of_the_starter_holds_is_denied_with_its_id(self):
-        out = self.start(KID2, self.WRITE + "a.py")
+    def test_a_start_whose_path_a_running_child_of_the_starter_holds_is_denied_with_its_id(self):
+        out = self.start(TOP, self.WRITE + "a.py")
         self.assertTrue(self.deny(out), out)
         self.assertIn(KID, out["permissionDecisionReason"])
-        self.assertFalse(self.deny(self.start(KID2, self.WRITE + "b.py")), "a path nobody holds")
+        self.assertFalse(self.deny(self.start(TOP, self.WRITE + "c.py")), "a path nobody holds")
 
     def test_a_start_whose_path_only_the_starter_holds_is_not_denied(self):
         relay.set_shard(self.t.p4, TOP, ["b.py"], self.t.proj)
@@ -3053,13 +3053,13 @@ class Partition(unittest.TestCase):
 
     def test_a_readers_start_and_a_new_orchestrators_are_not_read(self):
         reader = "Check what the exporter's flush does and report it.\nFiles: none"
-        self.assertFalse(self.deny(self.start(KID2, reader)))
+        self.assertFalse(self.deny(self.start(TOP, reader)))
         self.assertFalse(self.deny(self.start(GRAND, starts.ORCHESTRATOR_BRIEF + "\nFiles: a.py")))
 
     def test_the_same_start_after_the_sibling_is_archived_is_not_denied(self):
-        self.assertTrue(self.deny(self.start(KID2, self.WRITE + "a.py")))
+        self.assertTrue(self.deny(self.start(TOP, self.WRITE + "a.py")))
         self.archive(KID)
-        self.assertFalse(self.deny(self.start(KID2, self.WRITE + "a.py")))
+        self.assertFalse(self.deny(self.start(TOP, self.WRITE + "a.py")))
 
     def test_an_edit_outside_a_started_sessions_paths_is_denied_and_one_inside_them_is_not(self):
         out = self.edit(KID, self.mine("b.py")[0])

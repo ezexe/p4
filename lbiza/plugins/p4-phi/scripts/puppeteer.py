@@ -208,13 +208,11 @@ def subtree(home, top, every=None):
 
 
 def orchestrator(home, s, every=None):
-    """True for a session that orchestrates: an orchestrator with a task, or any session that started sessions."""
+    """True for a session that orchestrates: one nobody started that has a task, or any session another session
+    started, since below an orchestrator every worker is a terminal session with no record here."""
     if not isinstance(s, dict) or not s.get("sessionId"):
         return False
-    if not relay._parent(s):
-        return bool(str(s.get("task") or "").strip())
-    every = relay._sessions(home) if every is None else every
-    return any(relay._parent(v) == s["sessionId"] for v in every.values())
+    return bool(relay._parent(s)) or bool(str(s.get("task") or "").strip())
 
 
 def working(home, sid):
@@ -1370,11 +1368,43 @@ def verdict_text(home, s, d):
                 f"one line that \"{o['title']}\" has it. Start no session for it." + tail)
     if d["verdict"] == "here":
         return head + "No session is started for it." + tail
+    if d.get("parent"):
+        return (head + f"Start it in the Terminal panel: run `{phi.commands()} draft --start {d['id']}`, which gives "
+                "the worker its node, writes its brief and start file there and prints one "
+                "`mcp__terminal__run_in_terminal` call; make that call, then wait for its report with the "
+                "`coworkers --wait --report` line it prints, as one background command." + tail)
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
-            + json.dumps(call_of(d), ensure_ascii=False) + ". Its brief states the task by its title: before the "
-            "call, restate the rest of the task under that line as your own instruction to the new session, what it "
-            "is to do and why, from its side, quoting no message and saying nothing of who asked or how the request "
-            "travelled." + tail)
+            + json.dumps(call_of(d), ensure_ascii=False) + ". It is an orchestrator under this session and stays "
+            "there. Its brief states the task by its title: before the call, restate the rest of the task under "
+            "that line as your own instruction to the new session, what it is to do and why, from its side, quoting "
+            "no message and saying nothing of who asked or how the request travelled." + tail)
+
+
+def start_draft(home, s, did, base):
+    """`draft --start`: the terminal worker of a kept draft. It claims the worker's node in the store nested in this
+    session's, writes its brief, settings and start file there, and returns the lines to print: the worker's name and
+    its report, the `mcp__terminal__run_in_terminal` call and the wait for its report. A draft with no parent is an
+    orchestrator's and raises ValueError."""
+    import coworker
+    phi = _phi()
+    d = load_draft(home, s["sessionId"], did)
+    if not d:
+        raise ValueError(f"no draft {did} in this session")
+    if not d.get("parent"):
+        raise ValueError("an orchestrator's draft is started with the call the draft printed")
+    node = relay.nodes(home).get(s["sessionId"]) or home
+    name = coworker.draft_name(d["title"], d["id"])
+    one = coworker.worker(name, d["brief"], "The task of the brief is done and its checks pass", base, home,
+                          s["sessionId"], node)
+    if one.get("started"):
+        raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
+    coworker.write([one], base, home)
+    checkout = base.replace("\\", "/")
+    return [f"worker `{name}`: its report {one['report']}",
+            "`mcp__terminal__run_in_terminal` with " + json.dumps(
+                {"title": name, "cwd": checkout, "command": one["typed"]}, ensure_ascii=False),
+            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
+            f"{one['report']}`"]
 
 
 # --- parallel: the readings of an under-determined message, as one workflow run ------------------------------------------
@@ -1739,7 +1769,13 @@ def command(a, me):
         sys.stdout.write(text)
         print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged"), file=sys.stderr)
         return 0
+    if a.cmd == "draft" and a.start:
+        for line in start_draft(home, s, a.start, base):
+            print(line)
+        return 0
     if a.cmd == "draft":
+        if not a.text:
+            raise ValueError("give the words to draft, or `--start <draft id>`")
         read = prompty(home, s, a.text, base)
         if len(read["readings"]) >= 2 and not read["owner"]:
             print(readings_text(read["readings"]))
@@ -1778,7 +1814,11 @@ def add_parsers(sub, common):
         if name == "ledger":
             p.add_argument("--net", action="store_true", help="read the issues' states from GitHub now")
         if name == "draft":
-            p.add_argument("text", help="the words to run routing, the start draft and the gate on")
+            p.add_argument("text", nargs="?", default="", help="the words to run routing, the start draft and the "
+                                                               "gate on")
+            p.add_argument("--start", default="", metavar="DRAFT",
+                           help="start the terminal worker of a kept draft that has a parent: its node, brief and "
+                                "start file, and the call that opens its tab")
         if name == "pioneer":
             p.add_argument("draft", help="the draft's id")
         if name == "routes":

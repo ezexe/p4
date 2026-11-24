@@ -36,7 +36,9 @@ from unittest import mock
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
+import coworker  # noqa: E402
 import phi  # noqa: E402
+import relay  # noqa: E402
 import puppeteer  # noqa: E402
 import starts  # noqa: E402
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
@@ -66,9 +68,18 @@ def runs_of(sent, text, n=8):
 
 
 def call_in(ctx, k=0):
-    """The k-th exact start_session input a hook's text carries."""
-    piece = ctx.split("`mcp__ccd_session__start_session` with ")[k + 1]
-    return json.JSONDecoder().raw_decode(piece)[0]
+    """The k-th exact start_session input a hook's text carries. A worker's draft carries none, since its worker
+    starts in the Terminal panel: what puppeteer.call_of makes of the kept draft the text names stands in its place,
+    so a test reads the brief and the level a draft would start with."""
+    marker = "`mcp__ccd_session__start_session` with "
+    if marker in ctx:
+        return json.JSONDecoder().raw_decode(ctx.split(marker)[k + 1])[0]
+    did = re.search(r"draft (drf-[0-9a-f]{10})", ctx).group(1)
+    found = [os.path.join(d, did + ".json") for d, _, fs in os.walk(TREE[0].tmp) if did + ".json" in fs]
+    return puppeteer.call_of(json.load(open(found[0], encoding="utf-8")))
+
+
+TREE = [None]                    # the tree of the test running, for call_in
 
 
 class Base(unittest.TestCase):
@@ -78,6 +89,7 @@ class Base(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.t = t = Tree(self._tmp.name)
+        TREE[0] = t
         t.record(TOP, title="the exporter top")
         t.record(KID, TOP, title="the flush port")
 
@@ -175,8 +187,8 @@ class Linear(Base):
         self.assertNotIn("running writer", ctx, "the gate looks for no writer of its files")
         self.assertIn("its parent is this session", ctx)
         call = call_in(ctx)
-        self.assertIn('"use_worktree": false', ctx, "the drafted start of a session with a parent, as text")
-        self.assertNotIn('"use_worktree": true', ctx)
+        self.assertIn("draft --start", ctx, "a worker's draft is started in the Terminal panel")
+        self.assertNotIn("mcp__ccd_session__start_session", ctx)
         self.assertEqual((call["initiation"], call["context"], call["use_worktree"]), ("user_asked", "fresh", False),
                          "a worker's draft works in this checkout, on the paths of its `Files:` line")
         for line in puppeteer.checkout_lines():
@@ -406,7 +418,7 @@ class Linear(Base):
                                r"words quoted", re.I)
         self.assertIsNone(travelled.search(brief), brief)
         self.assertIsNone(travelled.search(call["background"]), call["background"])
-        self.assertIn("restate", ctx, "the session that makes the call is told to state the task in its own words")
+        self.assertIn("draft --start", ctx, "a worker's draft is started by the command that gives it its node")
 
     def test_no_line_handed_to_a_session_tells_it_to_quote_a_prompt(self):
         """Every road that tells a session to pass work on asks for the task restated as its own instruction."""
@@ -837,6 +849,77 @@ class Scorers(Base):
         self.assertEqual((puppeteer.ROUTE_MIN, puppeteer.ROUTE_CLOSE), (4, 0.6), "the route thresholds")
 
 
+class Terminal(Base):
+    """`draft --start`: a worker's draft starts in the Terminal panel, an orchestrator's with the desktop call."""
+
+    def drafted(self, words=RETRY):
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        ctx = context(t.say(TOP, words))
+        return ctx, re.search(r"draft (drf-[0-9a-f]{10})", ctx).group(1)
+
+    def test_a_workers_draft_names_the_command_and_the_command_gives_its_terminal_call(self):
+        t = self.t
+        ctx, did = self.drafted()
+        self.assertIn(f"draft --start {did}", ctx)
+        self.assertNotIn("mcp__ccd_session__start_session` with", ctx)
+        r = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        name = coworker.draft_name(title, did)
+        self.assertIn(f"worker `{name}`", r.stdout)
+        self.assertIn("`mcp__terminal__run_in_terminal` with ", r.stdout)
+        self.assertIn("coworkers --wait --report ", r.stdout)
+        node = relay.nodes(t.p4)[name]
+        for f in (f"brief-{name}.md", "coworker-settings.json"):
+            self.assertTrue(os.path.isfile(os.path.join(node, "phi", f)), f)
+        self.assertEqual(relay.node_record(t.p4, name)["kind"], "worker")
+        again = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(again.returncode, 2, "a worker is started once")
+
+    def test_an_orchestrators_draft_is_refused_there_and_keeps_its_desktop_call(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.stop(TOP, TASK, report="planned")
+        draft = puppeteer.prompter(t.p4, t.session(TOP), RETRY, {"within": False, "routes": [], "paths": []}, t.proj)
+        self.assertEqual(draft["parent"], "")
+        text = puppeteer.verdict_text(t.p4, t.session(TOP), {**draft, "verdict": "start", "gate": ["x"]})
+        self.assertIn("mcp__ccd_session__start_session` with", text)
+        self.assertIn("stays there", text)
+        self.assertNotIn("draft --start", text)
+        os.makedirs(os.path.join(t.dir(TOP), "drafts"), exist_ok=True)
+        write(os.path.join(t.dir(TOP), "drafts", draft["id"] + ".json"), json.dumps(draft))
+        r = t.cli(TOP, "draft", "--start", draft["id"])
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("an orchestrator's draft is started with the call the draft printed", r.stderr)
+        self.assertEqual(t.cli(TOP, "draft", "--start", "drf-0000000000").returncode, 2)
+
+    def test_sections_prints_the_terminal_call_of_each_run_and_a_report_wait_needs_no_plan(self):
+        t = self.t
+        t.say(TOP, TASK)
+        plan = os.path.join(t.tmp, "plan.md")
+        write(plan, "# A note\n\n## 1. The page\n\n- **Files:** `docs/export.md`\n")
+        r = t.cli(TOP, "sections", plan)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("`mcp__terminal__run_in_terminal` with ", r.stdout)
+        self.assertNotIn("mcp__ccd_session__start_session", r.stdout)
+        name = re.search(r"worker `(tw-[^`]+)`", r.stdout).group(1)
+        report = re.search(r"its report (\S+)", r.stdout).group(1)
+        self.assertEqual(os.path.basename(report), f"report-{name}.md")
+        write(report, "done")
+        waited = t.cli(TOP, "coworkers", "--wait", "--report", report)
+        self.assertEqual(waited.returncode, 0, waited.stderr)
+        self.assertIn("is there", waited.stdout)
+
+    def test_a_session_another_session_started_is_an_orchestrator_whether_or_not_it_started_one(self):
+        s = {"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}
+        self.assertTrue(puppeteer.orchestrator(self.t.p4, s))
+        self.assertFalse(puppeteer.orchestrator(self.t.p4, {"sessionId": TOP}), "one nobody started needs a task")
+        self.assertTrue(puppeteer.orchestrator(self.t.p4, {"sessionId": TOP, "task": "Build it"}))
+        self.assertFalse(puppeteer.orchestrator(self.t.p4, {}))
+
+
 class Parallel(Base):
     """The readings of an under-determined message run as the workflow the plugin ships, workflows/readings.js.
     p4-phi hands the line that names it and keeps nothing of a reading: no group, no session, no merge."""
@@ -881,8 +964,7 @@ class Parallel(Base):
         self.assertIn(f'{phi.commands()} draft "<the chosen reading>"', after)
         self.assertNotIn("source_branch", after)
         chosen = t.cli(TOP, "draft", "Make the narwhal exporter write each row of the flush straight to the store")
-        self.assertIn("Start it now: `mcp__ccd_session__start_session` with ", chosen.stdout,
-                      "the chosen reading is an ordinary draft: " + chosen.stderr)
+        self.assertIn("draft --start", chosen.stdout, "the chosen reading is an ordinary draft: " + chosen.stderr)
 
     def test_the_draft_command_hands_the_same_line(self):
         t = self.t
@@ -1031,12 +1113,13 @@ class Look(Base):
     def test_a_session_with_nothing_to_watch_pays_one_cheap_check(self):
         t = self.t
         t.say(TOP, TASK)
-        t.say(KID, handed("Port the flush to the new writer."))
+        t.record(GRAND, title="a session with no task")
+        t.hook("session-start", GRAND, {"hook_event_name": "SessionStart", "source": "startup"})
         before = self.files()
-        kid = self.look(KID)
+        kid = self.look(GRAND)
         self.assertEqual((kid["watching"], kid["why"], kid["wait_s"]), (False, "no orchestrator", 30.0))
         self.assertNotIn("changed", kid, "no pass over a subtree")
-        self.assertFalse(os.path.exists(self.path(KID, "ledger.md")))
+        self.assertFalse(os.path.exists(self.path(GRAND, "ledger.md")))
         off = self.look(P4_PHI_WATCH="0")
         self.assertEqual((off["watching"], off["off"]), (False, True), "P4_PHI_WATCH=0 keeps every look from running")
         self.assertEqual(self.look(P4_PHI="0")["off"], True)

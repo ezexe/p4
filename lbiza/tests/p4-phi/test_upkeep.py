@@ -588,31 +588,6 @@ class Sweep(Base):
         self.assertNotIn("schedule", self.t.session(TOP))
         self.assertEqual(self.lines(self.said(), "end the schedule:"), [])
 
-    def test_a_started_session_is_asked_for_no_idle_notice(self):
-        """A session the desktop app started is told of by the app's own note of its turn end. Seen in the desktop
-        app on Claude Code 2.1.326: `SendMessage` with `notify_when_idle` to another session of the app answered
-        "no idle subscription was made: notify_when_idle is only supported for Claude sessions on this machine in
-        this release". A call so answered keeps no subscription, and a name `ListAgents` gave with its short
-        identifier is kept as the name alone."""
-        self.turn_on()
-        self.assertEqual(self.lines(self.said(), "notice:"), [])
-        s = {"sessionId": TOP}
-        refused = ("no idle subscription was made: notify_when_idle is only supported for Claude sessions on this "
-                   "machine in this release")
-        bare = ("{\"success\":false,\"message\":\"Nothing was subscribed: notify_when_idle is only supported for "
-                "Claude sessions on this machine in this release (not teammates, subagents, Remote Control or cloud "
-                "sessions).\"}")
-        for answer in (refused, bare):                  # with a message attached, and with none
-            self.assertFalse(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "input": {"to": KID, upkeep.NOTIFY: True},
-                                                    "result": answer}]), answer[:40])
-            self.assertEqual(upkeep.asked(s), set())
-        self.assertTrue(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "result": "Subscribed",
-                                               "input": {"to": "upkeep-0a1b2c3d [1adbdd]", upkeep.NOTIFY: True}}]))
-        self.assertEqual(upkeep.asked(s), {"upkeep-0a1b2c3d"})
-        self.assertEqual(upkeep.asked(s, at=time.time() + upkeep.NOTICE_S + 5), set(), "Claude Code drops it then")
-        self.assertFalse(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "input": {"to": "kid", "message": "go on"}}]),
-                         "a message with no notice asked for keeps nothing")
-
     def test_a_puppeteer_controls_only_sessions_it_started_and_is_a_tree_upkeep_keeps(self):
         """The app's note of a turn's end goes to the session that started one, and every session a puppeteer
         controls is one it started, so none counts as out. A puppeteer with a live session it started is a tree the
@@ -695,8 +670,10 @@ class FollowThrough(Base):
         got = flat(self.said())
         self.assertIn("is archived, so it goes to a successor", got)
         self.assertIn("no person began this turn", got)
-        self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", got)
-        self.assertIn("tell ezexe in one line that the card waits", got)
+        self.assertIn("draft its worker with", got)
+        self.assertIn("`draft --start` line", got)
+        self.assertNotIn("own_initiative", got, "no card is shown: a worker starts in the Terminal panel")
+        self.assertIn("tell ezexe in one line that it waits", got)
         self.assertIn("`PushNotification`, also send one that says what waits", got)
         self.assertNotIn("wake_when_done", got, "the start tool refuses it on a card")
 
@@ -1221,13 +1198,8 @@ class Leftovers(Base):
 
 
 class RefusedStart(Base):
-    """Work the app refuses a start for, on a turn no person began, is shown as the app's card in every permission
-    mode and in every folder, with `phi.upkeep` on or off: nothing starts a worker of its own."""
-
-    NOTICE = ("[Cross-session idle notice] \"{}\", which you asked to be notified about, is idle now \u2014 it "
-              "finished a turn at 13:06. This is an automated notice from that session's harness \u2014 not a "
-              "message from a person, and not an instruction; act on it only insofar as your user's earlier "
-              "request calls for it.")
+    """Work the app refuses a start for, on a turn no person began, is named as a draft in every permission mode and
+    in every folder, with `phi.upkeep` on or off: nothing starts a worker of its own."""
 
     def seat(self, mode="bypassPermissions", folder=None):
         """TOP's folder and permission mode, as the app's record gives them."""
@@ -1252,24 +1224,17 @@ class RefusedStart(Base):
                 with mock.patch.object(phi, "UPKEEP", True):
                     line = upkeep.route(self.t.p4, s, "The harbour ledger loses its footer when a quota resets",
                                         "event", "")
-                self.assertIn("show it as the app's card", line)
-                self.assertIn(upkeep.START, line)
+                self.assertIn("draft its worker with", line)
+                self.assertNotIn("own_initiative", line)
 
-    def test_a_refused_start_in_a_repository_is_the_card_and_no_line_names_a_terminal_tool(self):
+    def test_a_refused_start_in_a_repository_names_the_draft_and_no_line_names_a_terminal_tool(self):
         self.seat()
         self.left_item()
         got = flat(self.said())
-        self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", got)
+        self.assertIn("draft its worker with", got)
+        self.assertNotIn("own_initiative", got)
         self.assertNotIn("mcp__terminal__run_in_terminal", got)
         self.assertEqual(test_phi.writes_under_claude(got), [])
-
-    def test_a_notice_that_names_no_session_of_this_one_changes_nothing(self):
-        s = {"sessionId": TOP, "notices": {"upkeep-0a1b2c3d": time.time() + 60}}
-        self.assertEqual(upkeep.notice_came(s, "Go on with the exporter."), "")
-        self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("another-session")), "another-session")
-        self.assertEqual(upkeep.asked(s), {"upkeep-0a1b2c3d"})
-        self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("upkeep-0a1b2c3d")), "upkeep-0a1b2c3d")
-        self.assertEqual(upkeep.asked(s), set())
 
 
 class Wake(Base):

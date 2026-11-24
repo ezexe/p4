@@ -243,9 +243,6 @@ class Supervisor(unittest.TestCase):
             self.assertIn(f"`{sid}`", line)
         self.assertIn("approval card", line, "the line whole")
         self.assertLessEqual(ctx.index(head) + len(head) + len(line), 2000, "inside the app's preview")
-        after = ctx.split(head, 1)[1]
-        self.assertTrue(any(m in after for m in ("ended turns. Each is one line", "set these sessions' effort")),
-                        "the informational pieces follow it, whole and beside the prompt")
 
     def test_what_p4_phis_records_hold_against_a_controlled_session_is_printed_and_never_refuses_an_archive(self):
         t = self.t
@@ -314,10 +311,9 @@ class Supervisor(unittest.TestCase):
         t.stop(TOP2, "Build the importer", report=report, proj=self.other)
         ctx = context(t.say(PUP, "what came in?"))
         page = os.path.join(t.dir(TOP2), "session.md").replace("\\", "/")
-        self.assertIn(f"\"Build the importer\" `{TOP2}` ended a turn", ctx)
-        self.assertIn("The importer reads the new format.", ctx, "one line")
-        self.assertIn(page, ctx, "and its page")
-        self.assertNotIn("ended a turn", context(t.say(PUP, "and now?")), "a report is named once")
+        self.assertIn("reports of this session's workers", ctx, "its starter's own hook hands the report, once")
+        self.assertIn("The importer reads the new format.", ctx)
+        self.assertNotIn("reports of this session's workers", context(t.say(PUP, "and now?")))
         t.cli(PUP, "note", "ezexe decides whether the importer ships before the exporter", "--source",
               "ezexe's message of today", "--kind", "decision")
         t.cli(PUP, "note", "The retry issue is parked until the importer lands", "--source", "the issue list",
@@ -470,7 +466,7 @@ class Supervisor(unittest.TestCase):
         self.assertIn(f"\"the retry\" `{NEW}`", t.cli(PUP, "controls").stdout, "and its puppeteer controls it")
         self.assertIn("This session is controlled by a puppeteer", told)
 
-    def test_a_controlled_sessions_refused_start_says_this_session_is_controlled_by_a_supervisor_session(self):
+    def test_a_controlled_sessions_desktop_start_is_refused_with_the_draft_command_and_the_request(self):
         """Run through `recall-hook.sh lookup-check`, which runs what the hooks module runs for a checked call."""
         t = self.t
         t.say(TOP, "Build the exporter")
@@ -484,7 +480,8 @@ class Supervisor(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout)["hookSpecificOutput"]
         self.assertEqual(out["permissionDecision"], "deny")
-        self.assertIn("this session is controlled by a puppeteer", out["permissionDecisionReason"])
+        self.assertIn("draft --start", out["permissionDecisionReason"])
+        self.assertIn("--to-puppeteer", out["permissionDecisionReason"])
 
     def test_a_declined_request_is_closed_and_the_session_that_filed_it_is_told(self):
         t = self.t
@@ -586,18 +583,11 @@ class Supervisor(unittest.TestCase):
 
     def test_a_puppeteer_is_told_to_set_each_reporting_sessions_effort_and_never_its_model(self):    # 224
         t = self.t
-        t.record(TOP4, title="Check the exporter's landing")
-        t.say(PUP, "Control the trees")
-        for sid in (TOP, TOP3, TOP4):
-            t.say(sid, "Build it")
-        self.control(TOP, TOP3, TOP4)
-        t.stop(TOP, "Build it", report="The check came back with 3 faults in flush_rows; the fix starts again.")
-        t.stop(TOP3, "Build it", report="Landed 2 commits and relayed the suite result to the importer.")
-        self.finish(TOP4, report="Checked and closed.")
-        ctx = context(t.say(PUP, "what came in?"))
-        line = next((x for x in ctx.splitlines() if "set_session_effort" in x), "")
-        self.assertTrue(line, ctx)
-        lines = ctx[ctx.index(line):]
+        rows = [(TOP, "working", "The check came back with 3 faults in flush_rows; the fix starts again."),
+                (TOP3, "working", "Landed 2 commits and relayed the suite result to the importer."),
+                (TOP4, "shown done", "Checked and closed.")]
+        lines = controls.effort_text(rows)
+        self.assertIn("set_session_effort", lines)
         self.assertRegex(lines, rf"`{TOP}`[^\n]*raise")
         self.assertRegex(lines, rf"`{TOP3}`[^\n]*lower")
         self.assertRegex(lines, rf"`{TOP4}`[^\n]*low\b")

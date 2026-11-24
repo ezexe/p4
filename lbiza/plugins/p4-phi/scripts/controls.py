@@ -319,10 +319,6 @@ PAIR = (
     "work, as the address book names it, never through the puppeteer.{asks}")
 PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` no longer controls it. This "
              "session starts its own new orchestrators.")
-ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so it starts no new "
-       "orchestrator: write `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, "
-       "the brief holding a line `Files: <paths>`. Its puppeteer \"{title}\" starts it or declines it with "
-       "one line to ezexe.")
 
 
 # --- a state page, and when a session clears itself --------------------------------------------------------------
@@ -473,14 +469,6 @@ def pair_text(s, store=""):
     return ""
 
 
-def ask_text(s, pid=""):
-    """The line that turns a controlled session's own start of a new orchestrator into a request. `pid` is its
-    puppeteer where its record does not hold it yet."""
-    held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
-    pid = held.get("sessionId") or pid
-    return ASK.format(cmd=PHI.commands(), title=full_title(pid)) if pid else ""
-
-
 def publisher(home, s, store=""):
     """The sessionId of the one session that publishes the issues of this session's tree: the session nobody
     started at its top."""
@@ -524,28 +512,6 @@ def started_by(sid):
 
 
 # --- reports by reference -----------------------------------------------------------------------------------------------
-
-def reports(s, rows=None, home=""):
-    """One line for each controlled session whose last turn ended since the puppeteer last looked, with
-    its page's path, never the report's text. Each reporting session goes on `rows` too, as its sessionId, state
-    and first line. The caller saves what was seen."""
-    seen = dict(s.get("controlSeen") or {}) if isinstance(s.get("controlSeen"), dict) else {}
-    lines = []
-    for e in controlled(s, home):
-        sid, store = e["sessionId"], e.get("store") or ""
-        when, first = last_report(store, sid)
-        if not when or seen.get(sid) == when:
-            continue
-        seen[sid] = when
-        state, _ = standing(store, sid)
-        if rows is not None:
-            rows.append((sid, state, first))
-        lines.append(f"- \"{full_title(sid)}\" `{sid}` ended a turn at {when}, {state}: {first} Its page: "
-                     f"{page_of(store, sid)}")
-    if lines:
-        s["controlSeen"] = seen
-    return lines
-
 
 RAISE = re.compile(r"\b(?:faults?|failed|fails|failing|again|stall(?:ed|s)?|stuck|refused)\b", re.I)
 LOWER = re.compile(r"\b(?:land(?:ed|ing|ings)?|relay(?:ed|s)?|pushed|rerun|reran|words-only|word commits?)\b", re.I)

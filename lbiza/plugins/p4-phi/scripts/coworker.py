@@ -345,27 +345,53 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
 
 def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
     """The node of one terminal worker of land(), and its brief, goal and start file in it."""
-    group, nums, name = one.pop("group"), one["sections"], one["name"]
-    folder, there = _node(home, store, name, "worker", starter, nums, checkout)
+    group, nums = one.pop("group"), one["sections"]
+    many = "s" if len(group) > 1 else ""
+    done = f"Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed, its Checks pass"
+    one.update(worker(one["name"], sections.brief(plan, title, group, checkout, []), done, checkout, home, starter,
+                      store, nums, windows))
+
+
+def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=None, team=False, mode=LAND_MODE,
+           extra=()):
+    """The node of one terminal worker and its brief, goal and start file in it, as one entry: `name`, and either
+    `started`, the folder of a node that holds that name already, or `folder`, `brief` and `brief_file`, `report`,
+    `goal`, and the start file's `file`, `lines` and the line `typed` in its tab. `done` is what the goal waits
+    for, one sentence with no quote. The worker has no worktree and no p4 plugin, and its goal is its prompt."""
+    windows = upkeep.WINDOWS if windows is None else windows
+    checkout = checkout.replace("\\", "/")
+    _quoted(checkout, home, store)
+    one = {"name": name}
+    folder, there = _node(home, store, name, "worker", starter, list(nums), checkout)
     if there:
         one["started"] = there
-        return
-    one["folder"] = folder                         # set at once, so a failure below removes the node
+        return one
+    one["folder"] = folder
     brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
     where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
-             "Commit only with this command, one commit for each section, naming every path the section "
-             "changed, added or removed and no other:",
+             "Commit only with this command, one commit for each part, naming every path it changed, added or "
+             "removed and no other:",
              f'python -I -X utf8 {PHI} commit --checkout {checkout} -m "<message>" -- <path> ...',
              "Never `git add -A`, `git commit -a` or a plain `git commit`. Push nothing and merge nothing.",
+             "Publish no issue: a finding goes into the report as one line that opens `Finding:`.",
              f"When every check passes, write your report to {report} and end.", ""]
-    many = "s" if len(group) > 1 else ""
-    goal = (f"/goal Every fence of section{many} {', '.join(nums)} of the plan {plan} is landed as the brief "
-            f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
-            f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
-            "with what is done and what is not.")
-    file, lines, typed = script(name, checkout, LAND_MODE, goal, folder, windows, team=False)
-    one.update(brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
-               report=report, goal=goal, file=file, lines=lines, typed=typed)
+    goal = (f"/goal {plain(done)}, as the brief {brief_file} says, and the report {report} is written; or a part "
+            f"does not fit the tree and the report says which and why. Stop after {TURNS} turns, and write the "
+            "report first with what is done and what is not.")
+    try:
+        file, lines, typed = script(name, checkout, mode, goal, folder, windows, team=team, extra=extra)
+    except Exception:
+        relay.unclaim(home, name)
+        raise
+    one.update(brief="\n".join([*where, brief]), brief_file=brief_file, report=report, goal=goal,
+               file=file, lines=lines, typed=typed)
+    return one
+
+
+def draft_name(title, did):
+    """A drafted worker's name: `tw-`, the title's slug cut at 24 characters, and the draft id's last four."""
+    stem = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:24].strip("-") or "work"
+    return f"tw-{stem}-{str(did)[-4:]}"
 
 
 def wait_report(report, home="", name="", longest=LONGEST, clock=time.time, sleep=time.sleep):

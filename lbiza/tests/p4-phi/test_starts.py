@@ -51,20 +51,19 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_the_plain_start_request_is_gone_and_the_card_is_named_in_its_place(self):
-        """The app's suggested task card holds a start a session may not make, desktop.md, "Start a task that Claude
-        suggests", so p4-phi keeps no request for it: `phi.py request` with no `--to-puppeteer` is refused with the
-        card's call and the tool that withdraws a card, starts.add keeps no row with no puppeteer to ask, and the
-        functions that handed such a request and ordered the blocked wrap-up are not there."""
+    def test_the_plain_start_request_is_gone_and_the_draft_is_named_in_its_place(self):
+        """A request is addressed to a puppeteer: `phi.py request` with no `--to-puppeteer` is refused with the
+        draft command that starts a worker, starts.add keeps no row with no puppeteer to ask, and the functions that
+        handed such a request and ordered the blocked wrap-up are not there."""
         t = self.t
         r = t.cli(KID, "request", "the flush port", "--brief", BRIEF)
         self.assertEqual(r.returncode, 2)
-        self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", r.stderr)
-        self.assertIn("`mcp__ccd_session__dismiss_task`", r.stderr)
+        self.assertIn("`draft --start`", r.stderr)
         self.assertIn("`--to-puppeteer`", r.stderr)
+        self.assertNotIn("own_initiative", r.stderr)
         with self.assertRaises(ValueError) as refused:
             starts.add(t.p4, KID, "the flush port", BRIEF)
-        self.assertIn("suggested task card", str(refused.exception))
+        self.assertIn("addressed to a puppeteer", str(refused.exception))
         self.assertEqual(starts.state(t.p4), {}, "no row is kept")
         with open(starts.__file__, encoding="utf-8") as f:
             source = f.read()

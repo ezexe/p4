@@ -82,20 +82,17 @@ class Sections(unittest.TestCase):
         _, found = sections.parse(PLAN, self.base)
         self.assertEqual([[s["n"] for s in run] for run in sections.runs(found)], [["1", "2", "4"], ["3"]])
 
-    def test_each_run_is_one_start_call_of_an_integrator_in_this_checkout(self):
-        first, second = sections.calls(self.path, self.base)
-        self.assertEqual(first["title"], "The exporter's move: sections 1, 2, 4")
-        self.assertEqual((first["initiation"], first["context"], first["use_worktree"]), ("user_asked", "fresh", False))
-        self.assertEqual(first["model"], plans.CHILD_LEVELS["static"]["model"])
-        self.assertGreaterEqual(len(first["background"]), 80, "the app refuses a fresh start with a shorter one")
+    def test_each_run_has_a_brief_that_names_its_plan_files_checks_and_what_done_looks_like(self):
+        title, found = sections.parse(PLAN, self.base)
+        first, second = [sections.brief(self.path, title, run, self.base) for run in sections.runs(found)]
+        self.assertTrue(first.startswith("# The exporter's move: sections 1, 2, 4"))
         for word in (f"of the plan `{self.path}`, in that order",
                      "Files: `src/export/writer.py`, `tests/test_writer.py`, `src/export/flush.py`",
                      "write no approach of this session's own", "never edits the plan file",
-                     "python -m pytest tests/test_flush.py", "Done looks like: every fence of sections 1, 2, 4 landed",
-                     "Model and effort: "):
-            self.assertIn(word, first["prompt"], word)
-        self.assertNotIn("export.md", first["prompt"])
-        self.assertIn("Done looks like: every fence of section 3 landed, committed and reported.", second["prompt"])
+                     "python -m pytest tests/test_flush.py", "Done looks like: every fence of sections 1, 2, 4 landed"):
+            self.assertIn(word, first, word)
+        self.assertNotIn("export.md", first)
+        self.assertIn("Done looks like: every fence of section 3 landed, committed and reported.", second)
 
     def test_a_heading_with_no_number_takes_a_free_one_and_a_files_line_ends_where_its_list_ends(self):
         text = ("# A plan\n\n## Setup\n\n- **Files:** `a.py`\n\n## 1. The writer\n\n"
@@ -131,7 +128,7 @@ class Sections(unittest.TestCase):
     def test_a_plan_with_no_files_line_has_no_run(self):
         with open(self.path, "w", encoding="utf-8") as f:
             f.write("# A plan\n\n## Context\n\nNothing to land.\n")
-        self.assertEqual(sections.calls(self.path, self.base), [])
+        self.assertEqual(sections.runs(sections.parse(open(self.path, encoding="utf-8").read(), self.base)[1]), [])
 
     def test_a_section_counts_its_fences_and_the_lines_under_its_assumed(self):
         ticks = chr(96) * 3
@@ -169,17 +166,3 @@ class Sections(unittest.TestCase):
         self.assertTrue(sections.team([self.section(1, 2, "`python -m pytest tests/test_a.py`")]))
         self.assertTrue(sections.team([self.section(1, 3), self.section(2, 2)]))
 
-    def test_a_runs_brief_names_no_environment_a_worktree_shares_since_it_has_no_worktree(self):
-        import json
-        import p4conf
-        main = os.path.realpath(tempfile.mkdtemp())
-        os.makedirs(os.path.join(main, ".git"))
-        os.makedirs(os.path.join(main, ".claude", "p4"))
-        os.makedirs(os.path.join(main, ".venv"))
-        open(os.path.join(main, ".venv", "python.exe"), "w").close()
-        with open(p4conf.path(os.path.join(main, ".claude", "p4")), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"worktree_python": ".venv/python.exe"}}, f)
-        first = sections.calls(self.path, main)[0]
-        self.assertNotIn("build no environment here", first["prompt"], "the run works in the checkout, which holds it")
-        self.assertNotIn(main.replace("\\", "/") + "/.venv/python.exe", first["prompt"])
-        self.assertNotIn("build no environment here", sections.calls(self.path, self.base)[0]["prompt"])

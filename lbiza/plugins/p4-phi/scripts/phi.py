@@ -93,7 +93,6 @@ APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks m
 APP_CAP = 10000
 APP_PREVIEW = 2000
 RELAY_CHARS = 4000               # of what the sessions beside this one changed, beside one prompt: relay.rebase's room
-PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
 BACKGROUND_CHARS = 3000
 REPORTS_CHARS = 6000
 REPORT_CHARS = 4000              # of one report, kept
@@ -1962,8 +1961,6 @@ def h_user_prompt_submit(payload):
     if not plans.woken(payload.get("prompt")):
         s.pop("woke", None)                        # a turn no wake started: the hooks module's count starts over
     plans.clear_in_flight(s, payload.get("prompt"))   # a completion notice ends its entry
-    if upkeep.notice_came(s, payload.get("prompt")):  # an idle notice spends the subscription it answers
-        RAN["notice"] = True
     mark_fork(s, me, payload)
     if not s.get("disposable") and relay.DISPOSABLE.search(str(payload.get("prompt") or "")) \
             and not load_turns(me.home, s["sessionId"]):
@@ -2105,16 +2102,6 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
     if ledger:
         RAN["asks"] = ledger.count("\n- ")
         out.append(ledger)
-    rows = []
-    seen = controls.reports(s, rows, me.home)
-    if seen:
-        out.append("phi (p4-phi): the sessions this puppeteer controls ended turns. Each is one line and its "
-                   "page, which holds up to 1,200 characters of the report; read a page only when its detail is "
-                   "needed:\n" + "\n".join(seen))
-    tune = controls.effort_text(rows)
-    if tune:
-        RAN["effort"] = tune.count("\n- ")
-        out.append(tune)
     if req:
         out += [p for p in (controls.requests_text(me.home, s), controls.route_down(s, req, me.home)) if p]
     edge = controls.boundary(me.home, s)
@@ -2738,6 +2725,15 @@ def h_start_advice(payload):
         return None                                 # starting a card already made: nothing to decide
     card = inp.get("initiation") == "own_initiative"
     mine = load_session(me.home, me.id)
+    if spawned_from(mine):                          # only a session nobody started adds a desktop session
+        RAN["terminal_only"] = True
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": (
+                                           "phi (p4-phi): this start is refused: a session another session started "
+                                           "starts its workers in the Terminal panel. Run `" + commands()
+                                           + " draft \"<the task>\"` and then the `draft --start` line it prints. "
+                                           "A new orchestrator is asked of the session above with `request "
+                                           "... --to-puppeteer`.")}}
     cap = caps_text(me.home, mine) if mine.get("sessionId") else ""
     if cap:                                         # as deep, or with as many live sessions, as p4-phi allows
         RAN["caps"] = True
@@ -2778,15 +2774,6 @@ def h_start_advice(payload):
             RAN["before_start"] = True
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": why}}
-    if brief and starts.ORCHESTRATOR.search(brief):
-        mine = load_session(me.home, me.id)
-        pid = controls.puppeteer_of(mine, me.store)[0]
-        if pid:                                    # a session another session started: its puppeteer starts it
-            RAN["asked_of_puppeteer"] = True       # asked of its puppeteer, never started here
-            return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                           "permissionDecisionReason": (
-                                               "phi (p4-phi): this start is refused: "
-                                               + PHI_LEAD.sub("", controls.ask_text(mine, pid)))}}
     wanted = "fork" if str(inp.get("context") or "fresh") == "fork" else "fresh"
     try:
         size = os.path.getsize(payload.get("transcript_path") or "")
@@ -3782,9 +3769,12 @@ def main(argv=None):
         if name == "show":
             p.add_argument("which", nargs="?", default="")
         if name == "sections":
-            p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed as starts")
+            p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed, each "
+                                        "as the terminal call that starts the worker that lands it")
         if name == "coworkers":
-            p.add_argument("plan", help="the plan file whose groups of sections are printed, each with its coworker")
+            p.add_argument("plan", nargs="?", default="",
+                           help="the plan file whose groups of sections are printed, each with its coworker; "
+                                "left out with --wait --report")
             p.add_argument("--for", dest="planner", default="",
                            help="the session id of the planner the coworkers send their lists to, this session's "
                                 "when left out")
@@ -3984,23 +3974,19 @@ def main(argv=None):
             for line in upkeep.set_on(store, a.act == "on"):
                 print(line)
             return 0
-        if a.cmd == "sections":                    # an approved plan's runs, each as the start of the worker that lands it
-            if not os.path.isfile(os.path.abspath(a.plan)):
-                print(f"phi: no plan file at {os.path.abspath(a.plan)}", file=sys.stderr)
-                return 2
-            out = sections.calls(os.path.abspath(a.plan), os.getcwd())
-            if not out:
-                print("phi: no section of that plan names files on a `Files:` line, so it has no run to start",
-                      file=sys.stderr)
-                return 2
-            for call in out:
-                print("`mcp__ccd_session__start_session` with " + json.dumps(call, ensure_ascii=False))
-            print(sections.CARD)
-            return 0
+        if a.cmd == "sections":                    # an approved plan's runs: what `coworkers --land` prints
+            a.cmd, a.planner, a.checkout, a.start, a.land, a.wait, a.report = "coworkers", "", "", False, True, None, ""
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
-            plan = os.path.abspath(a.plan)
-            if not os.path.isfile(plan):
+            if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
+                report = os.path.abspath(a.report).replace("\\", "/")
+                tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+                how, waited = coworker.wait_report(report, me.home, tab)
+                print(f"done: {report} is there, after {waited} seconds" if how == "done" else
+                      f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
+                return 0
+            plan = os.path.abspath(a.plan) if a.plan else ""
+            if not plan or not os.path.isfile(plan):
                 print(f"phi: no plan file at {plan}", file=sys.stderr)
                 return 2
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
@@ -4045,13 +4031,6 @@ def main(argv=None):
                           f"{one['report']}")
                     print("`mcp__terminal__run_in_terminal` with " + json.dumps(
                         {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
-                return 0
-            if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
-                report = os.path.abspath(a.report).replace("\\", "/")
-                tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
-                how, waited = coworker.wait_report(report, me.home, tab)
-                print(f"done: {report} is there, after {waited} seconds" if how == "done" else
-                      f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
                 return 0
             if a.wait is not None:                 # a round's wait, which only reads
                 # the names the starter answered with, since a mend can move a section into another group
@@ -4170,9 +4149,9 @@ def main(argv=None):
             print(starts.withdraw(me.home, a.withdraw.strip(), s["sessionId"]))
             return 0
         if a.cmd == "request":
-            if not a.to_puppeteer:                 # the app's suggested task card holds any other start
-                raise ValueError(starts.CARD + "; `request` keeps only a request to this session's puppeteer, "
-                                               "with `--to-puppeteer`")
+            if not a.to_puppeteer:                 # a worker is drafted and started in the Terminal panel
+                raise ValueError("`request` keeps only a request to this session's puppeteer, with "
+                                 "`--to-puppeteer`; a worker is started with `draft` and its `draft --start` line")
             brief = a.brief
             if a.brief_file:
                 with open(a.brief_file, encoding="utf-8") as f:
