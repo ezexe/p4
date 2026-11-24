@@ -284,10 +284,8 @@ def git(root, *args):
     subprocess.run(["git", "-C", root, *who, *args], check=True, capture_output=True)
 
 
-class CarriedOver(unittest.TestCase):
-    """What a session in a git worktree keeps for the project lies in the worktree's own store, since the store is
-    taken from the session's root and `plansDirectory` is a path from the project root. Each sweep copies its plans,
-    its notebook and its saved code into the main checkout's store, so they are there when the worktree is gone."""
+class _CarriedOverBase(unittest.TestCase):
+    """The fixture of a session in a git worktree: a main checkout with a store and a worktree of it."""
 
     def setUp(self):
         self.base = tempfile.mkdtemp(prefix="p4-temportal-carry-")
@@ -302,6 +300,12 @@ class CarriedOver(unittest.TestCase):
         git(self.main, "worktree", "add", "-q", self.tree, "-b", "work")
         self.here = os.path.join(self.tree, ".claude", "p4", "temportal")
         self.there = os.path.join(self.main, ".claude", "p4", "temportal")
+
+
+class CarriedOver(_CarriedOverBase):
+    """What a session in a git worktree keeps for the project lies in the worktree's own store, since the store is
+    taken from the session's root and `plansDirectory` is a path from the project root. Each sweep copies its plans,
+    its notebook and its saved code into the main checkout's store, so they are there when the worktree is gone."""
 
     def test_a_plan_of_a_session_in_a_worktree_is_in_the_main_checkouts_store_once_the_worktree_is_removed(self):
         plan = put(os.path.join(self.here, "plan-planner", "quick-plan-brave-otter.md"), "# the plan\n")
@@ -351,7 +355,7 @@ class CarriedOver(unittest.TestCase):
         self.assertEqual(lifetime.carry_over(outside), [], "a folder outside a repository has no main checkout")
 
 
-class WorktreeStore(CarriedOver):
+class WorktreeStore(_CarriedOverBase):
     """What a session in a git worktree reads and keeps beside its plans, its notebook and its saved code. p4.json
     is the main checkout's, since it holds what ezexe turned on for the project. A cookie is the worktree's own and
     goes into the main checkout's store with the file it names. And the worktree session's sweep clears the main

@@ -357,7 +357,7 @@ def on_message(home, s, req, last_turn=None):
 def on_send(home, s, target, message=""):
     """At the puppeteer's SendMessage: the row whose topic the message's own words share takes the target as its
     holder; failing that, a send to a controlled session holds the row this turn works on. A message on no
-    request's topic to a session it does not control, such as its standing worker, holds none."""
+    request's topic to a session it does not control holds none."""
     sid = s["sessionId"]
     target = _phi().safe_id(target) if target else ""
     if not target or target == sid:
