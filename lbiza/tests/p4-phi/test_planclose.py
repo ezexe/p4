@@ -249,11 +249,11 @@ class Guard(unittest.TestCase):
         self.assertIn("refused", planclose.guard("PowerShell", {"command": cmd}))
 
     def test_a_plan_close_line(self):
-        cmd = (f"python -I -X utf8 E:/p/scripts/phi.py plan close \"{self.PLANS}/x.md\" --checkout E:/p "
-               f"# into plan-planner/complete")
+        cmd = f"python -I -X utf8 E:/p/scripts/phi.py plan close \"{self.PLANS}/complete/x.md\" --checkout E:/p"
         self.assertIsNone(planclose.guard("Bash", {"command": cmd}))
-        ps = f"& python E:\\p\\scripts\\phi.py plan close {self.PLANS}\\complete\\x.md --checkout E:\\p 2>&1"
+        ps = f"& \"C:\\py\\python.exe\" E:\\p\\scripts\\phi.py plan close {self.PLANS}\\complete\\x.md --checkout E:\\p"
         self.assertIsNone(planclose.guard("PowerShell", {"command": ps}))
+        self.assertIsNone(planclose.guard("Bash", {"command": f"phi.py plan close {self.PLANS}/complete/x.md"}))
 
     def test_a_plan_close_line_chained_with_a_move(self):
         cmd = f"python phi.py plan close a.md --checkout . && mv b.md {self.PLANS}/complete/b.md"
@@ -270,6 +270,188 @@ class Guard(unittest.TestCase):
         self.assertIsNone(planclose.guard("Read", {"file_path": f"{self.PLANS}/complete/x.md"}))
         self.assertIsNone(planclose.guard("Grep", {"path": f"{self.PLANS}/complete"}))
         self.assertIsNone(planclose.guard("Write", None))
+
+
+class GuardHoles(unittest.TestCase):
+    """Section 11 of audit-before-a-plan-closes: the holes this plan's own audit found in guard()."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    ELSEWHERE = "E:/projects/p4-phi/p4"
+
+    def refused(self, cmd, tool="Bash", cwd=ELSEWHERE):
+        return planclose.guard(tool, {"command": cmd}, cwd=cwd)
+
+    # one close line only
+    def test_a_move_with_a_close_comment(self):
+        self.assertIn("refused", self.refused("mv a.md x/plan-planner/complete/a.md # phi.py plan close"))
+
+    def test_a_close_line_with_a_redirection_into_complete(self):
+        self.assertIn("refused", self.refused(f"python phi.py plan close nope.md 2> {self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"python phi.py plan close nope.md 2>&1 > {self.PLANS}/complete/x"))
+        self.assertIn("refused", self.refused(f"python phi.py plan close {self.PLANS}/x.md < {self.PLANS}/complete/y"))
+
+    def test_a_move_that_names_phi_py_plan_close_after_it(self):
+        self.assertIn("refused", self.refused(f"mv a.md {self.PLANS}/complete/a.md phi.py plan close"))
+        self.assertIn("refused", self.refused(f"python -c \"import shutil\" phi.py plan close {self.PLANS}/complete"))
+
+    # moves by any path
+    def test_a_cd_into_the_plans_folder_then_a_move(self):
+        self.assertIn("refused", self.refused("cd E:/p/.claude/p4/temportal/plan-planner && mv x.md complete/"))
+
+    def test_a_dot_segment_and_repeated_separators(self):
+        self.assertIn("refused", self.refused("mv x.md E:/p/plan-planner/./complete/x.md"))
+        self.assertIn("refused", self.refused("mv x.md E:/p/plan-planner//complete/x.md"))
+        self.assertIn("refused", self.refused(r"Move-Item x.md E:\p\plan-planner\.\complete\x.md", "PowerShell"))
+
+    def test_a_join_path_and_a_python_rename(self):
+        cmd = "Move-Item x.md (Join-Path 'E:\\p\\plan-planner' 'complete')"
+        self.assertIn("refused", self.refused(cmd, "PowerShell"))
+        cmd = "python -c \"import os; os.rename('plan-planner/x.md', os.path.join('plan-planner', 'complete', 'x.md'))\""
+        self.assertIn("refused", self.refused(cmd))
+
+    def test_a_complete_segment_run_from_the_plans_folder(self):
+        self.assertIn("refused", self.refused("mv x.md complete/", cwd=self.PLANS))
+        self.assertIn("refused", self.refused(r"Move-Item x.md .\complete\x.md", "PowerShell", cwd=self.PLANS + "/"))
+        self.assertIsNone(self.refused("mv x.md complete/"))
+        self.assertIsNone(self.refused("mv x.md todo/", cwd=self.PLANS))
+
+    def test_no_complete_segment(self):
+        self.assertIsNone(self.refused(f"mv {self.PLANS}/x.md {self.PLANS}/completed/x.md"))
+        self.assertIsNone(self.refused(f"cat {self.PLANS}/complete.md > {self.PLANS}/x.md"))
+
+    def test_read_only_lines_stay_allowed(self):
+        for cmd in (f"ls {self.PLANS}/complete", f"dir {self.PLANS}\\complete", f"cat {self.PLANS}/complete/x.md",
+                    f"type {self.PLANS}\\complete\\x.md", f"grep -n STATUS {self.PLANS}/complete/x.md",
+                    f"rg STATUS {self.PLANS}/complete", f"git status {self.PLANS}/complete",
+                    f"git log -- {self.PLANS}/complete", f"git diff {self.PLANS}/complete/x.md",
+                    f"git show HEAD:plan-planner/complete/x.md"):
+            self.assertIsNone(self.refused(cmd), cmd)
+        for cmd in (f"Get-ChildItem {self.PLANS}\\complete", f"Get-Content {self.PLANS}\\complete\\x.md"):
+            self.assertIsNone(self.refused(cmd, "PowerShell"), cmd)
+        self.assertIsNone(self.refused("ls complete", cwd=self.PLANS))
+
+    def test_read_only_lines_with_a_redirection_or_a_chain(self):
+        self.assertIn("refused", self.refused(f"cat x.md > {self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"cat {self.PLANS}/x.md >> {self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"ls {self.PLANS}/complete; mv x.md {self.PLANS}/complete/"))
+        self.assertIn("refused", self.refused(f"Get-Content x.md | Set-Content {self.PLANS}\\complete\\x.md",
+                                              "PowerShell"))
+        self.assertIn("refused", self.refused(f"git diff --output={self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"git commit -m x {self.PLANS}/complete/x.md"))
+
+    # other shell tools
+    def test_run_in_terminal(self):
+        cmd = f"mv {self.PLANS}/x.md {self.PLANS}/complete/x.md"
+        self.assertIn("refused", self.refused(cmd, "mcp__terminal__run_in_terminal"))
+        self.assertIsNone(self.refused(f"ls {self.PLANS}/complete", "mcp__terminal__run_in_terminal"))
+
+    # edits
+    def test_an_edit_path_resolved_against_cwd(self):
+        self.assertIn("refused", planclose.guard("Write", {"file_path": "complete/x.md"}, cwd=self.PLANS))
+        self.assertIn("refused", planclose.guard("Edit", {"file_path": "plan-planner\\complete\\x.md"},
+                                                 cwd="E:\\p\\.claude\\p4\\temportal"))
+        self.assertIn("refused", planclose.guard("Write", {"file_path": "../plan-planner/complete/x.md"},
+                                                 cwd=self.PLANS + "/todo"))
+        self.assertIsNone(planclose.guard("Write", {"file_path": "complete/x.md"}, cwd=self.ELSEWHERE))
+
+    def test_an_edit_path_normalised(self):
+        self.assertIn("refused", planclose.guard("Write", {"file_path": f"{self.PLANS}/./complete/x.md"}))
+        self.assertIn("refused", planclose.guard("Write", {"file_path": f"{self.PLANS}//complete//x.md"}))
+        self.assertIn("refused", planclose.guard("Edit", {"file_path": f"{self.PLANS}/todo/../complete/x.md"}))
+        self.assertIsNone(planclose.guard("Write", {"file_path": f"{self.PLANS}/complete/../x.md"}))
+
+
+class GateHoles(Repo):
+    """Section 11 of audit-before-a-plan-closes: the holes this plan's own audit found in check() and close()."""
+
+    def test_evidence_with_no_sha(self):
+        out = planclose.check(self.plan(evidence2="- **Evidence:** done"), self.repo)
+        self.assertEqual(out, ["section 2 (2. The flush)'s `Evidence:` names no commit"])
+
+    def test_a_numbered_finding_counts(self):
+        out = planclose.check(self.plan(findings=["- Finding 2: b: open"]), self.repo)
+        self.assertEqual(out, ["the finding `b` is open"])
+        out = planclose.check(self.plan(findings=["- Finding #3: c: open", "- **Finding 4:** d: answered, why"]),
+                              self.repo)
+        self.assertEqual(out, ["the finding `c` is open"])
+
+    def test_a_finding_bullet_that_does_not_parse_is_unread(self):
+        out = planclose.check(self.plan(findings=["- Finding: none", "- Findings - the flush: open"]), self.repo)
+        self.assertEqual(len(out), 1)
+        self.assertIn("Findings - the flush: open", out[0])
+        self.assertIn("states no outcome", out[0])
+        self.assertEqual(planclose.check(self.plan(findings=["- Finding: none", "- the rest is fine"]), self.repo),
+                         [])
+
+    def test_the_outcome_is_the_last_of_the_line(self):
+        out = planclose.check(self.plan(findings=["- Finding: the open flag is fixed: wrong: open"]), self.repo)
+        self.assertEqual(out, ["the finding `the open flag is fixed: wrong` is open"])
+        out = planclose.check(self.plan(findings=["- Finding: x: fixed elsewhere: answered, it is in the spec"]),
+                              self.repo)
+        self.assertEqual(out, [])
+
+    def test_a_base_or_head_that_opens_with_a_dash(self):
+        audited = f"Audited: 2026-11-24: --all..{self.two[:8]}, code-review and p4-phi:check"
+        out = planclose.check(self.plan(audited=audited), self.repo)
+        self.assertTrue(any("`--all`" in o and "opens with `-`" in o for o in out), out)
+
+    def test_a_fixed_sha_that_opens_with_a_dash(self):
+        out = planclose.check(self.plan(findings=["- Finding: a: fixed, --all"]), self.repo)
+        self.assertEqual(len(out), 1)
+        self.assertIn("opens with `-`", out[0])
+        self.assertEqual(planclose.commit_of(self.repo, "--all"), "")
+        self.assertFalse(planclose.contains(self.repo, "--all", self.two))
+
+    def test_only_a_heading_exactly_audit_is_the_record(self):
+        text = self.plan(audit=False) + "\n## Audit notes\n\nAudited: 2026-11-24: a..b\n- Finding: none\n"
+        self.assertEqual(planclose.check(text, self.repo), ["the plan holds no `## Audit` record"])
+
+
+class CloseHoles(Repo):
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def write(self, text, *where):
+        folder = os.path.join(self.home, *where[:-1])
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, where[-1])
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        return path
+
+    def test_a_shelved_plan_closes_into_the_plans_folder(self):
+        path = self.write(self.plan(), "todo", "x.md")
+        dest = planclose.close(path, self.repo, today="2026-11-24")
+        self.assertEqual(dest, os.path.join(self.home, "complete", "the-exporter-s-move.md"))
+        self.assertFalse(os.path.exists(os.path.join(self.home, "todo", "complete")))
+
+    def test_a_name_taken_after_free_name_takes_the_next(self):
+        path = self.write(self.plan(), "x.md")
+        real = planclose.free_name
+
+        def racing(home, name, own=""):
+            got = real(home, name, own)
+            if got == "the-exporter-s-move.md":
+                os.makedirs(os.path.join(home, "complete"), exist_ok=True)
+                open(os.path.join(home, "complete", got), "w").close()
+            return got
+        planclose.free_name = racing
+        try:
+            dest = planclose.close(path, self.repo, today="2026-11-24")
+        finally:
+            planclose.free_name = real
+        self.assertEqual(os.path.basename(dest), "the-exporter-s-move.2.md")
+        self.assertFalse(os.path.exists(path))
+
+    def test_crlf_line_ends_are_kept(self):
+        path = self.write(self.plan().replace("\n", "\r\n"), "x.md")
+        dest = planclose.close(path, self.repo, today="2026-11-24")
+        with open(dest, encoding="utf-8", newline="") as f:
+            got = f.read()
+        self.assertNotIn("\n", got.replace("\r\n", ""))
+        self.assertTrue(got.split("\r\n")[1].startswith("STATUS: COMPLETED 2026-11-24: 2 sections;"))
 
 
 if __name__ == "__main__":
