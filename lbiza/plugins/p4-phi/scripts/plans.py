@@ -630,6 +630,19 @@ def worker_mode_for(text):
     return "print", "landing, test and check work runs headless on the API credit"
 
 
+BUILD_IN_PLANNER = True
+
+
+def build_in_planner_for(rec, conf, default=BUILD_IN_PLANNER):
+    """(on, from): the session record's `buildInPlanner` where it is a bool, else phi.json's `build_in_planner`
+    where it is a bool, else `default`, with where it came from."""
+    if isinstance(rec.get("buildInPlanner"), bool):
+        return rec["buildInPlanner"], "the session's buildInPlanner"
+    if isinstance(conf.get("build_in_planner"), bool):
+        return conf["build_in_planner"], "phi.json build_in_planner"
+    return default, "the default"
+
+
 CODE =re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
                   r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
                   r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)

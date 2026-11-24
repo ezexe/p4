@@ -3666,5 +3666,45 @@ class Partition(unittest.TestCase):
         self.assertEqual(ran.returncode, 0, ran.stderr)
 
 
+class BuildInPlanner(unittest.TestCase):
+    """phi.json `build_in_planner` and a session's `buildInPlanner`: the session wins over phi.json over the default."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.home, ignore_errors=True)
+        self.conf = os.path.join(self.home, "phi", "phi.json")
+
+    def test_set_writes_keeps_other_keys_and_default_removes(self):
+        write(self.conf, json.dumps({"worker_mode": "interactive"}))
+        self.assertIn("off (phi.json build_in_planner)", phi.build_in_planner_set(self.home, "off"))
+        self.assertEqual(json.load(open(self.conf)), {"worker_mode": "interactive", "build_in_planner": False})
+        self.assertIn("on (phi.json build_in_planner)", phi.build_in_planner_set(self.home, "on"))
+        self.assertIn("on (the default)", phi.build_in_planner_set(self.home, "default"))
+        self.assertEqual(json.load(open(self.conf)), {"worker_mode": "interactive"})
+        with self.assertRaises(ValueError):
+            phi.build_in_planner_set(self.home, "maybe")
+
+    def test_a_file_that_does_not_parse_is_left_as_it_is(self):
+        write(self.conf, "{not json at all")
+        with self.assertRaises(ValueError):
+            phi.build_in_planner_set(self.home, "off")
+        self.assertEqual(open(self.conf).read(), "{not json at all")
+
+    def test_session_then_phi_json_then_default_and_worker_for_removes_the_key(self):
+        phi.save_session(self.home, {"sessionId": "s1"})
+        self.assertEqual(phi.build_in_planner(self.home, "s1"), (True, "the default"))
+        phi.build_in_planner_set(self.home, "off")
+        self.assertEqual(phi.build_in_planner(self.home, "s1"), (False, "phi.json build_in_planner"))
+        self.assertIn("build_in_planner on (the session's buildInPlanner)", phi.worker_for(self.home, "s1", build="true"))
+        self.assertEqual(phi.build_in_planner(self.home, "s1"), (True, "the session's buildInPlanner"))
+        phi.worker_for(self.home, "s1", build="false")
+        self.assertIs(phi.load_session(self.home, "s1")["buildInPlanner"], False)
+        phi.worker_for(self.home, "s1", build="default")
+        self.assertNotIn("buildInPlanner", phi.load_session(self.home, "s1"))
+        self.assertEqual(phi.build_in_planner(self.home, "s1"), (False, "phi.json build_in_planner"))
+        with self.assertRaises(ValueError):
+            phi.worker_for(self.home, "s1", build="yes")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

@@ -2186,5 +2186,18 @@ class OwnLines(unittest.TestCase):
             shutil.rmtree(home, ignore_errors=True)
 
 
+class BuildInPlannerFor(unittest.TestCase):
+    def test_the_session_then_phi_json_then_the_default(self):
+        self.assertEqual(plans.build_in_planner_for({"buildInPlanner": False}, {"build_in_planner": True}),
+                         (False, "the session's buildInPlanner"))
+        self.assertEqual(plans.build_in_planner_for({}, {"build_in_planner": False}),
+                         (False, "phi.json build_in_planner"))
+        self.assertEqual(plans.build_in_planner_for({}, {}), (True, "the default"))
+
+    def test_a_non_bool_is_skipped(self):
+        self.assertEqual(plans.build_in_planner_for({"buildInPlanner": "no"}, {"build_in_planner": 0}),
+                         (True, "the default"))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

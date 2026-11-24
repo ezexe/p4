@@ -85,6 +85,7 @@ RULES = True
 GOAL = True                      # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
 WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
 WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
+BUILD_IN_PLANNER = True          # phi.json `build_in_planner`: the planner that wrote an approved section plan builds it
 WORKER_MODES = ("print", "interactive")
 WORKER_PAIRS = {"print": "p4-workers", "interactive": ""}   # the profile a mode pairs with where nothing sets one
 POOL_LOW = 0.9                     # a pool is low at or over this share of its window (Max) or its budget (API credit)
@@ -123,7 +124,7 @@ SCAN_RECORDS = 60                # the newest records searched for a CLI session
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
             "goal": "GOAL", "app_tools": "APP_TOOLS", "worker_profile": "WORKER_PROFILE",
-            "worker_mode": "WORKER_MODE"}
+            "worker_mode": "WORKER_MODE", "build_in_planner": "BUILD_IN_PLANNER"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -3065,7 +3066,7 @@ def worker_balance(home):
     return "\n".join(out) + "\n" + pools_line(pool_state(home))
 
 
-def worker_for(home, sid, mode=None, profile=None):
+def worker_for(home, sid, mode=None, profile=None, build=None):
     """`phi.py worker_for`: with no mode and profile it prints; with them it writes the session `sid`'s `workerMode`
     and `workerProfile` (`default` removes the key, `off` for a profile is the empty string). The lines say the
     effective mode and profile and where each came from. ValueError on a bad word or an unknown session."""
@@ -3076,7 +3077,9 @@ def worker_for(home, sid, mode=None, profile=None):
         raise ValueError("a worker mode is print, interactive or default")
     if profile is not None and profile not in ("off", "default") and not re.fullmatch(r"[A-Za-z0-9_-]+", profile):
         raise ValueError("a worker profile's name holds letters, digits, _ and - only")
-    if mode is not None or profile is not None:
+    if build is not None and build not in ("true", "false", "default"):
+        raise ValueError("build_in_planner for a session is true, false or default")
+    if mode is not None or profile is not None or build is not None:
         if mode is not None:
             rec.pop("workerMode", None)
             if mode != "default":
@@ -3085,9 +3088,14 @@ def worker_for(home, sid, mode=None, profile=None):
             rec.pop("workerProfile", None)
             if profile != "default":
                 rec["workerProfile"] = "" if profile == "off" else profile
+        if build is not None:
+            rec.pop("buildInPlanner", None)
+            if build != "default":
+                rec["buildInPlanner"] = build == "true"
         save_session(home, rec)
     s = worker_settings(home, sid)
-    return f"worker settings of {sid}: " + worker_line(s)
+    on, src = build_in_planner(home, sid)
+    return f"worker settings of {sid}: " + worker_line(s) + f", build_in_planner {'on' if on else 'off'} ({src})"
 
 
 def worker_profile(home):
@@ -3141,6 +3149,32 @@ def worker_mode_set(home, mode=None):
     now_ = worker_mode(home)
     return (f"worker_mode is {now_} in {path.replace(chr(92), '/')}: a terminal worker runs as "
             + ("`claude -p`" if now_ == "print" else "an interactive `claude` tab"))
+
+
+def build_in_planner(home, sid=""):
+    """(on, from) for the session `sid`: plans.build_in_planner_for of its record and the store's phi.json."""
+    conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
+    rec = load_session(home, safe_id(sid)) if home and sid else {}
+    return plans.build_in_planner_for(rec, conf, BUILD_IN_PLANNER)
+
+
+def build_in_planner_set(home, act=None):
+    """`phi.py build_in_planner`: with no word it writes nothing and says how the key stands; `on` or `off` writes
+    it to the store's phi/phi.json, `default` removes it; the file's other keys are kept."""
+    path = os.path.join(home, "phi", "phi.json")
+    if act is not None:
+        if act not in ("on", "off", "default"):
+            raise ValueError("build_in_planner is on, off or default")
+        d = read_json(path)
+        if not d and os.path.exists(path) and os.path.getsize(path) > 2:
+            raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
+        if act == "default":
+            d.pop("build_in_planner", None)
+        else:
+            d["build_in_planner"] = act == "on"
+        write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    on, src = build_in_planner(home)
+    return f"build_in_planner is {'on' if on else 'off'} ({src}) in {path.replace(chr(92), '/')}"
 
 
 def app_tools_switch(home, on=None):
@@ -4342,7 +4376,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "worker_mode", "worker_for", "balance", "cards", "conf", "sections",
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "worker_mode", "build_in_planner", "worker_for", "balance", "cards", "conf", "sections",
                  "coworkers", "progress", "spend", "node"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
@@ -4417,6 +4451,11 @@ def main(argv=None):
                                                          "session; left out it is not changed")
             p.add_argument("--profile", default=None, help="a profile name, off or default (removes the key) for "
                                                             "the session; left out it is not changed")
+            p.add_argument("--build-in-planner", dest="build", default=None,
+                           help="true, false or default (removes the key) for the session: whether the planner "
+                                "that wrote an approved section plan builds it; left out it is not changed")
+        if name == "build_in_planner":
+            p.add_argument("act", nargs="?", default=None, help="on, off or default; left out it prints")
         if name == "cards":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on puts the set of what p4-phi settles with no approval card in force for the "
@@ -4516,7 +4555,14 @@ def main(argv=None):
             return 0
         if a.cmd == "worker_for":                  # a session's own override, this one's or the named one's
             try:
-                print(worker_for(me.home, me.id, a.mode, a.profile))
+                print(worker_for(me.home, me.id, a.mode, a.profile, a.build))
+            except ValueError as e:
+                print(f"phi: {e}", file=sys.stderr)
+                return 2
+            return 0
+        if a.cmd == "build_in_planner":            # the project's setting, which needs no session
+            try:
+                print(build_in_planner_set(me.home, a.act))
             except ValueError as e:
                 print(f"phi: {e}", file=sys.stderr)
                 return 2
