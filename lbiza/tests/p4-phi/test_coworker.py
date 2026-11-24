@@ -722,6 +722,29 @@ class Waves(unittest.TestCase):
         self.assertEqual(coworker.wait_any([reports[0]], longest=20, clock=lambda: now[0],
                                            sleep=lambda s: now.__setitem__(0, now[0] + s))[1:], ("long", 20))
 
+    def test_a_waves_wait_reads_idle_time_from_its_clock_and_ends_on_a_final_result_row(self):
+        folder = os.path.join(self.base, "tw-e")
+        os.makedirs(folder)
+        report = os.path.join(folder, "report-tw-e.md")
+        log = os.path.join(folder, coworker.LOG.format("tw-e"))
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("")
+        mtime = os.path.getmtime(log)
+        now = [mtime]
+
+        def sleep(sec):
+            now[0] += sec
+            if sec and now[0] == mtime + 10:         # the run's final row lands in the first round, then it idles
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write('{"type": "result", "subtype": "success"}\n')
+                os.utime(log, (now[0], now[0]))
+        got = coworker.wait_any([report], longest=100, quiet=60, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(got[:2], (report, "ended"), "idle counts on the clock given, not the wall clock")
+        self.assertGreaterEqual(got[2], 60)
+        now[0] = mtime
+        self.assertEqual(coworker.wait_any([report], longest=20, quiet=60, clock=lambda: now[0],
+                                           sleep=lambda s: now.__setitem__(0, now[0] + s))[1], "long")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

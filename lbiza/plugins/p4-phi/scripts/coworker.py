@@ -578,7 +578,7 @@ def wait_any(reports, longest=LONGEST, clock=time.time, sleep=time.sleep, quiet=
                 return report, "done"
             log, offset = logs[report]
             try:
-                idle = time.time() - os.path.getmtime(log)
+                idle = clock() - os.path.getmtime(log)
             except OSError:
                 continue
             if idle >= quiet and last_result(log, offset, final=True):
