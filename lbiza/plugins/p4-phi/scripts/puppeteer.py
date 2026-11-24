@@ -1243,6 +1243,16 @@ def test_files(base, paths):
     return out
 
 
+def spelled(p):
+    """A path as it is spelled on disk where it is there, with forward slashes; else `p` as given."""
+    try:
+        if os.path.lexists(p):
+            return os.path.realpath(p).replace("\\", "/")
+    except (OSError, ValueError):
+        pass
+    return p
+
+
 def prompter(home, s, req, read, base):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
     session, its parent session and the issue it closes when the message names one. The brief states the task by
@@ -1269,9 +1279,9 @@ def prompter(home, s, req, read, base):
                   "Its steps were: " + "; ".join((route.get("shape") or {}).get("steps") or ["none kept"]) + ".", ""]
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
-        lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
+        lines += ["Area: " + ", ".join(f"`{spelled(p)}`" for p in paths[:8]) + ".", ""]
     if paths:                                       # what a worker's brief says it covers; one that names none has none
-        lines += ["Files: " + ", ".join(f"`{p}`" for p in paths[:8]), ""]
+        lines += ["Files: " + ", ".join(f"`{spelled(p)}`" for p in paths[:8]), ""]
     if named:
         lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
     elif slug:

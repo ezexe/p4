@@ -239,7 +239,8 @@ class Linear(Base):
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
         prompt = call_in(context(t.say(TOP, RETRY + ", in `lib/x.py`")))["prompt"]
-        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1)      # the folder as the Files line spells it
+        # the folder as the test line spells it: norm form, as test_files gives it, where Files: is spelled on disk
+        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1).lower()
         self.assertIn(f"Run these test files, and no whole suite: `{at}/test_x.py`, `{at}/test_y.py`.", prompt)
         self.assertIn("Done looks like: the change made, those test files passing, committed and reported.", prompt)
         self.assertNotIn("test_z.py", prompt)
@@ -525,6 +526,24 @@ class TermsAndGuides(Base):
         none = call_in(context(t.say(TOP, RETRY)))["prompt"]
         self.assertNotRegex(none, r"(?m)^Files: ")
         self.assertNotIn("decisions.md", none)
+
+    def test_a_briefs_paths_keep_their_spelling_on_disk_and_a_path_not_there_is_kept_as_given(self):
+        t = self.t
+        t.say(TOP, TASK)
+        real = os.path.join(t.tmp, "ReadMe.MD")
+        write(real, "x")
+        want = os.path.realpath(real).replace("\\", "/")
+        lower = real.lower().replace("\\", "/")
+        missing = os.path.join(t.tmp, "Not-There.md").lower().replace("\\", "/")
+        self.assertEqual(puppeteer.spelled(missing), missing)
+        if os.path.exists(lower):                    # a case-insensitive file system
+            self.assertEqual(puppeteer.spelled(lower), want)
+            d = puppeteer.prompter(t.p4, t.session(TOP), RETRY,
+                                   {"within": False, "routes": [], "paths": [lower, missing]}, t.proj)
+            self.assertIn(f"Files: `{want}`, `{missing}`", d["brief"])
+            self.assertEqual(d["paths"], [lower, missing], "the paths comparisons read are unchanged")
+        else:
+            self.skipTest("the file system is case-sensitive")
 
 class WatcherCaps(unittest.TestCase):
     def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):
