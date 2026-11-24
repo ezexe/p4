@@ -1489,14 +1489,20 @@ def start_draft(home, s, did, base, task="", background=False):
     one["settings"] = settings                     # start_background reads the mode: an interactive worker needs a tab
     coworker.write([one], base, home)
     checkout = base.replace("\\", "/")
-    out = [phi.worker_start(home, settings, name, s["sessionId"], "plan" if planner else "work", one.get("log") or "",
-                            one["report"]),
+    started = phi.worker_start(home, settings, name, s["sessionId"], "plan" if planner else "work", one.get("log") or "",
+                               one["report"])
+    try:
+        begun = phi.start_lines(one, checkout, True) if background else [phi.tab_lines(name, checkout, one["typed"])]
+    except OSError as e:                           # no shell on PATH, say: the start row would hold its slot for RUNNING_HOURS
+        phi.worker_record(home, {"event": "outcome", "name": name, "how": "failed", "error": str(e)})
+        begun = [f"  `{name}` was not started in the background: {e}; its slot is freed"]
+    out = [started,
            f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
                                   f"{one['log']}" if headless else
                                   f"session {one['session']}, its report {one['report']}"),
            *([f"model and effort: {', '.join(f'{k} {v}' for k, v in sorted(level.items()))}, from the draft's own "
                 "lines"] if level else []),
-           *(phi.start_lines(one, checkout, True) if background else [phi.tab_lines(name, checkout, one["typed"])]),
+           *begun,
            *([phi.trust_line()] if settings["mode"] == "interactive" else []),
            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
            f"{one['report']}`",

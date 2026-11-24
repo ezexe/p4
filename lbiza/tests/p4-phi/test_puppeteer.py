@@ -1132,6 +1132,22 @@ class Terminal(Base):
         self.assertIn("is interactive: it needs a tab", r.stdout)
         self.assertIn("mcp__terminal__open_terminal_tab", r.stdout)
 
+    def test_a_background_start_that_fails_leaves_an_outcome_row_failed(self):
+        """Where `start_background` raises (no shell on PATH), the start row gets an outcome row `failed` with the
+        error, which is printed, so the slot is not held for RUNNING_HOURS."""
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        with mock.patch.object(subprocess, "Popen", side_effect=FileNotFoundError("no powershell on PATH")):
+            r = t.cli(TOP, "draft", "--start", did, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        name = coworker.draft_name("Fix the ports table", did)
+        with open(os.path.join(t.p4, "phi", "worker-starts.jsonl"), encoding="utf-8") as f:
+            rows = [json.loads(x) for x in f if x.strip()]
+        out = [x for x in rows if x.get("event") == "outcome" and x.get("name") == name]
+        self.assertEqual([x["how"] for x in out], ["failed"], rows)
+        self.assertIn("no powershell on PATH", out[0]["error"])
+        self.assertIn("no powershell on PATH", r.stdout)
+
     def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
         start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})
         self.assertIn("--permission-mode plan", start)
