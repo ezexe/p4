@@ -41,7 +41,8 @@ def by_overlap(items, task, key=lambda x: x):
 # The address rule is ezexe/phi's lbiza/phi_rank/tree.py:99-112, written again here and not imported: the top is "1",
 # a child is its parent's address with one more "0" for each child before it and then a "1", so no address holds "11".
 # A session's address is that of the store that holds its folder, read from the store's path under the root store:
-# the i-th child of a store is `.claude` i times and then `p4` under it, relay.store_of.
+# the i-th child of a store is `.claude/p4` for i = 1 and `.claude/p4-<i>` for i >= 2 (relay.store_of); a store made
+# before that holds it at `.claude` i times and then `p4` (relay.old_store_of), and place_of reads both.
 
 SHORT = 32                       # the most characters of an address a line of the tree prints whole
 
@@ -92,7 +93,8 @@ def level(s, sessions):
 
 def place_of(home, store):
     """(address, places) of a store from its path under the root store `home`: ("1", []) for the root, and
-    child(a, i) for each step of i `.claude` folders and a `p4`. A path that is no store's under `home` is the root's."""
+    child(a, i) for each step of `.claude/p4` (i = 1), `.claude/p4-<i>`, or the old i `.claude` folders and a `p4`.
+    A path that is no store's under `home` is the root's."""
     try:
         rel = os.path.relpath(store, home)
     except ValueError:
@@ -100,9 +102,12 @@ def place_of(home, store):
     parts = [] if rel == "." else rel.replace("\\", "/").split("/")
     address, places, run = "1", [], 0
     for part in parts:
+        m = relay.SIBLING.match(part)
         if part == ".claude":
             run += 1
-        elif part == "p4" and run:
+        elif m and run == 1 and m.group(1):          # `.claude/p4-<i>`: the i-th child
+            address, places, run = child(address, int(m.group(1))), places + [int(m.group(1))], 0
+        elif part == "p4" and run:                   # `.claude` i times and `p4`: the first, or the old i-th
             address, places, run = child(address, run), places + [run], 0
         else:
             return "1", []
