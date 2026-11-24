@@ -518,37 +518,26 @@ class WorkerSplit(Base):
 
 
 class TermsAndGuides(Base):
-    """A start draft carries the line that has the session decide by research and log the decision with its source
-    in its decisions file."""
+    """A start draft holds the task and the lines code reads back, and no paragraph of advice."""
 
-    def test_a_start_draft_carries_the_decide_by_research_line(self):
-        """A writing start whose message names its files and one whose message names none both carry the
-        decide-by-research sentence. The second has no `Files:` line, since a brief that writes claims no empty
-        set of files."""
+    def test_a_start_draft_holds_the_task_and_what_code_reads_back(self):
+        """A writing start whose message names its files carries its `Files:` line, the done line, "Report when
+        done." and the draft marker. One whose message names none has no `Files:` line, since a brief that writes
+        claims no empty set of files."""
         t = self.t
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
         writing = call_in(context(t.say(TOP, "Add a retry to `src/export/flush.py` for when the ports table write "
                                             "fails")))["prompt"]
         self.assertRegex(writing, r"Files: `[^`]*src/export/flush\.py`")
-        self.assertIn(phi.DECIDE, writing)
+        self.assertIn("Done looks like:", writing)
+        self.assertIn("Report when done.", writing)
+        self.assertRegex(writing, r"phi draft drf-[0-9a-f]+ for ")
+        self.assertNotIn("decisions.md", writing)
         t.stop(TOP, "retry", report="drafted")
         none = call_in(context(t.say(TOP, RETRY)))["prompt"]
         self.assertNotRegex(none, r"(?m)^Files: ")
-        self.assertIn(phi.DECIDE, none)
-        self.assertIn("decisions.md", phi.DECIDE)
-
-    def test_the_decide_line_does_not_change_a_starts_model_or_effort(self):
-        """Its words "documentation" and "decisions.md" are no sign of docs work: a reading's start is levelled as
-        if the line were not there."""
-        words = "Should the exporter buffer rows in memory or write each one to the store"
-        brief = "# Reading 1 of 2\n\nTask: Reading 1 of 2.\n\n{}Done looks like: the reading worked through."
-        bare = {"title": "Reading 1 of 2", "words": words, "context": "fresh", "background": "x", "brief":
-                brief.format("")}
-        with_line = dict(bare, brief=brief.format(phi.DECIDE + "\n\n"))
-        got, want = puppeteer.call_of(with_line), puppeteer.call_of(bare)
-        self.assertEqual((got.get("model"), got.get("effort")), (want.get("model"), want.get("effort")))
-        self.assertIn(phi.DECIDE, got["prompt"], "the line itself still reaches the child")
+        self.assertNotIn("decisions.md", none)
 
 class WatcherCaps(unittest.TestCase):
     def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):

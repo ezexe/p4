@@ -1294,7 +1294,6 @@ def prompter(home, s, req, read, base):
     if parent:
         lines += checkout_lines(base)
     tests = test_files(base, paths)
-    lines += [phi.DECIDE, ""]
     if tests:                                       # the tests the change touches, and no whole suite
         lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
                   "Done looks like: the change made, those test files passing, committed and reported.",
@@ -1325,9 +1324,8 @@ def call_of(d):
             "wake_when_done": True}
     if d["context"] == "fresh":
         call.update(use_worktree=starts.use_worktree(call["prompt"]), background=d["background"])
-    # a fresh draft names its model and effort, judged by the message it came from as well as its brief; the
-    # decide-by-research line every brief carries is no word of its kind of work
-    brief = d["brief"].replace(_phi().DECIDE, "")
+    # a fresh draft names its model and effort, judged by the message it came from as well as its brief
+    brief = d["brief"]
     return plans.with_level(call, d["title"] + "\n" + str(d.get("words") or "") + "\n" + brief)
 
 

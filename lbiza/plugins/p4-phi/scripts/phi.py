@@ -1326,10 +1326,6 @@ def now_exact():
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
-DECISIONS = "its decisions file, the one its brief names or decisions.md in the scratchpad directory the app names"
-DECIDE = ("A question that the code, the history, the issues or the current outside documentation can answer is "
-          f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
-          "question reaches ezexe only once those cannot settle it.")
 PLANS_DIR = p4conf.PLANS            # from the store's root, as the keeper has it: no line names a place under the app's own folder
 PLAN_MODE = True              # p4.json phi.plan_mode: false withholds no plan tool from a started session
 GOAL_REVIEW = True            # p4.json phi.goal_review: false leaves the review of the change out of a worker's goal
