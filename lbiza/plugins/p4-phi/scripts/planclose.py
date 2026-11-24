@@ -392,8 +392,9 @@ def grandfather(home, today=None):
 def normal(text):
     """`text` with its paths normalised: either slash is `/`, repeated separators are one, and a `./` segment is
     gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`,
-    `+`, `?`, `.` or `*` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`)."""
-    out = re.sub(r"\\(?=[|(){}+?.*])", "", str(text or ""))
+    `+`, `?` or `*` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`); one before `.` is a
+    separator, as in `complete\\.closed.jsonl`."""
+    out = re.sub(r"\\(?=[|(){}+?*])", "", str(text or ""))
     out = re.sub(r"/{2,}", "/", out.replace("\\", "/"))
     out = re.sub(r"/\.(?=/)", "", out)
     out = re.sub(r"(?<![\w.])\./", "", out)

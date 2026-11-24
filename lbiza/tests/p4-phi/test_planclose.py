@@ -739,5 +739,23 @@ class RegexEscapes(unittest.TestCase):
         self.assertIn("refused", self.refused("Move-Item x.md plan-planner\\.\\complete\\x.md", "PowerShell"))
 
 
+class DotAndNested(unittest.TestCase):
+    """Section 8 of two-level-planning-fixes: a backslash dot is a separator, a quoted glob counts in a nested
+    shell, and an escaped quote toggles no quote state."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+
+    def refused(self, cmd, tool="Bash", cwd=PLANS):
+        return planclose.guard(tool, {"command": cmd}, cwd=cwd)
+
+    def test_a_windows_write_of_the_closed_record_is_refused(self):
+        path = self.PLANS.replace("/", "\\") + "\\complete\\.closed.jsonl"
+        self.assertIn("refused", planclose.guard("Write", {"file_path": path}))
+        self.assertEqual(planclose.normal("plan-planner\\.\\complete"), "plan-planner/complete")
+
+    def test_a_quoted_glob_with_no_nested_shell_is_none(self):
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("echo 'a comp* b'"))
+
+
 if __name__ == "__main__":
     unittest.main()
