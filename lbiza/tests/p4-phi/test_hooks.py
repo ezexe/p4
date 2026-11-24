@@ -421,10 +421,10 @@ class PathChecks(unittest.TestCase):
                                                  "tool_input": {key: self.mine("a.py")}})
             self.assertNotIn("deny", r.stdout, tool)
 
-    def test_the_check_of_each_edit_tool_names_the_path_guard_and_the_puppeteer_tool(self):
+    def test_the_check_of_each_edit_tool_names_the_path_guard_alone(self):
         import hook
         for tool in ("Edit", "Write", "NotebookEdit"):
-            self.assertEqual(hook.PHI_CHECK[tool], ("path-guard", "puppeteer-tool"), tool)
+            self.assertEqual(hook.PHI_CHECK[tool], ("path-guard",), tool)
 
     def bash(self, *changed, diff=True):
         resp = {"stdout": "", "stderr": ""}

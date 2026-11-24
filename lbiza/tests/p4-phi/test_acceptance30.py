@@ -138,7 +138,7 @@ class Tree_(unittest.TestCase):
         page = open(relay.ready_path(self.t.p4), encoding="utf-8").read()
         self.assertIn(KID, page, "listed as ready to archive")
         ctx = context(self.t.say(TOP, "what next?"))
-        self.assertNotIn("archive_session", ctx, "no archive call is handed out to any session")
+        self.assertNotIn("archive each with `", ctx, "no archive call is handed out to any session")
         self.assertIn("the archive tool asks ezexe on the app's approval card before it runs", ctx)
         self.assertEqual(ctx.count(f"](#{KID})"), 1, "the notice names it once, as a link ezexe opens")
         again = context(self.t.say(TOP, "and then?"))

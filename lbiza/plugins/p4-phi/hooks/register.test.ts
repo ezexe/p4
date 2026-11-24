@@ -1607,31 +1607,6 @@ test('a plain shell call starts no python, whatever the store holds', async ($, 
   expect(seen.checks).toEqual([])
 })
 
-test('a puppeteer is checked at each edit and shell call', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  mock.clock(on)
-  const seen = machine(on, {})
-  on('tool.check', () => ALLOW)
-  const edit = (): never => call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' })
-
-  // Another session's marker opens nothing for this one.
-  seen.files[`${PHI}/.puppeteers/cli-0002`] = ''
-  await $.tool.check(edit())
-  await $.tool.check(bash('ls'))
-  expect(seen.checks).toEqual([])
-
-  seen.files[`${PHI}/.puppeteers/cli-0001`] = ''
-  await $.tool.check(edit())
-  await $.tool.check(call('Write', { file_path: 'a.py', content: 'x' }))
-  await $.tool.check(call('NotebookEdit', { notebook_path: 'a.ipynb', new_source: 'x' }))
-  await $.tool.check(bash('ls'))
-  expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Edit', 'Write', 'NotebookEdit', 'Bash'])
-
-  // A tool hook.py has no check for is not read.
-  await $.tool.check(call('Read', { file_path: 'a.py' }))
-  expect(seen.checks.length).toBe(4)
-})
-
 test("an edit is checked in a project whose store holds the paths marker, and not in one with no marker", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   mock.clock(on)
@@ -2679,75 +2654,6 @@ test('a call that does not answer is given up on after a short wait, and no seco
   expect(calls.length).toBe(4)
 })
 
-// A puppeteer's look where `app_tools` is on, and what the app's two tools for the sidebar answer.
-const APP_PUPPETEER: Answer = { ...APP_ON, app_sections: true }
-const SECTIONS = [
-  { id: 'sessions', kind: 'builtin', name: '', order: 1 },
-  { id: 'cg-9', kind: 'manual', name: 'importers', order: 2 },
-]
-const GROUPS = [{ id: 'cg-9', name: 'importers', session_count: 1, order: 0 }]
-
-function text(value: unknown): unknown {
-  return { result: [{ type: 'text', text: JSON.stringify(value) }], text: JSON.stringify(value) }
-}
-
-test("a puppeteer's look has the sidebar's sections asked for too, and they are kept with the sessions", async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { ...STORE }, look: () => APP_PUPPETEER })
-  const calls = app(on, tool => (tool.endsWith('list_sections') ? text(SECTIONS) : undefined))
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(calls.map(call => call.tool)).toEqual([
-    'mcp__ccd_session_mgmt__get_session',
-    'mcp__ccd_session_mgmt__list_sessions',
-    'mcp__ccd_sidebar__list_sections',
-  ])
-  expect(calls[2]).toEqual({ tool: 'mcp__ccd_sidebar__list_sections' })
-  expect(kept(seen)).toEqual([
-    { path: `${BOUND_IN}/app.json`, text: `${APP_KEPT.slice(0, -2)},"sections":${JSON.stringify(SECTIONS)}}\n` },
-  ])
-})
-
-test('where the sections are not answered the groups are asked, as while no window of the app is open', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { ...STORE }, look: () => APP_PUPPETEER })
-  const calls = app(on, tool => {
-    if (tool.endsWith('list_sections')) return { result: 'No app window is open.', text: 'No app window is open.', isError: true }
-
-    return tool.endsWith('list_groups') ? text(GROUPS) : undefined
-  })
-
-  await $.session.start(START)
-  await clock.settle()
-
-  expect(calls.map(call => call.tool).slice(2)).toEqual(['mcp__ccd_sidebar__list_sections', 'mcp__ccd_sidebar__list_groups'])
-  expect(kept(seen)[0]?.text.endsWith(`,"sections":${JSON.stringify(GROUPS)}}\n`)).toBe(true)
-})
-
-test("a session with no tool of the sidebar asks for one once, and its sessions are asked for as before", async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  const seen = machine(on, { files: { ...STORE }, look: () => APP_PUPPETEER })
-  const calls: string[] = []
-  on('tool.call', (_, e) => {
-    calls.push(String(e.tool))
-    if (String(e.tool).startsWith('mcp__ccd_sidebar__')) throw new Error(`No such tool available: ${String(e.tool)}`)
-
-    return text(String(e.tool).endsWith('get_session') ? APP_SELF : APP_LINKED) as never
-  })
-
-  await $.session.start(START)
-  await clock.advance(130_000)
-
-  expect(calls.filter(tool => tool.startsWith('mcp__ccd_sidebar__'))).toEqual(['mcp__ccd_sidebar__list_sections'])
-  expect(calls.filter(tool => tool.endsWith('get_session')).length).toBe(3)
-  expect(kept(seen).map(write => write.text.includes('"sections"'))).toEqual([false, false, false])
-})
-
 // The variables a command hook gets in a session the desktop app started in a git worktree, as `$.process.hookEnv`
 // answers them: the project is the main checkout, and the session's own folder is the worktree.
 const MAIN = '/work/main'
@@ -2811,10 +2717,10 @@ test('a script the module runs is handed the variables a command hook gets, so b
   // Python's markers are read in the store python wrote them to, the main checkout's, and one in the worktree's
   // store opens nothing.
   const before = seen.checks.length
-  seen.files[`${other}/.claude/p4/phi/.puppeteers/cli-0001`] = ''
+  seen.files[`${other}/.claude/p4/phi/.paths/on`] = ''
   await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
   expect(seen.checks.length).toBe(before)
-  seen.files[`${project}/.claude/p4/phi/.puppeteers/cli-0001`] = ''
+  seen.files[`${project}/.claude/p4/phi/.paths/on`] = ''
   await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
   expect(seen.checks.length).toBe(before + 1)
 })

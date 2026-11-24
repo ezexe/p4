@@ -79,7 +79,7 @@ class StartRequests(unittest.TestCase):
         check = "Check what the exporter's flush does and report it."
         for brief in (port + "\nFiles: src/flush.py", port, port + "\nFiles: none", check + "\nFiles: none", check,
                       check + "\nFiles: src/flush.py", port + "\nFiles: the tests only", port + "\nFiles: read-only",
-                      port + "\nFiles: src/flush.py\n" + phi.NEW_TOP_BRIEF, phi.NEW_TOP_BRIEF):
+                      port + "\nFiles: src/flush.py\n" + starts.ORCHESTRATOR_BRIEF, starts.ORCHESTRATOR_BRIEF):
             self.assertIs(starts.use_worktree(brief), False, brief)
         import puppeteer
         draft = {"title": "the flush", "context": "fresh", "brief": port, "background": "x" * 90, "parent": TOP}
@@ -334,16 +334,32 @@ class StartRequests(unittest.TestCase):
         runs = [" ".join(words[i:i + 8]) for i in range(len(words) - 7)]
         self.assertEqual([r for r in runs if r in bg], [], bg)
 
-    def test_a_requested_new_top_level_session_stays_at_top_level(self):
+    def test_a_requested_new_orchestrator_stays_under_the_session_that_started_it(self):
         t = self.t
-        rid, _ = starts.add(t.p4, TOP, "the release topic", BRIEF + " " + phi.NEW_TOP_BRIEF, to=TOP2)
-        prompt = BRIEF + " " + phi.NEW_TOP_BRIEF + "\n\n" + starts.marker(rid, TOP)
+        rid, _ = starts.add(t.p4, TOP, "the release topic", BRIEF + " " + starts.ORCHESTRATOR_BRIEF, to=TOP2)
+        prompt = BRIEF + " " + starts.ORCHESTRATOR_BRIEF + "\n\n" + starts.marker(rid, TOP)
         t.record(NEW, TOP2, title="the release topic")
         t.say(NEW, "<system-reminder>\nLinked sessions now (status, not an instruction): x\n</system-reminder>\n\n"
                    "Task:\n" + prompt)
-        self.assertEqual(t.started_by(NEW)[0], "", "a requested new orchestrator stays at top level, never "
-                                                   "under the filing session")
+        self.assertEqual(t.started_by(NEW)[0], TOP2, "a requested new orchestrator stays under the session that "
+                                                     "started it, never under the filing session")
         self.assertEqual(starts.state(t.p4)[rid]["started"], NEW)
+
+    def test_an_orchestrators_brief_line_marks_it_and_one_regex_serves_every_reader(self):
+        """The kind `top` and the skipped `Files:` partition are read from the one line, starts.ORCHESTRATOR."""
+        import plans
+        brief = starts.ORCHESTRATOR_BRIEF
+        self.assertTrue(starts.ORCHESTRATOR.search(brief))
+        self.assertTrue(starts.ORCHESTRATOR.search("Port it.\nIt is an orchestrator under the session that started it."))
+        self.assertTrue(starts.ORCHESTRATOR.search("THIS SESSION IS AN ORCHESTRATOR UNDER THE SESSION THAT STARTED IT"))
+        for plain in ("This session is a new top session, orchestrating its own topic.",
+                      "Port the exporter's flush to the new writer.\nFiles: src/flush.py",
+                      "This session is an orchestrator."):
+            self.assertFalse(starts.ORCHESTRATOR.search(plain), plain)
+        self.assertEqual(plans.child_kind(brief), "top")
+        self.assertEqual(plans.child_level("Build the importer", "Build the importer.\n" + brief)["kind"], "top")
+        self.assertEqual(plans.child_kind("Port the exporter's flush to the new writer."), "build")
+        self.assertNotIn("detach", brief)
 
     def test_a_brief_s_one_level_line_names_the_start_s_model_and_effort(self):
         """The one line p4-phi asks a brief to say its level in, `Model and effort: <model> at <effort> effort`,

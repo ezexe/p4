@@ -158,7 +158,7 @@ class Setting(Base):
         self.finish()
         got = self.said()
         self.assertNotIn("upkeep", got)
-        self.assertNotIn(ARCHIVE, got)
+        self.assertNotIn(f"archive each with `{ARCHIVE}`", got, "TOP started a session, so it is told the app asks")
         self.assertNotIn("worktree remove", got)
         self.assertFalse(os.path.exists(upkeep.path(self.t.p4, TOP)), "no record of upkeep is made")
         self.assertNotIn("left", self.t.turns(KID)[-1], "the worker's turn row is as it was")
@@ -613,34 +613,20 @@ class Sweep(Base):
         self.assertFalse(upkeep.keep_sweep(s, [{"name": upkeep.SEND, "input": {"to": "kid", "message": "go on"}}]),
                          "a message with no notice asked for keeps nothing")
 
-    def test_a_session_a_puppeteer_controls_and_did_not_start_counts_as_out_while_it_is_inside_a_turn(self):
-        """The app's note of a turn's end goes to the session that started one, and a session's hooks module sends
-        each turn's report to that starter, phi.starter_cli, so a puppeteer hears nothing of a session it controls
-        and did not start, and no idle notice can be asked of a session the app runs. The sweep's schedule covers
-        it: such a session counts as out while it is inside a turn, the schedule's end waits until it is not,
-        and a puppeteer with a session it controls is one upkeep keeps."""
+    def test_a_puppeteer_controls_only_sessions_it_started_and_is_a_tree_upkeep_keeps(self):
+        """The app's note of a turn's end goes to the session that started one, and every session a puppeteer
+        controls is one it started, so none counts as out. A puppeteer with a live session it started is a tree the
+        sweep's schedule keeps."""
         self.turn_on()
-        self.t.stop(TOP, TASK, [self.made()], report="The sweep's schedule is started.", uuid="c1")
-        self.commit()
-        self.finish(report="The last row is written now.")       # the one started session is no live one now
-        self.t.record(KID2, title="Another tree's orchestrator")
-        self.t.say(KID2, "Port the importer")                    # nobody started it, and it is inside a turn
-        rows = [{"sessionId": KID2, "store": self.t.p4}, {"sessionId": KID, "store": self.t.p4}]
-        pup = dict(self.t.session(TOP), controls=rows)
-        with mock.patch.object(phi, "UPKEEP", True):
-            self.assertEqual(upkeep.controlled_out(self.t.p4, pup), [KID2],
-                             "the one it started is the app's to tell of")
-            keys = [a[0] for a in upkeep.sweep_acts(self.t.p4, pup, upkeep.load(self.t.p4, TOP), False)]
-            self.assertEqual(keys, [], "its schedule runs and a controlled session works: no end yet")
-            self.t.stop(KID2, "Port the importer", report="The importer is ported.", uuid="k1")
-            self.assertEqual(upkeep.controlled_out(self.t.p4, pup), [])
-            keys = [a[0] for a in upkeep.sweep_acts(self.t.p4, pup, upkeep.load(self.t.p4, TOP), False)]
-            self.assertEqual(keys, [f"schedule-end:{TOP}"], "nothing is out now")
         alone = "local_pup00001"
         write(os.path.join(self.t.dir(alone), "session.json"), json.dumps({"sessionId": alone}))
-        self.assertFalse(upkeep.has_tree(self.t.p4, alone), "it started none and controls none")
-        write(os.path.join(self.t.dir(alone), "session.json"), json.dumps({"sessionId": alone, "controls": rows}))
-        self.assertTrue(upkeep.has_tree(self.t.p4, alone))
+        with mock.patch.dict(os.environ, self.t.env(alone)):
+            self.assertFalse(upkeep.has_tree(self.t.p4, alone), "it started none and controls none")
+            self.t.record(KID2, started_by=alone, title="Another tree's orchestrator")
+            self.t.say(KID2, "Port the importer")                # inside a turn
+            self.assertTrue(upkeep.has_tree(self.t.p4, alone))
+            pup = self.t.session(alone)
+            self.assertEqual(upkeep.controlled_out(self.t.p4, pup), [], "the one it started is the app's to tell of")
 
     def test_with_upkeep_off_no_line_of_the_sweep_is_handed(self):
         got = self.said()

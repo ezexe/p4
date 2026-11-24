@@ -36,6 +36,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
 import phi  # noqa: E402
+import starts  # noqa: E402
 import relay  # noqa: E402
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
@@ -108,6 +109,12 @@ class Tree:
             d["spawnedFrom"] = {"sessionId": started_by, "taskId": "task_1", "title": title, "sideSession": True}
             d["startChain"] = {"firstSessionId": TOP, "depth": 1}
         write(os.path.join(self.app, host + ".json"), json.dumps(d))
+
+    def forget(self, *hosts):
+        """The app's record of each session gone: a session that started one is a puppeteer, so a test of what an
+        orchestrator with no live session of its own is handed leaves it none."""
+        for host in hosts:
+            os.remove(os.path.join(self.app, host + ".json"))
 
     def env(self, host, proj=None, **more):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("CLAUDE_", "P4_PHI"))}
@@ -590,6 +597,7 @@ class Sessions(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
 
     def test_the_first_session_of_a_store_is_handed_nothing(self):
+        self.t.forget(KID, KID2, GRAND)
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
         self.assertEqual((r.returncode, context(r)), (0, ""), "no memories and no background: nothing is handed")
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
@@ -654,7 +662,7 @@ class Turns(unittest.TestCase):
         self.assertGreater(len(LONG), 400)
         self.assertIn("edited export/flush.py", text)
         self.assertIn("not shown done", text)
-        self.assertEqual(self.t.say(TOP, "and now?").stdout.strip(), "")
+        self.assertNotIn("reports of this session's workers", context(self.t.say(TOP, "and now?")))
 
     def test_a_report_the_hooks_module_sent_is_not_repeated_beside_the_message_that_holds_it(self):
         """ezexe/p4#157: the hooks module's message to a starter holds the worker's report, and the starter's prompt
@@ -960,8 +968,8 @@ class Background(unittest.TestCase):
     def test_the_tree_is_printed(self):
         self.t.stop(KID, HANDED, [], "Half done.")
         out = self.t.cli(TOP, "tree").stdout
-        self.assertIn("- 1 orchestrator \"Narwhal exporter\" `", out)
-        self.assertIn("  - 101 worker \"Fix the dropped row\" `", out)
+        self.assertIn("- 1 puppeteer \"Narwhal exporter\" `", out)
+        self.assertIn("  - 101 orchestrator \"Fix the dropped row\" `", out)
         self.assertIn("not shown done, 1 turn", out)
 
     def test_show_prints_a_sessions_page(self):
@@ -999,21 +1007,16 @@ class NewTask(unittest.TestCase):
             self.assertNotIn("about something else", said, words)
             self.assertNotIn("stay with the task", said, words)
 
-    def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
+    def test_an_orchestrators_brief_keeps_it_attached_under_the_session_that_started_it(self):
         self.say(TOP, TASK)
         told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
-                        + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
-        self.assertIn("p4-phi detached it to top level at this first message", told)
-        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", told)
-        self.assertNotIn("detached it to top level", self.say(KID, "and again"), "said at the first message only")
+                        + starts.ORCHESTRATOR_BRIEF)
+        self.assertNotIn("detach", told, "nothing detaches it, in the app or in p4-phi")
         s = phi.load_session(self.t.p4, KID)
-        self.assertEqual(phi.spawned_from(s), "", "detached at its first hook")
-        self.assertEqual(s["spawnedFrom"]["source"], "detached")
-        self.assertEqual(s["spawnedFrom"]["from"], TOP)
+        self.assertEqual(phi.spawned_from(s), TOP, "it stays under its starter")
         self.say(KID, "carry on")
-        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "the app's record does not undo it")
-        self.assertIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)),
-                      "orchestrators are siblings")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), TOP)
+        self.assertNotIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)))
         self.t.record(KID2, TOP, "a plain child")
         self.say(KID2, "Task:\nWrite the docs; this is not a new top")
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
@@ -1026,7 +1029,8 @@ class NewTask(unittest.TestCase):
         import plans
         self.say(TOP, TASK)
         stale = phi.load_session(self.t.p4, KID) or phi.ensure_session(self.t.p4, KID)
-        self.say(KID, "Task:\nPick the fence colour, archive when done. " + phi.NEW_TOP_BRIEF)
+        self.say(KID, "Task:\nPick the fence colour, archive when done.")
+        self.assertEqual(self.t.cli(TOP, "detach", KID).returncode, 0)    # by hand: nothing else detaches a session
         self.assertEqual(phi.load_session(self.t.p4, KID)["spawnedFrom"]["from"], TOP)
         phi.save_session(self.t.p4, dict(stale, spawnedFrom={"sessionId": TOP, "source": "record"}))
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "an older copy never undoes a detach")
@@ -1041,26 +1045,8 @@ class NewTask(unittest.TestCase):
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
         self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
 
-    def test_the_detach_notice_reaches_a_new_orchestrator_whose_brief_names_the_plugin_at_a_long_path(self):
-        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now leads
-        them. A new orchestrator's brief names phi.py where a landing clone keeps the plugin, 106 characters deep, so
-        its first message gets the new-task instruction and a start draft, and the detach notice reaches it whole,
-        inside the 2,000 characters the app shows of a text past its cap."""
-        land = "E:/projects/p4-phi/.claude/p4/temportal/tmp/83e32f0d-9d33-427a-93fc-f0c8db9acc23/land/lbiza/plugins/p4-phi"
-        script = os.path.join(SRC, "phi.py").replace("\\", "/")
-        brief = phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act().replace(script, land + "/scripts/phi.py")
-        self.assertIn(land, brief)
-        self.say(TOP, TASK)
-        self.say(TOP, "also, the fence colour?")
-        told = self.say(KID, "Task:\nPick the fence colour and update the fence. ezexe's words: \"the fence colour?\" "
-                        + brief)                         # a work word of the brief's own, not of the plugin's path
-        self.assertNotIn("did not fit", told, "no piece is held: the app's own cap and file take a long text")
-        notice = ("p4-phi detached it to top level at this first message. Now call "
-                  "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else")
-        self.assertIn(notice, told)
-        self.assertLessEqual(told.index(notice) + len(notice), phi.APP_PREVIEW, "inside the app's preview")
-
     def test_the_harness_speaking_gets_no_line(self):
+        self.t.forget(KID)
         self.say(TOP, TASK)
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
@@ -1203,6 +1189,7 @@ class NewTask(unittest.TestCase):
         self.assertNotEqual(self.t.cli(TOP, "task", "x").returncode, 0)
 
     def test_off_in_the_stores_settings(self):
+        self.t.forget(KID)
         write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"book": False}))
         env = {k: v for k, v in self.t.env(TOP).items() if k != "P4_PHI_BOOK"}
         for prompt in (TASK, "and the next part"):
@@ -1438,6 +1425,7 @@ class Rules(unittest.TestCase):
         tools-reference.md, "Foreground commands that move to the background", so p4-phi neither rewrites an
         orchestrator's lone test command nor hands a line beside it."""
         t = self.t
+        t.forget(KID)
         t.say(TOP, TASK)
         inp = {"command": "cd scripts && python -I -X utf8 test_flush.py 2>&1 | tail -3", "description": "Run tests"}
         body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": "Bash",
@@ -1932,7 +1920,7 @@ class NoWriteUnderClaude(unittest.TestCase):
     """Row B7 of the plugin defaults inventory: every write under .claude asks ezexe, even in bypass mode, so no line
     p4-phi hands a session names a place under .claude to write. A state page is kept in the app's scratchpad."""
 
-    PUP, WORKER, CO = "local_pup00001", "local_wrk00001", "local_cow00001"
+    PUP, CO = "local_pup00001", "local_cow00001"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1940,11 +1928,7 @@ class NoWriteUnderClaude(unittest.TestCase):
         t.record(TOP, title="Narwhal exporter")
         t.record(KID, TOP, "Fix the dropped row")
         t.record(self.PUP, title="Control the exporter tree")
-        t.record(self.WORKER, started_by=self.PUP, title="Puppeteer's standing worker")
-        t.record(self.CO, started_by=self.WORKER, title="a standing coworker")
-        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
-            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
-                                                 "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
+        t.record(self.CO, started_by=self.PUP, title="a coworker of the puppeteer")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1971,21 +1955,16 @@ class NoWriteUnderClaude(unittest.TestCase):
         import controls
         said = {}
         for host, first in ((TOP, TASK), (KID, HANDED), (self.PUP, "Control the trees"),
-                            (self.WORKER, "Run the puppeteer's checks.\n" + controls.WORKER_BRIEF),
                             (self.CO, "Check the archives.\nFiles: none")):
             said[host, "start"] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})
             said[host, "first"] = self.run_hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit",
                                                                 "prompt": first})
-        for host in (TOP, KID, self.WORKER, self.CO):
+        for host in (TOP, KID, self.CO):
             for source in ("compact", "clear"):
                 said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
-        said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
+        said[self.CO, "wrap_up"] = self.wrap_up(self.CO)
         for key, text in said.items():
             self.assertEqual(writes_under_claude(text), [], key)
-        page = self.pad(self.WORKER) + "/state.md"
-        self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
-        self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
-        self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
         for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
 
@@ -2684,15 +2663,15 @@ class Places(unittest.TestCase):
         write(os.path.join(self.t.dir(KID), "team.json"), json.dumps(
             {"teammates": [{"name": "fences", "task": "x", "state": "idle", "doing": ""}]}))
         out = self.t.cli(TOP, "tree").stdout.splitlines()
-        self.assertEqual(out[0], f"- 1 orchestrator \"Narwhal exporter\" `{TOP}`: no turn yet, 0 turns")
-        self.assertRegex(out[1], rf'^  - 101 worker "{KID}" `{KID}`: ')
+        self.assertEqual(out[0], f"- 1 puppeteer \"Narwhal exporter\" `{TOP}`: no turn yet, 0 turns")
+        self.assertRegex(out[1], rf'^  - 101 orchestrator "{KID}" `{KID}`: ')
         self.assertEqual(out[2], "    - teammate fences: idle")
 
     def test_node_prints_the_record_of_this_session(self):
         self.kid(KID)
         got = json.loads(self.t.cli(KID, "node").stdout)
         self.assertEqual((got["id"], got["level"], got["address"], got["parent"], got["places"]),
-                         (KID, "worker", "101", TOP, [1]))
+                         (KID, "orchestrator", "101", TOP, [1]))
         self.assertEqual(json.loads(self.t.cli(TOP, "node", KID).stdout)["address"], "101")
         self.assertEqual(self.t.cli(TOP, "node", "local_none0001").returncode, 2)
 
@@ -3075,7 +3054,7 @@ class Partition(unittest.TestCase):
     def test_a_readers_start_and_a_new_orchestrators_are_not_read(self):
         reader = "Check what the exporter's flush does and report it.\nFiles: none"
         self.assertFalse(self.deny(self.start(KID2, reader)))
-        self.assertFalse(self.deny(self.start(KID2, phi.NEW_TOP_BRIEF + "\nFiles: a.py")))
+        self.assertFalse(self.deny(self.start(GRAND, starts.ORCHESTRATOR_BRIEF + "\nFiles: a.py")))
 
     def test_the_same_start_after_the_sibling_is_archived_is_not_denied(self):
         self.assertTrue(self.deny(self.start(KID2, self.WRITE + "a.py")))

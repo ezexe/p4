@@ -118,7 +118,7 @@ def puppeteer(home, s, store=""):
     chain = _chain(every, sid)
     top = every.get(chain[-1]) if chain else s
     top = top or {"sessionId": chain[-1]}
-    if controls.is_puppeteer(top, store):
+    if controls.is_puppeteer(top, home):
         return top["sessionId"], home
     return controls.puppeteer_of(top, store)
 
@@ -144,7 +144,8 @@ def _issue(s):
 
 def _entry(home, s, every, pid):
     sid = s["sessionId"]
-    depth = len(_chain(every, sid))
+    chain = _chain(every, sid)
+    depth = len(chain) - (1 if pid and pid in chain else 0)     # a puppeteer above a session is no level of its tree
     role = ("puppeteer" if sid == pid else "orchestrator" if depth == 0 else "worker" if depth == 1
             else "coworker")
     slug, n = _issue(s)
@@ -172,7 +173,7 @@ def entries(home, sid, store=""):
         p = relay._session(pstore, pid)
         seen = {relay.norm(home)}
         tops = {}
-        for e in controls.controlled(p):
+        for e in controls.controlled(p, pstore):
             st = str(e.get("store") or "")
             if st and relay.norm(st) not in seen:
                 tops.setdefault(relay.norm(st), (st, set()))[1].add(e["sessionId"])
