@@ -486,14 +486,10 @@ def signature(home, top, roots):
     read, and the app's session records."""
     import progress                                # it imports this module at its head, so it is read here
     parts = [_stat(starts.path_of(home)), _stat(states_path(home))]
-    for base in relay.session_bases(home):         # the root's flat sessions and those of each node's store
-        try:
-            names = sorted(os.listdir(base))
-        except OSError:
-            names = []
-        parts.append(_stat(base))
-        parts += [_stat(os.path.join(base, n, "session.json")) for n in names]
-        parts += [_stat(os.path.join(base, n, progress.TEAM)) for n in names]   # a lead can stand outside the subtree
+    parts.append(_stat(os.path.join(home, "phi", "sessions")))     # a new flat session's folder
+    for d in relay.session_dirs(home):             # the root's flat sessions and those of each node's folder
+        parts.append(_stat(os.path.join(d, "session.json")))
+        parts.append(_stat(os.path.join(d, progress.TEAM)))        # a lead can stand outside the subtree
     ids = set()
     for sid, _, _ in subtree(home, top):
         ids.add(sid)
@@ -836,8 +832,8 @@ def routes_path(home, sid):
 def all_routes(home):
     """{route id: route row} of every route registered in the store and not withdrawn since."""
     out = {}
-    for p in sorted(p for base in relay.session_bases(home)
-                    for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))):
+    for p in sorted(os.path.join(d, "routes.jsonl") for d in relay.session_dirs(home)
+                    if os.path.isfile(os.path.join(d, "routes.jsonl"))):
         for r in relay._rows(p):
             rid = r.get("id")
             if r.get("kind") == "route" and rid:
@@ -920,8 +916,8 @@ def route_of(home, s, commit):
 def register_routes(home, top, net=False):
     """Registers each landed topic under an orchestrator once, beside the ledger, when its records back it. Returns
     the routes this call registered."""
-    rows = [r for base in relay.session_bases(home) for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))
-            for r in relay._rows(p) if r.get("kind") == "route"]
+    rows = [r for d in relay.session_dirs(home) for r in relay._rows(os.path.join(d, "routes.jsonl"))
+            if r.get("kind") == "route"]
     held, taken = {r.get("session") for r in rows}, {r.get("issue") for r in rows}
     new = []
     for sid, depth, s in subtree(home, top):
@@ -1433,7 +1429,6 @@ def start_draft(home, s, did, base, task=""):
         raise ValueError("an orchestrator's draft is started with the call the draft printed")
     text = task_text(task) if task else ""
     brief = with_task(d["brief"], text) if text else d["brief"]
-    node = relay.nodes(home).get(s["sessionId"]) or home
     name = coworker.draft_name(d["title"], d["id"])
     planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
     settings = phi.worker_settings(home, s["sessionId"], d["title"] + "\n" + d["brief"])
@@ -1446,7 +1441,7 @@ def start_draft(home, s, did, base, task=""):
         done = "The plan of the brief is written and put to ezexe"
     else:
         done = plans.done_line(text) or "The task of the brief is done and its checks pass"
-    one = coworker.worker(name, brief, done, base, home, s["sessionId"], node,
+    one = coworker.worker(name, brief, done, base, home, s["sessionId"],
                           team=planner and not headless,
                           mode="plan" if planner and not headless else coworker.LAND_MODE,
                           prompt=coworker.planner_task(d["title"], plan_file) if planner else "",

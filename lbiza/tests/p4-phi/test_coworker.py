@@ -50,14 +50,14 @@ class Coworker(unittest.TestCase):
         os.makedirs(self.home)
 
     def node(self, i=1):
-        """The folder `phi` of the planner's i-th child store."""
-        return relay.store_of(self.home, i).replace("\\", "/") + "/phi"
+        """The folder of the i-th worker's node, in phi/tree: the planner is no node, so it sits at the top."""
+        return os.path.join(self.home, "phi", relay.TREE, (i if isinstance(i, str) else coworker.worker_name(self.path, [str(i)]))).replace("\\", "/")
 
     def drafts(self, path=None, checkout="E:/repo"):
         return coworker.drafts(path or self.path, checkout)
 
     def land(self, path=None, mode="auto", claim=True):
-        return coworker.land(path or self.path, "E:/repo", WHO, mode, self.home, PLANNER, self.home, claim=claim,
+        return coworker.land(path or self.path, "E:/repo", WHO, mode, self.home, PLANNER, claim=claim,
                              windows=True)
 
     def test_drafts_print_each_group_with_its_sections_fences_and_whether_it_earns_a_team_and_make_nothing(self):
@@ -66,7 +66,7 @@ class Coworker(unittest.TestCase):
         self.assertEqual((second["sections"], second["fences"], second["team"]), (["2"], 5, True))
         self.assertEqual([sorted(one) for one in (first, second)], [["fences", "sections", "team"]] * 2)
         self.assertEqual([sorted(one) for one in self.land(claim=False)], [["name", "sections"]] * 2)
-        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing is made")
+        self.assertFalse(os.path.exists(os.path.join(self.home, "phi", relay.TREE)), "nothing is made")
         with open(self.path, "w", encoding="utf-8") as f:
             f.write(SMALL)
         self.assertEqual(self.drafts(), [{"sections": ["1"], "fences": 1, "team": False}])
@@ -95,7 +95,7 @@ class Coworker(unittest.TestCase):
         self.assertIn(f"--session-id {found['session']}", run)
         self.assertIn("Write the plan for the move in plan mode", run)
         self.assertIn(found["brief_file"], run, "its prompt names its brief")
-        self.assertEqual(found["typed"], f"sh '{self.node()}/start-tw-plan-0001.sh'")
+        self.assertEqual(found["typed"], f"sh '{self.node('tw-plan-0001')}/start-tw-plan-0001.sh'")
         self.assertTrue(found["temportal"])
         coworker.write([found], "/repo")
         with open(os.path.join(found["folder"], "coworker-settings.json"), encoding="utf-8") as f:
@@ -370,7 +370,7 @@ class Coworker(unittest.TestCase):
         one = coworker.worker("tw-p-0001", "Do it.", "It is done", "E:/repo", self.home, PLANNER, self.home,
                               windows=True, profile="p4-workers")
         self.assertTrue(any("ANTHROPIC_PROFILE" in x for x in one["lines"]))
-        found = coworker.land(self.path, "E:/repo", WHO, "auto", self.home, PLANNER, self.home, claim=True,
+        found = coworker.land(self.path, "E:/repo", WHO, "auto", self.home, PLANNER, claim=True,
                               windows=True, profile="p4-workers")
         self.assertTrue(all(any("ANTHROPIC_PROFILE" in x for x in f["lines"]) for f in found))
 
@@ -423,7 +423,7 @@ class Coworker(unittest.TestCase):
         self.assertEqual([one["started"] for one in again], [one["folder"] for one in first])
         self.assertFalse([one for one in again if one.get("file")])
         self.assertEqual(coworker.write(again, self.base), [])
-        self.assertEqual(len(relay.stores(self.home)), 3, "no further store")
+        self.assertEqual(len(relay.nodes(self.home)), 2, "no further node")
 
     def send(self, to, message, at="2026-11-23T10:00:00Z", name="SendMessage"):
         return {"type": "assistant", "timestamp": at,
@@ -433,7 +433,7 @@ class Coworker(unittest.TestCase):
     def team(self, name="cw-a", session="0c0ffee0-0000-4000-8000-000000000001"):
         """A reading team's node with its session id, and the path Claude Code keeps its lead's transcript at in
         the folder of `projects` it names after the checkout E:/repo."""
-        relay.claim(self.home, self.home, name, "reader", PLANNER, ["1"], session=session)
+        relay.claim(self.home, name, "reader", PLANNER, ["1"], session=session)
         config = os.path.join(self.base, "config")
         return config, os.path.join(config, "projects", "E--repo", session + ".jsonl")
 
@@ -529,7 +529,7 @@ class Coworker(unittest.TestCase):
     def test_a_path_that_holds_a_quote_is_refused_before_any_claim_and_a_read_only_draft_raises_nothing(self):
         self.assertEqual(len(coworker.drafts(self.path, "E:/it's/repo")), 2, "nothing is made, nothing checked")
         with self.assertRaises(ValueError):
-            coworker.land(self.path, "E:/it's/repo", WHO, "auto", self.home, PLANNER, self.home, claim=True)
+            coworker.land(self.path, "E:/it's/repo", WHO, "auto", self.home, PLANNER, claim=True)
         self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "nothing claimed")
 
     def test_a_failure_after_the_claim_removes_the_nodes_of_that_call(self):
@@ -553,7 +553,7 @@ class Coworker(unittest.TestCase):
         one = self.land()[0]
         store = relay.nodes(self.home)[one["name"]]
         claimed = time.time() - 900
-        os.utime(os.path.join(store, "phi", relay.NODE), (claimed, claimed))
+        os.utime(os.path.join(store, relay.NODE), (claimed, claimed))
         with open(one["report"], "w", encoding="utf-8") as f:
             f.write("the first report\n")
         first = time.time() - 300
@@ -578,7 +578,7 @@ class Coworker(unittest.TestCase):
         from unittest import mock
         config = os.path.join(self.base, "config")
         session = "0c0ffee0-0000-4000-8000-000000000002"
-        relay.claim(self.home, self.home, "cw-b", "reader", PLANNER, ["1"], session=session, checkout="E:/repo")
+        relay.claim(self.home, "cw-b", "reader", PLANNER, ["1"], session=session, checkout="E:/repo")
         lead = os.path.join(config, "projects", "E--repo", session + ".jsonl")
         os.makedirs(os.path.dirname(lead))
         open(lead, "w").close()
@@ -598,13 +598,13 @@ class Coworker(unittest.TestCase):
         ran = subprocess.run(command, capture_output=True, text=True, timeout=60)
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertEqual(len(ran.stdout.strip().split("\n")), 2, "one line a group")
-        self.assertFalse(os.path.isdir(os.path.join(self.home, ".claude")), "with no --land it only prints")
+        self.assertFalse(os.path.isdir(os.path.join(self.home, "phi", relay.TREE)), "with no --land it only prints")
         land = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
         self.assertEqual(land.returncode, 0, land.stderr)
         self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
         self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', land.stdout, "each runs in the checkout")
         relay.forget(self.home)
-        self.assertEqual(len(relay.stores(self.home)), 3)
+        self.assertEqual(len(relay.nodes(self.home)), 2)
         again = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
         self.assertEqual(again.returncode, 2, "a plan's workers are started once")
         none = subprocess.run(command[:6] + [self.path + ".gone"] + command[7:], capture_output=True, text=True,

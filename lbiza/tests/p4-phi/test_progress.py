@@ -210,19 +210,17 @@ class Tree(Store):
         self.assertEqual(kid["team"], [])
         self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/")])
 
-    def test_folders_name_each_stores_sessions_and_a_nested_session_is_read(self):
+    def test_folders_name_the_flat_sessions_and_the_tree_and_a_nested_session_is_read(self):
         self.session(TOP)
         self.steps(TOP, "in_progress")
-        store = relay.claim(self.home, self.home, KID, "session", TOP)
-        folder = os.path.join(store, "phi", "sessions", KID)
-        os.makedirs(folder)
+        folder = relay.claim(self.home, KID, "session", TOP)
         with open(os.path.join(folder, "session.json"), "w", encoding="utf-8") as f:
             json.dump({"sessionId": KID, "title": "the kid", "spawnedFrom": {"sessionId": TOP}}, f)
-        relay.claim(self.home, self.home, "cw-a", "reader", TOP, ["1"], session="5e55-1")   # a node of no sessions
+        relay.claim(self.home, "cw-a", "reader", TOP, ["1"], session="5e55-1")   # a node of no sessions
         m = progress.build(self.home, TOP)
         self.assertEqual([n["sessionId"] for n in m["nodes"]], [TOP, KID])
         self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/"),
-                                        f"{store}/phi/sessions".replace("\\", "/")])
+                                        f"{self.home}/phi/tree".replace("\\", "/")])
         self.assertIn(f"{folder}/session.json".replace("\\", "/"), m["sources"])
 
     def test_the_file_is_written_once_and_again_only_when_the_tree_changed(self):
@@ -240,12 +238,12 @@ class Tree(Store):
         folder = self.session(TOP)
         self.assertEqual(progress.write(self.home, TOP)["changed"], True)
         self.assertFalse(os.path.exists(os.path.join(folder, "workers.md")), "no worker, no page")
-        store = relay.claim(self.home, self.home, "tw-a", "worker", TOP, ["2"])
-        log = os.path.join(store, "phi", "log-tw-a.jsonl")
+        store = relay.claim(self.home, "tw-a", "worker", TOP, ["2"])
+        log = os.path.join(store, "log-tw-a.jsonl")
         with open(log, "w", encoding="utf-8") as f:
             f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
                                 "result": "Credit balance is too low"}) + "\n")
-        with open(os.path.join(store, "phi", "brief-tw-a.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(store, "brief-tw-a.md"), "w", encoding="utf-8") as f:
             f.write("# Land section 2\n")
         got = progress.write(self.home, TOP)
         self.assertEqual(got["changed"], True)
@@ -357,7 +355,7 @@ class Spend(Store):
         from unittest import mock
         config = os.path.join(self.root, "config")
         session = "0c0ffee0-0000-4000-8000-000000000003"
-        relay.claim(self.home, self.home, "cw-move-1", "reader", "local_plan0001", ["1"], session=session)
+        relay.claim(self.home, "cw-move-1", "reader", "local_plan0001", ["1"], session=session)
         lead = os.path.join(config, "projects", "E--repo", session + ".jsonl")
         self.rows(lead, ("m1", "claude-sonnet-5-5", {"input_tokens": 4, "output_tokens": 1}))
         mate = os.path.join(os.path.splitext(lead)[0], "subagents", "agent-afences-1.jsonl")

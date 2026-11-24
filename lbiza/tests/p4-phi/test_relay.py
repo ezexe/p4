@@ -969,7 +969,7 @@ class ThreeSessions(_ThreeSessionsBase):
 
         def rel(sid, name):                        # a session's file as git names it: a started one's in its node
             return os.path.relpath(os.path.join(relay._dir(t.p4, sid), name), t.p4).replace("\\", "/")
-        self.assertTrue(rel(A, "session.json").startswith(".claude/p4/phi/sessions/"), "a started session is nested")
+        self.assertTrue(rel(A, "session.json").startswith("phi/tree/"), "a started session is in the tree")
         write(os.path.join(relay._dir(t.p4, A), "usage.json"), json.dumps({"context": 40}))
         self.assertFalse([x for x in status.splitlines() if "phi/sessions/" in x or x.endswith(
             ("phi/anchor.json", "phi/reports.jsonl", "phi/start-requests.jsonl"))], status)
@@ -978,10 +978,10 @@ class ThreeSessions(_ThreeSessionsBase):
         shown = subprocess.run(["git", "-C", t.p4, "show", "--name-only", "--format=%s", "HEAD"],
                                capture_output=True, text=True).stdout.split()
         self.assertEqual(shown[:4], ["phi:", "the", "session", "tree,"])
-        files = [x for x in shown if x.startswith(("phi/", ".claude/"))]
+        files = [x for x in shown if x.startswith("phi/")]
         self.assertTrue(any(x.endswith("/session.json") for x in files))
         self.assertFalse(any(x.endswith(("log.jsonl", "session.md", "usage.json")) for x in files),
-                         "per machine or made again, in a node's store as in the root")
+                         "per machine or made again, in a node's folder as in the root")
         self.assertIn(rel(A, "session.json"), files, "a nested session's session.json is committed")
         self.assertIn(rel(TOP, "session.json"), files, "and a flat one's")
         self.assertNotEqual(subprocess.run(["git", "-C", t.p4, "check-ignore", "-q",
@@ -1956,7 +1956,8 @@ class WarnTogether(unittest.TestCase):
 
 
 class Nodes(unittest.TestCase):
-    """A node's store: relay.store_of, stores, nodes, claim, and _dir and _sessions through them."""
+    """A node's folder in phi/tree: tree_of, nodes, claim, unclaim, migrate_nested, and _dir and _sessions through
+    them."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1967,118 +1968,120 @@ class Nodes(unittest.TestCase):
     def same(self, a, b):
         return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
-    def test_store_of_gives_siblings_at_one_depth_and_old_store_of_one_more_claude_each(self):
-        self.assertEqual(relay.store_of("S", 1), os.path.join("S", ".claude", "p4"))
-        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", "2", ".claude", "p4"))
-        self.assertEqual(relay.store_of("S", 3), os.path.join("S", ".claude", "3", ".claude", "p4"))
-        self.assertEqual(relay.old_store_of("S", 2), os.path.join("S", ".claude", ".claude", "p4"))
+    def tree(self, *parts):
+        return os.path.join(self.home, "phi", relay.TREE, *parts)
 
-    def test_three_sibling_claims_x_and_nodes_finds_them_and_a_child_of_p4_2(self):
-        got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]
-        self.assertEqual([os.path.relpath(g, self.home).replace("\\", "/") for g in got],
-                         [".claude/p4", ".claude/2/.claude/p4", ".claude/3/.claude/p4"])
-        kid = relay.claim(self.home, got[1], "d", "session", "b")
-        self.assertEqual(kid, os.path.join(got[1], ".claude", "p4"))
-        self.assertEqual(relay.nodes(self.home), {"a": got[0], "b": got[1], "c": got[2], "d": kid})
+    def test_a_session_and_two_workers_under_it_are_folders_nested_by_parent_with_places_1_1_2(self):
+        s = relay.claim(self.home, "sid", "session", "top")
+        w1 = relay.claim(self.home, "w1", "worker", "sid", ["1"])
+        w2 = relay.claim(self.home, "w2", "worker", "sid", ["2"])
+        self.assertEqual((s, w1, w2), (self.tree("sid"), self.tree("sid", "w1"), self.tree("sid", "w2")))
+        self.assertEqual(relay.nodes(self.home), {"sid": s, "w1": w1, "w2": w2})
+        self.assertEqual([relay.node_record(self.home, k)["place"] for k in ("sid", "w1", "w2")], [1, 1, 2])
+        for folder in (s, w1, w2):
+            self.assertTrue(os.path.isfile(os.path.join(folder, relay.NODE)))
+        self.assertEqual(os.listdir(w1), [relay.NODE], "a node's folder holds its files and nothing else")
+        self.assertEqual(relay.claim(self.home, "w1", "worker", "sid"), w1, "one folder for an id asked twice")
+        n = relay.node_record(self.home, "w1")
+        self.assertEqual((n["id"], n["kind"], n["parent"], n["sections"]), ("w1", "worker", "sid", ["1"]))
 
-    def test_a_parent_with_an_old_second_child_gets_place_3_next(self):
-        write(os.path.join(relay.old_store_of(self.home, 1), "phi", relay.NODE), json.dumps({"id": "a"}))
-        write(os.path.join(relay.old_store_of(self.home, 2), "phi", relay.NODE), json.dumps({"id": "b"}))
+    def test_a_node_whose_parent_is_no_node_sits_at_the_top_and_the_chain_holds_each_ancestor_that_is_one(self):
+        a = relay.claim(self.home, "a", "worker", "outside")
+        self.assertEqual(a, self.tree("a"))
+        b = relay.claim(self.home, "b", "session", "a")
+        c = relay.claim(self.home, "c", "worker", "b")
+        self.assertEqual((b, c), (self.tree("a", "b"), self.tree("a", "b", "c")))
+        self.assertEqual(relay.tree_of(self.home, "d", "c"), self.tree("a", "b", "c", "d"))
+        self.assertEqual(relay.tree_of(self.home, "d", "nobody"), self.tree("d"))
+
+    def test_a_folder_that_holds_only_folders_is_a_container_and_no_node(self):
+        os.makedirs(self.tree("box", "inner"))
+        write(os.path.join(self.tree("box", "inner"), relay.NODE), json.dumps({"id": "kid"}))
+        os.makedirs(self.tree("work", "x.tmp-1-abcdef12"))
+        write(os.path.join(self.tree("work", "x.tmp-1-abcdef12"), relay.NODE), json.dumps({"id": "half"}))
         relay.forget(self.home)
-        self.assertEqual(set(relay.nodes(self.home)), {"a", "b"}, "the old layout is still read")
-        self.assertEqual(relay.claim(self.home, self.home, "c", "session", "top"), relay.store_of(self.home, 3))
+        self.assertEqual(relay.nodes(self.home), {"kid": self.tree("box", "inner")},
+                         "a container is no node, and a folder a claim is still making is passed over")
 
-    def test_stores_finds_the_root_two_children_and_a_grandchild_and_no_folder_named_otherwise(self):
-        one, two = relay.store_of(self.home, 1), relay.store_of(self.home, 2)
-        grand = relay.store_of(one, 1)
-        for k, d in enumerate((one, two, grand)):
-            write(os.path.join(d, "phi", relay.NODE), json.dumps({"id": f"n{k}"}))
-        for d in (os.path.join(self.home, ".claude", "worktrees", "x"), os.path.join(self.home, ".claude", ".claude", "q4"),
-                  os.path.join(one, "p4"), relay.store_of(self.home, 3), relay.store_of(self.home, 4) + ".tmp-1-ab"):
-            os.makedirs(os.path.join(d, "phi"), exist_ok=True)
-        relay.forget(self.home)
-        self.assertEqual(relay.stores(self.home), [self.home, one, grand, two],
-                         "the root first, depth first; a `p4` with no node.json is no store")
-        self.assertEqual(relay.claim(self.home, self.home, "c", "session", "top"), relay.store_of(self.home, 4),
-                         "a place whose folder is there is not taken, though it is no store")
-
-    def test_a_claim_whose_write_fails_leaves_no_store_and_the_next_claim_gets_place_1(self):
+    def test_a_claim_whose_write_fails_leaves_no_folder_and_the_next_claim_gets_place_1(self):
         with mock.patch.object(relay, "_write_raw", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
-                relay.claim(self.home, self.home, "kid", "session", "top")
-        self.assertFalse(os.path.isdir(os.path.join(self.home, ".claude")) and
-                         os.listdir(os.path.join(self.home, ".claude")), "no store and no temporary folder")
+                relay.claim(self.home, "kid", "session", "top")
+        self.assertFalse(os.path.isdir(self.tree("kid")) or glob.glob(self.tree("*")), "no folder and no temporary one")
         self.assertEqual(relay.nodes(self.home), {})
-        self.assertEqual(relay.claim(self.home, self.home, "kid", "session", "top"), relay.store_of(self.home, 1))
+        self.assertEqual(relay.claim(self.home, "kid", "session", "top"), self.tree("kid"))
+        self.assertEqual(relay.node_record(self.home, "kid")["place"], 1)
 
     def test_a_claim_another_process_makes_right_after_a_walk_is_seen(self):
         self.assertEqual(relay.nodes(self.home), {})
         code = ("import sys; sys.path.insert(0, sys.argv[1]); import relay; "
-                "print(relay.claim(sys.argv[2], sys.argv[2], 'kid', 'session', 'top'))")
-        made = subprocess.run([sys.executable, "-I", "-c", code, SRC, self.home], capture_output=True, text=True,
-                              timeout=60).stdout.strip()
+                "print(relay.claim(sys.argv[2], sys.argv[3], 'session', sys.argv[4]))")
+        made = subprocess.run([sys.executable, "-I", "-c", code, SRC, self.home, "kid", "top"], capture_output=True,
+                              text=True, timeout=60).stdout.strip()
         self.assertEqual(relay.nodes(self.home), {"kid": made}, "no forget() needed")
-        grand = subprocess.run([sys.executable, "-I", "-c", code.replace("sys.argv[2], 'kid'", "sys.argv[3], 'g'"),
-                                SRC, self.home, made], capture_output=True, text=True, timeout=60).stdout.strip()
-        self.assertEqual(relay.nodes(self.home).get("g"), grand, "a claim nested in a node's store too")
+        grand = subprocess.run([sys.executable, "-I", "-c", code, SRC, self.home, "g", "kid"], capture_output=True,
+                               text=True, timeout=60).stdout.strip()
+        self.assertEqual(relay.nodes(self.home).get("g"), grand, "a claim under a node's folder too")
+        self.assertEqual(grand, self.tree("kid", "g"))
 
-    def test_track_stages_a_nodes_phi_and_no_other_file_under_claude(self):
+    def test_track_stages_the_tree_and_no_other_file_under_claude(self):
         for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
                                        "-m", "store")):
             subprocess.run(["git", "-C", self.home, *args], check=True, capture_output=True)
         write(os.path.join(self.home, "p4.json"), json.dumps({"phi": {"track": True}}))
         write(os.path.join(self.home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
-        store = relay.claim(self.home, self.home, "kid", "session", "top")
-        write(os.path.join(store, "phi", "sessions", "kid", "session.json"), json.dumps({"sessionId": "kid"}))
+        folder = relay.claim(self.home, "kid", "session", "top")
+        write(os.path.join(folder, "session.json"), json.dumps({"sessionId": "kid"}))
+        write(os.path.join(folder, "log.jsonl"), "{}\n")
         write(os.path.join(self.home, ".claude", "settings.local.json"), "{}")
-        write(os.path.join(store, "other.txt"), "not the tree's")
         self.assertTrue(relay.track(self.home, first_only=True, wait=True))
         shown = subprocess.run(["git", "-C", self.home, "show", "--name-only", "--format=", "HEAD"],
                                capture_output=True, text=True).stdout.split()
-        self.assertIn(".claude/p4/phi/sessions/kid/session.json", shown)
-        self.assertIn(".claude/p4/phi/node.json", shown)
-        self.assertFalse([x for x in shown if x.endswith(("settings.local.json", "other.txt"))], shown)
-
-    def test_claim_gives_1_2_3_to_three_ids_and_the_same_store_to_an_id_asked_twice(self):
-        got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]
-        self.assertEqual(got, [relay.store_of(self.home, i) for i in (1, 2, 3)])
-        self.assertEqual(relay.claim(self.home, self.home, "b", "session", "top"), got[1])
-        n = relay.node_record(self.home, "a")
-        self.assertEqual((n["id"], n["kind"], n["parent"], n["sections"]), ("a", "session", "top", []))
-        self.assertEqual(sorted(os.listdir(got[0])), ["phi"], "a node's store holds only phi/")
-        self.assertEqual(os.listdir(os.path.join(got[0], "phi")), [relay.NODE])
+        self.assertIn("phi/tree/kid/session.json", shown)
+        self.assertIn("phi/tree/kid/node.json", shown)
+        self.assertFalse([x for x in shown if x.endswith(("settings.local.json", "log.jsonl"))], shown)
 
     def test_dir_is_the_nodes_folder_for_a_claimed_id_and_the_flat_one_for_any_other(self):
-        store = relay.claim(self.home, self.home, "kid", "session", "top")
-        self.assertTrue(self.same(relay._dir(self.home, "kid"), os.path.join(store, "phi", "sessions", "kid")))
+        folder = relay.claim(self.home, "kid", "session", "top")
+        self.assertTrue(self.same(relay._dir(self.home, "kid"), folder))
         self.assertTrue(self.same(relay._dir(self.home, "top"), os.path.join(self.home, "phi", "sessions", "top")))
         self.assertTrue(self.same(relay._dir(self.home, "top"), relay.flat(self.home, "top")))
 
-    def test_sessions_holds_a_flat_session_and_a_nested_one(self):
+    def test_sessions_and_session_dirs_hold_a_flat_session_and_each_session_node_and_no_worker(self):
         write(os.path.join(self.home, "phi", "sessions", "top", "session.json"), json.dumps({"sessionId": "top"}))
-        store = relay.claim(self.home, self.home, "kid", "session", "top")
-        write(os.path.join(store, "phi", "sessions", "kid", "session.json"),
+        folder = relay.claim(self.home, "kid", "session", "top")
+        write(os.path.join(folder, "session.json"),
               json.dumps({"sessionId": "kid", "spawnedFrom": {"sessionId": "top"}}))
+        w = relay.claim(self.home, "w1", "worker", "kid", ["1"])
         self.assertEqual(sorted(relay._sessions(self.home)), ["kid", "top"])
+        self.assertEqual(relay.session_dirs(self.home), [relay.flat(self.home, "top"), folder])
+        self.assertNotIn(w, relay.session_dirs(self.home))
 
-    def test_two_processes_that_claim_at_once_get_two_stores_for_two_ids_and_one_store_for_one(self):
+    def test_the_cache_sees_a_folder_added_under_the_tree_by_another_process(self):
+        folder = relay.claim(self.home, "kid", "session", "top")
+        self.assertEqual(sorted(relay.nodes(self.home)), ["kid"])
+        os.makedirs(os.path.join(folder, "w9"))
+        write(os.path.join(folder, "w9", relay.NODE), json.dumps({"id": "w9", "parent": "kid"}))
+        self.assertEqual(sorted(relay.nodes(self.home)), ["kid", "w9"], "no forget() needed")
+
+    def test_two_processes_that_claim_at_once_get_two_folders_for_two_ids_and_one_for_one(self):
         code = ("import sys; sys.path.insert(0, sys.argv[1]); import relay; "
-                "print(relay.claim(sys.argv[2], sys.argv[2], sys.argv[3], 'session', 'top'))")
+                "print(relay.claim(sys.argv[2], sys.argv[3], 'session', 'top'))")
 
         def at_once(*ids):
             procs = [subprocess.Popen([sys.executable, "-I", "-c", code, SRC, self.home, i], stdout=subprocess.PIPE,
                                       text=True) for i in ids]
             return [p.communicate(timeout=60)[0].strip() for p in procs]
         two = at_once("a", "b")
-        self.assertEqual(len(set(two)), 2)
-        self.assertEqual(set(two), {relay.store_of(self.home, 1), relay.store_of(self.home, 2)})
+        self.assertEqual(set(two), {self.tree("a"), self.tree("b")})
         one = at_once("c", "c")
         self.assertEqual(one[0], one[1])
         relay.forget(self.home)
-        self.assertEqual(len(relay.stores(self.home)), 4, "one store for c")
+        self.assertEqual(sorted(relay.nodes(self.home)), ["a", "b", "c"])
+        self.assertEqual(sorted(relay.node_record(self.home, k)["place"] for k in "abc"), [1, 2, 3])
 
-    def test_two_claims_for_one_id_with_the_lock_given_up_both_return_the_first_store(self):
-        first = relay.claim(self.home, self.home, "kid", "session", "top")
+    def test_two_claims_for_one_id_with_the_lock_given_up_both_return_the_first_folder(self):
+        first = relay.claim(self.home, "kid", "session", "top")
         real = relay.nodes
         asked = []
 
@@ -2086,25 +2089,143 @@ class Nodes(unittest.TestCase):
             asked.append(home)
             return {} if len(asked) == 1 else real(home)
         with mock.patch.object(relay, "nodes", blind):
-            second = relay.claim(self.home, self.home, "kid", "session", "top")
+            second = relay.claim(self.home, "kid", "session", "top")
         self.assertEqual(second, first)
-        self.assertTrue(os.path.isdir(relay.store_of(self.home, 2)), "the other stays an empty node")
+        self.assertEqual(os.listdir(first), [relay.NODE])
 
-    def test_claim_makes_nothing_where_the_stores_path_would_pass_180_characters(self):
-        deep = os.path.join(self.home, *(["x" * 30] * 6))
-        self.assertGreater(len(os.path.abspath(relay.store_of(deep, 1))), relay.NODE_PATH_MAX)
-        self.assertEqual(relay.claim(self.home, deep, "kid", "session", "top"), "")
-        self.assertFalse(os.path.exists(deep))
-        self.assertEqual(relay.nodes(self.home), {})
+    def test_claim_makes_nothing_where_the_folders_path_would_pass_180_characters(self):
+        above, made = "top", []
+        for k in range(12):
+            ident = f"n{k}" + "x" * 30
+            got = relay.claim(self.home, ident, "session", above)
+            if not got:
+                break
+            made.append(ident)
+            above = ident
+            self.assertLessEqual(len(os.path.abspath(got)), relay.NODE_PATH_MAX)
+        self.assertLess(len(made), 12, "a chain deep enough is refused")
+        self.assertEqual(relay.claim(self.home, "z" * 80, "session", above), "")
+        self.assertEqual(sorted(relay.nodes(self.home)), sorted(made), "nothing is made")
 
-    def test_each_ignore_and_attribute_line_of_phi_has_a_twin_for_a_nodes_store(self):
+    def test_unclaim_removes_a_fresh_folder_and_each_container_it_leaves_empty_and_no_other(self):
+        os.makedirs(self.tree("box", "inner"))
+        write(os.path.join(self.tree("box", "inner"), relay.NODE), json.dumps({"id": "fresh", "parent": ""}))
+        relay.forget(self.home)
+        self.assertTrue(relay.unclaim(self.home, "fresh"))
+        self.assertFalse(os.path.exists(self.tree("box")), "the container it left empty goes with it")
+        self.assertTrue(os.path.isdir(self.tree()) or not os.path.exists(self.tree()))
+        s = relay.claim(self.home, "sid", "session", "top")
+        w = relay.claim(self.home, "w", "worker", "sid")
+        write(os.path.join(w, "brief-w.md"), "x")
+        self.assertFalse(relay.unclaim(self.home, "w"), "a folder that holds a file is kept")
+        os.remove(os.path.join(w, "brief-w.md"))
+        self.assertTrue(relay.unclaim(self.home, "w"))
+        self.assertTrue(os.path.isdir(s), "the parent's folder is a node, not a container")
+        self.assertFalse(relay.unclaim(self.home, "nobody"))
+
+    def test_each_ignore_line_of_a_session_folder_has_a_twin_for_the_tree_and_no_line_opens_a_nested_claude(self):
         for lines in (relay.IGNORED, relay.UNTRACKED):
             for k, x in enumerate(lines):
-                if x.startswith("phi/"):
-                    self.assertEqual(lines[k + 1], ".claude/**/" + x)
-                elif x.startswith("!phi/"):
-                    self.assertEqual(lines[k + 1], "!.claude/**/" + x[1:])
-        self.assertEqual(relay.ATTRS[2:], (".claude/**/phi/** filter=p4path", ".claude/**/phi/archive/** -filter"))
+                if x.startswith("phi/sessions/*/"):
+                    self.assertEqual(lines[k + 1], "phi/tree/**/" + x[len("phi/sessions/*/"):])
+                elif x == "phi/sessions/":
+                    self.assertEqual(lines[k + 1], "phi/tree/")
+        self.assertIn("phi/tree/**/log.jsonl", relay.IGNORED)
+        self.assertIn("phi/tree/", relay.UNTRACKED)
+        self.assertFalse([x for x in relay.IGNORED + relay.UNTRACKED + relay.ATTRS if ".claude" in x])
+        self.assertEqual(relay.ATTRS, ("phi/** filter=p4path", "phi/archive/** -filter"))
+        self.assertEqual(relay._tracked(self.home), ["phi"])
+
+
+class Migration(unittest.TestCase):
+    """relay.migrate_nested: the old nested stores, of both layouts, moved into phi/tree once."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.home = os.path.join(self._tmp.name, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("P4_PHI_MIGRATE", None)
+
+    def old(self, store, ident, kind, parent, time="2026-11-24 10:00"):
+        write(os.path.join(store, "phi", relay.NODE),
+              json.dumps({"id": ident, "kind": kind, "parent": parent, "sections": [], "time": time}))
+
+    def made(self):
+        """A session node `sid` under a top session, in the first-place store of the new layout, with two workers
+        in its own, one of each layout."""
+        one = os.path.join(self.home, ".claude", "p4")
+        self.old(one, "sid", "session", "top")
+        write(os.path.join(one, "phi", "sessions", "sid", "session.json"), json.dumps({"sessionId": "sid"}))
+        write(os.path.join(one, "phi", "sessions", "sid", "turns.jsonl"), "{}\n")
+        w1 = os.path.join(one, ".claude", "p4")                                 # the first child: `.claude/p4`
+        w2 = os.path.join(one, ".claude", "2", ".claude", "p4")                 # the second: `.claude/2/.claude/p4`
+        for store, name, time in ((w1, "w1", "2026-11-24 10:01"), (w2, "w2", "2026-11-24 10:02")):
+            self.old(store, name, "worker", "sid", time)
+            for f in (f"brief-{name}.md", f"log-{name}.jsonl", f"report-{name}.md"):
+                write(os.path.join(store, "phi", f), f)
+
+    def test_the_old_stores_move_into_the_tree_at_the_first_read_with_every_file_and_the_walk_is_gone(self):
+        self.made()
+        self.assertEqual(relay.nodes(self.home), {"sid": os.path.join(self.home, "phi", "tree", "sid"),
+                                                  "w1": os.path.join(self.home, "phi", "tree", "sid", "w1"),
+                                                  "w2": os.path.join(self.home, "phi", "tree", "sid", "w2")})
+        tree = os.path.join(self.home, "phi", "tree", "sid")
+        self.assertEqual(sorted(os.listdir(tree)), ["node.json", "session.json", "turns.jsonl", "w1", "w2"])
+        for name in ("w1", "w2"):
+            self.assertEqual(sorted(os.listdir(os.path.join(tree, name))),
+                             sorted([relay.NODE, f"brief-{name}.md", f"log-{name}.jsonl", f"report-{name}.md"]))
+        with open(os.path.join(tree, "w2", "report-w2.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "report-w2.md")
+        self.assertEqual([relay.node_record(self.home, k)["place"] for k in ("sid", "w1", "w2")], [1, 1, 2])
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")), "the old walk is removed")
+        import node
+        # child("101", 1) is "10101" and child("101", 2) "101001", by node.py's rule that no address holds "11"
+        self.assertEqual([node.address_of(self.home, k) for k in ("sid", "w1", "w2")], ["101", "10101", "101001"])
+
+    def test_the_old_one_i_claude_layout_is_moved_too_and_a_second_read_changes_nothing(self):
+        a = os.path.join(self.home, ".claude", "p4")
+        b = os.path.join(self.home, ".claude", ".claude", "p4")
+        self.old(a, "a", "session", "top", "2026-11-24 09:00")
+        self.old(b, "b", "session", "top", "2026-11-24 09:30")
+        self.assertEqual(sorted(relay.nodes(self.home)), ["a", "b"])
+        self.assertEqual([relay.node_record(self.home, k)["place"] for k in "ab"], [1, 2], "by their time")
+        before = sorted(os.path.join(at, n) for at, ds, fs in os.walk(self.home) for n in ds + fs)
+        self.assertFalse(relay.migrate_nested(self.home), "a second run finds nothing")
+        relay.forget(self.home)
+        self.assertEqual(sorted(relay.nodes(self.home)), ["a", "b"])
+        self.assertEqual(before, sorted(os.path.join(at, n) for at, ds, fs in os.walk(self.home) for n in ds + fs))
+
+    def test_a_file_the_tree_folder_holds_is_kept_and_the_old_one_dropped_and_a_late_file_comes_in_later(self):
+        store = os.path.join(self.home, ".claude", "p4")
+        self.old(store, "w", "worker", "top")
+        write(os.path.join(store, "phi", "report-w.md"), "old")
+        write(os.path.join(self.home, "phi", "tree", "w", "report-w.md"), "new")
+        self.assertEqual(sorted(relay.nodes(self.home)), ["w"])
+        with open(os.path.join(self.home, "phi", "tree", "w", "report-w.md"), encoding="utf-8") as f:
+            self.assertEqual(f.read(), "new")
+        late = os.path.join(self.home, ".claude", "p4", "phi")      # a worker mid-run wrote on at its old path
+        write(os.path.join(late, "log-w.jsonl"), "late")
+        self.old(os.path.join(self.home, ".claude", "p4"), "w", "worker", "top")
+        self.assertTrue(relay.migrate_nested(self.home))
+        self.assertTrue(os.path.isfile(os.path.join(self.home, "phi", "tree", "w", "log-w.jsonl")))
+
+    def test_nothing_is_moved_where_the_environment_holds_p4_phi_migrate_0(self):
+        self.made()
+        os.environ["P4_PHI_MIGRATE"] = "0"
+        self.assertFalse(relay.migrate_nested(self.home))
+        relay.forget(self.home)
+        self.assertEqual(relay.nodes(self.home), {}, "the old stores are not read, and not moved")
+        self.assertTrue(os.path.isfile(os.path.join(self.home, ".claude", "p4", "phi", relay.NODE)))
+        self.assertEqual(relay.claim(self.home, "new", "session", "top"), os.path.join(self.home, "phi", "tree", "new"))
+        self.assertTrue(os.path.isdir(os.path.join(self.home, ".claude")))
+        del os.environ["P4_PHI_MIGRATE"]
+        relay.forget(self.home)
+        self.assertEqual(sorted(relay.nodes(self.home)), ["new", "sid", "w1", "w2"], "moved at the next read")
+        self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
 
 
 class Partition(unittest.TestCase):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """coworker.py: the terminal sessions p4-phi starts, for `phi.py coworkers`, `sections` and `draft --start`.
 
-A terminal worker is a node, relay.claim makes it a store nested in its starter's, where its start file, resume file,
+A terminal worker is a node, relay.claim makes it a folder of phi/tree nested in its starter's, where its start file, resume file,
 settings file, brief, report and log are, and it runs in the checkout and reaches them by their whole paths: one
 worker lands each group of an approved plan's sections, sections.groups, and one starts for each draft that has a
 parent. By default (phi.json `worker_mode` `print`) a worker runs as `claude -p` with `--output-format stream-json
@@ -187,16 +187,17 @@ def _quoted(*paths):
             raise ValueError(f"a start file's paths hold no quote: {path}")
 
 
-def _node(home, store, name, kind, starter, nums, checkout, session=""):
-    """(the folder `<node>/phi` of a new node `name`, ""), or (None, its folder) where the name has a node already,
-    whose session was started once. Raises ValueError where no store could be made."""
+def _node(home, name, kind, starter, nums, checkout, session=""):
+    """(the folder of a new node `name`, ""), or (None, its folder) where the name has a node already, whose
+    session was started once; relay.claim finds the folder from the starter's id. Raises ValueError where no
+    folder could be made."""
     have = relay.nodes(home).get(name)
     if have:
-        return None, os.path.join(have, "phi").replace("\\", "/")
-    made = relay.claim(home, store, name, kind, starter, nums, session=session, checkout=checkout)
+        return None, have.replace("\\", "/")
+    made = relay.claim(home, name, kind, starter, nums, session=session, checkout=checkout)
     if not made:
-        raise ValueError(f"no store could be made for {name} under {store}: its path would be too long")
-    return os.path.join(made, "phi").replace("\\", "/"), ""
+        raise ValueError(f"no folder could be made for {name} under {starter}: its path would be too long")
+    return made.replace("\\", "/"), ""
 
 
 def _undo(home, found):
@@ -313,11 +314,11 @@ TURNS = 60                                     # the goal page: a goal with no t
 LAND_MODE = "bypassPermissions"
 
 
-def land(path, checkout, who, mode, home="", starter="", store="", claim=False, windows=None, profile="",
+def land(path, checkout, who, mode, home="", starter="", claim=False, windows=None, profile="",
          headless=True, settings=None):
     """One entry for each group of the plan at `path` that is not landed, in the plan's order: the terminal worker
     that lands it, started once ezexe approved the plan. `name` and `sections`, and with `claim` the node relay.claim
-    makes for it in the store `store` of its starter `starter`, and in the node's folder the `brief` text and its
+    makes for it under its starter `starter`, and in the node's folder the `brief` text and its
     file, the `report` file the worker writes, its `goal`, and the start file's name, `lines` and the line `typed` in
     its tab; a name that has a node already gets `started`, its node's folder, and nothing else. The worker has no
     worktree, no team (none spawns under -p), no p4 plugin and no `--add-dir`: its goal is its prompt, since no hooks module sets one. It
@@ -328,7 +329,7 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
     plan = os.path.abspath(path).replace("\\", "/")
     checkout = checkout.replace("\\", "/")
     if claim:                                      # every path before the first claim
-        _quoted(plan, checkout, home, store)
+        _quoted(plan, checkout, home)
     with open(path, encoding="utf-8") as f:
         title, found = sections.parse(f.read(), checkout)
     out = []
@@ -339,14 +340,14 @@ def land(path, checkout, who, mode, home="", starter="", store="", claim=False, 
         return [{k: v for k, v in one.items() if k != "group"} for one in out]
     try:
         for one in out:
-            _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile, headless, settings)
+            _worker(one, plan, title, checkout, mode, home, starter, windows, profile, headless, settings)
     except Exception:
         _undo(home, out)
         raise
     return out
 
 
-def _worker(one, plan, title, checkout, mode, home, starter, store, windows, profile="", headless=True,
+def _worker(one, plan, title, checkout, mode, home, starter, windows, profile="", headless=True,
             settings=None):
     """The node of one terminal worker of land(), and its brief, goal and start file in it."""
     group, nums = one.pop("group"), one["sections"]
@@ -356,11 +357,11 @@ def _worker(one, plan, title, checkout, mode, home, starter, store, windows, pro
     if settings:
         one["settings"] = settings(title + "\n" + brief)
         profile, headless = one["settings"]["profile"], one["settings"]["mode"] == "print"
-    one.update(worker(one["name"], brief, done, checkout, home, starter, store, nums, windows, profile=profile,
+    one.update(worker(one["name"], brief, done, checkout, home, starter, nums, windows, profile=profile,
                       headless=headless))
 
 
-def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=None, team=False, mode=LAND_MODE,
+def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, team=False, mode=LAND_MODE,
            extra=(), prompt="", profile="", plan_file="", headless=True):
     """The node of one terminal worker and its brief, goal and start file in it, as one entry: `name`, and either
     `started`, the folder of a node that holds that name already, or `folder`, `brief` and `brief_file`, `report`,
@@ -373,10 +374,10 @@ def worker(name, brief, done, checkout, home, starter, store, nums=(), windows=N
     `plan_file` is where its plan is."""
     windows = upkeep.WINDOWS if windows is None else windows
     checkout = checkout.replace("\\", "/")
-    _quoted(checkout, home, store)
+    _quoted(checkout, home)
     one = {"name": name}
     session = str(uuid.uuid4())
-    folder, there = _node(home, store, name, "worker", starter, list(nums), checkout, session=session)
+    folder, there = _node(home, name, "worker", starter, list(nums), checkout, session=session)
     if there:
         one["started"] = there
         return one

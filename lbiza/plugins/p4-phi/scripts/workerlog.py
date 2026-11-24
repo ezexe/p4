@@ -19,7 +19,6 @@ ERROR = 300                      # the most of an error that is drawn
 WORKERS = 20                     # the most workers one page holds
 # the key of a tool's input that says most about the call, in this order
 INPUTS = ("command", "file_path", "path", "pattern", "url", "description", "prompt")
-GOALS = (("goal achieved", "achieved"), ("goal met", "achieved"), ("goal cleared", "cleared"))
 
 
 def _cut(text, n, flat=True):
@@ -82,8 +81,10 @@ def name_of(log):
 def state(log):
     """The state of the worker whose stream-json log is `log`: `name`, `session`, `model`, `turns` (distinct assistant
     message ids), `tool` (the last tool_use with no tool_result after it, as {name, input}, else None), `text` (the
-    last assistant text), `cost` and `num_turns` (of the last result row, else None), `goal` (`set`, `achieved`,
-    `cleared` or ""), `error`, `end` (`done`, `failed` or `running`) and `updated` (the log's mtime). A log that cannot
+    last assistant text), `cost` and `num_turns` (of the last result row, else None), `goal` (`set` while the run is
+    running, `ended` where its last row is a result with no error, `cleared` where that result is an error, "" with no
+    goal set: a `-p` log holds no row that marks a goal met or cleared, and its final `result` row comes once the goal's
+    loop has ended), `error`, `end` (`done`, `failed` or `running`) and `updated` (the log's mtime). A log that cannot
     be read gives a state whose `error` names that."""
     out = {"name": name_of(log), "session": "", "model": "", "turns": 0, "tool": None, "text": "", "cost": None,
            "num_turns": None, "goal": "", "error": "", "end": "running", "updated": 0.0}
@@ -121,15 +122,13 @@ def state(log):
         local = row.get("local_command_run")
         if isinstance(local, dict) and local.get("command") == "goal":
             out["goal"] = "set"
-        low = said.lower()
-        for opening, word in GOALS:
-            if low.startswith(opening):
-                out["goal"] = word
         if kind == "result":
             out["cost"], out["num_turns"] = row.get("total_cost_usd"), row.get("num_turns")
     last = rows[-1] if rows else {}
     if last.get("type") == "result":
         out["end"] = "failed" if last.get("is_error") else "done"
+        if out["goal"]:
+            out["goal"] = "cleared" if last.get("is_error") else "ended"
         error = _cut(_text_of(last) or str(last.get("subtype") or "an error"), ERROR) if last.get("is_error") else ""
     out["turns"] = len(ids)
     out["tool"] = list(pending.values())[-1] if pending and out["end"] == "running" else None
@@ -155,10 +154,9 @@ def workers(home, sid):
     out = []
     if not home or not sid:
         return out
-    for ident, store in relay.nodes(home).items():
+    for ident, folder in relay.nodes(home).items():
         if str(relay.node_record(home, ident).get("parent") or "") != sid:
             continue
-        folder = os.path.join(store, "phi")
         log = os.path.join(folder, f"log-{ident}.jsonl")
         if not os.path.isfile(log):
             continue

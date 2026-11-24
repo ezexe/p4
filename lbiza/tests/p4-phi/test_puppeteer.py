@@ -892,7 +892,7 @@ class Terminal(Base):
         self.assertIn("coworkers --wait --report ", r.stdout)
         node = relay.nodes(t.p4)[name]
         for f in (f"brief-{name}.md", "coworker-settings.json"):
-            self.assertTrue(os.path.isfile(os.path.join(node, "phi", f)), f)
+            self.assertTrue(os.path.isfile(os.path.join(node, f)), f)
         self.assertEqual(relay.node_record(t.p4, name)["kind"], "worker")
         again = t.cli(TOP, "draft", "--start", did)
         self.assertEqual(again.returncode, 2, "a worker is started once")
@@ -907,7 +907,7 @@ class Terminal(Base):
         self.assertNotIn("--task <file>", r.stdout)
         title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
         name = coworker.draft_name(title, did)
-        folder = os.path.join(relay.nodes(t.p4)[name], "phi")
+        folder = relay.nodes(t.p4)[name]
         with open(os.path.join(folder, f"brief-{name}.md"), encoding="utf-8") as f:
             brief = f.read()
         self.assertIn("## The task", brief)
@@ -926,7 +926,7 @@ class Terminal(Base):
         self.assertIn("pass `--task <file>`", r.stdout)
         title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
         name = coworker.draft_name(title, did)
-        with open(os.path.join(relay.nodes(t.p4)[name], "phi", f"brief-{name}.md"), encoding="utf-8") as f:
+        with open(os.path.join(relay.nodes(t.p4)[name], f"brief-{name}.md"), encoding="utf-8") as f:
             self.assertNotIn("## The task", f.read())
 
     def test_a_missing_or_empty_task_file_exits_2(self):
@@ -993,7 +993,7 @@ class Terminal(Base):
         r = t.cli(TOP, "draft", "--start", did)
         self.assertEqual(r.returncode, 0, r.stderr)
         name = coworker.draft_name("Plan the ports table move", did)
-        folder = os.path.join(relay.nodes(t.p4)[name], "phi")
+        folder = relay.nodes(t.p4)[name]
         ext = "ps1" if os.name == "nt" else "sh"
         with open(os.path.join(folder, f"start-{name}.{ext}"), encoding="utf-8") as f:
             start = f.read()
@@ -1038,7 +1038,7 @@ class Terminal(Base):
         did = re.search(r"draft (drf-[0-9a-f]{10})", ctx).group(1)
         self.assertEqual(t.cli(TOP, "draft", "--start", did).returncode, 0)
         title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
-        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        folder = relay.nodes(t.p4)[coworker.draft_name(title, did)]
         name = [f for f in os.listdir(folder) if f.startswith("start-")][0]
         with open(os.path.join(folder, name), encoding="utf-8") as f:
             return f.read()
@@ -1164,7 +1164,7 @@ class WorkerSettings(Base):
         r = t.cli(host, "draft", "--start", did)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.out = r.stdout
-        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        folder = relay.nodes(t.p4)[coworker.draft_name(title, did)]
         with open(os.path.join(folder, [f for f in os.listdir(folder) if f.startswith("start-")][0]),
                   encoding="utf-8") as f:
             return f.read()
@@ -1606,8 +1606,8 @@ class NodeStores(unittest.TestCase):
         self.home = os.path.join(self._tmp.name, "proj", ".claude", "p4")
         write(os.path.join(self.home, "phi", "sessions", TOP, "session.json"), json.dumps({"sessionId": TOP}))
         import relay
-        self.store = relay.claim(self.home, self.home, KID, "session", TOP)
-        self.kid = os.path.join(self.store, "phi", "sessions", KID)
+        self.store = relay.claim(self.home, KID, "session", TOP)
+        self.kid = self.store
         write(os.path.join(self.kid, "session.json"), json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}))
 
     def test_the_signature_changes_when_a_nested_session_json_changes(self):

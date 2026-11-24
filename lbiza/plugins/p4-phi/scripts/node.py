@@ -40,9 +40,8 @@ def by_overlap(items, task, key=lambda x: x):
 # --- the node: the level and the address of a session ---------------------------------------------------------------
 # The address rule is ezexe/phi's lbiza/phi_rank/tree.py:99-112, written again here and not imported: the top is "1",
 # a child is its parent's address with one more "0" for each child before it and then a "1", so no address holds "11".
-# A session's address is that of the store that holds its folder, read from the store's path under the root store:
-# the i-th child of a store is `.claude/p4` for i = 1 and `.claude/<i>/.claude/p4` for i >= 2 (relay.store_of); a store made
-# before that holds it at `.claude` i times and then `p4` (relay.old_store_of), and place_of reads both.
+# A node's address is its parent node's address, or "1" where its parent is no node, then `child` of its `place`: the
+# number its node.json holds, one more than the nodes of the same parent before it (relay.claim).
 
 SHORT = 32                       # the most characters of an address a line of the tree prints whole
 
@@ -91,40 +90,31 @@ def level(s, sessions):
     return "orchestrator"
 
 
-def place_of(home, store):
-    """(address, places) of a store from its path under the root store `home`: ("1", []) for the root, and
-    child(a, i) for each step of `.claude/p4` (i = 1), `.claude/<i>/.claude/p4`, or the old i `.claude` folders
-    and a `p4`. A path that is no store's under `home` is the root's."""
-    try:
-        rel = os.path.relpath(store, home)
-    except ValueError:
+def _place(home, ident, seen=()):
+    """(address, places) of the node `ident`: ("1", []) where it is no node, else its parent's address and places,
+    with `child(address, place)` and the place added."""
+    d = relay.node_record(home, ident)
+    if not d or ident in seen:
         return "1", []
-    parts = [] if rel == "." else rel.replace("\\", "/").split("/")
-    address, places, run, num = "1", [], 0, 0
-    for part in parts:
-        if part == ".claude":
-            run += 1
-        elif relay.PLACE.match(part) and run == 1 and not num:   # `.claude/<i>/.claude/p4`: the i-th child
-            num, run = int(part), 0
-        elif part == "p4" and run and num:
-            address, places, run, num = child(address, num), places + [num], 0, 0
-        elif part == "p4" and run:                                  # `.claude` i times and `p4`
-            address, places, run = child(address, run), places + [run], 0
-        else:
-            return "1", []
-    return (address, places) if not run and not num else ("1", [])
+    above, places = _place(home, str(d.get("parent") or ""), tuple(seen) + (ident,))
+    try:
+        place = max(1, int(d.get("place") or 1))
+    except (TypeError, ValueError):
+        place = 1
+    return child(above, place), places + [place]
 
 
-def _store(home, sid):
-    """The store that holds a session's folder: its node's, else the root."""
-    return relay.nodes(home).get(relay._safe(sid)) or home
+def address_of(home, ident):
+    """The address of the node `ident`: its parent node's address, or "1" where its parent is no node, and
+    `child` of its place. "1" where `ident` has no node, as every flat session."""
+    return _place(home, relay._safe(ident))[0]
 
 
 def addresses(home, sessions):
-    """{sid: address}: the address of the store that holds each session's folder, so every flat session is "1" and
-    a started session's address is its node's. A reparented session keeps its store, so its address can differ
-    from the line it is printed under."""
-    return {sid: place_of(home, _store(home, sid))[0] for sid in sessions}
+    """{sid: address}: the address of each session's node, so every flat session is "1" and a started session's
+    address follows its parent's. A reparented session keeps its node, so its address can differ from the line it
+    is printed under."""
+    return {sid: address_of(home, sid) for sid in sessions}
 
 
 def _tasks(plan):
@@ -149,12 +139,12 @@ def leaves(home, sid):
         if isinstance(r, dict) and r.get("name"):
             out.append({"level": "teammate", "name": str(r["name"]), "state": str(r.get("state") or "")})
     safe = relay._safe(sid)
-    for name, store in relay.nodes(home).items() if safe else ():
+    for name, folder in relay.nodes(home).items() if safe else ():
         n = relay.node_record(home, name)
         if n.get("parent") != safe or n.get("kind") != "worker":
             continue
-        report = os.path.join(store, "phi", f"report-{name}.md")
-        out.append({"level": "terminal", "name": name, "address": place_of(home, store)[0],
+        report = os.path.join(folder, f"report-{name}.md")
+        out.append({"level": "terminal", "name": name, "address": address_of(home, name),
                     "state": "reported" if os.path.isfile(report) else "started"})
     return out
 
@@ -163,7 +153,7 @@ def record(home, sid, sessions):
     """{id, title, level, parent, address, places, paths, leaves} of a session; `paths` is its shard, else its
     fileSet."""
     s = sessions.get(sid) or {}
-    address, places = place_of(home, _store(home, sid))
+    address, places = _place(home, relay._safe(sid))
     paths = relay.paths_of(s)
     title = s.get("title") or " ".join(str(s.get("task") or "").split())[:60] or str(sid)[:14]
     return {"id": sid, "title": title, "level": level(s, sessions) if s else "",

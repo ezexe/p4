@@ -2549,8 +2549,8 @@ class AppTools(unittest.TestCase):
 
 
 class Places(unittest.TestCase):
-    """A node's store: a session another session started is given a store nested in its starter's at its first
-    hook, relay.claim, and its address is that store's."""
+    """A node's folder: a session another session started is given a folder of phi/tree nested in its starter's at its
+    first hook, relay.claim, and its address follows its parent's."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -2580,10 +2580,10 @@ class Places(unittest.TestCase):
     def test_a_started_session_gets_a_node_at_its_first_hook_with_its_session_json_and_no_flat_folder(self):
         self.kid(KID)
         node = self.store(KID)
-        self.assertEqual(os.path.normcase(node), os.path.normcase(os.path.join(self.t.p4, ".claude", "p4")))
-        self.assertTrue(os.path.isfile(os.path.join(node, "phi", "sessions", KID, "session.json")))
-        self.assertEqual(jload(os.path.join(node, "phi", relay.NODE))["kind"], "session")
-        self.assertEqual(jload(os.path.join(node, "phi", relay.NODE))["parent"], TOP)
+        self.assertEqual(os.path.normcase(node), os.path.normcase(os.path.join(self.t.p4, "phi", "tree", KID)))
+        self.assertTrue(os.path.isfile(os.path.join(node, "session.json")))
+        self.assertEqual(jload(os.path.join(node, relay.NODE))["kind"], "session")
+        self.assertEqual(jload(os.path.join(node, relay.NODE))["parent"], TOP)
         self.assertFalse(os.path.exists(self.flat(KID)), "no flat folder is made")
         self.assertEqual(self.store(TOP), "", "a top stays flat")
         self.assertTrue(os.path.isfile(os.path.join(self.flat(TOP), "session.json")))
@@ -2594,13 +2594,13 @@ class Places(unittest.TestCase):
         self.t.say(KID, "Again.")
         self.t.stop(KID, HANDED, [], "Half done.")
         self.assertEqual([self.address(h) for h in (TOP, KID, KID2, GRAND)], ["1", "101", "1001", "10001"])
-        self.assertEqual(len(relay.stores(self.t.p4)), 4)
+        self.assertEqual(len(relay.nodes(self.t.p4)), 3)
 
-    def test_the_child_of_a_nested_session_is_nested_in_that_sessions_store(self):
+    def test_the_child_of_a_nested_session_is_nested_in_that_sessions_folder(self):
         self.kid(KID)
         self.kid(GRAND, KID)
         self.assertEqual(os.path.normcase(self.store(GRAND)),
-                         os.path.normcase(os.path.join(self.store(KID), ".claude", "p4")))
+                         os.path.normcase(os.path.join(self.store(KID), GRAND)))
         self.assertEqual(self.address(GRAND), "10101")
 
     def test_a_session_whose_flat_folder_is_there_stays_flat_with_its_later_files_beside_it(self):
@@ -2611,12 +2611,12 @@ class Places(unittest.TestCase):
         for name in ("session.json", "turns.jsonl", "log.jsonl"):
             self.assertTrue(os.path.isfile(os.path.join(self.flat(KID), name)), name)
         self.assertEqual(self.address(KID), "1")
-        self.assertFalse(os.path.isdir(os.path.join(self.t.p4, ".claude")), "no store was made")
+        self.assertFalse(os.path.isdir(os.path.join(self.t.p4, "phi", "tree")), "no node was made")
 
     def test_a_first_prompts_hooks_leave_every_file_of_a_started_session_in_its_node(self):
         self.kid(KID)
         self.t.stop(KID, HANDED, [], "Half done.")
-        folder = os.path.join(self.store(KID), "phi", "sessions", KID)
+        folder = self.store(KID)
         for name in ("session.json", "turns.jsonl", "log.jsonl"):
             self.assertTrue(os.path.isfile(os.path.join(folder, name)), name)
         self.assertFalse(os.path.exists(self.flat(KID)))
@@ -2639,7 +2639,7 @@ class Places(unittest.TestCase):
         relay.forget(other.p4)
         self.assertTrue(os.path.isfile(os.path.join(relay.flat(other.p4, "local_up000001"), "session.json")))
         self.assertEqual(os.path.normcase(relay.nodes(other.p4).get(KID, "")),
-                         os.path.normcase(os.path.join(other.p4, ".claude", "p4")))
+                         os.path.normcase(os.path.join(other.p4, "phi", "tree", KID)))
 
     def test_a_reparented_session_keeps_its_store_and_a_detached_one_too(self):
         for host in (KID, KID2):
@@ -2648,7 +2648,7 @@ class Places(unittest.TestCase):
         self.assertEqual(self.t.cli(TOP, "reparent", KID2, KID).returncode, 0)
         self.assertEqual(self.t.started_by(KID2)[0], KID)
         self.assertEqual(self.store(KID2), held)
-        self.assertEqual(self.address(KID2), "1001", "the address of the store it has")
+        self.assertEqual(self.address(KID2), "1001", "the address of the node it has")
         self.assertEqual(self.t.cli(TOP, "detach", KID2).returncode, 0)
         self.assertEqual(self.store(KID2), held)
 
@@ -2710,7 +2710,10 @@ class TerminalWorker(unittest.TestCase):
                               capture_output=True, text=True, timeout=60, env=env)
 
     def node(self):
-        return os.path.join(self.home, ".claude", "p4", "phi")
+        """The folder of the worker's node: the planner is no node, so it is the one folder of phi/tree."""
+        tree = os.path.join(self.home, "phi", "tree")
+        (name,) = os.listdir(tree)
+        return os.path.join(tree, name)
 
     def test_land_from_a_mode_that_asks_or_none_known_writes_the_start_in_bypass_permissions_mode(self):
         """A landing worker always starts in bypassPermissions mode, so what mode its starter is in, or whether the
@@ -2773,7 +2776,7 @@ class TerminalWorker(unittest.TestCase):
             self.assertEqual(ran.returncode, 2, ran.stdout)
             self.assertIn("hold no quote", ran.stderr)
             self.assertNotIn("started already", ran.stderr)
-            self.assertFalse(os.path.exists(os.path.join(self.home, ".claude")))
+            self.assertFalse(os.path.exists(os.path.join(self.home, "phi", "tree")))
 
     def rows(self):
         return phi.read_rows(os.path.join(self.home, "phi", "worker-starts.jsonl"))
