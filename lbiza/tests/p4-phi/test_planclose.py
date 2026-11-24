@@ -731,6 +731,7 @@ class RegexEscapes(unittest.TestCase):
         return planclose.guard(tool, {"command": cmd}, cwd=self.ELSEWHERE)
 
     def test_a_regex_alternation_names_no_path(self):
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
         self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}\\?' f"))
 
     def test_a_windows_path_with_complete_is_still_refused(self):
