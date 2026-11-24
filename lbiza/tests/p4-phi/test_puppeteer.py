@@ -127,6 +127,19 @@ class Linear(Base):
         self.assertIn("reported \"Ported; the suite passes.\"", text3)
         self.assertTrue(os.path.exists(self.path(TOP, "ledger.json")))
 
+    def test_a_report_that_asks_ezexe_what_its_context_decides_is_relayed_as_a_status_not_a_question(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer. Archive when done."))
+        t.stop(KID, "Port the flush", report="Ported. Tell me now if ezexe wants X instead.")
+        text = self.ledger()[0]
+        self.assertIn("Its default stands, so relay this as a status, not as a question card.", text)
+        self.assertNotIn("reported \"Ported. Tell me now", text)
+        t.stop(KID, "Port the flush", report="Ported. Approve the plan?")
+        text = self.ledger()[0]
+        self.assertNotIn("relay this as a status", text)
+        self.assertIn("reported \"Ported. Approve the plan?\"", text)
+
     def test_a_live_agent_team_is_a_part_of_the_ledger_and_one_that_is_over_is_not(self):
         t = self.t
         t.say(TOP, TASK)

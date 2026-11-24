@@ -1264,6 +1264,9 @@ def turn_relay(home, s, row, calls):
             unsent.append((oid, named))   # a step named by address or path, or words that change it, not progress
     parent = relay._parent(s)
     ask = waiting_on(report)
+    flagged = relay.asks_ezexe_in(report)
+    if parent and flagged:                      # a call its own context covers: relayed as a status, not a question card
+        relay.warn(home, parent, f"default:{sid}:{stamp}", relay.default_status(title, flagged))
     if parent and ask:
         relay.warn(home, parent, f"wait:{sid}:{stamp}",
                    f"\"{title}\", your worker, ended its turn on a question: \"{relay._short(ask, 240)}\". "

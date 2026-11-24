@@ -521,6 +521,18 @@ class TreeOfPlans(unittest.TestCase):
         pend = relay._session(self.t.p4, TOP).get("relayPending") or []
         self.assertTrue(any("ended its turn on a question" in w["text"] and A in w["text"] for w in pend))
 
+    def test_a_report_asking_ezexe_what_the_context_decides_is_relayed_as_a_status_and_a_plan_approval_is_not(self):
+        s = relay._session(self.t.p4, A)
+        plans.turn_relay(self.t.p4, s, {"id": "r1", "report": "Moved it. Tell me now if ezexe wants X instead."}, [])
+        pend = relay._session(self.t.p4, TOP).get("relayPending") or []
+        self.assertTrue(any("relay this as a status, not as a question card" in w["text"] for w in pend), pend)
+        self.assertFalse(any("ended its turn on a question" in w["text"] for w in pend))
+        before = len(pend)
+        plans.turn_relay(self.t.p4, s, {"id": "r2", "report": "Moved it. Approve the plan?"}, [])
+        pend = relay._session(self.t.p4, TOP).get("relayPending") or []
+        self.assertFalse(any("Approve the plan" in w["text"] and "relay this as a status" in w["text"] for w in pend))
+        self.assertEqual(relay.asks_ezexe_in("Moved it. Approve the plan?"), [])
+
     def test_an_up_line_is_said_once(self):
         """An up line, such as "the parent has moved past your root step", is said once, not at every boundary."""
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))

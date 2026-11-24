@@ -554,6 +554,8 @@ def build(home, top, net=False):
                      "name": (rec or {}).get("name", ""), "working": working(home, sid),
                      "turns": len(turns), "lastTurn": str(last.get("time") or ""), "done": bool(last.get("done")),
                      "report": _short(last.get("report"), 160),
+                     "status": (relay.default_status(title, relay.asks_ezexe_in(last.get("report")))
+                                if relay.asks_ezexe_in(last.get("report")) else ""),
                      "step": {"addr": cur.get("addr"), "content": _short(cur.get("content"), 90)} if cur else None,
                      "stepsDone": sum(1 for x in steps if x.get("status") == "completed"), "steps": len(steps),
                      "open": [_short(x.get("content"), 90) for x in steps if x.get("status") != "completed"][:8],
@@ -632,7 +634,9 @@ def render(m):
             bits.append(f"issue {r['issue']} {r['issueState'] or 'state not read'}")
         if r["shard"]:
             bits.append("owned paths " + ", ".join(r["shard"]))
-        if r["report"]:
+        if r.get("status"):                        # a call its own context covers: a status line, not a question card
+            bits.append(r["status"])
+        elif r["report"]:
             bits.append(f"reported \"{r['report']}\"")
         name = f", {r['name']}" if r["name"] else ""
         out.append(f"{'  ' * r['depth']}- \"{r['title']}\" `{r['sessionId']}`{name}: " + "; ".join(bits))
