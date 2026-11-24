@@ -787,9 +787,8 @@ def look(home, sid, net=False, folder_only=False):
     phi.starter_cli answers it, where the module sends the report of each of its turns; `watching`, True when the
     session is an orchestrator and the look went over its subtree; `why`, what kept the look from running; `off`,
     True when P4_PHI or P4_PHI_WATCH is 0, where the module runs no look at all; `changed`, True when the ledger was
-    rewritten; `net`, True when the look read GitHub; `move`, the prompt phi.move_text answers for a turn the
-    module starts; `upkeep`, the prompt upkeep.wake answers for one, asked for only at a look that rewrote the
-    ledger or is a slow one, and only where `move` is empty; and the three times of `pace`.
+    rewritten; `net`, True when the look read GitHub; `upkeep`, the prompt upkeep.wake answers for a turn the
+    module starts, asked for only at a look that rewrote the ledger or is a slow one; and the three times of `pace`.
     `net` asks for a slow look, which reads GitHub unless P4_PHI_WATCH_NET is 0 and checks the routes.
     `folder_only` answers the folder and does nothing else.
     A session whose folder was never made, or was deleted, gets no look: nothing is written and no folder is made,
@@ -832,13 +831,7 @@ def look(home, sid, net=False, folder_only=False):
         return {"watching": False, "why": "no session folder", **pace(home)}
     if relay.gone(home, relay._session(home, sid)):       # the look that shows its end, then none
         return dict(out, why="closed", changed=changed, **pace(home))
-    try:                                            # the work a wait left unmoved at the last turn's end
-        move = _phi().move_text(home, sid)
-    except Exception:  # noqa: BLE001
-        move = ""
-    if move:
-        out["move"] = move
-    elif changed or net:                            # upkeep that is due while every started session is idle
+    if changed or net:                              # upkeep that is due while every started session is idle
         try:
             due = _phi().upkeep.wake(home, sid, conf_store(home, sid))
         except Exception:  # noqa: BLE001

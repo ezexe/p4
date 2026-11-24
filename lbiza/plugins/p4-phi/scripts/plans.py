@@ -25,8 +25,7 @@ advice and checks that ride on them.
              model and effort its kind of work gets.
   subagents  a subagent the Agent tool starts is a task of the step in progress, told what changed beside it.
   turns      at Stop, a turn's report is matched against the open steps of the session's children and siblings and
-             delivered to those it bears on, and a turn that ends with open steps the session tree can settle is
-             sent back to its next step.
+             delivered to those it bears on.
   in flight  the Stop input's list of background tasks still running, kept on session.json for the checks that
              run between turns.
 """
@@ -1443,39 +1442,15 @@ def waiting_on(report):
     return "" if AUTHORITY.search(q) else q
 
 
-# --- a turn that ends with open steps the session tree can settle ----------------------------------------------------
+# --- the turns the hooks module starts ------------------------------------------------------------------------------
 #
-# A session that ends its turn with steps of its task list still open, none of them waiting on ezexe's authority,
-# would cost ezexe a message just to restart agreed work, so at Stop it is sent back with its next open step, at most
-# KEEP_GOING_MAX times a turn.
+# The plugin's hooks module starts a turn for upkeep with `$.prompt.submit`, of which plugins/mods/api.md, "Start a
+# turn from a background job", says "The call waits until the session is idle and then starts a new turn." The prompt
+# of such a turn opens with UPKEEP_MARK, which a UserPromptSubmit hook is given as submitted, so it is told from
+# ezexe's words by its opening. Each wake is counted on session.json as `woke`, until a turn begins that no wake
+# started, and upkeep stops at KEEP_GOING_MAX of them in a row.
 
-KEEP_GOING_MAX = 2             # times one turn is sent back, under hooks.md's 8-consecutive-continuation cap
-WAITS_ON_OWNER = re.compile(r"\b(?:wait\w*|blocked|need\w*|until)\b[^.\n]{0,80}\b(?:user|owner|boss|ezexe|your|you)\b|"
-                            r"\b(?:your|ezexe's|the (?:user|owner)'s?) (?:go|ok|okay|approval|answer|decision|sign-?off)\b", re.I)
-
-
-AWAITS = re.compile(r"\b(?:a?wait\w*|collect\w*|until|hold\w*\s+for)\b[^.;]*\b(?:reports?|sessions?|trees?|tops?|"
-                    r"results?|finish\w*|done|land\w*|answers?|repl(?:y|ies)|word)\b", re.I)
-# a step that waits on other sessions' reports: nothing can be done on it until one arrives, and the arrival starts
-# the next turn
-
-
-def waiting_step(home, sid):
-    """The next open step of a session's task list when it waits on other sessions' reports, else None."""
-    steps = [x for x in load(home, sid).get("steps") or [] if x.get("status") != "completed"]
-    if not steps:
-        return None
-    nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
-    return nxt if awaits_sessions(nxt.get("content")) or AWAITS.search(str(nxt.get("content") or "")) else None
-
-
-# A Stop hook can send back only the turn that is ending. A turn that ends on a step waiting on other sessions is
-# let end, and work that does not depend on that wait may be left unmoved, ezexe/p4#193. The plugin's hooks module
-# starts a turn for it with `$.prompt.submit`, of which plugins/mods/api.md, "Start a turn from a background job",
-# says "The call waits until the session is idle and then starts a new turn." The prompt of such a turn opens with
-# WAKE_MARK, which a UserPromptSubmit hook is given as submitted, so it is told from ezexe's words by its opening.
-# Each wake is counted on session.json as `woke`, until a turn begins that no wake started, and it shares
-# KEEP_GOING_MAX with the Stop hook's send-backs of the turn it follows.
+KEEP_GOING_MAX = 2             # turns the hooks module starts for upkeep in a row, under hooks.md's 8-in-a-row cap
 
 WAKE_MARK = "phi (p4-phi): the turn before this one ended on"
 # The prompt of a turn the module starts for upkeep, upkeep.wake, opens with this one. No prompt opens with it while
@@ -1488,7 +1463,7 @@ SWEEP_MARK = "Sweep the sessions this one started, as p4-phi's upkeep has it."
 
 
 def woken(prompt):
-    """True for the prompt of a turn the hooks module started: for work a wait left unmoved, or for upkeep."""
+    """True for the prompt of a turn the hooks module started: for upkeep, or one that opens with WAKE_MARK."""
     return str(prompt or "").lstrip().startswith((WAKE_MARK, UPKEEP_MARK))
 
 
@@ -1524,65 +1499,14 @@ def wakes(disk):
     return int(w.get("n") or 0) if isinstance(w, dict) else 0
 
 
-def sent_back(disk, turn_id):
-    """How many times the Stop hook sent back the turn `turn_id`, by the session's session.json."""
-    sent = disk.get("keptGoing") if isinstance(disk, dict) and isinstance(disk.get("keptGoing"), dict) else {}
-    return int(sent.get("n") or 0) if sent.get("turn") == str(turn_id or "") else 0
-
-
-def keep_going(home, s, report, calls, turn_id, active=False, waits=(), background=()):
-    """The Stop hook's reason to send the session back to its next open step; '' when the turn may end: no open
-    step, the turn wrapped up or asked ezexe a matter of authority, the next step is one, the Stop input lists a
-    background task still running, since its notice starts the next turn, this turn was sent back KEEP_GOING_MAX times
-    already, counting the turns the hooks module started in a row before it, or the next step waits on other
-    sessions' reports while `waits` names sessions not yet complete. '' too while the session's native goal is set,
-    since that goal's evaluator sends the turn back."""
-    if goal_on(s):
-        return ""
-    p = load(home, s["sessionId"])
-    steps = [x for x in p.get("steps") or [] if x.get("status") != "completed"]
-    if not steps:
-        return ""
-    names = {str(c.get("name") or "") for c in calls or [] if isinstance(c, dict)}
-    if "mcp__ccd_turn__wrap_up" in names:
-        return ""                                  # the turn wrapped up: its recap says what is left and why
-    if any(isinstance(t, dict) and str(t.get("status") or "running").lower() == "running" for t in background or ()):
-        return ""                                  # hooks.md, Stop input: a running task's end wakes the session
-    nxt = next((x for x in steps if x.get("status") == "in_progress"), steps[0])
-    if waits and (AWAITS.search(str(nxt.get("content") or "")) or awaits_sessions(nxt.get("content"))):
-        return ""                                  # nothing can be done on it until a report arrives
-    tail = str(report or "").strip()[-600:]
-    asks = [q for q in re.findall(r"[^.!?\n]*\?", tail) if len(q.strip()) > 8]
-    if AUTHORITY.search(str(nxt.get("content") or "")) or any(AUTHORITY.search(q) for q in asks) \
-            or WAITS_ON_OWNER.search(tail) and AUTHORITY.search(tail):
-        return ""
-    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
-    disk = relay._read_json(path)
-    key = str(turn_id or "")
-    n = sent_back(disk, key)
-    if n + wakes(disk) >= KEEP_GOING_MAX or (active and not key):
-        return ""                                  # a turn with no id cannot be counted: never sent back twice
-    disk["keptGoing"] = {"turn": key, "n": n + 1}
-    relay._write_json(path, disk)
-    others = len(steps) - 1
-    return (f"phi (p4-phi): step {nxt.get('addr')} \"{relay._short(nxt.get('content'), 120)}\" is still "
-            f"{nxt.get('status') or 'pending'}" + (f", with {others} more open after it" if others else "") +
-            ", and this turn's end names no matter of ezexe's authority. Carry on with it now. If it truly waits "
-            "on a matter of ezexe's authority, permissions or security settings, credentials, spending, or an action "
-            "that cannot be undone or publishes outward, end the turn with `mcp__ccd_turn__wrap_up` whose question "
-            "names it in one line and whose first button is ezexe's go; if the step is done or dropped, update the "
-            "task list.")
-
-
 # --- a worker's native goal -------------------------------------------------------------------------------------------
 #
 # Claude Code has a goal of its own, https://code.claude.com/docs/en/goal.md: one completion condition a session works
 # toward, which a small model judges after each turn from the transcript alone, and while it is not met the turn is
 # sent back. Where a store's phi.json sets `goal` true, a worker's brief line `Done looks like:` becomes its goal. The
 # plugin's hooks module sets it once the worker's first turn has ended, with `$.command.run`, the one call seen to set
-# a goal with no dialog, in the desktop app on Claude Code 2.1.326. While that goal is set keep_going sends no turn
-# back: the goal's evaluator does, and the two would share Claude Code's one count of eight continuations in a row.
-# The checks the evaluator cannot make stay phi.py's Stop hook, since it runs nothing and reads no file.
+# a goal with no dialog, in the desktop app on Claude Code 2.1.326. The goal's evaluator sends the turn back, and the
+# Stop hook sends none for open steps. The checks the evaluator cannot make stay phi.py's Stop hook, since it runs nothing and reads no file.
 
 DONE_LINE = re.compile(r"^[ \t>*_-]*Done looks like[*_]*[ \t]*:[*_]*[ \t]*(\S.*)$", re.I | re.M)
 GOAL_CHARS = 4000             # goal.md, "Write an effective condition": "The condition can be up to 4,000 characters."

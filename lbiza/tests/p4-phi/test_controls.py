@@ -319,10 +319,9 @@ class Supervisor(unittest.TestCase):
         t.stop(TOP, "Build it", report="Built.")
         t.say(PUP, "a report came in")
         r = t.stop(PUP, "a report came in", report="Read it.", uuid="u1")
-        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "nobody left to wait on: back to the step")
+        self.assertEqual(r.stdout.strip(), "", "nobody left to wait on, and the turn is not sent back to the step")
         r = t.stop(TOP3, "Control the two trees", report="Waiting.")
-        self.assertEqual(json.loads(r.stdout).get("decision"), "block",
-                         "an orchestrator outside the section is sent back to its step")
+        self.assertEqual(r.stdout.strip(), "", "an orchestrator outside the section is not sent back either")
 
     # --- the board ------------------------------------------------------------------------------------------------------
 
@@ -913,23 +912,6 @@ class TreeAndClicks(unittest.TestCase):
         self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
                       f"shows it at top level.", ledger)
         self.assertNotIn("detach_session", ledger)
-
-
-class Waits(unittest.TestCase):
-    def test_keep_going_lets_a_waiting_step_end_the_turn_only_with_someone_to_wait_on(self):
-        import plans
-        with tempfile.TemporaryDirectory() as home:
-            s = {"sessionId": "local_p"}
-            relay._write_json(os.path.join(relay._dir(home, "local_p"), "session.json"), s)
-            relay._write_json(os.path.join(relay._dir(home, "local_p"), "plan.json"), {"steps": [
-                {"addr": "1", "content": "Await reports from A, B and C", "status": "in_progress"},
-                {"addr": "2", "content": "Check the trees' results against GitHub", "status": "pending"}]})
-            self.assertEqual(plans.keep_going(home, s, "Waiting on A.", [], "t1", waits=["A"]), "")
-            self.assertIn("is still in_progress", plans.keep_going(home, s, "Waiting on A.", [], "t1"))
-            relay._write_json(os.path.join(relay._dir(home, "local_p"), "plan.json"), {"steps": [
-                {"addr": "1", "content": "Rewrite the exporter", "status": "in_progress"}]})
-            self.assertIn("is still in_progress", plans.keep_going(home, s, "Not yet.", [], "t2", waits=["A"]),
-                          "a step that is work is not a wait")
 
 
 class LandedWorker(unittest.TestCase):

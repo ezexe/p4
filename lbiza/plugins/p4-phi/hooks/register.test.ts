@@ -986,52 +986,6 @@ test('P4_PHI_WATCH=0 still sends a report, from the starter the folder question 
   expect(seen.sent.length).toBe(1)
 })
 
-test('a look that answers work a wait left unmoved starts a turn of the session for it', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  let isLeft = false
-  const seen = machine(on, {
-    look: () => {
-      const answer = isLeft ? { ...ORCHESTRATOR, move: MOVE } : ORCHESTRATOR
-      isLeft = false
-
-      return answer
-    },
-  })
-
-  await $.session.start(START)
-  await clock.advance(5_000)
-  expect(seen.submitted).toEqual([])
-
-  // The turn ends on a wait, and the look its end asks for, one tick after the last one, answers what can move.
-  await $.turn.start({ text: 'what came in?', turnId: 't1' })
-  await clock.advance(6_000)
-  isLeft = true
-  await $.turn.complete(TURN)
-  await clock.advance(5_000)
-  expect(seen.submitted).toEqual([MOVE])
-  expect(seen.sent).toEqual([])
-
-  await clock.advance(60_000)
-  expect(seen.submitted).toEqual([MOVE])
-})
-
-test('no turn is started for a wait while a turn of the session runs', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  let isLeft = false
-  const seen = machine(on, { look: () => (isLeft ? { ...ORCHESTRATOR, move: MOVE } : ORCHESTRATOR) })
-
-  await $.session.start(START)
-  await clock.advance(5_000)
-  await $.turn.start({ text: 'land the series', turnId: 't1' })
-  isLeft = true
-  await clock.advance(60_000)
-
-  expect(seen.looks.length).toBeGreaterThan(2)
-  expect(seen.submitted).toEqual([])
-})
-
 // The prompt upkeep.wake answers, which opens with plans.UPKEEP_MARK.
 const UPKEEP = 'phi (p4-phi): upkeep is due for the sessions this one started: 1 act, each listed beside this prompt.'
 
@@ -1040,7 +994,7 @@ test('a look that answers upkeep that is due starts a turn of the session for it
   const clock = mock.clock(on)
   let isDue = false
   const seen = machine(on, {
-    // Python answers it once for an act and counts the turn, as it does for `move`.
+    // Python answers it once for an act and counts the turn.
     look: () => {
       const answer = isDue ? { ...ORCHESTRATOR, upkeep: UPKEEP } : ORCHESTRATOR
       isDue = false
@@ -1075,27 +1029,6 @@ test('with the setting off a look answers no upkeep, and the module starts no tu
   expect(seen.submitted).toEqual([])
 })
 
-test('work a wait left unmoved comes before upkeep, and one look starts one turn', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const clock = mock.clock(on)
-  let isDue = false
-  const seen = machine(on, {
-    look: () => {
-      const answer = isDue ? { ...ORCHESTRATOR, move: MOVE, upkeep: UPKEEP } : ORCHESTRATOR
-      isDue = false
-
-      return answer
-    },
-  })
-
-  await $.session.start(START)
-  await clock.advance(5_000)
-  isDue = true
-  await clock.advance(6_000)
-
-  expect(seen.submitted).toEqual([MOVE])
-})
-
 test('no turn is started for upkeep while a turn of the session runs', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
@@ -1121,7 +1054,7 @@ test('a look that answers a goal sets it by the goal command, once, and python i
   let isDue = false
   const seen = machine(on, {
     look: () => {
-      const answer = isDue ? { ...STARTED, goal: CONDITION, move: MOVE } : STARTED
+      const answer = isDue ? { ...STARTED, goal: CONDITION, upkeep: UPKEEP } : STARTED
       isDue = false
 
       return answer
@@ -1133,7 +1066,7 @@ test('a look that answers a goal sets it by the goal command, once, and python i
   expect(seen.ran).toEqual([])
 
   // The worker's first turn ends, and the look its end asks for answers the goal. The goal command starts the
-  // turn that follows, so no turn is started for what a wait left unmoved.
+  // turn that follows, so no turn is started for upkeep.
   await $.turn.start({ text: 'port the flush', turnId: 't1' })
   await clock.advance(6_000)
   isDue = true
@@ -2647,10 +2580,10 @@ test("the app's tools are asked once a minute at most, and never while a turn of
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)
   let moves = ''
-  const seen = machine(on, { files: { ...STORE }, look: () => (moves ? { ...APP_ON, move: moves } : APP_ON) })
+  const seen = machine(on, { files: { ...STORE }, look: () => (moves ? { ...APP_ON, upkeep: moves } : APP_ON) })
   const calls = app(on)
 
-  // The first look starts a turn for work a wait left unmoved, so nothing is asked of the app beside it.
+  // The first look starts a turn for upkeep, so nothing is asked of the app beside it.
   moves = MOVE
   await $.session.start(START)
   await clock.settle()

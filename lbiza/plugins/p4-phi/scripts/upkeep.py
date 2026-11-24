@@ -52,8 +52,8 @@ card stays where the session runs in a permission mode that asks, where its fold
 default branch on a remote, and with the setting off.
 
 When every started session is idle and an act is due that no turn was started for yet, `wake` answers the prompt of a
-turn the hooks module starts. Each such turn counts in upkeep.json, against `phi.keep_going_max` together with the
-module's other wakes, until ezexe's own message begins a turn, and no act starts a second one, so two sessions that
+turn the hooks module starts. Each such turn counts in upkeep.json, against `phi.keep_going_max` in a row,
+until ezexe's own message begins a turn, and no act starts a second one, so two sessions that
 answer each other never wake each other without end.
 """
 

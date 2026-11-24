@@ -57,7 +57,7 @@ DEFAULTS = {
         "chain_max": 8,                  # sessions above one whose tasks its background carries
         "turn_steps": 12,                # the steps of one turn a report keeps
         "tree_checks": 6,                # the sessions of the tree checked at once for a stall
-        "keep_going_max": 2,             # times the Stop hook sends a turn with open steps back
+        "keep_going_max": 2,             # turns the hooks module starts for upkeep in a row
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
         "upkeep": False,                 # true: a session that started others is handed their upkeep as acts that

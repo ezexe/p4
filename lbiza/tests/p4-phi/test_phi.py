@@ -266,8 +266,8 @@ class Requests(unittest.TestCase):
     def test_the_prompt_of_a_turn_the_hooks_module_started_is_no_request_of_ezexes(self):
         """ezexe/p4#193: a UserPromptSubmit hook is given a prompt that a plugin's hooks module submitted as the
         module wrote it, with no tag around it, as a live probe on Claude Code 2.1.326 showed. p4-phi's own opens
-        with plans.WAKE_MARK, and every reader of a prompt tells it from ezexe's words by that opening. A message
-        that quotes those words further in is still ezexe's."""
+        with plans.WAKE_MARK or plans.UPKEEP_MARK, and every reader of a prompt tells it from ezexe's words by that
+        opening. A message that quotes those words further in is still ezexe's."""
         import plans
         import puppeteer
         import rows
@@ -277,6 +277,11 @@ class Requests(unittest.TestCase):
         self.assertTrue(plans.woken("\n" + wake))
         self.assertTrue(puppeteer.from_session(wake))
         self.assertTrue(rows.WAKE_RE.match(wake), "rows.py spells the mark as plans.py does")
+        upkeep = plans.UPKEEP_MARK + ": the sessions this one started are idle."
+        self.assertEqual(phi.request_of(upkeep), "")
+        self.assertEqual(phi.request_of("<system-reminder>x</system-reminder>\n" + upkeep), "")
+        self.assertTrue(plans.woken("\n" + upkeep))
+        self.assertTrue(puppeteer.from_session(upkeep))
         asked = "why did it say this: " + wake
         self.assertEqual(phi.request_of(asked), asked)
         self.assertFalse(puppeteer.from_session(asked))
@@ -729,6 +734,58 @@ class TurnEnds(unittest.TestCase):
         row = self.t.log(TOP)[-1]
         self.assertEqual((row["hook"], row["event"], row["ended"]), ("stop", "StopFailure", "rate_limit"))
         self.assertEqual(self.t.turns(TOP), [])
+
+
+class StopEnds(unittest.TestCase):
+    """The Stop hook sends a turn back for the issue loop's verdict alone, never for open steps."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.t = Tree(self._tmp.name)
+        self.t.record(TOP, title="top")
+        self.t.record(KID, TOP, title="the x fix")
+        self.t.say(TOP, TASK)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def plan(self, host, steps, status="pending"):
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": {"items": [{"content": c, "status": status} for c in steps]},
+                                       "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_a_turn_with_two_open_steps_and_no_issue_ends_with_nothing_said(self):
+        self.plan(TOP, ("Port the hooks", "Write the layout docs"))
+        r = self.t.stop(TOP, TASK, report="I ported half the hooks.", uuid="s1")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
+        r = self.t.stop(TOP, TASK, report="Still porting.", uuid="s2")
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "nor the next turn")
+
+    def test_a_finished_started_session_whose_issue_is_not_proven_is_sent_back_with_the_gates_reason(self):
+        import issues
+        self.t.say(KID, TASK)
+        path = os.path.join(self.t.dir(KID), "session.json")
+        s = jload(path)
+        s["issue"] = {"repo": "ezexe/demo", "number": 7, "url": "https://github.com/ezexe/demo/issues/7"}
+        write(path, json.dumps(s))
+        self.plan(KID, ("Fix x",), status="completed")
+        r = self.t.stop(KID, TASK, report="Fixed x.", uuid="s3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("names no regression test that proves ezexe/demo#7 fixed", out.get("reason", ""))
+        self.assertTrue(out["reason"].startswith("phi (p4-phi): this session's work looks finished"))
+        self.assertNotIn("Carry on", out["reason"])
+        self.assertTrue(callable(issues.gate))
+
+    def test_phi_look_answers_no_move(self):
+        self.t.say(KID, TASK)
+        env = self.t.env(TOP, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0")
+        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look"],
+                       capture_output=True, text=True, env=env, cwd=self.t.proj, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("move", json.loads(r.stdout))
 
 
 class Background(unittest.TestCase):

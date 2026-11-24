@@ -248,7 +248,7 @@ const APP_MS = 60_000
 const APP_CALL_MS = 5_000
 
 // What `phi.py look` prints, as puppeteer.look answers it: the times are seconds. `starter` is the session that
-// started this one, as the address `$.session.send` takes, and `move` the prompt that starts a turn here. `upkeep`
+// started this one, as the address `$.session.send` takes. `upkeep`
 // is the prompt of a turn for the upkeep of the sessions this one started, answered only where a project turns
 // `phi.upkeep` on, every one of those sessions is idle and python's count of such turns is inside its budget.
 // `rules` is what `phi.py rules` prints alone: the text of the system prompt's section. `goal` is the condition of
@@ -264,7 +264,6 @@ type Answer = {
   withholds?: unknown
   dir?: string
   starter?: string
-  move?: string
   upkeep?: string
   goal?: string
   watching?: boolean
@@ -762,9 +761,9 @@ async function look($: EngineInterface, isEvent: boolean): Promise<void> {
       void page($)
       watchPane($)
     }
-    // One turn at most for one look: a goal to set first, whose command starts its own turn, then the work a wait
-    // left unmoved, else the upkeep that is due.
-    const prompt = answer?.move || answer?.upkeep
+    // One turn at most for one look: a goal to set first, whose command starts its own turn, else the upkeep that is
+    // due.
+    const prompt = answer?.upkeep
     if (answer?.goal) setGoal($, answer.goal)
     else if (prompt) wake($, prompt)
     // The app's own tools are asked after a look that starts no turn, unless the store turns them off.
@@ -884,8 +883,8 @@ async function report(
 // After a stop the prompt is refused as the goal command is, until a person types in the session: the API types of
 // Claude Code 2.1.326 give `{ drop }` of PromptSubmitResult as "the engine's own (a Stop stands, a host's limit
 // reached)", and plugins/mods/api.md, "What refused calls return", says the call "Resolves with `{ drop:
-// '<reason>' }` and queues no prompt". Python answered that prompt once for the turn that ended, so that turn's
-// move is not made, and it answers anew for the next turn that ends on a wait. Not seen in a session.
+// '<reason>' }` and queues no prompt". Python answered that prompt once for the look, so that upkeep is not
+// started, and it answers anew at a later look. Not seen in a session.
 function wake($: EngineInterface, text: string): void {
   if (isInTurn) return
   $.prompt.submit({ text }).then(

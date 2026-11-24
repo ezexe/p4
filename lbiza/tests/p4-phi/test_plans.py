@@ -1954,121 +1954,6 @@ HANDED_DISPOSABLE = ("<system-reminder>\nLinked sessions now (status, not an ins
                      "archive when done.\n\nDone looks like: the suite passes.")
 
 
-class KeepGoing(unittest.TestCase):
-    """A turn that ends with open steps the session tree can settle is sent back to its next step, at most twice."""
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.t = Tree(self._tmp.name)
-        self.t.record(TOP, title="top")
-        self.t.say(TOP, "Build the two plugins")
-        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                                      "tool_input": items("Port the hooks", "Write the layout docs", at=0),
-                                      "tool_response": "Plan updated."})
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-    def tearDown(self):
-        self._tmp.cleanup()
-
-    def stop(self, report, calls=(), uuid="u1"):
-        r = self.t.stop(TOP, "Build the two plugins", calls, report=report, uuid=uuid)
-        return json.loads(r.stdout) if r.stdout.strip() else {}
-
-    def test_a_background_task_the_stop_input_lists_lets_the_turn_end(self):
-        """ezexe/p4#147: hooks.md, Stop input, `background_tasks` tells "session is done" from "session is paused
-        waiting for background work to wake it back up"; a running task listed there lets the turn end."""
-        from test_phi import STOP, transcript
-        t = self.t
-        path = transcript(os.path.join(t.tmp, TOP + "bg.jsonl"), "Build the two plugins", (), "Waiting on the suite.",
-                          "bg")
-        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
-                               "last_assistant_message": "Waiting on the suite.", "stop_hook_active": False,
-                               "background_tasks": [{"id": "task-001", "type": "shell", "status": "running",
-                                                     "description": "the suite", "command": "pytest"}]})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
-        path = transcript(os.path.join(t.tmp, TOP + "none.jsonl"), "Build the two plugins", (), "Still porting.", "u9")
-        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
-                               "last_assistant_message": "Still porting.", "stop_hook_active": False,
-                               "background_tasks": []})
-        self.assertEqual(json.loads(r.stdout).get("decision"), "block", "an empty list does not")
-
-    def test_a_stop_with_no_list_reads_the_saved_one(self):
-        """An input with no `background_tasks` is no empty list: keep_going falls back on the list the last Stop
-        kept, so a task still running there lets the turn end."""
-        from test_phi import STOP, transcript
-        t = self.t
-        path = transcript(os.path.join(t.tmp, TOP + "kept.jsonl"), "Build the two plugins", (), "Waiting.", "kept")
-        r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message": "Waiting.",
-                               "background_tasks": [{"id": "bkept0001", "type": "shell", "status": "running",
-                                                     "command": "pytest"}]})
-        self.assertNotEqual((json.loads(r.stdout) if r.stdout.strip() else {}).get("decision"), "block")
-        self.assertNotEqual(self.stop("Still waiting.", uuid="u8").get("decision"), "block", "the saved list is read")
-
-    def test_only_a_running_background_task_lets_the_turn_end(self):
-        """ezexe/p4#147: each `background_tasks` entry carries a `status`, the task's current one; a task listed as
-        completed or failed wakes nothing, so it does not let the turn end."""
-        from test_phi import STOP, transcript
-        t = self.t
-
-        def stop(tasks, uuid):
-            path = transcript(os.path.join(t.tmp, TOP + uuid + ".jsonl"), "Build the two plugins", (), "Waiting.", uuid)
-            r = t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path, "last_assistant_message":
-                                   "Waiting.", "stop_hook_active": False, "background_tasks": tasks})
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return (json.loads(r.stdout) if r.stdout.strip() else {}).get("decision")
-
-        done = {"id": "task-002", "type": "shell", "status": "completed", "description": "the suite"}
-        self.assertEqual(stop([done, {**done, "id": "task-003", "status": "failed"}], "s1"), "block")
-        self.assertNotEqual(stop([done, {**done, "id": "task-004", "status": "running"}], "s2"), "block")
-
-    def test_open_steps_send_the_turn_back_twice_then_let_it_end(self):
-        out = self.stop("I ported half the hooks.")
-        self.assertEqual(out.get("decision"), "block")
-        self.assertIn("step 1 \"Port the hooks\"", out["reason"])
-        self.assertIn("1 more open", out["reason"])
-        self.assertEqual(self.stop("Still porting.").get("decision"), "block")
-        self.assertEqual(self.stop("Still porting."), {}, "a turn is sent back at most twice")
-        self.assertEqual(self.stop("New turn.", uuid="u2").get("decision"), "block", "a new turn counts afresh")
-
-    def test_a_turn_the_hooks_module_started_shares_the_budget_of_the_stop_hooks_send_backs(self):
-        """ezexe/p4#193: each turn the plugin's hooks module starts for work a wait left unmoved counts against
-        keep_going_max with the Stop hook's own send-backs. A turn that follows one wake is sent back once, and one
-        that follows two not at all, until a turn begins that no wake started."""
-        t = self.t
-        path = os.path.join(t.dir(TOP), "session.json")
-
-        def woke(n):
-            with open(path, encoding="utf-8") as f:
-                d = json.load(f)
-            d["woke"] = {"n": n, "time": "2026-11-19 10:00"}
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(d, f)
-
-        woke(1)
-        self.assertEqual(self.stop("Still porting.", uuid="w1").get("decision"), "block")
-        self.assertEqual(self.stop("Still porting.", uuid="w1"), {}, "one wake and one send-back are the two")
-        woke(2)
-        self.assertEqual(self.stop("Still porting.", uuid="w2"), {}, "two wakes in a row leave no send-back")
-        t.say(TOP, plans.WAKE_MARK + " step 1, \"Port the hooks\", which waits on other sessions.")
-        self.assertEqual(t.session(TOP)["woke"]["n"], 2, "the module's own prompt keeps the count")
-        self.assertEqual(t.session(TOP)["task"], "Build the two plugins", "and is no task of ezexe's")
-        t.say(TOP, "carry on")                     # a message of ezexe's: the count starts over
-        self.assertNotIn("woke", t.session(TOP))
-        self.assertEqual(self.stop("Still porting.", uuid="w3").get("decision"), "block")
-
-    def test_authority_or_a_wrap_up_lets_the_turn_end(self):
-        self.assertEqual(self.stop("Shall I push main to origin now?"), {}, "a push asked of ezexe")
-        self.assertEqual(self.stop("Done for now.", [("mcp__ccd_turn__wrap_up", {"recap": "x"}, "ok")], uuid="u3"), {})
-
-    def test_no_open_step_lets_the_turn_end(self):
-        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                                      "tool_input": items("Port the hooks", "Write the layout docs", at=2),
-                                      "tool_response": "Plan updated."})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.stop("All done."), {})
-
-
 class NativeGoal(unittest.TestCase):
     """Claude Code's own goal, https://code.claude.com/docs/en/goal.md, in place of the Stop hook's send-back. Where
     phi.json turns `goal` on, the line `Done looks like:` of a worker's brief is the condition the hooks module sets
@@ -2157,13 +2042,13 @@ class NativeGoal(unittest.TestCase):
     def test_with_the_setting_off_nothing_of_the_goal_happens(self):
         self.brief()
         self.assertNotIn("doneLine", self.t.session(KID))
-        self.assertEqual(self.stop("I ported half the flush.", "u1").get("decision"), "block", "sent back as before")
+        self.assertEqual(self.stop("I ported half the flush.", "u1"), {}, "no turn is sent back for open steps")
         self.assertNotIn("goal", self.phi("look"))
         s = self.t.session(KID)
         self.assertNotIn("goal", s)
         self.assertNotIn("transcript", s)
         self.assertEqual(self.phi("goal", "set"), {"set": False}, "no goal was asked for, so none is marked set")
-        self.assertEqual(self.stop("Still porting.", "u2").get("decision"), "block")
+        self.assertEqual(self.stop("Still porting.", "u2"), {})
 
     def test_goal_on_and_off_write_the_key_the_hooks_read_and_say_how_it_stands(self):
         """A session writes nothing under `.claude` with its own tools, so `phi.py goal on` and `goal off` set the
@@ -2183,7 +2068,7 @@ class NativeGoal(unittest.TestCase):
         self.assertTrue(r.stdout.strip().startswith("goal is off in "), r.stdout)
         with open(path, encoding="utf-8") as f:
             self.assertEqual(json.load(f), {"book": False, "goal": False})
-        self.assertEqual(self.stop("I ported half the flush.", "u1").get("decision"), "block", "off again")
+        self.assertEqual(self.stop("I ported half the flush.", "u1"), {}, "off again")
         self.assertNotIn("goal", self.phi("look"), "and the look answers none")
         write(path, "{not json")
         r = self.t.cli(KID, "goal", "on")
@@ -2243,15 +2128,14 @@ class NativeGoal(unittest.TestCase):
         self.assertEqual(self.t.session(KID).get("doneLine"), self.LINE)
         self.assertNotIn("goal", self.phi("look", **self.ON), "no turn has ended yet")
         out = self.stop("I ported half the flush.", "u1", **self.ON)
-        self.assertEqual(out.get("decision"), "block", "no goal is set yet, so the Stop hook still sends back")
+        self.assertEqual(out, {}, "no goal is set yet, and the Stop hook sends no turn back for open steps")
         self.assertEqual(self.phi("look", **self.ON).get("goal"), self.worded(self.LINE))
         self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
         goal = self.t.session(KID)["goal"]
         self.assertEqual(goal["condition"], self.worded(self.LINE))
         self.assertEqual(self.t.session(KID)["doneLine"], self.LINE, "the brief's line is kept as the brief has it")
         self.assertNotIn("set", goal)
-        self.assertEqual(self.stop("Still porting.", "u2", **self.ON).get("decision"), "block",
-                         "asked for and not set: the command may have failed, so the send-back stays")
+        self.assertEqual(self.stop("Still porting.", "u2", **self.ON), {}, "asked for and not set: no turn is sent back")
         self.assertNotIn("goal", self.phi("look", "--folder", **self.ON), "the folder question answers no goal")
 
     # plugins/mods/api.md, "Work your mod started before the interruption": the error of a command a stop found in
@@ -2563,8 +2447,8 @@ class NativeGoal(unittest.TestCase):
         told = phi.latest_reports(phi.load_reports(self.t.p4, TOP))
         self.assertEqual([r["turn"].get("done") for r in told if r["sessionId"] == KID], [turns[-1]["done"]],
                          "the row its starter reads says done too")
-        self.assertEqual(self.stop("One more thing.", "u9", **self.ON).get("decision"), "block",
-                         "the goal is over, so a later turn with open steps is sent back again")
+        self.assertEqual(self.stop("One more thing.", "u9", **self.ON), {},
+                         "the goal is over, and a later turn with open steps is sent back no more than before")
 
     def test_a_goal_judged_impossible_or_cleared_is_over_and_marks_nothing_done(self):
         for row, over in (({"met": False, "failed": True, "reason": "No test exists."}, "failed"),
@@ -2578,13 +2462,11 @@ class NativeGoal(unittest.TestCase):
                 self.phi("look", **self.ON)
                 self.assertEqual(self.t.session(KID)["goal"].get("over"), over)
                 self.assertFalse(self.t.turns(KID)[-1].get("done"))
-                self.assertEqual(self.stop("Next.", "u9", **self.ON).get("decision"), "block")
+                self.assertEqual(self.stop("Next.", "u9", **self.ON), {})
 
 
 class WaitsOnReports(unittest.TestCase):
-    """A step that waits on other sessions' reports stays with the orchestrator, is handed to no child, and
-    does not send the turn back while a worker or a session this one messaged is running or has an
-    undelivered report."""
+    """A step that waits on other sessions' reports stays with the orchestrator and is handed to no child."""
 
     STEPS = ("Await reports from A, B and C", "Check the trees' results against GitHub")
 
@@ -2601,130 +2483,7 @@ class WaitsOnReports(unittest.TestCase):
     plan = TreeOfPlans.plan
     check = TopOrchestrates.check
 
-    def stop(self, report, uuid="u1"):
-        r = self.t.stop(TOP, "Run the three trees", (), report=report, uuid=uuid)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout) if r.stdout.strip() else {}
-
-    def look(self, host=TOP):
-        """`phi.py look` as the plugin's hooks module runs it for a session -> what it answers."""
-        env = self.t.env(host, P4_PHI_WATCH="1", P4_PHI_WATCH_NET="0")
-        r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "look"],
-                       capture_output=True, text=True, env=env, cwd=self.t.proj, timeout=60)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)
-
-    def git(self, cwd, *args):
-        r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return r.stdout.strip()
-
-    def test_a_turn_that_ends_waiting_on_one_child_is_followed_by_a_turn_for_another_childs_unlanded_series(self):
-        """ezexe/p4#193: a pause in one flow stops only its own work. B reported done with a commit that closes #7
-        and is on no branch of origin while A still works. The turn that waits on A ends, since a Stop hook can send
-        back only the turn that is ending, and the look the hooks module runs after it answers `move`, the prompt of
-        a turn the module starts, naming B's series and not a step that lands work or asks ezexe. It is answered
-        once for a turn and at most keep_going_max times in a row, and no more once the series is on origin."""
-        t = self.t
-        t.record(B, TOP, title="B, the flush child")
-        who = ("-c", "user.name=t", "-c", "user.email=t@t")
-        bare = os.path.join(t.tmp, "bare.git").replace("\\", "/")
-        work = os.path.join(t.proj, "work").replace("\\", "/")
-        self.git(t.tmp, "init", "-q", "--bare", "-b", "main", bare)
-        os.makedirs(os.path.join(work, "lib"))
-        for name in ("x.py", "y.py"):
-            with open(os.path.join(work, "lib", name), "w", encoding="utf-8") as f:
-                f.write("v = 1\n")
-        for args in (("init", "-q", "-b", "main"), ("add", "-A"), (*who, "commit", "-qm", "one"),
-                     ("remote", "add", "origin", bare), ("push", "-q", "origin", "main"), ("fetch", "-q", "origin")):
-            self.git(work, *args)
-        self.plan(TOP, items(*self.STEPS, "Land the series on main and push it to origin",
-                             "Ask ezexe whether to publish the release"))
-        t.say(B, "Task:\nFix the flush for ezexe/demo#7. Report when done.\nFiles: work/lib/x.py")
-
-        def edit(name, uuid):
-            with open(os.path.join(work, "lib", name), "a", encoding="utf-8") as f:
-                f.write("more = 2\n")
-            t.stop(B, "edit it", [("Edit", {"file_path": os.path.join(work, "lib", name)}, "ok")], uuid=uuid)
-
-        edit("x.py", "c1")
-        self.git(work, *who, "commit", "-qam", "lib: fix the flush\n\nCloses #7")
-        sha = self.git(work, "rev-parse", "--short", "HEAD")
-        t.cli(B, "done", "the flush is fixed and committed; closes #7")
-        edit("y.py", "c2")
-        self.git(work, "checkout", "-q", "--", "lib/y.py")
-        t.say(TOP, "what came in?")                 # B's report is handed to the orchestrator
-        t.say(A, "Move the layout")                 # A is inside a turn
-        self.assertNotIn("move", self.look(), "a session inside a turn is started no turn")
-        out = self.stop("Waiting on A.", uuid="u5")
-        self.assertNotIn("decision", out, "the turn ends on its wait")
-        self.assertEqual(t.session(TOP)["waitEnded"]["turn"], "u5")
-        self.assertEqual(t.session(TOP)["waitEnded"]["waited"], [A])
-        move = self.look().get("move", "")
-        self.assertTrue(move.startswith(plans.WAKE_MARK + " step 1, \"Await reports from A, B and C\""), move)
-        self.assertIn("\"B, the flush child\" reported done, and its commit " + sha[:7], move)
-        self.assertIn("which closes #7, is on no branch of origin: land it", move)
-        self.assertIn("ezexe sent no message", move)
-        self.assertNotIn("\"A, the layout child\" reported", move)
-        self.assertNotIn("Land the series", move, "landing depends on the wait")
-        self.assertNotIn("Ask ezexe", move, "a matter of ezexe's authority depends on the wait")
-        self.assertNotIn("move", self.look(), "answered once for a turn")
-        self.assertEqual(t.session(TOP)["woke"]["n"], 1)
-        t.say(TOP, move)                            # the turn the module started, as a UserPromptSubmit hook gets it
-        self.assertEqual(t.session(TOP)["turnBy"], "event", "the module's words are not ezexe's")
-        self.assertNotIn("move", self.look(), "nor while that turn runs")
-        self.assertNotIn("decision", self.stop("Still waiting on A.", uuid="u6"))
-        self.assertIn("B, the flush child", self.look().get("move", ""), "the second wake in a row")
-        t.say(TOP, move)
-        self.assertNotIn("decision", self.stop("Still waiting on A.", uuid="u7"))
-        self.assertNotIn("move", self.look(), "keep_going_max wakes in a row, and no third")
-        t.say(TOP, "what else came in?")            # a message of ezexe's: the count starts over
-        self.assertNotIn("decision", self.stop("Still waiting on A.", uuid="u8"))
-        self.assertIn("B, the flush child", self.look().get("move", ""))
-        self.git(work, "push", "-q", "origin", "HEAD:main")
-        t.say(TOP, "and now?")
-        self.assertNotIn("decision", self.stop("Still waiting on A.", uuid="u9"))
-        self.assertNotIn("move", self.look(), "the series is on origin: nothing is left to move")
-
-    def test_a_step_no_child_holds_is_named_beside_the_wait_and_one_a_working_child_holds_is_not(self):
-        """ezexe/p4#193: an open step that is plain work depends on no wait, so the turn the module starts names it.
-        The same step handed to a child that is still at work depends on that child and is not named."""
-        t = self.t
-        self.plan(TOP, items(*self.STEPS, "Write the flow page in docs/flow.html"))
-        t.say(A, "Move the layout")                 # A is inside a turn
-        self.assertNotIn("decision", self.stop("Waiting on A.", uuid="h1"))
-        move = self.look().get("move", "")
-        self.assertIn("- step 3, \"Write the flow page in docs/flow.html\", depends on no wait: do it", move)
-        self.assertNotIn("step 2,", move, "a step that checks other sessions' results waits with them")
-        t.record(B, TOP, title="B, the flow page child")
-        t.say(B, "Write the flow page")             # B is at work on step 3
-        path = os.path.join(t.dir(B), "session.json")
-        with open(path, encoding="utf-8") as f:
-            held = json.load(f)
-        held["rootStep"] = "3"
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(held, f)
-        t.say(TOP, "what came in?")
-        self.assertNotIn("decision", self.stop("Waiting on A and B.", uuid="h2"))
-        self.assertEqual(sorted(t.session(TOP)["waitEnded"]["waited"]), sorted([A, B]))
-        self.assertNotIn("move", self.look(), "the step B holds depends on B: nothing to move")
-
-    def test_a_turn_that_ends_on_no_wait_or_on_an_error_is_followed_by_no_turn(self):
-        """The wait is kept only for the turn the Stop hook let end on it. A turn that ended on an error ran no Stop
-        hook, so the wait a turn before it ended on is not answered for it."""
-        t = self.t
-        self.plan(TOP, items(*self.STEPS, "Write the flow page in docs/flow.html"))
-        self.assertEqual(self.stop("Nothing is in yet.", uuid="n1").get("decision"), "block", "nobody is waited on")
-        self.assertNotIn("waitEnded", t.session(TOP))
-        self.assertNotIn("move", self.look())
-        t.say(A, "Move the layout")
-        self.assertNotIn("decision", self.stop("Waiting on A.", uuid="n2"))
-        self.assertIn("waitEnded", t.session(TOP))
-        r = t.hook("stop-failure", TOP, {"hook_event_name": "StopFailure", "error": "rate_limit"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("move", self.look(), "the last turn end is the failed one")
-
-    def test_a_step_that_waits_on_reports_stays_and_lets_the_turn_end_naming_whom_it_waits_on(self):
+    def test_a_step_that_waits_on_reports_stays_with_the_orchestrator(self):
         t = self.t
         groups, kept = plans.top_groups({"steps": [{"addr": str(k + 1), "content": c, "status": "pending"}
                                                    for k, c in enumerate(self.STEPS)]}, "")
@@ -2735,18 +2494,6 @@ class WaitsOnReports(unittest.TestCase):
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(self.STEPS)]}, True, ""), "")
         ctx = self.plan(TOP, items(*self.STEPS)) or ""
         self.assertNotIn("Hand its work steps to workers", ctx)
-        self.assertEqual(self.stop("Nothing is in yet.").get("decision"), "block",
-                         "nobody is running and no report is undelivered: the step is sent back as any other")
-        t.say(A, "Move the layout")                # A is inside a turn
-        out = self.stop("Waiting on A.", uuid="u2")
-        self.assertNotIn("decision", out, "with A running the turn may end")
-        self.assertIn("which waits on \"A, the layout child\"", out["systemMessage"])
-        self.assertIn("step 1, \"Await reports from A, B and C\"", out["systemMessage"])
-        t.stop(A, "Move the layout", report="Moved.")
-        out = self.stop("Still waiting.", uuid="u3")
-        self.assertIn("\"A, the layout child\"", out.get("systemMessage", ""), "its report is not delivered yet")
-        t.say(TOP, "what came in?")                 # the report is handed to the orchestrator
-        self.assertEqual(self.stop("A reported.", uuid="u4").get("decision"), "block", "nothing is waited on now")
 
     def test_other_steps_stay_or_go_by_the_same_rules(self):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
