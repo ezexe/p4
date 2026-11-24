@@ -2233,6 +2233,21 @@ class BuildRoute(unittest.TestCase):
         for part in ("/p/plan.md", "/n/report-x-built.md", "one commit a section", "sections 2, 3", "/repo"):
             self.assertIn(part, said)
 
+    def test_the_message_names_forward_slash_paths_and_no_backslash(self):
+        said = plans.build_message("E:\\p\\plan.md", "E:\\n\\report-built.md", ["2"], "E:\\repo")
+        for part in ("E:/p/plan.md", "E:/n/report-built.md", "E:/repo"):
+            self.assertIn(part, said)
+        self.assertNotIn("\\", said)
+
+    def test_the_message_gives_the_evidence_line_form(self):
+        self.assertIn("**Evidence:**", plans.build_message("/p/plan.md", "/n/r-built.md", ["2"], "/repo"))
+
+    def test_a_section_with_that_evidence_line_is_landed(self):
+        import sections
+        text = "# Plan\n\n## 1. A\n\n**Evidence:** abc1234, a.py:3, 5 passed\n\n- **Files:** `a.py`\n"
+        found = sections.parse(text)[1]
+        self.assertTrue(found and found[0]["landed"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

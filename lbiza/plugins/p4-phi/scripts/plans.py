@@ -662,9 +662,12 @@ def built_report(report):
 
 def build_message(plan, built, nums, checkout):
     """What the planner is told once ezexe approved the plan: build it, with no worktree and one commit a section."""
+    plan, built, checkout = (str(p).replace("\\", "/") for p in (plan, built, checkout))
     return (f"Your plan {plan} is approved. Build sections {', '.join(nums)} in {checkout}: no worktree and no branch, "
             "commit only by phi.py commit, one commit a section, push and merge nothing. Run each section's Checks, "
-            f"write its Evidence into the plan, and when every check passes write {built} and end the turn.")
+            "and write its Evidence into that plan file, under the section's `## ` heading, as one line "
+            "`**Evidence:** <commit sha>, <path:line>, <the check's result>`, not as a heading. "
+            f"When every check passes write {built} and end the turn.")
 
 
 CODE =re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
