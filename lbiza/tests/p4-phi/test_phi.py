@@ -2681,7 +2681,7 @@ TICKS = chr(96) * 3
 WORKER_PLAN = ("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n"
                "## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Checks:** `python -m pytest t.py`\n\n"
                f"{TICKS}python\nx = 1\n{TICKS}\n\n"
-               "## 2. The page\n\n- **Files:** `docs/export.md`\n- **Depends on:** 1\n\n"
+               "## 2. The page\n\n- **Files:** `docs/export.md`, `src/export/writer.py`\n- **Depends on:** 1\n\n"
                f"{TICKS}markdown\nA line.\n{TICKS}\n")
 
 
@@ -3018,6 +3018,109 @@ class PoolState(unittest.TestCase):
         start, out = phi.read_rows(self.ledger())
         self.assertEqual(set(start["pools"]), {"api_low", "api_spent_month", "max_low", "max_utilization"})
         self.assertEqual(out["rate_limit"]["status"], "allowed")
+
+
+FOUR = "# Four\n\n" + "".join(
+    f"## {k}. Piece {k}\n\n- **Files:** `src/p{k}.py`\n- **Depends on:** none\n- **Checks:** `t {k}`\n\n"
+    for k in range(1, 6)) + "## 6. Last\n\n- **Files:** `src/p6.py`\n- **Depends on:** 1, 2\n- **Checks:** `t 6`\n"
+
+
+class Slots(unittest.TestCase):
+    """pool_slots and slot_assigner fill both pools at once, and `coworkers --land` starts every ready run on them."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-slots-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        self.plan = os.path.join(self.base, "plan.md")
+        write(self.plan, FOUR)
+
+    def conf(self, d):
+        write(os.path.join(self.home, "phi", "phi.json"), json.dumps(d))
+
+    def run_phi(self, *args):
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), *args,
+                               "--p4", self.home, "--session", "local_plan0001"],
+                              capture_output=True, text=True, timeout=60,
+                              env={**os.environ, "P4_PHI_APP_SESSIONS": os.path.join(self.base, "app")})
+
+    def test_print_work_fills_the_api_slots_then_the_max_plans_and_interactive_work_takes_only_the_max_plans(self):
+        self.conf({"worker_slots": {"api": 2, "max": 2}})
+        pick = phi.slot_assigner(self.home, "")
+        got = [pick("land", {}) for _ in range(5)]
+        self.assertEqual([g and (g["pool"], g["profile"], g["mode"]) for g in got],
+                         [("api", "p4-workers", "print"), ("api", "p4-workers", "print"), ("max", "", "print"),
+                          ("max", "", "print"), None])
+        self.assertIn("the Max plan, still as -p", got[2]["profile_from"])
+        pick = phi.slot_assigner(self.home, "")
+        team = {"mode": "interactive", "pool": "max", "team": True, "said": "team"}
+        self.assertEqual((pick("plan", team)["pool"], pick("plan", team)["mode"]), ("max", "interactive"))
+        self.assertIsNone(pick("plan", team), "interactive work has no other pool")
+        self.assertEqual(pick("land", {})["pool"], "api", "the API slots are still free")
+        named = {"mode": "print", "pool": "max", "said": "print max"}
+        self.assertEqual(phi.slot_assigner(self.home, "")("x", named)["profile"], "")
+
+    def test_running_workers_take_slots_a_low_pool_has_none_and_a_budget_caps_the_api_credit(self):
+        self.conf({"worker_slots": {"api": 1, "max": 1}, "worker_api_budget_usd": 1.0})
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
+        phi.append_line(os.path.join(self.home, "phi", "worker-starts.jsonl"),
+                        {"time": stamp, "event": "start", "name": "tw-run", "profile": "", "mode": "print",
+                         "log": os.path.join(self.base, "none.jsonl"), "report": os.path.join(self.base, "r.md")})
+        slots = phi.pool_slots(self.home)
+        self.assertEqual((slots["api"], slots["max"], slots["running"]), (1, 0, {"api": 0, "max": 1}))
+        phi.append_line(os.path.join(self.home, "phi", "worker-starts.jsonl"),
+                        {"time": stamp, "event": "outcome", "name": "tw-run", "how": "done"})
+        self.conf({"worker_slots": {"api": 4, "max": 1}, "worker_api_budget_usd": 1.0})
+        self.assertEqual(phi.pool_slots(self.home)["api"], 2, "1 USD left buys two at 0.40")
+        self.assertIn("buys 2 more", phi.slots_line(phi.pool_slots(self.home)))
+
+    def test_land_starts_every_ready_run_across_both_pools_shows_each_tab_and_waits_on_the_wave(self):
+        self.conf({"worker_slots": {"api": 3, "max": 1}})
+        ran = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        out = ran.stdout
+        self.assertEqual(out.count("`mcp__terminal__open_terminal_tab` with "), 4, out)
+        self.assertEqual(out.count(", which shows the panel, then `mcp__terminal__run_in_terminal` with "), 4)
+        self.assertEqual(out.count("  pool api, "), 3)
+        self.assertEqual(out.count("  pool max, mode print"), 1)
+        self.assertIn("waits for a slot: ", out, "piece 5 waits for a free slot")
+        self.assertIn("waits on sections 1, 2: ", out)
+        self.assertIn("coworkers --wait --report ", out)
+        rows = [r for r in phi.read_rows(os.path.join(self.home, "phi", "worker-starts.jsonl"))
+                if r["event"] == "start"]
+        self.assertEqual(sorted(r["profile"] for r in rows), ["", "p4-workers", "p4-workers", "p4-workers"])
+        for r in rows[:2]:                         # pieces 1 and 2 report done: piece 6 is next, with piece 5
+            write(r["report"], "done")
+            write(r["log"], json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.1}) + "\n")
+        wave = self.run_phi("coworkers", "--wait", "--report", rows[0]["report"], rows[2]["report"])
+        self.assertEqual(wave.returncode, 0, wave.stderr)
+        self.assertIn(f"done: {rows[0]['report']}", wave.stdout.replace("\\", "/"))
+        self.assertIn("still running: ", wave.stdout)
+        again = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(again.stdout.count("`mcp__terminal__open_terminal_tab` with "), 2, "pieces 5 and 6")
+        bal = self.run_phi("balance")
+        self.assertIn("at once: ", bal.stdout)
+
+    def test_peak_at_once_counts_overlapping_workers_per_pool(self):
+        ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+        t = lambda m: f"2026-11-24T12:{m:02d}:00"   # noqa: E731
+        for name, a, b, profile in (("w1", 0, 10, "p4-workers"), ("w2", 1, 5, ""), ("w3", 2, 4, "p4-workers"),
+                                    ("w4", 10, 12, "")):
+            phi.append_line(ledger, {"time": t(a), "event": "start", "name": name, "profile": profile})
+            phi.append_line(ledger, {"time": t(b), "event": "outcome", "name": name, "how": "done"})
+        self.assertEqual(phi.peak_at_once(self.home), {"all": 3, "api": 2, "max": 1})
+
+    def test_sections_lint_prints_each_readers_flag_and_exits_one(self):
+        write(self.plan, FOUR.replace("`src/p6.py`", "`src/p6.py`, `src/p3.py`"))
+        ran = self.run_phi("sections", self.plan, "--lint")
+        self.assertEqual(ran.returncode, 1, ran.stderr)
+        self.assertIn("fences: sections 3 and 6 both write src/p3.py", ran.stdout)
+        write(self.plan, FOUR)
+        clean = self.run_phi("sections", self.plan, "--lint")
+        self.assertEqual((clean.returncode, clean.stdout.split(":")[0]), (0, "clean"))
 
 
 class CommitCommand(unittest.TestCase):
