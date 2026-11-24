@@ -177,7 +177,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
   <h1>Delegation</h1>
   <p class="lede">p4-phi delegates each piece of work to where Claude Code runs it best, so a session's own turn is never held by it. Choose a kind of task below, see where it goes, and step through the path its result takes back.</p>
   <ul class="facts">
-    <li class="f-phi"><b>Workers do the writing.</b>An orchestrator plans and lands. Each work step of its task list goes to a worker, which the <a href="session-tree.html">session tree</a> page shows. A <a href="puppeteer.html">puppeteer</a> is the exception: its steps stay with it.</li>
+    <li class="f-phi"><b>Workers do the writing.</b>An orchestrator plans and lands, and starts a worker for work that writes files, which the <a href="session-tree.html">session tree</a> page shows.</li>
     <li class="f-you"><b>Each role has its agent.</b>The plugin's skill <code>sub-agentic</code> decides whether to delegate, how many agents, and each one's type, model and effort by its role. A read across files goes to <code>p4-phi:finder</code> on <code>haiku</code> at <code>low</code>, a review of a code change to Claude Code's bundled skill <code>code-review</code>, a result that is no code change to <code>p4-phi:check</code> on <code>sonnet</code> at <code>medium</code>, and a subagent that writes to <code>p4-phi:writer</code> on <code>opus</code> or <code>p4-phi:integrator</code> on <code>sonnet</code>, each at <code>medium</code>.</li>
     <li class="f-app"><b>Nobody waits in the foreground.</b>The session that asked goes on or ends its turn. A completion notification brings the result in a later turn.</li>
   </ul>
@@ -203,11 +203,6 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
       <section class="card sec" aria-label="The kind of task">
         <h2>The task</h2>
         <div class="acts" id="kinds"></div>
-        <div class="field">
-          <label for="plan">Or a step of a task list</label>
-          <input id="plan" type="text" maxlength="90" autocomplete="off" placeholder="Find where p4.json is read">
-        </div>
-        <p class="named" id="named">p4-phi names where each step of an orchestrator's task list runs, and which steps the orchestrator keeps. Write one to see where.</p>
       </section>
       <section class="card sec ex" id="example" aria-label="Where the task goes and how its result comes back"></section>
     </div>
@@ -215,35 +210,21 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="On by default">
     <h2>On by default</h2>
-    <p class="intro">Nothing has to be configured. The delegation rule and the plugin's agent work in any project the plugin is enabled in.</p>
+    <p class="intro">Nothing has to be configured. The plugin's agents work in any project the plugin is enabled in.</p>
     <div class="rules">
       <div class="rule">
         <h3>Nothing to set up</h3>
         <ul>
-          <li>Every session holds the delegation rule in its system prompt, as one of p4-phi's built-in rules beside act-don't-wait.</li>
           <li>A background command and the skill <code>code-review</code> are Claude Code's own, so the plugin ships no agent that runs a command and none that reviews a code change.</li>
           <li>Each of the plugin's agents is a file in its <code>agents/</code> folder with its <code>model</code> and <code>effort</code> in it, so it loads with the plugin as <code>p4-phi:finder</code>, <code>p4-phi:writer</code>, <code>p4-phi:integrator</code> or <code>p4-phi:check</code> and runs on its role's model with nothing on the call.</li>
         </ul>
-      </div>
-      <div class="rule">
-        <h3>One key turns it off</h3>
-        <ul>
-          <li>Set <code>phi.levels</code> to <code>false</code> in the project's <code>.claude/p4/p4.json</code>.</li>
-          <li>The delegation rule is then left out, no step of a task list is named for <code>p4-phi:finder</code> or a background command, and a worker is not told at its first message how to split its own work.</li>
-          <li>No key turns it on. Any value but <code>false</code>, or no key at all, leaves it on.</li>
-        </ul>
-        <pre>{
- "phi": {
-  "levels": false
- }
-}</pre>
       </div>
     </div>
   </section>
 
   <section class="block" aria-label="The model and effort a worker starts with">
     <h2>A worker's model and effort</h2>
-    <p class="intro">The start calls p4-phi's advice hands out carry the <code>model</code> and the <code>effort</code> of the step's role in the skill <code>sub-agentic</code>, and a new top session carries neither, so it keeps its parent session's. The start tool takes a model id of the same family as the starter's or cheaper, and ignores a higher one. The kind of the step decides both, and the brief says them in one line, <code>Model and effort: &lt;model&gt; at &lt;effort&gt; effort</code>.</p>
+    <p class="intro">The start calls p4-phi drafts carry the <code>model</code> and the <code>effort</code> of the step's role in the skill <code>sub-agentic</code>, and a new top session carries neither, so it keeps its parent session's. The start tool takes a model id of the same family as the starter's or cheaper, and ignores a higher one. The kind of the step decides both, and the brief says them in one line, <code>Model and effort: &lt;model&gt; at &lt;effort&gt; effort</code>.</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Kind of step</th><th>Role</th><th>Model</th><th>Effort</th></tr></thead>
@@ -344,7 +325,7 @@ function steps(kind,ask){
        code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",model:"claude-opus-5-5",effort:"medium",
          prompt:"<the whole brief, with its Files: line and its model and effort>"})},
       {dir:"hold",legs:["tc"],by:"The orchestrator ends its turn",say:"The worker works. The orchestrator is free.",
-       html:"The orchestrator keeps itself free for orchestration: planning, messaging and managing sessions, decisions with ezexe, and landing the work. It does not do the step itself and it does not wait on the worker."},
+       html:"The orchestrator plans, messages and manages sessions, decides with ezexe and lands the work. It does not wait on the worker."},
       {dir:"up",legs:["tc"],by:"The worker reports",say:"The report comes back up.",
        html:"When the worker ends its turn, its report reaches its parent session beside that session's next message. The worker leaves its outcome there as a <code>replaces:</code> note and counts as archived from then on. The orchestrator lands the work, meaning merge and push."}
     ];
@@ -352,7 +333,7 @@ function steps(kind,ask){
   if(kind==="read")return [
     {dir:"down",legs:["ask"],by:W+" starts p4-phi:finder",say:"The Agent call carries the question down.",
      html:"The call names the plugin's finder by <code>subagent_type</code>, and its file gives it <code>haiku</code> at <code>low</code> effort, so the call names no model. The prompt is the question, and it is all the finder knows.",
-     code:call("Agent",{subagent_type:"p4-phi:finder",description:"Find readers of phi.levels",prompt:"Find every place that reads phi.levels from p4.json. Return each as path:line."})},
+     code:call("Agent",{subagent_type:"p4-phi:finder",description:"Find readers of phi.child_levels",prompt:"Find every place that reads phi.child_levels from p4.json. Return each as path:line."})},
     {dir:"hold",legs:["ask"],by:W+" goes on or ends its turn",say:"The finder reads. The session keeps its turn.",
      html:HOLD+" Claude Code starts a subagent in the background when nothing else is configured."},
     {dir:"up",legs:["ask"],by:"A completion notification brings the result",say:"The completion notification comes back up.",
@@ -386,30 +367,6 @@ function steps(kind,ask){
      html:"The verdict comes first in one sentence. Then each finding, most serious first, as <code>path:line</code> with the input or state that shows it. Each is marked as confirmed from the files or as a suspicion."}
   ];
 }
-
-/* ---------- steps of a task list, as plans.level_of and plans.child_kind read them ---------- */
-var READS=/^\W*(?:find|search|look\s+(?:for|up|at|into|through)|read|grep|list|locate|survey|scan|map|inventory|explore|trace|identify|count|collect|gather|sweep|research)\b/i;
-var RUNS=/^\W*(?:run|re-?run|execute)\b/i;
-var WRITES=/\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b/i;
-var TEAMS=/\b(?:with|by) an? agent[- ]team\b|\bfrom (?:several|multiple|many|different|opposing|competing|two|three|four|all) (?:sides|angles|perspectives|viewpoints|lenses)\b|\b(?:with|by) competing (?:hypothes[ie]s|theories|explanations)\b/i;
-var TEAM_NOT=/^\W*(?:build|draft|develop|generat|convert|extract|document)\w*\b/i;
-function levelOf(t){if(WRITES.test(t))return "session";if(TEAMS.test(t)&&!TEAM_NOT.test(t))return "team";if(READS.test(t))return "read";if(RUNS.test(t))return "run";return "session"}
-var DESIGNS=/^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|investigat|decid|analy[sz]|research|plan\b)\w*/i;
-var REVIEWS=/^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*/i;
-var CODE=/\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)|\b(?:scripts?|src|hooks?|lib)\/|\b(?:hook|script|function|module|class|api|test suite|behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b/i;
-var STATIC=/\b(?:docs?|dox|documentation|readme|changelog|pages?|html|css|markdown|typos?|wording|comments?|renam\w*|version bump|bump\w*|format\w*|static|mechanical|copy\w*|mov\w+)\b|\.(?:md|html|css|txt|svg)\b/i;
-function kindOfWork(t){if(REVIEWS.test(t))return "review";if(DESIGNS.test(t))return "design";if(STATIC.test(t)&&!CODE.test(t))return "static";return "build"}
-/* three of the reasons plans.top_stays keeps a step with the orchestrator; it has more, such as waiting on other sessions. Watching the run on what was pushed, and updating the installed plugins, count as landing. */
-var LANDS=/^\W*(?:run\b[^,.;]*\b(?:tests?|suites?|checks?)|report|wrap)\b|^\W*(?:tests?|verify|check|review)\b(?!\s*#?\d)(?=(?:(?!\bpass(?:es|ed)?\b)[^.;:])*\b(?:own (?:work|changes?|commits?|diff|steps?)|landed|merged|committed|pushed|work|changes?|diff|results?|commits?|suites?|tests?|build|outcome|fix(?:es)?|it|them)\b)|\b(?:commit|merge|push|ship|release|land|fast-forward)\b/i;
-var SYNCS=/^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b/i;
-var WATCHES_RUN=/\b(?:watch|follow|monitor|poll|a?wait|check|verify|confirm)\w*\b[^.;]*?\b(?:(?:workflow|ci|release|action|pipeline|github(?:'s|’s)?(?:\s+actions?)?)\s+runs?\b|(?:the|its|each|every)\s+runs?\s+on\b|this\s+run\s+on\b|ci(?:\s+(?:on|for|to|until|through|pass\w*|finish\w*|end\w*|go\w*|results?|green|red)\b|\W*$)|(?:workflows?|pipelines?)(?:\s+(?:on|for|to|until|through|results?|green|red)\b|\W*$))/i;
-var INSTALLS=/\b(?:updat|upgrad|reinstall|refresh)\w*\b[^.;]*?\binstalled\s+(?:[\w-]+\s+){0,2}?plugins?(?=\s*(?:$|[.;,:!?)])|\s+(?:from|to|for|with|in|on|at|and|of|after|before|via|by|once|then|using|so|when|until)\b)|\bplugin\s+update\b/i;
-var ORCHESTRATES=/^\W*(?:start|kick\s*off|launch)\s+(?!writing|adding|implementing|making)(?:[\w'’-]+\s+){0,5}?(?:checks?|tests?|sessions?|runs?)\b|^\W*(?:run|re-?run)\s+(?:[\w'’-]+\s+){0,5}?(?:sessions?|acceptance\s+(?:checks?|tests?|runs?))\b/i;
-function staysWhy(t){if(LANDS.test(t)||SYNCS.test(t)||WATCHES_RUN.test(t)||INSTALLS.test(t))return "it checks or lands the work";if(ORCHESTRATES.test(t))return "it starts a check, test or session, which is orchestration";return ""}
-var KIND_WORDS={static:"static or mechanical work, an integrator's, so it starts on <code>claude-sonnet-5-5</code> at <code>medium</code> effort",
-  build:"a build that changes behaviour, a writer's, so it starts on <code>claude-opus-5-5</code> at <code>medium</code> effort",
-  design:"a design or a decision with its sources, a writer's, so it starts on <code>claude-opus-5-5</code> at <code>medium</code> effort",
-  review:"a review or check of another's work, a cross-check's, so it starts on <code>claude-sonnet-5-5</code> at <code>medium</code> effort"};
 
 /* ---------- state ---------- */
 var S={kind:"read",ask:"top",step:0};
@@ -557,17 +514,6 @@ function nodeHit(e){
 }
 svg.addEventListener("click",nodeHit);
 svg.addEventListener("keydown",function(e){if(e.key==="Enter"||e.key===" "){e.preventDefault();nodeHit(e)}});
-$("plan").addEventListener("input",function(){
-  var t=$("plan").value.trim(),out=$("named");
-  if(!t){out.textContent="p4-phi names where each step of an orchestrator's task list runs, and which steps the orchestrator keeps. Write one to see where.";return}
-  var stay=staysWhy(t);
-  if(stay){out.innerHTML="The orchestrator keeps this step itself, since "+stay+".";S.ask="top";pick("work");return}
-  var lv=levelOf(t);
-  if(lv==="read"){out.innerHTML="This step only reads or searches, so p4-phi names it for <code>p4-phi:finder</code>, the plugin's evidence finder on <code>haiku</code> at <code>low</code> effort, not a session.";pick("read")}
-  else if(lv==="run"){out.innerHTML="This step only runs a command, so p4-phi names it for a Bash or PowerShell call of its own with <code>run_in_background: true</code>, not a session.";pick("bg")}
-  else if(lv==="team"){out.innerHTML="This step asks for one question from several sides, so p4-phi names it for an agent team led from a terminal session, not a worker.";S.ask="top";pick("work")}
-  else{out.innerHTML="This step is work, so p4-phi names it for a worker. It is "+KIND_WORDS[kindOfWork(t)]+".";S.ask="top";pick("work")}
-});
 
 var rw=0;
 if(window.ResizeObserver)new ResizeObserver(function(){var w=wrap.clientWidth;if(w!==rw){rw=w;draw(false)}}).observe(wrap);

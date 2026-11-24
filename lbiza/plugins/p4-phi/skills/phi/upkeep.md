@@ -46,7 +46,7 @@ A worktree that holds a link among what git does not track, such as a directory 
 The hold is there because https://github.com/git-for-windows/git/pull/6151 says "Similar to how `git clean` already avoids traversing NTFS junctions, `git worktree remove` now does the same", a fix that first shipped in Git for Windows 2.54.0.
 
 When every session it started is idle and an act is due that no message carried yet, the hooks module starts one turn for it, whose prompt opens `phi (p4-phi): upkeep is due`.
-Each such turn counts against `phi.keep_going_max`, together with the module's turns after a wait, the count starts over only when ezexe's own message begins a turn, and no act starts a second turn, so two sessions that answer each other never wake each other without end.
+Each such turn counts against `phi.keep_going_max`, the turns the hooks module starts for upkeep in a row, the count starts over only when ezexe's own message begins a turn, and no act starts a second turn, so two sessions that answer each other never wake each other without end.
 
 What upkeep cannot do:
 

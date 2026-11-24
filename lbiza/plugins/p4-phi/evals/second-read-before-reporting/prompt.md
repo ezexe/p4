@@ -1,5 +1,5 @@
 ---
-description: The levels rule of scripts/phi.py and the description of agents/check.md. An independent read of a result that is no code change, before it is reported as done, goes to the plugin's subagent by its namespaced type.
+description: The description of agents/check.md. An independent read of a result that is no code change, before it is reported as done, goes to the plugin's subagent by its namespaced type.
 tags: [smoke]
 max_turns: 15
 timeout_seconds: 600

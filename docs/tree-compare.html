@@ -224,7 +224,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
         <li><b>Each part exists because the one above it made it.</b> A call makes two calls, a store is grown under a store, and a session starts a session.</li>
         <li><b>Results travel up the link.</b> A call returns its sum to its caller, and a session's reports and its <code>replaces:</code> note go to its parent session. The ensemble only half does: a parent member starts from the mean of its children's weights as they stood before their fine-tuning, so with pretraining off, as it is by default, nothing a child member learned travels up.</li>
         <li><b>A subtree is one whole thing.</b> <code>fib(6)</code> holds a complete <code>fib(5)</code>. A reparent moves a session with every session below it, and <code>phi.py tree</code> prints nothing under a session archived in the app.</li>
-        <li><b>The work is at the leaves.</b> The call tree's value is its count of base cases. In p4-phi an orchestrator hands each work step to a worker that declares the files it writes, and keeps itself for orchestration, while <code>phi.top_orchestrates</code> is on, as it is by default.</li>
+        <li><b>The work is at the leaves.</b> The call tree's value is its count of base cases. In p4-phi a worker declares the files it writes on the <code>Files:</code> line of its brief, and an orchestrator starts one for the work it hands out.</li>
       </ol>
     </div>
     <div class="box2">
