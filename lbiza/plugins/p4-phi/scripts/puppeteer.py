@@ -86,9 +86,6 @@ using one two all any each every not and for the are was were been being its it'
 than too very what which who how why where while after before over under again new old""".split())
 DRAFT_RE = re.compile(r"phi draft (drf-[0-9a-f]{10}) for (\S+?)\.?(?:\s|$)")
 READINGS = "p4-phi:readings"     # the workflow the plugin ships in workflows/readings.js, which runs as /p4-phi:readings
-# the folder a workflow run gives an agent it isolates, as a run in the desktop app on Claude Code 2.1.326 made it:
-# <repository>/.claude/worktrees/wf_<run id>-<n>, on the branch worktree-wf_<run id>-<n>
-WORKFLOW_TREE = re.compile(r"[/\\]\.claude[/\\]worktrees[/\\]wf_[^/\\]+(?:[/\\]|$)")
 EITHER = re.compile(r"\beither\b\s+(.{6,200}?)\s*,?\s+\bor\b\s+(.{6,200}?)(?=[.?!;\n]|$)", re.I | re.S)
 OR_MAYBE = re.compile(r"([^.?!;\n]{6,200}?)\s*,?\s+\bor (?:maybe|perhaps|else|instead)\b\s+([^.?!;\n]{6,200})", re.I)
 
@@ -521,9 +518,7 @@ def outcome_kept(home, parent, sid):
 def build(home, top, net=False):
     """The ledger of an orchestrator as data: its reconcile lines, a row for each session of its subtree, their open
     background tasks, the start requests waiting, the issues tied to them, and the work closed sessions left
-    unfinished. A subagent that wrote files is a level miss, but for an agent of a workflow run that wrote only in
-    the git worktree the run gave it: the readings workflow gives a reading that writes such a worktree, and
-    workflows.md, "Behavior and limits", has the agents be what reads, writes and runs commands."""
+    unfinished. A subagent that wrote files is a level miss."""
     phi = _phi()
     every = relay._sessions(home)
     tree = subtree(home, top, every)
@@ -580,7 +575,7 @@ def build(home, top, net=False):
                      "shard": relay.shard_of(s)[:6], "files": relay.edited_files(home, sid)[:40],
                      "task": _short(s.get("task"), 300)})
         for st, t in plans._tasks(plan):
-            wrote = [x for x in t.get("wrote") or [] if not WORKFLOW_TREE.search(str(x))]
+            wrote = list(t.get("wrote") or [])
             if t.get("agent") and wrote:
                 misses.append({"id": str(t.get("id")), "sessionId": sid, "title": title,
                                "step": (st or {}).get("addr", ""), "wrote": wrote[:8]})
@@ -1402,17 +1397,15 @@ def verdict_text(home, s, d):
 # Seen in a desktop session on Claude Code 2.1.326: the session listed `p4-phi:readings` among its skills and ran it
 # by the Workflow tool with that `name`; SubagentStart and SubagentStop fired for each agent of the run with
 # `agent_type` `workflow-subagent`, so plans.agent_bind made each a task of the step in progress, and no PreToolUse
-# of the Agent tool came before one, so hook.py held no lines for its start; and a reading that wrote ran in
-# <repository>/.claude/worktrees/wf_<run id>-<n> on the branch worktree-wf_<run id>-<n>, both of which stayed after
-# the run. The reading reads that branch from git and returns it, which is how the session finds it.
+# of the Agent tool came before one, so hook.py held no lines for its start. No reading changes a file: the chosen
+# reading is started as an ordinary session or worker that writes in the one checkout.
 
 def readings_run(texts):
     """How a session runs the readings workflow on `texts`: the tool, the workflow's name and the `args` it takes.
-    The message is the session's to pass whole, and a reading that writes is the session's to mark."""
+    The message is the session's to pass whole."""
     args = json.dumps({"words": "<the message, whole>", "readings": list(texts)}, ensure_ascii=False)
     return (f"run the plugin's workflow `/{READINGS}`, the `Workflow` tool with `name` `{READINGS}` and `args` "
-            f"{args}, giving a reading whose working through changes files as "
-            f"{{\"text\": \"<the reading>\", \"writes\": true}}, so its agent writes in a git worktree of its own")
+            f"{args}; no reading changes a file")
 
 
 def readings_after():
@@ -1420,8 +1413,7 @@ def readings_after():
     return (f"After the run: `collapsed` carries its `result` on as the answer, with no question to ezexe; `forked` "
             f"puts its one `question` to ezexe with `AskUserQuestion`, an option for each of its `options` and its "
             f"`default` first, and the chosen reading then goes on as an ordinary child session, by the call "
-            f"`{_phi().commands()} draft \"<the chosen reading>\"` prints, with `source_branch` set to the `branch` "
-            f"that reading returned where it changed files.")
+            f"`{_phi().commands()} draft \"<the chosen reading>\"` prints.")
 
 
 def readings_text(texts):

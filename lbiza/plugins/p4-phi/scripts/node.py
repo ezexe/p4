@@ -139,7 +139,7 @@ def _tasks(plan):
 
 def leaves(home, sid):
     """What works under a session with no session folder, in this order: its subagents, its teammates, its
-    terminal sessions of upkeep.json, and the reading teams and terminal workers whose node names it as parent,
+    reading teams and terminal workers whose node names it as parent,
     each {level: "subagent" | "teammate" | "terminal", name, state}, and a node's with its `address`."""
     d = relay._dir(home, sid)
     out = []
@@ -151,10 +151,6 @@ def leaves(home, sid):
     for r in rows if isinstance(rows, list) else []:
         if isinstance(r, dict) and r.get("name"):
             out.append({"level": "teammate", "name": str(r["name"]), "state": str(r.get("state") or "")})
-    for t in _json(os.path.join(d, "upkeep.json")).get("terminals") or []:
-        if isinstance(t, dict) and t.get("name"):
-            out.append({"level": "terminal", "name": str(t["name"]),
-                        "state": "removed" if t.get("removed") else "started"})
     safe = relay._safe(sid)
     for name, store in relay.nodes(home).items() if safe else ():
         n = relay.node_record(home, name)

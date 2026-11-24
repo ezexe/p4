@@ -79,7 +79,7 @@ class Page(unittest.TestCase):
             self.assertIn(f"<code>{reader}</code>", live, reader)
             self.assertIn(f"def {function}(", read(os.path.join(SRC, module + ".py")), reader)
 
-    def test_live_checks_holds_the_pane_the_goal_the_terminal_worker_and_the_plan_folder(self):
+    def test_live_checks_holds_the_pane_the_goal_and_the_plan_folder(self):
         """What the live-checks section says changed holds in the code: each tool the page's open section names is
         still a word of the code's own, and the lines the section says were fixed are in the code."""
         page = read(PAGE)
@@ -92,7 +92,6 @@ class Page(unittest.TestCase):
         self.assertIn("if (text === reported) return", read(os.path.join(os.path.dirname(SRC), "hooks", "register.ts")))
         upkeep = read(os.path.join(SRC, "upkeep.py"))
         self.assertIn("route(home, s, text, by, store, k, d, hand)", upkeep)
-        self.assertIn('os.path.isdir(f"{worker[1]}/.claude/worktrees/{worker[0]}")', upkeep)
         self.assertIn('s["doneLine"] = plans.done_line(turn.get("prompt"))', read(os.path.join(SRC, "phi.py")))
 
     def test_every_link_of_the_page_leads_somewhere(self):

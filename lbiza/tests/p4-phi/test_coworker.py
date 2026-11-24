@@ -249,7 +249,7 @@ class Coworker(unittest.TestCase):
         first = self.drafts()[0]
         name = first["name"]
         task = coworker.task(self.path, [s for s in coworker.sections.parse(PLAN, "E:/repo")[1] if s["n"] == "1"], WHO)
-        same = coworker.script(name, "E:/repo", "auto", task, first["folder"], windows=True, worktree=False,
+        same = coworker.script(name, "E:/repo", "auto", task, first["folder"], windows=True,
                                team=True, session=first["session"])
         self.assertEqual((first["file"], first["lines"], first["typed"]), same)
         self.assertNotIn("--worktree", first["lines"][3])

@@ -46,11 +46,6 @@ until they start it". A message to a live session goes through on any turn. So o
 wants a new session goes by message to a live worker whose task covers it, and otherwise is shown as the app's card
 with one line to ezexe.
 
-The setting is also ezexe's standing word that such a start is no card: it is a scripted Claude Code run in a tab of
-the app's Terminal panel, a terminal worker, which "a worker in the Terminal panel" below builds and removes. The
-card stays where the session runs in a permission mode that asks, where its folder is in no git repository with a
-default branch on a remote, and with the setting off.
-
 When every started session is idle and an act is due that no turn was started for yet, `wake` answers the prompt of a
 turn the hooks module starts. Each such turn counts in upkeep.json, against `phi.keep_going_max` in a row,
 until ezexe's own message begins a turn, and no act starts a second one, so two sessions that
@@ -120,7 +115,7 @@ def path(home, sid):
 
 def load(home, sid):
     d = relay._read_json(path(home, sid))
-    for k, kind in (("items", list), ("waits", list), ("named", list), ("wokeFor", list), ("terminals", list),
+    for k, kind in (("items", list), ("waits", list), ("named", list), ("wokeFor", list),
                     ("tried", dict), ("closing", dict), ("refused", dict),
                     ("scanned", dict), ("swept", dict), ("mains", dict)):
         if not isinstance(d.get(k), kind):
@@ -1295,43 +1290,11 @@ def archive_acts(home, s, d, hand):
     return out
 
 
-# --- a worker in the Terminal panel -----------------------------------------------------------------------------------
-# With `phi.upkeep` on, a start the app refuses on a turn no person began is a scripted Claude Code run that the
-# session types into a tab of the app's Terminal panel, in place of the card that waits on ezexe. Claude Code does
-# every part of it, and this module only hands the files and the one line. The pages, read on 2026-11-19:
-# - headless.md, "Start faster with bare mode": without `--bare`, "`claude -p` discovers and loads them as an
-#   interactive session would", installed plugins among them, and bare mode binds no inbox, so the run is not bare
-#   and its `--settings` file turns p4's two plugins off. They are off because the run's folder is a worktree
-#   `--worktree` made, which a terminal session takes as its project, so p4's hooks would set up a second store
-#   inside it, and because p4-phi knows a worker by the app's record of it, which a scripted run has none of.
-# - cross-session-messaging.md, "Non-interactive sessions": "Claude Code binds an inbox socket for a `claude -p`
-#   session like an interactive one", and "To let a `-p` worker take messages unattended, start it with
-#   `crossSessionInbound` set to `accept` in its `--settings` value."
-# - worktrees.md, "Start Claude in a worktree": the worktree is `.claude/worktrees/<name>/` at the repository's
-#   root on the branch `worktree-<name>`, and "Non-interactive runs with `-p` skip the trust check, so `claude -p
-#   --worktree` proceeds without it". "Clean up worktrees": such a run leaves "the lock it took on each one at
-#   creation in place until a later session's stale-lock sweep releases it. To remove one, run `git worktree
-#   remove`; if git refuses because the worktree is locked, run `git worktree unlock` on it first."
-# - headless.md, "Auto-approve tools": "In a Manual mode `claude -p` run, a call that needs approval is denied unless
-#   something approves it". So the run takes the session's own permission mode, and only where that is auto or
-#   bypass permissions: a higher mode than the session's own is ezexe's to give.
-# - goal.md and the probes of 0.11.60: a scripted run is gone when its turn ends, and `claude -p "/goal <condition>"`
-#   keeps it running until the condition is met, so the prompt is that command with a condition that names the brief.
-# The first such worker, started on 2026-11-19 with these two settings while ezexe's user settings turn both plugins
-# on, heard no hook of either plugin, kept its `/goal`, bound an inbox, and held git's lock on its worktree with the
-# reason `claude session <name> (pid <n>)`.
+# --- the names of the terminal tools, and what a shell of a desktop session hands down ---------------------------------
 RUN = "mcp__terminal__run_in_terminal"
-TABS = "mcp__terminal__list_terminal_tabs"
-CLOSE_TAB = "mcp__terminal__stop_terminal_tab"
-TERMINAL = "a worker in the Terminal panel"      # the words of a line that names one, which `form` is added for
-FOLDER = "terminal-workers"                      # in the shared notes folder: each worker's brief, script and report
-SETTINGS_FILE = "worker-settings.json"
-WORKER_SETTINGS = ('{"crossSessionInbound": "accept", "enabledPlugins": {"p4-phi@' + p4conf.MARKET
-                   + '": false, "p4-temportal@' + p4conf.MARKET + '": false}}')
 # what a shell of a desktop session hands down, which a run started from it must not carry as its own identity
 CARRIED = ("CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_ENTRYPOINT",
            "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN")
-LOCK_PID = re.compile(r"\(pid (\d+)\)")
 WINDOWS = os.name == "nt"
 
 
@@ -1339,162 +1302,9 @@ def mode_of(sid):
     return str((PHI.app_record(sid) if str(sid).startswith("local_") else {}).get("permissionMode") or "")
 
 
-def worker_name(text):
-    """The name of the terminal worker for a step or an item, which names its worktree, its branch and its files."""
-    return "upkeep-" + hashlib.sha1(" ".join(sorted(plans.words(text))).encode("utf-8")).hexdigest()[:8]
-
-
-def terminal(home, s, text, d=None, hand=False):
-    """The terminal worker that takes work the app refuses a start for, as (its name, the main checkout it starts
-    in, what upkeep.json keeps of it or None), or None where the card stays: with the setting off, in a session whose
-    permission mode asks, and in a folder of no repository with a default branch on a remote. With `hand` it is kept
-    in `d`."""
-    main = main_of(str(s.get("cwd") or "")) if on() and mode_of(s["sessionId"]) in NO_ASK else ""
-    if not main or not default_ref(main):
-        return None
-    name = worker_name(text)
-    kept = next((t for t in d["terminals"] if t.get("name") == name), None) if d is not None else None
-    if hand and d is not None and kept is None:
-        d["terminals"] = (d["terminals"] + [{"name": name, "main": spelled(main), "time": now(),
-                                             "text": " ".join(str(text).split())[:ITEM_CHARS]}])[-OPEN_MOST:]
-    return name, spelled(main), kept
-
-
-def script_of(s, name, main, windows=None):
-    """The start script of a terminal worker, as (its file's name, its lines, the line typed into the tab). `<folder>`
-    stands for the folder the session writes the files in, which only the session knows. Its goal carries the
-    review of the change, plans.REVIEW_PART, as a started session's goal does, where `phi.goal_review` is
-    on: a terminal worker's work is a change that lands on the default branch."""
-    windows = WINDOWS if windows is None else windows
-    sid, sep = s["sessionId"], "\\" if windows else "/"
-    here = main.replace("/", sep)
-    who = re.sub(r"[^\w .,:#-]", " ", title(sid, s))        # no quote and no shell character in the prompt
-    prompt = (f"/goal Carry out the brief in the file <folder>{sep}brief-{name}.md. This is met when every part of "
-              f"that brief is on {default_ref(main)} with its proof shown in this conversation, or is written into "
-              f"the note <folder>{sep}report-{name}.md as left with the reason, and one message with the outcome "
-              f"has been sent with SendMessage to the session named {who}."
-              + (" " + plans.REVIEW_PART if PHI.GOAL_REVIEW else ""))   # its work lands on the default branch
-    run = (f"claude -p '{prompt}' --name {name} --permission-mode {mode_of(sid)} --worktree {name} "
-           f"--settings '<folder>{sep}{SETTINGS_FILE}'")
-    if windows:
-        names = ", ".join(f"'{n}'" for n in CARRIED)
-        return (f"start-{name}.ps1",
-                [f"foreach ($n in {names}) {{ Remove-Item -Path ('Env:' + $n) -ErrorAction SilentlyContinue }}",
-                 f"Set-Location '{here}'", run], f"& '<folder>\\start-{name}.ps1'")
-    return f"start-{name}.sh", [f"unset {' '.join(CARRIED)}", f"cd '{here}'", run], f"sh '<folder>/start-{name}.sh'"
-
-
-def form(home, s, d, said):
-    """The lines after the acts `said` where one of them names a terminal worker to start: what the session writes
-    and the one call that starts each, said once for all of them, with `<name>` for a worker's name. [] where none
-    does."""
-    todo = [t for t in d["terminals"] if f"`{t.get('name')}`" in said] if TERMINAL in said else []
-    if not todo:
-        return []
-    sid, main, here = s["sessionId"], todo[0]["main"], spelled(str(s.get("cwd") or ""))
-    script, lines, typed = script_of(s, "<name>", main)
-    names = " and ".join(f"`{t['name']}`" for t in todo)
-    return [f"{TERMINAL[0].upper()}{TERMINAL[1:]} is a scripted Claude Code run in a worktree of its own, which "
-            f"`phi.upkeep` has this session start in place of the app's card. In this turn, write the files below "
-            f"into the folder `{FOLDER}` of the shared notes folder the app named to this session, with that "
-            f"folder's whole path for `<folder>` and the worker's name for `<name>`, make the one call for each "
-            f"worker, and say in one line that it runs.",
-            f"  `{SETTINGS_FILE}`, once for all of them, holds exactly `{WORKER_SETTINGS}`: the first has its "
-            f"messages delivered with nobody at its keyboard, and the second keeps p4's hooks, which would set up a "
-            f"second store in its worktree, out of it.",
-            f"  `brief-<name>.md` holds the work's own words, what done looks like, the proof to show, that it works "
-            f"in its own worktree, lands by a fast-forward push to the default branch and opens no pull request, and "
-            f"that it reports twice: one message by `SendMessage` to the session named \"{title(sid, s)}\", and the "
-            f"note `report-<name>.md` beside the brief.",
-            f"  `{script}` holds these {len(lines)} lines, each whole on a line of its own: "
-            + " ".join(f"line {i}: {x}" for i, x in enumerate(lines, 1)),
-            f"  Then, for each of {names}, call `{RUN}` with `title` `<name>`, `cwd` `{here}`, this session's own "
-            f"folder, and `command` `{typed}`: the tool types one literal line and refuses a variable read, a pipe "
-            f"and a second line, so everything else is in the file. Its worktree is `{main}/.claude/worktrees/<name>` "
-            f"and its branch `worktree-<name>`.",
-            f"  Such a worker has no row in the sidebar, no Changes card and no archive, and the app shows no check "
-            f"of it: its message, its note and `{TABS}`, which says whether a command still runs in its tab, are "
-            f"what tell of it. Once its run has ended, upkeep hands the close of its tab and the removal of its "
-            f"worktree and branch."]
-
-
-def lock_pid(main, tree):
-    """The process a locked worktree's reason names, as Claude Code writes it, 0 where it names none, and None where
-    git holds no lock on it."""
-    cur, key = "", relay.norm(tree)
-    for line in (_out(main, "worktree", "list", "--porcelain") or "").splitlines():
-        if line.startswith("worktree "):
-            cur = relay.norm(line[9:].strip())
-        elif line.startswith("locked") and cur == key:
-            m = LOCK_PID.search(line)
-            return int(m.group(1)) if m else 0
-    return None
-
-
-def terminal_acts(home, s, d, hand):
-    """For each terminal worker this session started whose run has ended: the close of its tab and the removal of its
-    worktree and branch by git's own commands, after `git worktree unlock`, since a scripted run leaves its lock; or,
-    once, the name of one whose work is not landed. One that still runs, or was not started yet, gets no line."""
-    out = []
-    for t in [t for t in d["terminals"] if not t.get("removed")]:
-        name, main = str(t.get("name") or ""), str(t.get("main") or "")
-        tree, branch = f"{main}/.claude/worktrees/{name}", f"worktree-{name}"
-        if not name or not os.path.isdir(tree):
-            if hand and t.get("started"):
-                t["removed"] = now()               # it was there and is gone: removed, as the line below asks
-            continue
-        if hand and not t.get("started"):
-            t["started"] = now()
-        pid = lock_pid(main, tree)
-        if pid and PHI.issues._alive(pid):
-            continue                               # its run holds the lock: it still works
-        n, got = dirty(tree), on_default(tree, "HEAD")
-        if n or n is None or got is not True:
-            key = f"terminal:{name}"
-            if key not in d["named"]:
-                if hand:
-                    d["named"] = (d["named"] + [key])[-400:]
-                why = (f"holds {n} uncommitted change{'s' * (n != 1)}" if n else "could not be read by git"
-                       if n is None else f"holds commits that are not on {default_ref(tree) or 'a default branch'}")
-                out.append((f"named:{key}", "named", False,
-                            f"left on disk, of the terminal worker `{name}`, whose run has ended: its worktree "
-                            f"{tree} {why}. A scripted run takes no message once it has ended, so read its note "
-                            f"`report-{name}.md`, land what is whole as the push line says, and name the rest to "
-                            f"ezexe once, in one line: a removal by force and a deletion of unmerged work are "
-                            f"ezexe's."))
-            continue
-        tied = links(tree)
-        if tied is None:
-            continue                               # git could not list what it ignores: nothing is removed
-        if tied:
-            key = f"terminal-link:{name}"
-            if key not in d["named"]:
-                if hand:
-                    d["named"] = (d["named"] + [key])[-400:]
-                out.append((f"named:{key}", "named", False,
-                            f"left on disk, of the terminal worker `{name}`, whose run has ended: its worktree "
-                            f"{tree} is clean and landed, and " + LINKED.format(link=tied[0], cmd=unlink_cmd(tree))
-                            + "."))
-            continue
-        how, frm = stand(home, s, main, but=tree)
-        rest = ([f"worktree unlock \"{tree}\""] if pid is not None else []) + [f"worktree remove \"{tree}\""]
-        if _out(main, "show-ref", "--verify", f"refs/heads/{branch}") is not None and on_default(main, branch) is True:
-            rest.append(f"branch -d {branch}")
-        if not how:
-            continue
-        out.append((f"terminal:{name}", "leftover", True,
-                    f"leftovers of the terminal worker `{name}`: its run has ended, its worktree is clean and its "
-                    f"work is on {default_ref(tree)}. Close its tab with `{CLOSE_TAB}` and `close: true` where "
-                    f"`{TABS}` still lists it, then remove them: {cmds_text([git_of(how, frm, r) for r in rest])}. "
-                    + ("The unlock is for the lock Claude Code took for the run and left, since a scripted run has "
-                       "no exit that releases it. " if pid is not None else "") + LEAVE))
-    return out
-
-
 def route(home, s, text, by, store, back="", d=None, hand=False):
     """Where work that wants a session goes: on a turn a person began, a start; on any other, a message to a live
-    worker whose task covers it, else a worker in the Terminal panel, and where `terminal` gives none, the app's
-    card with one line to ezexe."""
+    worker whose task covers it, else the app's card with one line to ezexe."""
     cmd = PHI.commands()
     if by == "user":
         return f"start its session with the call `{cmd} draft \"<its words>\"` prints"
@@ -1504,16 +1314,6 @@ def route(home, s, text, by, store, back="", d=None, hand=False):
     if k:
         return (f"{refused}: send it by `SendMessage` with `to` `{k}`, to \"{title(k, ks)}\", a live session whose "
                 f"task covers it")
-    worker = terminal(home, s, text, d, hand)
-    # A worker whose worktree is there was started, though terminal_acts, which runs after this, has not marked it
-    # yet. Seen in the desktop app: the prompt after a worker's start handed the start lines for it once more.
-    if worker and worker[2] and (worker[2].get("started")
-                                 or os.path.isdir(f"{worker[1]}/.claude/worktrees/{worker[0]}")):
-        return (f"{refused}, and it went to the terminal worker `{worker[0]}` at {worker[2].get('time')}: its "
-                f"message and its note `report-{worker[0]}.md` say where it stands")
-    if worker:
-        return (f"{refused}, and no live session's task covers it: start {TERMINAL} for it, named `{worker[0]}`, "
-                f"as the lines after these acts say, which waits on nobody")
     return (f"{refused}, and no live session's task covers it: show it as the app's card, `{START}` with "
             f"`initiation` `own_initiative` and a brief that holds its words, and tell ezexe in one line that the "
             f"card waits. {relay.PUSH[:-1]}")
@@ -1654,33 +1454,18 @@ def leftover_acts(home, s, d, hand):
     return out
 
 
-# --- the sweep of a session tree: an idle notice from each terminal worker, and one long schedule -------------------
+# --- the sweep of a session tree: one long schedule -------------------------------------------------------------------
 # An orchestrator keeps the sessions it started by a sweep, and what brings it back to one is an event wherever
 # Claude Code has one. scheduled-tasks.md opens with "Reacting to events as they happen instead of polling: see
 # Channels", and best-practices.md, "Start runs on a schedule or an event", says of a scheduled prompt "Each run is
 # another turn in the same session, so don't leave one going in a long conversation". So p4-phi hands no `/loop`.
-# Three things bring an orchestrator back, and the first two are events:
+# Two things bring an orchestrator back, and the first is an event:
 # - A session the desktop app started: the app's own note of that session's turn end, which p4-phi adds nothing to.
-# - A worker in the Terminal panel, a scripted run on this machine of which the app sends no note: an idle notice.
-#   cross-session-messaging.md, "Get a notice when another session goes idle": "Claude can ask one of your sessions
-#   on this machine to send back one notice when that session next goes idle or exits", with `SendMessage` and
-#   `notify_when_idle`, and "If the asking session is idle, Claude Code starts a new turn with the notice." A
-#   session is handed that call once for each worker that runs, and again after each notice while it still runs.
-# - What neither tells, a session that stalls with no turn's end and a worker whose notice does not come: one prompt
-#   on a long fixed schedule, by `CronCreate` itself and not through the skill `loop`. scheduled-tasks.md, "Manage
-#   session-scoped scheduled tasks": "`CronCreate` | Schedule a new task. Accepts a 5-field cron expression, the
-#   prompt to run, and whether it recurs or fires once." It is handed once while any worker is out and no schedule
-#   is kept, and its end, `CronList` and `CronDelete`, once nothing is live.
-# Seen on 2026-11-22, a session of the desktop app on Claude Code 2.1.326 asking scripted `claude -p` runs on 2.1.328:
-# - The call answered "Subscribed" for a scripted run, which `ListAgents` listed five seconds after its start, where
-#   the same call to another session of the desktop app answers "no idle subscription was made".
-# - The notice came for a worker in the asker's own permission mode: queued the instant the worker ended, it began a
-#   turn a second after the asker went idle, and it waited while a turn ran there. For a worker in the default mode
-#   under an asker that bypasses permission prompts nothing came: by "Control inbound messages" a session that
-#   bypasses holds what a session that prompts sends. script_of starts a worker in its starter's own mode.
-# - One subscription gave one notice, for the first time the worker was idle, and none at its later turn ends or at
-#   its exit. A worker stopped from outside sent none. So the call is handed anew after each notice, and the
-#   schedule covers a worker that was stopped.
+# - What that note does not tell, a session that stalls with no turn's end: one prompt on a long fixed schedule, by
+#   `CronCreate` itself and not through the skill `loop`. scheduled-tasks.md, "Manage session-scoped scheduled
+#   tasks": "`CronCreate` | Schedule a new task. Accepts a 5-field cron expression, the prompt to run, and whether
+#   it recurs or fires once." It is handed once while any session is out and no schedule is kept, and its end,
+#   `CronList` and `CronDelete`, once nothing is live.
 # The schedule's interval is CRON, the half hour. "How late a recurring task runs": "Unless it runs every five
 # minutes, a recurring task starts each run late by up to half the gap to the next run, and by at most 30 minutes",
 # so its prompt comes thirty to forty-five minutes apart, inside the hour best-practices.md gives the prompt cache
@@ -1690,7 +1475,7 @@ def leftover_acts(home, s, d, hand):
 # The sweep's words are SWEEP, kept here and nowhere else, so no orchestrator writes them by hand.
 # What a session's own calls did is read at each turn's end, keep_sweep: a `CronCreate` whose prompt holds the
 # sweep's opening words begins the schedule, until Claude Code's expiry of a recurring task, and a `CronDelete` of
-# its id ends it; a `SendMessage` with `notify_when_idle` asks a worker, until its notice comes as a prompt,
+# its id ends it; a `SendMessage` with `notify_when_idle` asks a session, until its notice comes as a prompt,
 # notice_came, or Claude Code drops the subscription, "If no notice arrives within 12 hours".
 # Seen in the desktop app on Claude Code 2.1.326: `CronCreate` with CRON, a prompt and `recurring` true answered
 # "Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm.", seven minutes after the mark, where
@@ -1700,7 +1485,7 @@ def leftover_acts(home, s, d, hand):
 # Nothing is built for a session that still runs a `/loop` an older p4-phi handed it: that loop's own words end it.
 CRON_CREATE, CRON_LIST, CRON_DELETE = "CronCreate", "CronList", "CronDelete"
 SEND, NOTIFY = "SendMessage", "notify_when_idle"
-CRON = "7,37 * * * *"            # when the schedule's prompt comes while a worker is out: each half hour, off 0 and 30
+CRON = "7,37 * * * *"            # when the schedule's prompt comes while a session is out: each half hour, off 0 and 30
 EXPIRY_S = 7 * 86400             # scheduled-tasks.md: "Recurring tasks automatically expire 7 days after creation."
 NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arrives within 12 hours"
 # in the call's answer where the app made none: with no message "Nothing was subscribed: notify_when_idle is only
@@ -1709,22 +1494,20 @@ NOTICE_S = 12 * 3600             # cross-session-messaging.md: "If no notice arr
 NOT_MADE = ("nothing was subscribed", "no idle subscription", '"success":false', '"success": false')
 OPENS = plans.SWEEP_MARK         # the sweep's opening words, which tell its prompt from a message of ezexe's
 SWEEP = (OPENS + " Read each live session with "
-         "`mcp__ccd_session_mgmt__list_sessions` and `linked` true, and each worker in the Terminal panel with `"
-         + "mcp__terminal__list_terminal_tabs" + "`. Send on one that stopped with work left, by SendMessage to its "
-         "id. Verify one that reports done, on its repository's default branch and on the run of its workflow, "
-         "before it counts as done. Do each act p4-phi hands beside this prompt. The app's note of a started "
-         "session's turn end and a terminal worker's idle notice are the main wake-ups, so this prompt comes on a "
-         "long fixed schedule for what neither tells: a session that stalls with no turn's end, and a worker that "
-         "was stopped or whose notice did not come. End the schedule once no session and no terminal worker is "
-         "live: read the tasks with `" + CRON_LIST + "` and call `" + CRON_DELETE + "` with the id of the task that "
+         "`mcp__ccd_session_mgmt__list_sessions` and `linked` true. Send on one that stopped with work left, by "
+         "SendMessage to its id. Verify one that reports done, on its repository's default branch and on the run of "
+         "its workflow, before it counts as done. Do each act p4-phi hands beside this prompt. The app's note of a "
+         "started session's turn end is the main wake-up, so this prompt comes on a long fixed schedule for what "
+         "it does not tell: a session that stalls with no turn's end. End the schedule once no session is live: "
+         "read the tasks with `" + CRON_LIST + "` and call `" + CRON_DELETE + "` with the id of the task that "
          "holds these words.")
 JOB = re.compile(r"\b(?:job|task)\s+([0-9A-Za-z]{8})\b")  # the id in `CronCreate`'s answer
 REF = re.compile(r"\s*\[[0-9a-f]+\]\s*\Z")                # the short identifier `ListAgents` adds to a shared name
-# the worker an idle notice names, as the app words the prompt: `[Cross-session idle notice] "<name>", which ...`,
+# the session an idle notice names, as the app words the prompt: `[Cross-session idle notice] "<name>", which ...`,
 # and the first name in quotes on that line where a notice words it another way, as one of an expired subscription
 NOTICE = re.compile(r"\A\s*(?:\[MESSAGE FROM NON-USER SOURCE\b[^\]\n]*\]\s*)?\[Cross-session idle notice\][^\n\"]*"
                     r"\"([^\"\n]+)\"")
-NOTICED_MOST = 40                # the workers whose notices are counted, the latest kept
+NOTICED_MOST = 40                # the sessions whose notices are counted, the latest kept
 
 
 def keep_sweep(s, calls, at=None):
@@ -1786,17 +1569,6 @@ def notice_came(s, prompt):
     return name
 
 
-def running(t):
-    """True while the run of a terminal worker still works: its worktree is there and git's lock on it names a
-    process that lives, as Claude Code writes that lock for the run."""
-    name, main = str(t.get("name") or ""), str(t.get("main") or "")
-    tree = f"{main}/.claude/worktrees/{name}"
-    if not name or not os.path.isdir(tree):
-        return False
-    pid = lock_pid(main, tree)
-    return bool(pid and PHI.issues._alive(pid))
-
-
 def controlled_out(home, s):
     """The sessions `s` controls as a puppeteer that are inside a turn and that it did not start. The app's note of
     a turn's end goes to the session that started one, and so does the report its hooks module sends, so nothing
@@ -1810,58 +1582,37 @@ def controlled_out(home, s):
 
 
 def sweep_acts(home, s, d, hand):
-    """What brings this session back to the workers it has out, each line handed once. For each worker in the
-    Terminal panel whose run still works and that it has asked for no idle notice: the call that asks, and again
-    after each notice while that run still works. While any worker is out and no schedule of the sweep is kept: the
-    one `CronCreate` that makes it. And once a schedule runs and nothing is live: its end. A worker is out while it
-    is a started session that is not finished, a worker in the Terminal panel not yet removed, or a session this
-    one controls and did not start that is inside a turn, controlled_out. A started session is asked for no
-    notice: the app's own note of its turn end tells of it."""
+    """What brings this session back to the sessions it has out, each line handed once. While any is out and no
+    schedule of the sweep is kept: the one `CronCreate` that makes it. And once a schedule runs and nothing is live:
+    its end. A session is out while it is a started session that is not finished, or a session this one controls and
+    did not start that is inside a turn, controlled_out. A started session is asked for no notice: the app's own
+    note of its turn end tells of it."""
     sid = s["sessionId"]
     live = [k for k, ks in started(home, sid).items() if not finished(home, k, ks)]
-    tabs = [t for t in d["terminals"] if not t.get("removed")]
     held = controlled_out(home, s)
     fixed = schedule_runs(s)
     out = []
     if fixed:
-        d.pop("scheduleTold", None)                # a schedule that ends while a worker is out is asked for anew
+        d.pop("scheduleTold", None)                # a schedule that ends while a session is out is asked for anew
     else:
         d.pop("scheduleEndTold", None)
-    waiting = asked(s)
-    came = s.get("noticed") if isinstance(s.get("noticed"), dict) else {}
-    told = d.get("noticeTold") if isinstance(d.get("noticeTold"), dict) else {}
-    told = {k: v for k, v in told.items() if any(t.get("name") == k for t in tabs)}
-    for t in tabs:
-        name, n = str(t.get("name") or ""), int(came.get(str(t.get("name") or "")) or 0)
-        if not name or name in waiting or told.get(name) == n or not running(t):
-            continue
-        told[name] = n
-        out.append((f"notice:{name}", "sweep", True,
-                    f"notice: the terminal worker `{name}` runs, and this session has asked it for no idle notice"
-                    + (f" since the last one came" if n else "") + f". Ask it: call `{SEND}` with `to` `{name}`, "
-                    f"`{NOTIFY}` true and no `message`, which costs that worker nothing. One `[Cross-session idle "
-                    f"notice]` then begins a turn here once it goes idle or exits. It runs in this session's own "
-                    f"permission mode, which is what lets its notice through, and one subscription gives one "
-                    f"notice. A worker that was stopped from outside sends none, which the sweep's schedule covers."))
-    if hand:
-        d["noticeTold"] = told
-    if (live or held or tabs) and not fixed and not d.get("scheduleTold"):
+    if (live or held) and not fixed and not d.get("scheduleTold"):
         if hand:
             d["scheduleTold"] = now()
-        n = len(live) + len(held) + len(tabs)
-        out.append((f"schedule:{sid}", "sweep", any(t.get("started") for t in tabs),
-                    f"schedule: {n} of the sessions and terminal workers this session keeps "
+        n = len(live) + len(held)
+        out.append((f"schedule:{sid}", "sweep", False,
+                    f"schedule: {n} of the sessions this session keeps "
                     f"{'is' if n == 1 else 'are'} out, and no schedule of the sweep runs. Read the tasks with "
                     f"`{CRON_LIST}` first, and where one holds the words below, start "
                     f"none. Otherwise call `{CRON_CREATE}` once, with `cron` `{CRON}`, `recurring` true and, as "
                     f"`prompt`, these words as they stand: \"{SWEEP}\""))
-    if not live and not held and not tabs and fixed and not d.get("scheduleEndTold"):
+    if not live and not held and fixed and not d.get("scheduleEndTold"):
         if hand:
             d["scheduleEndTold"] = now()
         kept = str((s.get("schedule") or {}).get("id") or "")
         out.append((f"schedule-end:{sid}", "sweep", False,
-                    f"end the schedule: no session this one started or controls and no worker in the Terminal "
-                    f"panel is live, and the sweep's fixed schedule still runs. Read the tasks with `{CRON_LIST}` "
+                    f"end the schedule: no session this one started or controls is live, and the sweep's fixed "
+                    f"schedule still runs. Read the tasks with `{CRON_LIST}` "
                     f"and call `{CRON_DELETE}` with the id of the task whose prompt opens \"{OPENS}\""
                     + (f", which this session's own `{CRON_CREATE}` call gave as `{kept}`." if kept else ".")))
     return out
@@ -1877,7 +1628,7 @@ def acts(home, s, by="user", store="", hand=False, d=None):
     out = []
     for part in (lambda: archive_acts(home, s, d, hand), lambda: item_acts(home, s, d, by, store, hand),
                  lambda: wait_acts(home, s, d, by, store, hand), lambda: leftover_acts(home, s, d, hand),
-                 lambda: terminal_acts(home, s, d, hand), lambda: sweep_acts(home, s, d, hand)):
+                 lambda: sweep_acts(home, s, d, hand)):
         try:
             out += part()
         except Exception:  # noqa: BLE001  one act that cannot be read never costs a message the others
@@ -1918,7 +1669,7 @@ def text(home, s, by="user", store=""):
     if not due:
         return ""
     said = [f"- {a[3]}" for a in due]
-    return "\n".join([HEAD_LINE] + said + [TAIL_LINE] + form(home, s, d, "\n".join(said)))
+    return "\n".join([HEAD_LINE] + said + [TAIL_LINE])
 
 
 def wakes(d):
@@ -1964,7 +1715,6 @@ def status(home, s, store=""):
     d = load(home, sid)
     due = acts(home, s, s.get("turnBy") or "user", store, hand=False, d=d)
     lines += ["", "Due now:"] + ([f"- {a[3]}" for a in due] or ["- nothing"])
-    lines += form(home, s, d, "\n".join(a[3] for a in due))
     timed = [w for w in d["waits"] if w.get("at") and not w.get("closed")]
     if timed:
         lines += ["", "Kept for a scheduled run, which ezexe makes:"]

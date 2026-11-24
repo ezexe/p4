@@ -490,32 +490,6 @@ class WorkerSplit(Base):
         self.assertIn("src/export/flush.py", miss)
         self.assertIn("the flush port", miss)
 
-    def test_a_workflows_agent_that_wrote_in_the_worktree_its_run_gave_it_is_no_level_miss(self):
-        """The hook input is the one a run of /p4-phi:readings raised on Claude Code 2.1.326: SubagentStart and
-        SubagentStop fire for a workflow's agent with `agent_type` `workflow-subagent`, and no Agent call comes
-        before them. A reading that writes runs in the folder `.claude/worktrees/wf_<run id>-<n>`."""
-        t = self.t
-        t.say(TOP, TASK)
-        t.say(KID, handed("Port the flush to the new writer. Report when done."))
-        self.plan(KID, {"items": [{"content": "Port the flush", "status": "in_progress"}], "scope": "first_task"})
-        tree = os.path.join(t.proj, ".claude", "worktrees", "wf_9bd8d43e-c60-1")
-        for agent, path in (("agwf1", os.path.join(tree, "src", "export", "flush.py")),
-                            ("agwf2", os.path.join(t.proj, "src", "export", "table.py"))):
-            self.recall(KID, "subagent-start", {"hook_event_name": "SubagentStart", "agent_id": agent,
-                                                "agent_type": "workflow-subagent"})
-            log = os.path.join(t.tmp, f"agent-{agent}.jsonl")
-            transcript(log, "work the reading", [("Write", {"file_path": path, "content": "x"}, "ok")], "done")
-            self.recall(KID, "subagent-stop", {"hook_event_name": "SubagentStop", "agent_id": agent,
-                                               "agent_type": "workflow-subagent", "agent_transcript_path": log})
-        tasks = {x["id"]: x for st in jload(self.path(KID, "plan.json"))["steps"] for x in st.get("tasks", [])}
-        self.assertEqual({k: v["status"] for k, v in tasks.items()}, {"agwf1": "completed", "agwf2": "completed"},
-                         "each agent of the run is bound to the step in progress and closed at its stop")
-        text, _ = self.ledger()
-        miss = text.split("## Level misses")[1]
-        self.assertNotIn("agwf1", miss, "a write inside the worktree the run gave the agent is no miss")
-        self.assertIn("agwf2", miss, "a write in the session's own checkout still is")
-        self.assertIn("table.py", miss)
-
 
 class TermsAndGuides(Base):
     """A start draft holds the task and the lines code reads back, and no paragraph of advice."""
@@ -882,7 +856,7 @@ class Parallel(Base):
         self.assertIn("the `Workflow` tool with `name` `p4-phi:readings`", ctx)
         self.assertEqual(self.args_in(ctx), {"words": "<the message, whole>", "readings": [
             "buffer the rows in memory until the table closes", "write each row straight to the store"]})
-        self.assertIn('{"text": "<the reading>", "writes": true}', ctx, "a reading that writes is marked for a worktree")
+        self.assertNotIn("writes", ctx, "no reading is marked as one that writes")
         self.assertIn("Start no session for it", ctx)
         self.assertNotIn("`mcp__ccd_session__start_session` with {", ctx, "no start_session call for a reading")
         self.assertNotIn("Result:", ctx, "no reading is asked for a Result line")
@@ -904,7 +878,7 @@ class Parallel(Base):
         self.assertIn("its `default` first", after)
         self.assertIn("the chosen reading then goes on as an ordinary child session", after)
         self.assertIn(f'{phi.commands()} draft "<the chosen reading>"', after)
-        self.assertIn("`source_branch` set to the `branch` that reading returned", after)
+        self.assertNotIn("source_branch", after)
         chosen = t.cli(TOP, "draft", "Make the narwhal exporter write each row of the flush straight to the store")
         self.assertIn("Start it now: `mcp__ccd_session__start_session` with ", chosen.stdout,
                       "the chosen reading is an ordinary draft: " + chosen.stderr)

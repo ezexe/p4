@@ -419,10 +419,6 @@ export function treeLines(nodes: readonly PhiNode[]): PhiLine[] {
         lines.push({ kind: step.status === 'in_progress' ? 'now' : 'text', text: `${pad}[${mark}] ${step.addr} ${step.content}${agents}` })
       }
     }
-    for (const worker of one.workers ?? []) {
-      const kind = worker.state === 'running' ? 'now' : 'text'
-      lines.push({ kind, text: `${pad}terminal worker ${worker.name}, ${worker.state}: ${worker.task}` })
-    }
     for (const mate of one.team ?? []) {
       const kind = mate.state === 'running' ? 'now' : 'text'
       lines.push({ kind, text: `${pad}teammate ${mate.name}, ${mate.state}: ${mate.task}` })

@@ -38,7 +38,7 @@ FULL = 5
 CARD = ("In a turn ezexe's own message did not begin, the app refuses a start that runs at once: send each call there "
         "with `initiation` `own_initiative` and without `wake_when_done`, which shows a card ezexe presses. A planner "
         "another session started sends none of these calls: it starts one `p4-phi:integrator` subagent for each, "
-        "with the call's `prompt` as its brief, in a git worktree it makes, as the line at its plan's approval says.")
+        "with the call's `prompt` as its brief, in the one checkout, as the line at its plan's approval says.")
 
 
 def assumed_of(body):

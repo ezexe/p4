@@ -27,9 +27,8 @@ export type PhiNode = {
   current: string
   steps: PhiStep[]
   plan: PhiPlan | null
-  // The terminal workers the session started and the teammates of the team it leads, and whether the session
+  // The teammates of the team the session leads, and whether the session
   // stands apart from the tree, as a team's lead that no session of the tree started does.
-  workers?: { name: string; task: string; state: string }[]
   team?: { name: string; task: string; state: string; doing: string }[]
   apart?: boolean
 }

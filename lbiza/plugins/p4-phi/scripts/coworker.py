@@ -11,7 +11,7 @@ it runs in the checkout and reaches them by their whole paths. The pages, read o
 - `claude --help`: `--session-id <uuid>`, "Use a specific session ID for the conversation", which finds a reading
   team's transcripts.
 - cli-reference.md: `--settings` takes "Path to a settings JSON file or an inline JSON string".
-The settings file turns p4's three plugins off, as the terminal worker's turns off two, upkeep.WORKER_SETTINGS, so
+The settings file turns p4's plugins off, so
 no hook of p4 runs in the coworker and none sets up a store. The lead of the first read run this way, on 2026-11-23
 with p4-phi and p4-temportal off, led three teammates, where no `.claude` folder appeared. Neither has `--add-dir`:
 for a folder Claude Code has not seen it asks whether the folder is trusted, and a `claude -p` in auto mode read and
@@ -76,7 +76,7 @@ def _named(prefix, title, numbers, path):
 
 
 def name_of(title, group, path):
-    """A coworker's name, which names its session, its worktree and its branch: lower-case letters, digits and
+    """A coworker's name, which names its session and its node: lower-case letters, digits and
     hyphens, made of the plan's title, its sections' numbers and four characters of a hash of the plan's path, so
     two plans of one title make two names."""
     return _named("cw", title, [s["n"] for s in group], path)
@@ -122,11 +122,11 @@ def task(path, group, who):
             f"teammate down, since later rounds and the word to land come by message from that session.")
 
 
-def script(name, checkout, mode, said, folder, windows=None, worktree=True, team=True, extra=(), session=""):
+def script(name, checkout, mode, said, folder, windows=None, team=True, extra=(), session=""):
     """A coworker's start script, as (its file's name, its lines, the line typed into the tab): what a desktop
-    session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout, with a
-    worktree of the coworker's name where `worktree` is on, and the settings file of `folder`. `session` adds
-    `--session-id <uuid>` right after the name. A terminal worker's has `worktree` and `team` off and its `extra`
+    session's shell hands down is cleared, the team variable is set, and `claude` starts in the checkout, with no
+    worktree, and the settings file of `folder`. `session` adds
+    `--session-id <uuid>` right after the name. A terminal worker's has `team` off and its `extra`
     flags, each a word spelled as the shell reads it, after those. A quote in the prompt `said` is refused as one in
     a path is, since the prompt stands between quotes."""
     windows = upkeep.WINDOWS if windows is None else windows
@@ -138,7 +138,7 @@ def script(name, checkout, mode, said, folder, windows=None, worktree=True, team
     lv = level()
     flags = "".join(f" --{k} {lv[k]}" for k in ("model", "effort") if str(lv.get(k) or "inherit") != "inherit")
     run = (f"claude --name {name}" + (f" --session-id {session}" if session else "")
-           + (f" --worktree {name}" if worktree else "") + "".join(f" {x}" for x in extra)
+           + "".join(f" {x}" for x in extra)
            + flags + (f" --permission-mode {mode}" if mode else "")
            + f" --settings '{at}{sep}{SETTINGS_FILE}' '{said}'")
     if windows:
@@ -211,7 +211,7 @@ def drafts(path, checkout, who, mode="", home="", starter="", store="", claim=Fa
             one["folder"] = folder
             one["session"] = str(relay.node_record(home, one["name"]).get("session") or "")
             one["file"], one["lines"], one["typed"] = script(one["name"], checkout, mode, said, folder, windows,
-                                                             worktree=False, session=one["session"])
+                                                             session=one["session"])
     except Exception:
         _undo(home, out)
         raise
@@ -363,7 +363,7 @@ def _worker(one, plan, title, checkout, mode, home, starter, store, windows):
             f"{brief_file} says, its Checks pass, and the report {report} is written; or a fence does not fit "
             f"the tree and the report says which and why. Stop after {TURNS} turns, and write the report first "
             "with what is done and what is not.")
-    file, lines, typed = script(name, checkout, LAND_MODE, goal, folder, windows, worktree=False, team=False)
+    file, lines, typed = script(name, checkout, LAND_MODE, goal, folder, windows, team=False)
     one.update(brief=sections.brief(plan, title, group, checkout, where), brief_file=brief_file,
                report=report, goal=goal, file=file, lines=lines, typed=typed)
 

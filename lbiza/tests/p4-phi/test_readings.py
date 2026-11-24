@@ -11,7 +11,7 @@ default `workflows/` folder, which holds this one script.
 
 Then the script's own logic, with its body run under node and `agent()` answered from a list, since the runtime is
 Claude Code's and a test calls no model: one agent for each reading, each with the result schema; a reading that
-writes files gets `isolation: 'worktree'` and one that does not shares the checkout; results that agree return
+changes no file, and none runs in a worktree; results that agree return
 `collapsed` with the result; results that differ return `forked` with an option for each reading and a default; a
 reading that cannot go on without ezexe returns its question as data and the run forks on it; a stopped or failed
 agent is a lost reading; and fewer than two distinct readings is an error before any agent starts. The compare is the
@@ -76,8 +76,7 @@ const scenarios = JSON.parse(fs.readFileSync(0, 'utf8'))
 
 WORDS = "make the export either a CSV file or a JSON file"
 CSV = {"result": "The export is written as a CSV file.", "question": ""}
-JSON_ = {"result": "The export is written as a JSON file.", "question": "", "wrote": ["export.py"],
-         "branch": "worktree-wf_9bd8d43e-c60-1", "worktree": "/repo/.claude/worktrees/wf_9bd8d43e-c60-1"}
+JSON_ = {"result": "The export is written as a JSON file.", "question": ""}
 ROWS = {"result": "The parser drops empty lines before counting rows.", "question": ""}
 
 # What puppeteer.same_result answered for each pair before the workflow took the compare over.
@@ -99,18 +98,13 @@ SCENARIOS = {
              "replies": [CSV, JSON_]},
     "collapse": {"args": {"words": "w", "readings": ["a", "b"]},
                  "replies": [ROWS, {"result": "the parser drops empty lines before counting rows", "question": ""}]},
-    "all lost": {"args": {"words": "w", "readings": ["a", "b"]}, "replies": [None, {"throws": "the worktree failed"}]},
+    "all lost": {"args": {"words": "w", "readings": ["a", "b"]}, "replies": [None, {"throws": "its agent failed"}]},
     "one lost": {"args": {"words": "w", "readings": ["a", "b"]}, "replies": [ROWS, None]},
     "question": {"args": {"words": "w", "readings": ["a", "b", "c"]},
                  "replies": [{"result": "It got as far as the upload.", "question": "Which bucket holds the exports?"},
                              ROWS, ROWS]},
     "all ask": {"args": {"words": "w", "readings": ["a", "b"]},
                 "replies": [{"result": "", "question": "Which bucket?"}, {"result": "", "question": "Which region?"}]},
-    "reader with a branch": {"args": {"readings": ["a", {"text": "b", "writes": True}]},
-                             "replies": [{"result": "one", "question": "", "wrote": ["x.py"], "branch": "main",
-                                          "worktree": "/repo"},
-                                         {"result": "two", "question": "", "wrote": [], "branch": "worktree-wf_1-1",
-                                          "worktree": "/repo/.claude/worktrees/wf_1-1"}]},
     "one reading": {"args": {"words": "w", "readings": ["only one", " Only  ONE "]}},
     "no args": {},
     "a list": {"args": ["x one", "y two"], "replies": [ROWS, ROWS]},
@@ -208,7 +202,7 @@ class Run(unittest.TestCase):
             schema = c["opts"]["schema"]
             self.assertEqual(schema["type"], "object")
             self.assertEqual(schema["required"], ["result", "question"])
-            self.assertLessEqual({"result", "question", "wrote", "branch", "worktree"}, set(schema["properties"]))
+            self.assertLessEqual({"result", "question"}, set(schema["properties"]))
             self.assertEqual(c["opts"]["phase"], "Readings")
             self.assertEqual((c["opts"]["model"], c["opts"]["effort"]), ("opus", "medium"), "the writer's level")
         self.assertEqual(self.got["fork"]["phases"], ["Readings"])
@@ -216,14 +210,16 @@ class Run(unittest.TestCase):
         self.assertIn("Your reading of it: a CSV file", calls[0]["prompt"])
         self.assertIn("reading 2 of 2", calls[1]["prompt"])
 
-    def test_a_reading_that_writes_gets_a_worktree_of_its_own_and_one_that_reads_shares_the_checkout(self):
+    def test_no_reading_writes_or_runs_in_a_worktree_and_a_writes_key_is_ignored(self):
         _, calls = self.ran("fork")
-        self.assertNotIn("isolation", calls[0]["opts"])
-        self.assertIn("This reading changes no file", calls[0]["prompt"])
-        self.assertEqual(calls[1]["opts"]["isolation"], "worktree")
-        self.assertIn("a git worktree of your own", calls[1]["prompt"])
-        self.assertIn("commit what you change on that branch", calls[1]["prompt"])
-        self.assertIn("`git rev-parse --abbrev-ref HEAD`", calls[1]["prompt"], "the reading reads its own branch")
+        for c in calls:
+            self.assertNotIn("isolation", c["opts"])
+            self.assertIn("This reading changes no file", c["prompt"])
+            self.assertNotIn("worktree", c["prompt"])
+        got, _ = self.ran("fork")
+        self.assertEqual(got["state"], "forked", "a `writes` key of a reading does not fail the run")
+        for o in got["options"]:
+            self.assertFalse({"branch", "worktree", "wrote"} & set(o))
 
     def test_no_reading_can_ask_ezexe_so_its_question_comes_back_as_data(self):
         _, calls = self.ran("fork")
@@ -252,25 +248,15 @@ class Run(unittest.TestCase):
         self.assertEqual(got["default"], 1)
         self.assertEqual([(o["k"], o["text"], o["result"]) for o in got["options"]],
                          [(1, "a CSV file", CSV["result"]), (2, "a JSON file", JSON_["result"])])
-        self.assertEqual(got["options"][1]["branch"], "worktree-wf_9bd8d43e-c60-1",
-                         "the branch a reading committed on comes back with it")
-        self.assertEqual(got["options"][1]["wrote"], ["export.py"])
         self.assertIn("`AskUserQuestion`", got["next"])
-        self.assertIn("a child session of its own", got["next"])
+        self.assertIn("child session", got["next"])
         self.assertNotIn("result", {k for k in got if k != "options"})
-
-    def test_only_a_reading_that_wrote_in_its_own_worktree_names_a_branch(self):
-        got, _ = self.ran("reader with a branch")
-        first, second = got["options"]
-        self.assertNotIn("branch", first, "a reading that shared the checkout is on the session's own branch")
-        self.assertNotIn("branch", second, "a worktree left unchanged is removed with its branch")
-        self.assertEqual(got["question"], "Which reading is meant?", "with no words given")
 
     def test_a_stopped_or_failed_agent_is_a_lost_reading(self):
         got, _ = self.ran("all lost")
         self.assertEqual(got["state"], "lost")
         self.assertEqual([(x["k"], x["why"]) for x in got["lost"]],
-                         [(1, "its agent was stopped or failed"), (2, "the worktree failed")])
+                         [(1, "its agent was stopped or failed"), (2, "its agent failed")])
         got, _ = self.ran("one lost")
         self.assertEqual(got["state"], "collapsed", "it closes on what the other reading gave")
         self.assertEqual([x["k"] for x in got["lost"]], [2])

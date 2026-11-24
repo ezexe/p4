@@ -31,9 +31,6 @@ GOAL_TAIL = 256 * 1024           # the most of a transcript's end read for a typ
 WATCHED = ("session.json", "plan.json", "log.jsonl", "turns.jsonl", "upkeep.json", "team.json")
 TEAM = "team.json"               # hooks/register.ts writes it: the teammates `$.agent.list()` answered in the lead
 OVER = ("completed", "failed", "killed")
-# gitrepository-layout, `worktrees/<id>/locked`, and upkeep.py: a terminal worker's run holds git's lock on its
-# worktree with the reason `claude session <name> (pid <n>)`.
-LOCK_PID = re.compile(r"\(pid (\d+)\)")
 
 # plan-planner, "The plan loop": "under a last heading `## Loop log`, one line a round as
 # `- Round <n>: <k> held, <m> minutes: <what the mends changed>`", and a clean round as
@@ -133,35 +130,6 @@ def plan_of(s):
             "sections": out[:STEPS], "loop": loop_of(bare)}
 
 
-def run_lives(main, name):
-    """True while the process that holds git's lock on a terminal worker's worktree runs."""
-    try:
-        with open(os.path.join(main, ".git", "worktrees", name, "locked"), encoding="utf-8", errors="replace") as f:
-            m = LOCK_PID.search(f.read())
-    except OSError:
-        return False
-    return bool(m) and bool(puppeteer._phi().issues._alive(int(m.group(1))))
-
-
-def workers_of(home, sid):
-    """The terminal workers a session started, as upkeep.terminal keeps them in its upkeep.json: each one's name,
-    its task, and whether it is `not started`, `running`, `ended` or `removed`. Its run keeps no record of p4-phi's,
-    so it has no step and no goal to show."""
-    out = []
-    for t in relay._read_json(os.path.join(relay._dir(home, sid), "upkeep.json")).get("terminals") or []:
-        if not isinstance(t, dict) or not t.get("name"):
-            continue
-        name, main = str(t["name"]), str(t.get("main") or "")
-        if t.get("removed"):
-            state = "removed"
-        elif not os.path.isdir(os.path.join(main, ".claude", "worktrees", name)):
-            state = "ended" if t.get("started") else "not started"
-        else:
-            state = "running" if run_lives(main, name) else "ended"
-        out.append({"name": name, "task": relay._short(t.get("text"), 120), "state": state})
-    return out[-STEPS:]
-
-
 def team_of(home, sid):
     """The teammates of the agent team a session leads, as its hooks module kept them in team.json: each one's name,
     the task its lead gave it, its state as `$.agent.list()` words it, and what it is doing where that is told."""
@@ -186,7 +154,7 @@ def node(home, sid, depth, s):
                        "agents": sum(1 for t in x.get("tasks") or []
                                      if isinstance(t, dict) and t.get("agent") and t.get("status") == "open")}
                       for x in steps[:STEPS]],
-            "plan": plan_of(s), "workers": workers_of(home, sid), "team": team_of(home, sid)}
+            "plan": plan_of(s), "team": team_of(home, sid)}
 
 
 def build(home, top):

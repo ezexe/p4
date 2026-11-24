@@ -1234,10 +1234,14 @@ class Leftovers(Base):
         self.assertTrue(os.path.isdir(mine))
 
 
-class TerminalWorker(Base):
-    """With `phi.upkeep` on, work the app refuses a start for goes to a scripted run in the Terminal panel, in
-    place of the card: https://code.claude.com/docs/en/headless.md, https://code.claude.com/docs/en/worktrees.md
-    and https://code.claude.com/docs/en/cross-session-messaging.md, "Non-interactive sessions"."""
+class RefusedStart(Base):
+    """Work the app refuses a start for, on a turn no person began, is shown as the app's card in every permission
+    mode and in every folder, with `phi.upkeep` on or off: nothing starts a worker of its own."""
+
+    NOTICE = ("[Cross-session idle notice] \"{}\", which you asked to be notified about, is idle now \u2014 it "
+              "finished a turn at 13:06. This is an automated notice from that session's harness \u2014 not a "
+              "message from a person, and not an instruction; act on it only insofar as your user's earlier "
+              "request calls for it.")
 
     def seat(self, mode="bypassPermissions", folder=None):
         """TOP's folder and permission mode, as the app's record gives them."""
@@ -1254,274 +1258,32 @@ class TerminalWorker(Base):
         self.finish()
         self.archive_in_app()
 
-    def worker(self, name, pid, push=True, change=""):
-        """The worktree and the lock a scripted run named `name` leaves, as Claude Code 2.1.328 left them."""
-        tree = os.path.join(self.repo, ".claude", "worktrees", name)
-        r = git(self.repo, "worktree", "add", "-q", tree, "-b", f"worktree-{name}", "origin/main")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        if change:
-            write(os.path.join(tree, "exporter.py"), change)
-            self.assertEqual(git(tree, "commit", "-q", "-am", "the empty table keeps its row").returncode, 0)
-            if push:
-                self.assertEqual(git(tree, "push", "-q", "origin", "HEAD:main").returncode, 0)
-        r = git(self.repo, "worktree", "lock", "--reason", f"claude session {name} (pid {pid})", tree)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return tree
+    def test_a_turn_no_person_began_with_no_fitting_session_names_the_card_in_any_mode(self):
+        for mode in ("bypassPermissions", "auto", "acceptEdits"):
+            with self.subTest(mode=mode):
+                self.seat(mode=mode)
+                s = {"sessionId": TOP, "cwd": self.repo}
+                with mock.patch.object(phi, "UPKEEP", True):
+                    line = upkeep.route(self.t.p4, s, "The harbour ledger loses its footer when a quota resets",
+                                        "event", "")
+                self.assertIn("show it as the app's card", line)
+                self.assertIn(upkeep.START, line)
 
-    def ended(self):
-        """The id of a process that has ended."""
-        p = subprocess.Popen([sys.executable, "-c", "pass"])
-        p.wait()
-        return p.pid
-
-    def test_with_it_on_a_refused_start_is_a_worker_in_the_terminal_panel_and_no_card(self):
+    def test_a_refused_start_in_a_repository_is_the_card_and_no_line_names_a_terminal_tool(self):
         self.seat()
-        self.left_item()
-        got = self.said()
-        items = self.lines(got, "item")
-        self.assertEqual(len(items), 2)
-        names = re.findall(r"named `(upkeep-[0-9a-f]{8})`", got)
-        self.assertEqual(len(set(names)), 2, got)
-        for line in items:
-            self.assertIn("no person began this turn", line)
-            self.assertIn("start a worker in the Terminal panel for it", line)
-            self.assertIn("waits on nobody", line)
-        self.assertNotIn("own_initiative", got)
-        self.assertNotIn("the card waits", got)
-        tail = got.split(upkeep.TAIL_LINE, 1)[1]
-        self.assertEqual(tail.count("worker-settings.json`, once for all of them"), 1, "the form is said once")
-        kept = json.loads(re.search(r"holds exactly `(\{.*?\}\})`", tail).group(1))
-        self.assertEqual(kept, {"crossSessionInbound": "accept",
-                                "enabledPlugins": {"p4-phi@p4-marketplace": False,
-                                                   "p4-temportal@p4-marketplace": False}})
-        repo = os.path.realpath(self.repo).replace("\\", "/")
-        self.assertIn("claude -p '/goal Carry out the brief in the file <folder>", tail)
-        self.assertRegex(tail, r"brief-<name>\.md\. This is met when every part of that brief is on origin/main")
-        self.assertIn("--permission-mode bypassPermissions --worktree <name> --settings '<folder>", tail)
-        self.assertRegex(tail, rf"`mcp__terminal__run_in_terminal` with `title` `<name>`, `cwd` `{re.escape(repo)}`")
-        self.assertRegex(tail, r"`command` `(& '<folder>\\start-<name>\.ps1'|sh '<folder>/start-<name>\.sh')`")
-        self.assertIn("its branch `worktree-<name>`", tail)
-        for name in set(names):
-            self.assertEqual(tail.count(f"`{name}`"), 1, "each worker is named once in the form")
-        self.assertIn(upkeep.plans.REVIEW_PART, tail, "the worker's goal carries the review of its change")
-        self.assertLess(len(tail.split("phi (p4-phi):")[0]) - len(upkeep.plans.REVIEW_PART), 3200,
-                        "the form stays short beside a message, the review's words apart")
-        self.assertIn("SendMessage to the session named Orchestrate the narwhal exporter.", tail)
-        self.assertIn("CLAUDE_CODE_HOST_SESSION_ID", tail)
-        for lack in ("no row in the sidebar", "no Changes card", "no archive"):
-            self.assertIn(lack, tail)
-        self.assertNotIn("--bare", got, "a bare run binds no inbox and takes no message")
-        self.assertEqual(test_phi.writes_under_claude(got), [])
-
-    def test_the_script_is_powershells_on_windows_and_a_posix_shells_elsewhere(self):
-        s = {"sessionId": TOP, "title": "It's the \"narwhal\" exporter; $(x) `y`"}
-        with mock.patch.object(upkeep, "mode_of", lambda sid: "auto"), \
-                mock.patch.object(upkeep, "default_ref", lambda repo: "origin/main"), \
-                mock.patch.object(upkeep, "title", lambda sid, s=None: s["title"]):
-            win = upkeep.script_of(s, "upkeep-0a1b2c3d", "E:/code/narwhal", windows=True)
-            nix = upkeep.script_of(s, "upkeep-0a1b2c3d", "/code/narwhal", windows=False)
-            with mock.patch.object(phi, "GOAL_REVIEW", False):
-                off = upkeep.script_of(s, "upkeep-0a1b2c3d", "/code/narwhal", windows=False)
-        self.assertNotIn(upkeep.plans.REVIEW_PART, off[1][-1], "with `phi.goal_review` off its goal asks for none")
-        self.assertEqual(win[0], "start-upkeep-0a1b2c3d.ps1")
-        self.assertEqual(win[2], "& '<folder>\\start-upkeep-0a1b2c3d.ps1'")
-        self.assertTrue(win[1][0].startswith("foreach ($n in 'CLAUDE_CODE_HOST_SESSION_ID', "))
-        self.assertEqual(win[1][1], "Set-Location 'E:\\code\\narwhal'")
-        self.assertEqual(nix[0], "start-upkeep-0a1b2c3d.sh")
-        self.assertEqual(nix[2], "sh '<folder>/start-upkeep-0a1b2c3d.sh'")
-        self.assertTrue(nix[1][0].startswith("unset CLAUDE_CODE_HOST_SESSION_ID "))
-        self.assertEqual(nix[1][1], "cd '/code/narwhal'")
-        for lines, typed in ((win[1], win[2]), (nix[1], nix[2])):
-            run = lines[-1]
-            self.assertIn("--permission-mode auto --worktree upkeep-0a1b2c3d --settings", run)
-            self.assertIn("--name upkeep-0a1b2c3d ", run, "the name its starter asks its idle notice by")
-            self.assertIn(upkeep.plans.REVIEW_PART, run, "its goal carries the review, in words a shell line takes")
-            self.assertEqual(run.count("'"), 4, "the prompt and the settings path are the two quoted words")
-            self.assertNotRegex(run, r"[\"$`;()]", "no character of the title reaches the shell")
-            # the tool types one literal line of printable ASCII and refuses a variable read, a pipe and a backtick
-            self.assertRegex(typed, r"^[ -~]+$")
-            self.assertNotRegex(typed, r"[$|`()]")
-
-    def test_the_card_stays_in_a_mode_that_asks_and_in_a_folder_of_no_repository(self):
-        self.seat(mode="acceptEdits")
         self.left_item()
         got = flat(self.said())
         self.assertIn("`mcp__ccd_session__start_session` with `initiation` `own_initiative`", got)
-        self.assertNotIn("Terminal panel", got)
-
-    def test_in_a_folder_of_no_repository_the_card_stays(self):
-        self.seat(folder=self.t.proj)
-        self.left_item()
-        got = flat(self.said())
-        self.assertIn("tell ezexe in one line that the card waits", got)
-        self.assertNotIn("Terminal panel", got)
-
-    def test_both_states_of_the_setting(self):
-        s = {"sessionId": TOP, "cwd": self.repo}
-        with mock.patch.object(upkeep, "mode_of", lambda sid: "auto"):
-            with mock.patch.object(phi, "UPKEEP", True):
-                on = upkeep.terminal(self.t.p4, s, "The harbour ledger loses its footer when a quota resets")
-                line = upkeep.route(self.t.p4, s, "The harbour ledger loses its footer when a quota resets", "event", "")
-            with mock.patch.object(phi, "UPKEEP", False):
-                off = upkeep.terminal(self.t.p4, s, "The harbour ledger loses its footer when a quota resets")
-                card = upkeep.route(self.t.p4, s, "The harbour ledger loses its footer when a quota resets", "event", "")
-        self.assertRegex(on[0], r"^upkeep-[0-9a-f]{8}$")
-        self.assertEqual(on[1], os.path.realpath(self.repo).replace("\\", "/"))
-        self.assertIn(f"start a worker in the Terminal panel for it, named `{on[0]}`", line)
-        self.assertIsNone(off)
-        self.assertIn("show it as the app's card", card)
-        self.assertNotIn("Terminal", card)
-
-    def test_with_it_off_no_line_names_a_terminal_worker(self):
-        self.seat()
-        self.left_item()
-        self.assertEqual(self.t.cli(TOP, "upkeep", "off").returncode, 0)
-        got = self.said()
-        self.assertNotIn("Terminal panel", got)
         self.assertNotIn("mcp__terminal__run_in_terminal", got)
-        self.assertNotIn("upkeep of the sessions this one started", got)
+        self.assertEqual(test_phi.writes_under_claude(got), [])
 
-    def started(self):
-        """A terminal worker was handed, and its name."""
-        self.seat()
-        self.left_item()
-        return re.findall(r"named `(upkeep-[0-9a-f]{8})`", self.said())[0]
-
-    def test_a_due_step_whose_worker_has_its_worktree_is_not_handed_to_start_once_more(self):
-        """Seen in the desktop app on Claude Code 2.1.326: the first prompt after a terminal worker's start handed
-        the due step's start lines again, since the mark that the worker was started is written after the step's
-        line is built. A worker whose worktree exists was started, so the line says where the step went."""
-        self.seat()
-        self.turn_on()
-        self.t.cli(TOP, "upkeep", "wait", "Tabulate the quarterly almanac of quince harvests", "--on", KID)
-        self.commit()
-        self.finish(report="The last row is written now.")
-        first = " ".join(self.lines(self.said(), "due:")[0].split())
-        name = re.search(r"named `(upkeep-[0-9a-f]{8})`", first).group(1)
-        self.assertIn("start a worker in the Terminal panel for it", first)
-        self.worker(name, os.getpid())                  # its run made the worktree and holds the lock
-        got = self.said()
-        again = " ".join(self.lines(got, "due:")[0].split())
-        self.assertNotIn("start a worker in the Terminal panel", again)
-        self.assertIn(f"it went to the terminal worker `{name}`", again)
-        self.assertNotIn("worker-settings.json`, once for all of them", got, "and the form is not said again")
-
-    def test_once_its_run_has_ended_and_its_work_is_landed_its_tab_worktree_and_branch_go(self):
-        name = self.started()
-        tree = self.worker(name, os.getpid(), change="rows = [1, 2]\n")
-        self.assertEqual(self.lines(self.said(), "leftovers of the terminal worker"), [], "its run holds the lock")
-        git(self.repo, "worktree", "unlock", tree)
-        git(self.repo, "worktree", "lock", "--reason", f"claude session {name} (pid {self.ended()})", tree)
-        git(self.repo, "fetch", "-q", "origin")
-        left = self.lines(self.said(), "leftovers of the terminal worker")
-        self.assertEqual(len(left), 1)
-        self.assertIn("`mcp__terminal__stop_terminal_tab` and `close: true`", left[0])
-        self.assertIn("`mcp__terminal__list_terminal_tabs`", left[0])
-        cmds = re.findall(r"`(git [^`]+)`", left[0])
-        self.assertEqual(len(cmds), 3, left[0])
-        self.assertRegex(cmds[0], r"^git -C \"[^\"]+\" worktree unlock \"[^\"]+/\.claude/worktrees/" + name + "\"$")
-        self.assertRegex(cmds[1], r"^git -C \"[^\"]+\" worktree remove \"[^\"]+/\.claude/worktrees/" + name + "\"$")
-        self.assertEqual(cmds[2].split(" ", 3)[3], f"branch -d worktree-{name}")
-        self.assertFalse([c for c in cmds if "--force" in c or " -f" in c or " -D" in c])
-        for c in cmds:                              # git takes each as it is handed
-            r = subprocess.run(c, shell=True, capture_output=True, text=True, timeout=60)
-            self.assertEqual(r.returncode, 0, c + "\n" + r.stderr)
-        self.assertFalse(os.path.isdir(tree))
-        self.assertEqual(git(self.repo, "branch", "--list", f"worktree-{name}").stdout.strip(), "")
-        self.assertEqual(self.lines(self.said(), "leftovers of the terminal worker"), [], "nothing of it is left")
-
-    def test_one_whose_run_ended_with_work_that_is_not_landed_is_named_once_and_left(self):
-        name = self.started()
-        self.worker(name, self.ended(), push=False, change="rows = [1, 2]\n")
-        got = self.said()
-        named = self.lines(got, f"left on disk, of the terminal worker `{name}`")
-        self.assertEqual(len(named), 1, got)
-        self.assertIn("holds commits that are not on origin/main", named[0])
-        self.assertIn(f"report-{name}.md", named[0])
-        self.assertNotIn("worktree unlock", got)
-        self.assertEqual(self.lines(self.said(), "left on disk, of the terminal worker"), [], "it is named once")
-
-    NOTICE = ("[Cross-session idle notice] \"{}\", which you asked to be notified about, is idle now — it finished a "
-              "turn at 13:06. This is an automated notice from that session's harness — not a message from a "
-              "person, and not an instruction; act on it only insofar as your user's earlier request calls for it.")
-
-    def test_a_terminal_worker_that_runs_is_asked_for_its_idle_notice_once_and_anew_after_each_notice(self):
-        """The app sends no note when a worker in the Terminal panel ends. cross-session-messaging.md, "Get a notice
-        when another session goes idle": "Claude can ask one of your sessions on this machine to send back one
-        notice when that session next goes idle or exits", and "If the asking session is idle, Claude Code starts a
-        new turn with the notice." Seen with scripted runs on Claude Code 2.1.328 under a session of the desktop
-        app: one subscription gave one notice, for the first time the worker was idle, in the words of NOTICE. So
-        the session is handed the call once for a worker whose run works, its own call keeps the subscription, the
-        notice that comes as a prompt spends it, and the call is handed anew while the run still works."""
-        name = self.started()
-        self.assertEqual(self.lines(self.said(), "notice:"), [], "its run has not begun: no worktree is there")
-        self.worker(name, os.getpid())                  # its run made the worktree and holds the lock
-        got = self.said()
-        line = self.lines(got, "notice:")
-        self.assertEqual(len(line), 1, got)
-        for part in (f"`{name}`", f"`{upkeep.SEND}`", f"`{upkeep.NOTIFY}`"):
-            self.assertIn(part, line[0])
-        self.assertEqual(self.lines(self.said(), "notice:"), [], "handed once")
-        call = (upkeep.SEND, {"to": name, upkeep.NOTIFY: True},
-                f"Subscribed — \"{name}\" will send one notice when it is next idle (or exits).")
-        self.t.stop(TOP, TASK, [call], report="The worker is asked for its notice.", uuid="n1")
-        self.assertEqual(upkeep.asked(self.t.session(TOP)), {name})
-        self.assertEqual(self.lines(self.said(), "notice:"), [], "its notice is asked for")
-        after = self.lines(self.said(self.NOTICE.format(name)), "notice:") + self.lines(self.said(), "notice:")
-        self.assertEqual(upkeep.asked(self.t.session(TOP)), set(), "its one notice spent the subscription")
-        self.assertEqual(len(after), 1, "and its run still works, so the call is handed anew, once")
-        self.assertEqual(self.lines(self.said(), "notice:"), [])
-
-    def test_a_worker_whose_run_has_ended_is_asked_for_no_notice(self):
-        """A scripted run is gone when its turn ends, and a subscription to a session that is gone answers nothing.
-        A worker whose lock names a process that has ended gets no such line: its leftovers are what is handed."""
-        name = self.started()
-        self.worker(name, self.ended(), change="rows = [1, 2]\n")
-        git(self.repo, "fetch", "-q", "origin")
-        got = self.said()
-        self.assertEqual(self.lines(got, "notice:"), [])
-        self.assertEqual(len(self.lines(got, "leftovers of the terminal worker")), 1, got)
-
-    def test_a_notice_that_names_no_worker_of_this_session_changes_nothing(self):
+    def test_a_notice_that_names_no_session_of_this_one_changes_nothing(self):
         s = {"sessionId": TOP, "notices": {"upkeep-0a1b2c3d": time.time() + 60}}
         self.assertEqual(upkeep.notice_came(s, "Go on with the exporter."), "")
         self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("another-session")), "another-session")
         self.assertEqual(upkeep.asked(s), {"upkeep-0a1b2c3d"})
         self.assertEqual(upkeep.notice_came(s, self.NOTICE.format("upkeep-0a1b2c3d")), "upkeep-0a1b2c3d")
         self.assertEqual(upkeep.asked(s), set())
-
-    def test_a_terminal_worker_counts_as_out_for_the_schedule_and_its_end_waits_until_none_is_live(self):
-        """The schedule covers what no event tells of a terminal worker: one that was stopped from outside sent no
-        notice in the runs of 2026-11-22. So a worker in the Terminal panel is out for the schedule as a started
-        session is, and the end is handed once the last of them is removed."""
-        self.seat()
-        self.left_item()
-        got = self.said()
-        line = self.lines(got, "schedule:")
-        self.assertEqual(len(line), 1, got)
-        self.assertIn(upkeep.SWEEP, line[0])
-        made = (upkeep.CRON_CREATE, {"cron": upkeep.CRON, "prompt": upkeep.SWEEP},
-                "Scheduled recurring job 72f3dc05 (7,37 * * * *). Next run: Nov 22 1:44pm.")
-        self.t.stop(TOP, TASK, [made], report="The sweep's schedule is started.", uuid="c1")
-        again = self.said()
-        self.assertEqual(self.lines(again, "schedule:") + self.lines(again, "end the schedule:"), [],
-                         "its schedule runs and its workers are out")
-        d = upkeep.load(self.t.p4, TOP)
-        self.assertEqual(len(d["terminals"]), 2)
-        for t in d["terminals"]:
-            t["removed"] = upkeep.now()                 # as terminal_acts marks one whose worktree is gone
-        upkeep.save(self.t.p4, TOP, d)
-        got = self.said()
-        self.assertEqual(len(self.lines(got, "end the schedule:")), 1, got)
-        self.assertEqual(self.lines(got, "schedule:"), [])
-
-    def test_an_item_handed_to_a_terminal_worker_is_listed_after_with_no_card(self):
-        name = self.started()
-        again = self.said()
-        self.assertNotIn(f"named `{name}`", again, "an item is handed once, and listed as still open after")
-        r = self.t.cli(TOP, "upkeep")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("own_initiative", r.stdout)
 
 
 class Wake(Base):

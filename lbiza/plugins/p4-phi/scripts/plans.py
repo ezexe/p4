@@ -1260,8 +1260,8 @@ GOAL_LEAST = 12               # a shorter line is no condition, so `/goal clear`
 GOAL_TAIL = 1 << 20           # the bytes from a transcript's end read for the goal's last row
 # The part of a goal that has a worker's change read by a reader that has not seen the conversation, where the work
 # changes files and p4.json's `phi.goal_review` is on. It is kept here alone and both goals p4-phi sets carry it: the
-# one from a brief's line `Done looks like:`, by phi.goal_condition, and a terminal worker's, by upkeep.script_of.
-# That worker's line is typed into a shell, so these words hold no backtick, quote or bracket.
+# one from a brief's line `Done looks like:`, by phi.goal_condition. That goal is typed into a shell by a coworker's
+# start script, so these words hold no backtick, quote or bracket.
 # best-practices.md, "Give Claude a check to run": "A fresh reviewer does help, because it hasn't seen your
 # reasoning", and "A reviewer that's asked to find problems will always find something. If you fix every finding,
 # you end up with extra abstraction layers and tests for cases that can't happen." goal.md, "Write an effective

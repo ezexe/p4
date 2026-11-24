@@ -2488,13 +2488,12 @@ test('a lead keeps its teammates in team.json at a turn end, and a session with 
   expect(teams().length).toBe(1)
 })
 
-test('a terminal worker and a teammate are lines under their session, and a lead apart says so', () => {
+test('a teammate is a line under its session, and a lead apart says so', () => {
   const lead: PhiNode = {
     ...(NODES[0] as PhiNode),
     apart: true,
     steps: [],
     goal: null,
-    workers: [{ name: 'upkeep-aaaa1111', task: 'port the flush', state: 'running' }],
     team: [
       { name: 'scout', task: 'Read the exporter', state: 'idle', doing: '' },
       { name: 'critic', task: 'Argue against the plan', state: 'running', doing: 'reading flush.py' },
@@ -2503,7 +2502,6 @@ test('a terminal worker and a teammate are lines under their session, and a lead
 
   expect(treeLines([lead])).toEqual([
     { kind: 'title', text: 'Port the flush: working, a terminal session' },
-    { kind: 'now', text: 'terminal worker upkeep-aaaa1111, running: port the flush' },
     { kind: 'text', text: 'teammate scout, idle: Read the exporter' },
     { kind: 'now', text: 'teammate critic, running: Argue against the plan' },
     { kind: 'dim', text: '  reading flush.py' },

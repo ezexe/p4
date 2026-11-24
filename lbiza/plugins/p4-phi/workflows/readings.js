@@ -2,13 +2,14 @@ export const meta = {
   name: 'readings',
   description: 'Work each distinct reading of an unclear message in an agent of its own, then compare what they came to',
   whenToUse: 'A message leaves two or more distinct readings open, and one start would have to guess between them',
-  phases: [{ title: 'Readings', detail: 'one agent for each reading, a reading that writes files in a git worktree of its own', model: 'opus' }],
+  phases: [{ title: 'Readings', detail: 'one agent for each reading, each reading only reads and works its reading through to a result', model: 'opus' }],
 }
 
-// args: {"words": "<the message>", "readings": ["<a reading>", {"text": "<a reading>", "writes": true}, ...]}
+// args: {"words": "<the message>", "readings": ["<a reading>", {"text": "<a reading>"}, ...]}
 //
-// A reading given as a string, or without `writes: true`, changes no file and shares the session's checkout. A
-// reading with `writes: true` runs in a git worktree of its own and commits there. The run returns one of:
+// No reading changes a file: each only reads and works its reading through to a result, in the session's one
+// checkout. The chosen reading is then started as an ordinary session or worker that does the writing. The run
+// returns one of:
 //   {state: "collapsed", result, readings, lost, next}             the readings came to one result
 //   {state: "forked", question, default, options, lost, next}      they differ, or one stopped on a question for ezexe
 //   {state: "lost", lost, next}                                    no reading gave a result
@@ -56,7 +57,7 @@ function sameResult(a, b) {
 
 const USAGE =
   'readings takes args {"words": "<the message>", "readings": [...]} with two or more distinct readings, ' +
-  'each a string or {"text": "<the reading>", "writes": true}'
+  'each a string or {"text": "<the reading>"}'
 
 let given = args
 if (typeof given === 'string') {
@@ -77,11 +78,11 @@ for (const r of Array.isArray(given.readings) ? given.readings : []) {
   const text = oneLine(named ? r.text : r)
   if (!text || seen.has(text.toLowerCase())) continue
   seen.add(text.toLowerCase())
-  distinct.push({ text, writes: Boolean(named && r.writes === true) })
+  distinct.push({ text }) // an unknown `writes` key of a reading is ignored
 }
 if (distinct.length < 2) throw new Error(USAGE)
 
-const readings = distinct.slice(0, MOST).map((r, i) => ({ k: i + 1, text: r.text, writes: r.writes }))
+const readings = distinct.slice(0, MOST).map((r, i) => ({ k: i + 1, text: r.text }))
 const dropped = distinct.slice(MOST).map(r => r.text)
 if (dropped.length) {
   log(
@@ -102,30 +103,13 @@ const RESULT = {
       type: 'string',
       description: 'Empty, unless the reading cannot go on without ezexe: then the one question only ezexe can answer',
     },
-    wrote: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'Each file this reading changed, as a path from the repository root, and empty when it changed none',
-    },
-    branch: {
-      type: 'string',
-      description: 'The branch the changed files are committed on, and empty when no file changed',
-    },
-    worktree: {
-      type: 'string',
-      description: 'The folder of the git worktree this reading ran in, and empty when it shared the checkout',
-    },
   },
 }
 
-const WRITES =
-  'You run in a git worktree of your own, on a branch of your own. Change files only there, and commit what you ' +
-  'change on that branch, so the session finds the work by the branch. Push nothing and merge nothing. Return the ' +
-  'branch `git rev-parse --abbrev-ref HEAD` prints as `branch`, the folder `git rev-parse --show-toplevel` prints ' +
-  'as `worktree`, and each file you changed, as a path from the repository root, in `wrote`.'
 const READS =
-  'This reading changes no file. You share the checkout with the session and with the other readings, so write no ' +
-  'file there and commit nothing. Leave `branch`, `worktree` and `wrote` empty.'
+  'This reading changes no file. You share the checkout with the session and with the other readings, so change no ' +
+  'file and commit nothing. Work the reading through to a result: what you would do, which files you would change ' +
+  'and how, and what you found.'
 const DECIDE =
   'A question that the code, the history, the issues or the current outside documentation can answer is yours to ' +
   'research and decide. A question only ezexe can answer ends the reading: stop there, put that one question in ' +
@@ -146,7 +130,7 @@ function brief(r, n) {
     '',
     'Work only this reading, through to what it comes to.',
     '',
-    r.writes ? WRITES : READS,
+    READS,
     '',
     DECIDE,
     '',
@@ -167,7 +151,6 @@ const got = await parallel(
         // the writer's level of the skill sub-agentic's table: a reading is worked through to what it comes to
         model: 'opus',
         effort: 'medium',
-        ...(r.writes ? { isolation: 'worktree' } : {}),
       })
       return { out, why: out ? '' : 'its agent was stopped or failed' }
     } catch (e) {
@@ -183,14 +166,6 @@ const entries = readings.map((r, i) => {
   const question = oneLine(out && out.question)
   if (!result && !question) return { k: r.k, text: r.text, why: g.why || 'it returned no result' }
   const entry = { k: r.k, text: r.text, result, question }
-  const wrote = (out && Array.isArray(out.wrote) ? out.wrote : []).map(oneLine).filter(Boolean)
-  // Only a reading that ran in a worktree of its own and changed a file has a branch to find: a worktree left
-  // unchanged is removed with its branch, and a reading that shared the checkout is on the session's own branch.
-  if (r.writes && wrote.length) {
-    entry.wrote = wrote
-    entry.branch = oneLine(out.branch)
-    entry.worktree = oneLine(out.worktree)
-  }
   return entry
 })
 
@@ -215,7 +190,6 @@ if (!live.length) {
 }
 
 if (!asking.length && through.every(e => sameResult(through[0].result, e.result))) {
-  const held = through.find(e => e.branch)
   return {
     state: 'collapsed',
     ...base,
@@ -226,11 +200,7 @@ if (!asking.length && through.every(e => sameResult(through[0].result, e.result)
       (through.length === 1
         ? `Reading ${through[0].k} alone gave a result: carry it on as the answer, and put no question to ezexe.`
         : 'The readings came to one result: carry it on as the answer, and put no question to ezexe.') +
-      gone +
-      (held
-        ? ` Reading ${held.k} committed its files on the branch \`${held.branch}\`: merge that branch into this ` +
-          "session's branch."
-        : ''),
+      gone,
   }
 }
 
@@ -245,7 +215,7 @@ return {
   next:
     'The readings fork. Put the one `question` to ezexe with `AskUserQuestion`, an option for each entry of ' +
     `\`options\`, reading ${first} first as the recommended one, each option saying what its reading came to or the ` +
-    'question it stopped on. Then start the chosen reading as a child session of its own, cut from its `branch` ' +
-    'where it has one.' +
+    'question it stopped on. Then start the chosen reading as an ordinary child session of its own, which does the ' +
+    'writing in the one checkout.' +
     gone,
 }

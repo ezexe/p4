@@ -207,7 +207,7 @@ class Tree(Store):
                 self.assertIn(f"{self.home}/phi/sessions/{sid}/{name}".replace("\\", "/"), m["sources"])
         # the hooks' log and the turns are watched too, since `working` and `done` are read from them
         self.assertEqual(len(m["sources"]), 12)
-        self.assertEqual((kid["workers"], kid["team"]), ([], []))
+        self.assertEqual(kid["team"], [])
         self.assertEqual(m["folders"], [f"{self.home}/phi/sessions".replace("\\", "/")])
 
     def test_folders_name_each_stores_sessions_and_a_nested_session_is_read(self):
@@ -245,27 +245,6 @@ class Others(Store):
     def put(self, sid, name, data):
         with open(os.path.join(self.home, "phi", "sessions", sid, name), "w", encoding="utf-8") as f:
             json.dump(data, f)
-
-    def test_a_terminal_worker_is_not_started_running_ended_or_removed(self):
-        self.session(TOP)
-        main = self.root.replace("\\", "/")
-        self.put(TOP, "upkeep.json", {"terminals": [
-            {"name": "upkeep-aaaa1111", "main": main, "text": "port the flush"},
-            {"name": "upkeep-bbbb2222", "main": main, "text": "read the exporter", "started": "2026-11-23 06:00"},
-            {"name": "upkeep-cccc3333", "main": main, "text": "run the suite", "started": "2026-11-23 06:00"},
-            {"name": "upkeep-dddd4444", "main": main, "text": "fix the docs", "started": "x", "removed": "y"}]})
-        for name in ("upkeep-bbbb2222", "upkeep-cccc3333"):
-            os.makedirs(os.path.join(self.root, ".claude", "worktrees", name))
-        lock = os.path.join(self.root, ".git", "worktrees", "upkeep-bbbb2222")
-        os.makedirs(lock)
-        with open(os.path.join(lock, "locked"), "w", encoding="utf-8") as f:
-            f.write(f"claude session upkeep-bbbb2222 (pid {os.getpid()})\n")
-        got = progress.workers_of(self.home, TOP)
-        self.assertEqual([(w["name"][-8:], w["state"]) for w in got],
-                         [("aaaa1111", "not started"), ("bbbb2222", "running"), ("cccc3333", "ended"),
-                          ("dddd4444", "removed")])
-        self.assertEqual(got[0]["task"], "port the flush")
-        self.assertEqual(progress.workers_of(self.home, "local_never001"), [])
 
     def test_a_leads_teammates_are_read_from_its_team_file(self):
         self.session(TOP)

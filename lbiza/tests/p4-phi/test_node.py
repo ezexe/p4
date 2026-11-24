@@ -140,14 +140,12 @@ class Level(unittest.TestCase):
         r = subprocess.run([sys.executable, "-I", "-c", code, str(SRC)], capture_output=True, text=True)
         self.assertEqual(r.stdout.strip(), "puppeteer", r.stderr)
 
-    def test_leaves_give_a_subagent_a_teammate_a_terminal_and_the_claimed_reader_and_worker_with_addresses(self):
+    def test_leaves_give_a_subagent_a_teammate_and_the_claimed_reader_and_worker_with_addresses(self):
         put(self.home, "s", "plan.json", {"steps": [{"addr": "1", "tasks": [
             {"id": "a1", "tool": "Agent", "agent": True, "status": "open", "stepText": "Read the port"},
             {"id": "t1", "tool": "Bash", "status": "open"}]}], "loose": [
             {"id": "a2", "tool": "Agent", "agent": True, "status": "done", "stepText": ""}]})
         put(self.home, "s", "team.json", {"teammates": [{"name": "fences", "task": "x", "state": "idle", "doing": ""}]})
-        put(self.home, "s", "upkeep.json", {"terminals": [{"name": "upkeep-1", "main": "E:/r", "time": "t", "text": ""},
-                                                          {"name": "upkeep-2", "removed": True}]})
         worker = relay.claim(self.home, self.home, "tw-x", "worker", "s", ["8"])
         relay.claim(self.home, self.home, "cw-z", "reader", "s", ["1"], session="5e55-1")
         relay.claim(self.home, self.home, "s2", "session", "s")
@@ -155,8 +153,7 @@ class Level(unittest.TestCase):
         got = [(x["level"], x["name"], x["state"], x.get("address")) for x in node.leaves(self.home, "s")]
         self.assertEqual(got, [
             ("subagent", "Read the port", "open", None), ("subagent", "a2", "done", None),
-            ("teammate", "fences", "idle", None), ("terminal", "upkeep-1", "started", None),
-            ("terminal", "upkeep-2", "removed", None), ("terminal", "tw-x", "started", "101"),
+            ("teammate", "fences", "idle", None), ("terminal", "tw-x", "started", "101"),
             ("terminal", "cw-z", "started", "1001")], "a session's node and another's worker are no leaves of it")
         with open(os.path.join(worker, "phi", "report-tw-x.md"), "w", encoding="utf-8") as f:
             f.write("done\n")
