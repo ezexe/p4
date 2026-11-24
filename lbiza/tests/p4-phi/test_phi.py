@@ -3777,6 +3777,89 @@ class BuildByPlanner(unittest.TestCase):
         self.assertEqual([r["name"] for r in phi.running_workers(self.home)], [])
 
 
+class LandPlanner(unittest.TestCase):
+    """`coworkers <section plan> --land --planner <name>`: the planner builds where the route says, else `-p` does."""
+
+    TOP = ("# Top plan\n\n## Context\n\nNo planner.\n\n"
+           "## 1. Part 1\n\n- **Files:** `src/p1.py`\n- **Depends on:** none\n- **Done when:** MARK1\n")
+
+    def setUp(self):
+        import coworker
+        self.coworker = coworker
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-landplanner-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        self.plan = os.path.join(self.base, "plan.md")
+        write(self.plan, WORKER_PLAN)
+        top = os.path.join(self.base, "top.md")
+        write(top, self.TOP)
+        found = coworker.section_plans(top, self.base, self.home, "local_plan0001",
+                                       lambda text, runner: {"mode": "interactive", "profile": "", "pool": "max"},
+                                       windows=False)
+        coworker.write([o for o in found if o.get("folder")], self.base, self.home)
+        relay.forget(self.home)
+        self.planner = found[0]["name"]
+        self.conf = os.path.join(self.home, "phi", "phi.json")
+        self.ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+
+    def land(self, *args, plan=None, planner=True):
+        env = {**os.environ, "P4_PHI_APP_SESSIONS": os.path.join(self.base, "app")}
+        more = ["--planner", self.planner] if planner is True else ["--planner", planner] if planner else []
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers",
+                               plan or self.plan, "--p4", self.home, "--session", "local_plan0001", "--checkout",
+                               self.base, "--land", *more, *args], capture_output=True, text=True, timeout=60, env=env)
+
+    def rows(self):
+        return phi.read_rows(self.ledger)
+
+    def test_the_planner_route_prints_the_wait_before_the_message_and_claims_no_p_node(self):
+        write(self.conf, json.dumps({"build_in_planner": True}))
+        ran = self.land()
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertLess(ran.stdout.index("coworkers --wait --report"), ran.stdout.index("SendMessage"))
+        self.assertIn("Yes, and use auto mode", ran.stdout)
+        self.assertEqual(list(relay.nodes(self.home)), [self.planner], "no -p node is claimed")
+        self.assertEqual([r["state"] for r in self.coworker.plan_runs(self.plan, self.base, self.home)], ["ready"])
+        self.assertEqual([(r["name"], r["kind"]) for r in self.rows()], [(f"{self.planner}-built", "build")])
+
+    def test_with_the_setting_off_the_workers_start_as_they_do_without_planner(self):
+        write(self.conf, json.dumps({"build_in_planner": False}))
+        ran = self.land()
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("build_in_planner is off", ran.stdout)
+        self.assertIn("worker `", ran.stdout)
+        self.assertNotIn("SendMessage", ran.stdout)
+        self.assertEqual({r["kind"] for r in self.rows()}, {"land"})
+
+    def test_an_unknown_planner_and_a_plan_that_does_not_parse_exit_2_with_no_traceback(self):
+        ran = self.land(planner="tp-9-9-none")
+        self.assertEqual(ran.returncode, 2)
+        self.assertIn("phi: no planner", ran.stderr)
+        write(self.plan, "# A\n\n## 1. One\n\n- **Files:** `a.py`\n\n## 1. Again\n\n- **Files:** `b.py`\n")
+        ran = self.land()
+        self.assertNotIn("Traceback", ran.stderr)    # sections.parse raises no ValueError here, so none is forced
+
+    def test_sections_still_prints_its_runs_and_collect_names_the_planner_in_its_hint(self):
+        env = {**os.environ, "P4_PHI_APP_SESSIONS": os.path.join(self.base, "app")}
+        ran = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "sections", self.plan,
+                              "--p4", self.home, "--session", "local_plan0001"],
+                             capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("worker `", ran.stdout)
+        top = os.path.join(self.base, "top.md")
+        made = os.path.join(self.base, "made.md").replace("\\", "/")
+        write(made, "# T\n\nRead: one group\n")
+        write(os.path.join(relay.nodes(self.home)[self.planner], f"report-{self.planner}.md"),
+              f"Plan file: `{made}`\n")
+        ran = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", top,
+                              "--collect", "--p4", self.home, "--session", "local_plan0001", "--checkout", self.base],
+                             capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn(f"--land --planner {self.planner}", ran.stdout)
+
+
 class RunningBuilds(unittest.TestCase):
     """running_workers: a build row is held to BUILD_HOURS, a retry's start is not ended by an old outcome."""
 

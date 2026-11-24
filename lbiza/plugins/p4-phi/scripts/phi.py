@@ -4439,6 +4439,9 @@ def main(argv=None):
             p.add_argument("--collect", action="store_true",
                            help="the plan is a top plan: print each section's plan file, its report and its "
                                 "`Read:` line")
+            p.add_argument("--planner", default="",
+                           help="with --land: the planner that wrote this section plan; it builds it where "
+                                "build_in_planner is on, the Max plan is not low and a Max slot is free")
             p.add_argument("--report", nargs="+", default=[], metavar="FILE",
                            help="with --wait: wait for this terminal worker's report file instead of for coworkers")
             p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
@@ -4681,6 +4684,7 @@ def main(argv=None):
         if a.cmd == "sections":                    # an approved plan's runs: what `coworkers --land` prints
             a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, []
             a.plan_sections = a.collect = False
+            a.planner = ""
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
@@ -4754,7 +4758,7 @@ def main(argv=None):
                           f"{c['report'] or 'none yet'}" + (f"\n  {c['read']}" if c["read"] else ""))
                     if c["state"] == "done" and c["plan"]:
                         print(f"  once ezexe approves it: `{commands()} coworkers \"{c['plan']}\" --checkout "
-                              f"\"{checkout}\" --land`")
+                              f"\"{checkout}\" --land --planner {c['name']}`")
                 return 0
             if a.plan_sections:
                 pick = slot_assigner(me.home, me.id)
@@ -4793,6 +4797,23 @@ def main(argv=None):
             if a.land:                             # a terminal worker for each ready run, in LAND_MODE
                 # each terminal session is a node nested in the folder that holds this session's, found from its id
                 node_of = {"home": me.home, "starter": safe_id(me.id)}
+                if a.planner:                      # a section plan built by the planner that wrote it, or by -p
+                    folder = (relay.nodes(me.home).get(a.planner) or "").replace("\\", "/")
+                    if not folder:
+                        print(f"phi: no planner `{a.planner}` has a node here", file=sys.stderr)
+                        return 2
+                    try:                           # a plan sections.parse rejects exits 2, as the `-p` route does
+                        left = [n for r in coworker.plan_runs(plan, checkout, me.home) if r["state"] != "landed"
+                                for n in r["sections"]]
+                    except ValueError as e:
+                        print(f"phi: {e}", file=sys.stderr)
+                        return 2
+                    if left:                       # sections all landed fall through to the unchanged audit step
+                        lines, why = build_by_planner(me.home, plan, checkout, a.planner, safe_id(me.id), folder, left)
+                        if lines:
+                            print("\n".join(lines))
+                            return 0
+                        print(f"phi: {why}")
                 # landing is headless work by the rule, so a section's own words, which may name modes, pick no
                 # mode: only a set mode or the section's Runner line does, and each run takes a slot of a pool
                 pick = slot_assigner(me.home, me.id)
