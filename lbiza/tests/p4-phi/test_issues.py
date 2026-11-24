@@ -36,7 +36,7 @@ import controls  # noqa: E402  after test_phi, whose import of phi.py hands cont
 A, B = KID, KID2
 SUP = "local_sup00001"
 CLI.setdefault(SUP, "eeee5555-0000-4000-8000-000000000000")
-WRK, COW, COW2 = "local_wrk00001", "local_cow00001", "local_cow00002"     # a standing worker and two coworkers
+WRK, COW, COW2 = "local_wrk00001", "local_cow00001", "local_cow00002"     # a worker and two coworkers
 for k, sid in enumerate((WRK, COW, COW2)):
     CLI.setdefault(sid, f"eeee666{k}-0000-4000-8000-000000000000")
 RECALL = os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")

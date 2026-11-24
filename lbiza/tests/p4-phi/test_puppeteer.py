@@ -912,8 +912,11 @@ class Terminal(Base):
         self.assertEqual(waited.returncode, 0, waited.stderr)
         self.assertIn("is there", waited.stdout)
 
-    def test_a_planners_draft_starts_in_plan_mode_with_the_team_variable_and_p4_temportal_on(self):
+    def planner_draft(self, settings=None):
+        """Starts a planner's draft; its start file's text, its resume file's text, the output and the node folder."""
         t = self.t
+        if settings is not None:
+            write(os.path.join(t.p4, "phi", "phi.json"), json.dumps(settings))
         t.say(TOP, TASK)
         did = "drf-0123456789"
         os.makedirs(os.path.join(t.dir(TOP), "drafts"), exist_ok=True)
@@ -924,14 +927,39 @@ class Terminal(Base):
         self.assertEqual(r.returncode, 0, r.stderr)
         name = coworker.draft_name("Plan the ports table move", did)
         folder = os.path.join(relay.nodes(t.p4)[name], "phi")
-        with open(os.path.join(folder, f"start-{name}.ps1" if os.name == "nt" else f"start-{name}.sh"),
-                  encoding="utf-8") as f:
+        ext = "ps1" if os.name == "nt" else "sh"
+        with open(os.path.join(folder, f"start-{name}.{ext}"), encoding="utf-8") as f:
             start = f.read()
+        with open(os.path.join(folder, f"resume-{name}.{ext}"), encoding="utf-8") as f:
+            resume = f.read()
+        with open(os.path.join(folder, "coworker-settings.json"), encoding="utf-8") as f:
+            self.assertTrue(json.load(f)["enabledPlugins"]["p4-temportal@p4-marketplace"])
+        return start, resume, r.stdout, name
+
+    def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
+        start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})
         self.assertIn("--permission-mode plan", start)
         self.assertIn(coworker.TEAMS, start)
         self.assertNotIn("/goal", start)
-        with open(os.path.join(folder, "coworker-settings.json"), encoding="utf-8") as f:
-            self.assertTrue(json.load(f)["enabledPlugins"]["p4-temportal@p4-marketplace"])
+        self.assertNotIn("claude -p", start)
+        self.assertIn("--session-id", start)
+        self.assertIn("--resume", resume)
+        self.assertNotIn("--session-id", resume)
+        self.assertNotIn("log-", out)
+
+    def test_a_print_planners_draft_starts_headless_with_its_plan_file_and_prints_the_resume_and_the_land_line(self):
+        start, resume, out, name = self.planner_draft()
+        self.assertIn("claude -p", start)
+        self.assertIn("--permission-mode bypassPermissions", start)
+        self.assertNotIn(coworker.TEAMS, start)
+        self.assertIn("/goal Write the plan", start)
+        plan_file = os.path.join(self.t.p4, "temportal", "plan-planner", f"{name}.md").replace("\\", "/")
+        self.assertIn(plan_file, start)
+        self.assertIn("--resume", resume)
+        self.assertIn(f"log-{name}.jsonl", out)
+        self.assertIn(f"resume-{name}", out)
+        self.assertIn(plan_file, out)
+        self.assertIn("--land", out)
 
     def started_file(self, name_words="Fix the ports table", settings=None):
         t = self.t
@@ -950,6 +978,70 @@ class Terminal(Base):
 
     def test_a_drafted_workers_start_file_names_the_workers_profile_by_default_and_not_when_it_is_off(self):
         self.assertIn("ANTHROPIC_PROFILE", self.started_file())
+
+    def test_the_profile_and_the_mode_combine_all_four_ways(self):
+        for profile in ("p4-workers", ""):
+            for mode in ("print", "interactive"):
+                with self.subTest(profile=profile, mode=mode):
+                    self.setUp()
+                    text = self.started_file(settings={"worker_profile": profile, "worker_mode": mode})
+                    self.assertEqual("ANTHROPIC_PROFILE" in text, bool(profile))
+                    self.assertEqual("claude -p" in text, mode == "print")
+                    self.assertEqual("stream-json" in text, mode == "print")
+
+    def test_worker_mode_reads_print_where_the_key_is_absent_and_the_command_writes_it(self):
+        t = self.t
+        t.say(TOP, TASK)
+        path = os.path.join(t.p4, "phi", "phi.json")
+        self.assertEqual(phi.worker_mode(t.p4), "print")
+        self.assertIn("worker_mode is print", t.cli(TOP, "worker_mode").stdout)
+        self.assertFalse(os.path.exists(path) and "worker_mode" in jload(path), "reading writes nothing")
+        write(path, json.dumps({"book": False}))
+        r = t.cli(TOP, "worker_mode", "interactive")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(jload(path), {"book": False, "worker_mode": "interactive"}, "the other keys are kept")
+        self.assertEqual(phi.worker_mode(t.p4), "interactive")
+        r = t.cli(TOP, "worker_mode", "print")
+        self.assertIn("worker_mode is print", r.stdout)
+        self.assertEqual(jload(path), {"book": False, "worker_mode": "print"})
+        bad = t.cli(TOP, "worker_mode", "tab")
+        self.assertEqual(bad.returncode, 2)
+        self.assertIn("phi:", bad.stderr)
+        self.assertEqual(jload(path)["worker_mode"], "print", "a bad word writes nothing")
+        write(path, json.dumps({"worker_mode": "nonsense"}))
+        self.assertEqual(phi.worker_mode(t.p4), "print")
+
+    def test_wait_report_prints_ended_with_the_result_row_where_the_log_ends_with_no_report(self):
+        t = self.t
+        t.say(TOP, TASK)
+        folder = os.path.join(t.tmp, "node")
+        os.makedirs(folder)
+        report, log = os.path.join(folder, "report-tw-x.md"), os.path.join(folder, "log-tw-x.jsonl")
+        write(log, json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                               "result": "Credit balance is too low"}) + "\n")
+        import threading
+        import time
+
+        stop = threading.Event()
+
+        def later():
+            # The row is written again until the CLI is done, so one lands past the offset its wait began at however
+            # slowly the process starts: a single row written once raced a slow runner and the wait ran an hour.
+            while not stop.wait(1):
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                                        "result": "Credit balance is too low"}) + "\n")
+                old = time.time() - 3600            # the run ended past the quiet window
+                os.utime(log, (old, old))
+        threading.Thread(target=later, daemon=True).start()
+        try:
+            r = t.cli(TOP, "coworkers", "--wait", "--report", report)
+        finally:
+            stop.set()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ended:", r.stdout)
+        self.assertIn("Credit balance is too low", r.stdout)
+        self.assertIn("error", r.stdout)
 
     def test_an_empty_profile_in_phi_json_leaves_the_start_file_without_the_line(self):
         self.assertNotIn("ANTHROPIC_PROFILE", self.started_file(settings={"worker_profile": ""}))
@@ -1193,7 +1285,7 @@ class Look(Base):
         `$.session.send({ to: { sessionId } })`, whose `sessionId` is "what its `$.session.id()` answers on this
         machine", by the API's types. That is the CLI session id on the app's record of the starter, so every look
         of a started session answers it, the one that only asks for the folder too. A session nobody started
-        answers none, and neither does a puppeteer's standing worker, whose first line asks it for the message its
+        answers none, and neither does a puppeteer's worker, whose first line asks it for the message its
         turn ends with."""
         t = self.t
         t.say(TOP, TASK)

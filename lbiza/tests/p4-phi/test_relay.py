@@ -1967,9 +1967,26 @@ class Nodes(unittest.TestCase):
     def same(self, a, b):
         return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
-    def test_store_of_gives_one_more_claude_for_each_further_child(self):
+    def test_store_of_gives_siblings_at_one_depth_and_old_store_of_one_more_claude_each(self):
         self.assertEqual(relay.store_of("S", 1), os.path.join("S", ".claude", "p4"))
-        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", ".claude", "p4"))
+        self.assertEqual(relay.store_of("S", 2), os.path.join("S", ".claude", "2", ".claude", "p4"))
+        self.assertEqual(relay.store_of("S", 3), os.path.join("S", ".claude", "3", ".claude", "p4"))
+        self.assertEqual(relay.old_store_of("S", 2), os.path.join("S", ".claude", ".claude", "p4"))
+
+    def test_three_sibling_claims_x_and_nodes_finds_them_and_a_child_of_p4_2(self):
+        got = [relay.claim(self.home, self.home, sid, "session", "top") for sid in ("a", "b", "c")]
+        self.assertEqual([os.path.relpath(g, self.home).replace("\\", "/") for g in got],
+                         [".claude/p4", ".claude/2/.claude/p4", ".claude/3/.claude/p4"])
+        kid = relay.claim(self.home, got[1], "d", "session", "b")
+        self.assertEqual(kid, os.path.join(got[1], ".claude", "p4"))
+        self.assertEqual(relay.nodes(self.home), {"a": got[0], "b": got[1], "c": got[2], "d": kid})
+
+    def test_a_parent_with_an_old_second_child_gets_place_3_next(self):
+        write(os.path.join(relay.old_store_of(self.home, 1), "phi", relay.NODE), json.dumps({"id": "a"}))
+        write(os.path.join(relay.old_store_of(self.home, 2), "phi", relay.NODE), json.dumps({"id": "b"}))
+        relay.forget(self.home)
+        self.assertEqual(set(relay.nodes(self.home)), {"a", "b"}, "the old layout is still read")
+        self.assertEqual(relay.claim(self.home, self.home, "c", "session", "top"), relay.store_of(self.home, 3))
 
     def test_stores_finds_the_root_two_children_and_a_grandchild_and_no_folder_named_otherwise(self):
         one, two = relay.store_of(self.home, 1), relay.store_of(self.home, 2)

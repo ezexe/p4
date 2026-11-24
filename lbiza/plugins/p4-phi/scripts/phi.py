@@ -82,6 +82,8 @@ BOOK = True
 RULES = True
 GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
 WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
+WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
+WORKER_MODES = ("print", "interactive")
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
@@ -109,7 +111,8 @@ WAIT_S = 2.0                     # how long a handed-over first message waits fo
 SCAN_RECORDS = 60                # the newest records searched for a CLI session id, when the host id is missing
 SETTINGS = {"background": "BACKGROUND", "reports": "REPORTS", "turns": "TURNS", "book": "BOOK",
             "rules": "RULES", "background_chars": "BACKGROUND_CHARS", "reports_chars": "REPORTS_CHARS", "wait_s": "WAIT_S",
-            "goal": "GOAL", "app_tools": "APP_TOOLS", "worker_profile": "WORKER_PROFILE"}
+            "goal": "GOAL", "app_tools": "APP_TOOLS", "worker_profile": "WORKER_PROFILE",
+            "worker_mode": "WORKER_MODE"}
 SHELL_TOOLS = ("Bash", "PowerShell")
 EDIT_TOOLS = ("Edit", "Write", "NotebookEdit")
 LOOKING = frozenset("""cat head tail sed grep rg ls find wc awk echo cd for printf date sleep tr file which where test
@@ -2642,6 +2645,30 @@ def worker_profile_set(home, name=None):
             + (f": ezexe runs `ant auth login --profile {now_}` once" if now_ else ""))
 
 
+def worker_mode(home):
+    """How a terminal worker runs: `worker_mode` of the store's phi/phi.json where it is one of WORKER_MODES, else
+    WORKER_MODE."""
+    v = read_json(os.path.join(home, "phi", "phi.json")).get("worker_mode") if home else None
+    return v if v in WORKER_MODES else WORKER_MODE
+
+
+def worker_mode_set(home, mode=None):
+    """`phi.py worker_mode`: with no mode it writes nothing and says how the key stands; with `print` or
+    `interactive` it writes it to the store's phi/phi.json, keeping the file's other keys. The line read back."""
+    path = os.path.join(home, "phi", "phi.json")
+    if mode is not None:
+        if mode not in WORKER_MODES:
+            raise ValueError("a worker mode is print or interactive")
+        d = read_json(path)
+        if not d and os.path.exists(path) and os.path.getsize(path) > 2:
+            raise ValueError(f"{path} does not parse as JSON, so it is left as it is")
+        d["worker_mode"] = mode
+        write_atomic(path, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    now_ = worker_mode(home)
+    return (f"worker_mode is {now_} in {path.replace(chr(92), '/')}: a terminal worker runs as "
+            + ("`claude -p`" if now_ == "print" else "an interactive `claude` tab"))
+
+
 def app_tools_switch(home, on=None):
     """`phi.py app_tools on` and `app_tools off`: writes `app_tools` in the store's phi/phi.json, as `goal on` writes
     its key, and returns the line that says how it stands as read back. With neither it writes nothing and says how
@@ -3780,7 +3807,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="phi.py: what linked sessions hand each other")
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("note", "done", "task", "show", "tree", "background", "detach", "reparent", "shard", "disposable",
-                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "cards", "conf", "sections",
+                 "request", "proof", "controls", "gaps", "upkeep", "goal", "app_tools", "worker_profile", "worker_mode", "cards", "conf", "sections",
                  "coworkers", "progress", "spend", "node"):
         p = sub.add_parser(name)
         p.add_argument("--p4", default="", help="the store the sessions' files live in, this session's when left out")
@@ -3835,6 +3862,10 @@ def main(argv=None):
             p.add_argument("name", nargs="?", default=None,
                            help="the Anthropic profile a terminal worker names in its tab, which `ant auth login "
                                 "--profile <name>` wrote, or `off` for none; left out it prints how the key stands")
+        if name == "worker_mode":
+            p.add_argument("mode", nargs="?", default=None,
+                           help="print starts a terminal worker as `claude -p` with a stream-json log, "
+                                "interactive as an interactive tab; left out it prints how the key stands")
         if name == "cards":
             p.add_argument("act", nargs="?", default="", choices=("", "on", "off"),
                            help="on puts the set of what p4-phi settles with no approval card in force for the "
@@ -3929,6 +3960,9 @@ def main(argv=None):
         if a.cmd == "worker_profile":              # the project's setting, which needs no session
             print(worker_profile_set(me.home, a.name))
             return 0
+        if a.cmd == "worker_mode":                 # the project's setting, which needs no session
+            print(worker_mode_set(me.home, a.mode))
+            return 0
         if a.cmd == "app_tools":                   # the project's setting, which needs no session and makes no folder
             print(app_tools_switch(me.home, a.act == "on" if a.act else None))
             return 0
@@ -4009,7 +4043,14 @@ def main(argv=None):
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
                 report = os.path.abspath(a.report).replace("\\", "/")
                 tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
-                how, waited = coworker.wait_report(report, me.home, tab)
+                log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
+                how, waited = coworker.wait_report(report, me.home, tab, log=log)
+                if how == "ended":
+                    r = coworker.last_result(log)
+                    print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "
+                          f"{r.get('subtype') or ''}{' error' if r.get('is_error') else ''}: "
+                          f"{str(r.get('result') or '')[:400]} (its log {log}; continue it with its resume file)")
+                    return 0
                 print(f"done: {report} is there, after {waited} seconds" if how == "done" else
                       f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
                 return 0
@@ -4047,7 +4088,7 @@ def main(argv=None):
                            "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
                 try:
                     found = coworker.land(plan, checkout, "", mode, claim=True, profile=worker_profile(me.home),
-                                          **node_of)
+                                          headless=worker_mode(me.home) == "print", **node_of)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
@@ -4066,8 +4107,12 @@ def main(argv=None):
                 for one in new:
                     print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
                           f"{one['report']}")
+                    print(f"  session {one['session']}"
+                          + (f", its log {one['log']}" if worker_mode(me.home) == "print" else ""))
                     print("`mcp__terminal__run_in_terminal` with " + json.dumps(
                         {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
+                    print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
+                          f"`{one['resume_typed']}`")
                 return 0
             try:
                 found = coworker.drafts(plan, checkout)

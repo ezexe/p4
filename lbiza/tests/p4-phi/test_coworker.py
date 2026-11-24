@@ -3,10 +3,10 @@
 
     python -m pytest tests/p4-phi/test_coworker.py
 
-agent-teams.md: "In non-interactive mode with the `-p` flag, including Agent SDK sessions, Claude doesn't spawn
-teammates". A coworker's start file is an interactive `claude` run with the team variable set in its shell, in the
-checkout, with a session id p4-phi gives it and a settings file that turns p4's plugins off. A coworker and a
-terminal worker are each a node, a store nested in their starter's, where their files are.
+A coworker's start file is a `claude -p` run (or, in the `interactive` worker mode, an interactive `claude` run with
+the team variable set), in the checkout, with a session id p4-phi gives it, a resume file beside it and a settings
+file that turns p4's plugins off. A coworker and a terminal worker are each a node, a store nested in their
+starter's, where their files are.
 """
 
 import json
@@ -80,15 +80,19 @@ class Coworker(unittest.TestCase):
         self.assertIn("ExitPlanMode", said)
         self.assertIn("the exporter s  move   HOME", said)
 
-    def test_a_planner_is_a_worker_in_plan_mode_with_the_team_variable_a_prompt_and_p4_temportal_on(self):
+    def test_an_interactive_planner_is_a_worker_in_plan_mode_with_the_team_variable_a_prompt_and_p4_temportal_on(self):
         found = coworker.worker("tw-plan-0001", "Plan the move.", "The plan is put", "/repo", self.home, PLANNER,
-                                self.home, windows=False, team=True, mode="plan",
+                                self.home, windows=False, team=True, mode="plan", headless=False,
                                 prompt=coworker.planner_task("the move"))
         self.assertEqual(found["file"], "start-tw-plan-0001.sh")
         self.assertEqual(found["lines"][1:3], ["export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "cd '/repo'"])
         run = found["lines"][3]
         self.assertIn("--permission-mode plan ", run)
         self.assertNotIn("/goal", run, "a planner's turn ends on ExitPlanMode, not on a goal")
+        self.assertNotIn(" -p ", run)
+        self.assertNotIn("stream-json", run)
+        self.assertNotIn("tee", run)
+        self.assertIn(f"--session-id {found['session']}", run)
         self.assertIn("Write the plan for the move in plan mode", run)
         self.assertIn(found["brief_file"], run, "its prompt names its brief")
         self.assertEqual(found["typed"], f"sh '{self.node()}/start-tw-plan-0001.sh'")
@@ -103,13 +107,152 @@ class Coworker(unittest.TestCase):
         self.assertNotIn(coworker.TEAMS, "\n".join(plain["lines"]))
         self.assertIn("--permission-mode bypassPermissions ", plain["lines"][-1])
 
+    def test_a_headless_planner_runs_in_bypass_permissions_with_a_goal_that_names_its_plan_file_and_no_team_variable(self):
+        plan_file = f"{self.home}/temportal/plan-planner/tw-plan-0001.md".replace("\\", "/")
+        found = coworker.worker("tw-plan-0001", "Plan the move.", "The plan is written", "/repo", self.home, PLANNER,
+                                self.home, windows=False, team=True, mode="plan", plan_file=plan_file,
+                                prompt=coworker.planner_task("the move", plan_file))
+        run = found["lines"][-1]
+        self.assertNotIn(coworker.TEAMS, "\n".join(found["lines"]))
+        self.assertIn("--permission-mode bypassPermissions ", run)
+        self.assertNotIn("--permission-mode plan", run)
+        self.assertTrue(found["goal"].startswith("/goal "))
+        self.assertIn("into the file " + coworker.plain(plan_file), found["goal"])
+        self.assertIn("ExitPlanMode", found["goal"], "the prompt forbids it")
+        self.assertEqual(found["plan"], plan_file)
+        self.assertTrue(found["temportal"])
+
+    def test_the_start_line_of_each_mode(self):
+        sid = "11111111-2222-4333-8444-555555555555"
+        for windows in (True, False):
+            kw = dict(windows=windows, session=sid)
+            on = coworker.script("tw-a", "/repo", "bypassPermissions", "go", "/n/phi", **kw)
+            off = coworker.script("tw-a", "/repo", "plan", "go", "/n/phi", headless=False, **kw)
+            run_on, run_off = on[1][-1], off[1][-1]
+            self.assertTrue(run_on.startswith("claude -p --name tw-a --session-id 1111"), run_on)
+            self.assertIn("--output-format stream-json --verbose 'go'", run_on)
+            self.assertIn("Tee-Object -FilePath" if windows else "| tee -a", run_on)
+            self.assertIn("log-tw-a.jsonl", run_on)
+            self.assertTrue(run_off.startswith("claude --name tw-a --session-id 1111"), run_off)
+            for word in (" -p ", "stream-json", "tee", "Tee-Object", "log-"):
+                self.assertNotIn(word, run_off, word)
+            self.assertNotIn(coworker.TEAMS, "\n".join(on[1]), "no teammate spawns under -p")
+            team = coworker.script("tw-a", "/repo", "plan", "go", "/n/phi", team=True, headless=False, **kw)
+            self.assertIn(coworker.TEAMS, "\n".join(team[1]))
+            both = coworker.script("tw-a", "/repo", "", "go", "/n/phi", team=True, **kw)
+            self.assertNotIn(coworker.TEAMS, "\n".join(both[1]))
+
+    def test_a_resume_file_continues_the_session_and_needs_one(self):
+        sid = "11111111-2222-4333-8444-555555555555"
+        for windows, ext in ((True, "ps1"), (False, "sh")):
+            file, lines, typed = coworker.script("tw-a", "/repo", "", "go", "/n/phi", windows=windows, session=sid,
+                                                 resume=True)
+            self.assertEqual(file, f"resume-tw-a.{ext}")
+            self.assertIn(f"--resume {sid}", lines[-1])
+            self.assertNotIn("--session-id", lines[-1])
+            self.assertIn(f"resume-tw-a.{ext}", typed)
+            with self.assertRaises(ValueError):
+                coworker.script("tw-a", "/repo", "", "go", "/n/phi", windows=windows, resume=True)
+        one = coworker.worker("tw-r-0001", "Do it.", "It is done", "/repo", self.home, PLANNER, self.home,
+                              windows=False)
+        self.assertRegex(one["session"], r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
+        self.assertEqual(relay.node_record(self.home, "tw-r-0001")["session"], one["session"])
+        self.assertEqual(one["resume_file"], "resume-tw-r-0001.sh")
+        self.assertIn(f"--resume {one['session']}", one["resume_lines"][-1])
+        self.assertTrue(one["log"].endswith("/log-tw-r-0001.jsonl"))
+        coworker.write([one], "/repo")
+        with open(os.path.join(one["folder"], one["resume_file"]), encoding="utf-8") as f:
+            self.assertEqual(f.read().rstrip("\n").split("\n"), one["resume_lines"])
+
+    def test_last_result_skips_lines_that_are_no_json_and_rows_before_the_offset(self):
+        log = os.path.join(self.base, "log.jsonl")
+        old = json.dumps({"type": "result", "subtype": "success", "result": "old"}) + "\n"
+        with open(log, "wb") as f:
+            f.write(b"\xef\xbb\xbf" + old.encode() + b"stderr: warning\n")
+        self.assertEqual(coworker.last_result(log)["result"], "old")
+        offset = os.path.getsize(log)
+        self.assertEqual(coworker.last_result(log, offset), {}, "a row before the offset is not read")
+        with open(log, "ab") as f:
+            f.write(b"\xef\xbb\xbf" + json.dumps({"type": "assistant"}).encode() + b"\nnot json {\n")
+            f.write(json.dumps({"type": "result", "is_error": True, "result": "Credit balance"}).encode() + b"\n")
+            f.write(b"trailing stderr line\n")
+        got = coworker.last_result(log, offset)
+        self.assertEqual((got["is_error"], got["result"]), (True, "Credit balance"))
+        self.assertEqual(coworker.last_result(os.path.join(self.base, "none.jsonl")), {})
+
+    def test_wait_report_ends_on_a_new_result_row_with_no_report_and_is_done_where_the_report_is_there(self):
+        report = os.path.join(self.base, "report-x.md")
+        log = os.path.join(self.base, "log-x.jsonl")
+        row = json.dumps({"type": "result", "subtype": "success", "is_error": False}) + "\n"
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(row)                          # the old run's row
+
+        def sleeper(clock):
+            def sleep(_):
+                clock[0] += 10
+                if clock[0] == 20:                # the resumed run ends
+                    with open(log, "a", encoding="utf-8") as f:
+                        f.write(row)
+            return sleep
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleeper(clock), longest=100,
+                                      quiet=0)
+        self.assertEqual(how, "ended")
+        self.assertGreaterEqual(clock[0], 20, "the old row did not end the wait")
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, clock=lambda: clock[0], longest=30, log=os.path.join(self.base, "n.jsonl"),
+                                      sleep=lambda _: clock.__setitem__(0, clock[0] + 10))
+        self.assertEqual(how, "long")
+        with open(report, "w", encoding="utf-8") as f:
+            f.write("done")
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleeper(clock), longest=100)
+        self.assertEqual(how, "done", "a report ends the wait whatever the log holds")
+
+    def test_a_result_row_that_more_rows_follow_or_a_log_still_written_ends_no_wait(self):
+        report = os.path.join(self.base, "report-g.md")
+        log = os.path.join(self.base, "log-g.jsonl")
+        turn = json.dumps({"type": "result", "subtype": "success", "is_error": False})
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("{}" + chr(10))
+
+        def sleep(_):
+            clock[0] += 10
+            if clock[0] == 10:                    # a goal turn ends and the next one begins
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(turn + chr(10) + json.dumps({"type": "assistant"}) + chr(10))
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=sleep, longest=40, quiet=0)
+        self.assertEqual(how, "long", "a result row with rows after it is a goal turn, not the run's end")
+        with open(log, "a", encoding="utf-8") as f:
+            f.write(turn + chr(10))
+        tick = lambda _: clock.__setitem__(0, clock[0] + 10)  # noqa: E731
+        clock = [0.0]
+        how, _ = coworker.wait_report(report, log=log, clock=lambda: clock[0], sleep=tick, longest=30, quiet=3600)
+        self.assertEqual(how, "long", "a log written within the quiet window is still a run")
+        clock = [0.0]
+        offset_log = os.path.join(self.base, "log-h.jsonl")
+        with open(offset_log, "w", encoding="utf-8") as f:
+            f.write("{}" + chr(10))
+
+        def ends(_):
+            clock[0] += 10
+            if clock[0] == 10:                    # the run's last row, then nothing
+                with open(offset_log, "a", encoding="utf-8") as f:
+                    f.write(turn + chr(10))
+                old = time.time() - 3600
+                os.utime(offset_log, (old, old))
+        how, _ = coworker.wait_report(report + ".x", log=offset_log, clock=lambda: clock[0], sleep=ends, longest=60,
+                                      quiet=90)
+        self.assertEqual(how, "ended", "a last result row in a log quiet past the window is the run's end")
+
     def test_the_files_are_written_into_the_node_with_p4s_two_plugins_off_and_no_other_setting(self):
         found = self.land()
         wrote = coworker.write(found, self.base)
         self.assertEqual(sorted(os.listdir(found[0]["folder"])),
-                         sorted(["coworker-settings.json", found[0]["file"], os.path.basename(found[0]["brief_file"]),
-                                 relay.NODE]))
-        self.assertEqual(len(wrote), 6)
+                         sorted(["coworker-settings.json", found[0]["file"], found[0]["resume_file"],
+                                 os.path.basename(found[0]["brief_file"]), relay.NODE]))
+        self.assertEqual(len(wrote), 8)
         with open(os.path.join(found[0]["folder"], "coworker-settings.json"), encoding="utf-8") as f:
             settings = json.load(f)
         self.assertLessEqual(set(settings), {"enabledPlugins", "claudeMdExcludes"})
@@ -158,15 +301,16 @@ class Coworker(unittest.TestCase):
         self.assertEqual(len(one["lines"]), 3, "no team variable")
         self.assertNotIn(coworker.TEAMS, "\n".join(one["lines"]))
         run = one["lines"][-1]
-        for word in ("--worktree", "--add-dir", "--session-id"):
+        for word in ("--worktree", "--add-dir"):
             self.assertNotIn(word, run, word)
         self.assertIn("--permission-mode bypassPermissions ", run, "whatever mode its starter is in")
-        self.assertTrue(run.startswith(f"claude --name {name} --model "), run)
+        self.assertTrue(run.startswith(f"claude -p --name {name} --session-id {one['session']} --model "), run)
         at = one["folder"].replace("/", "\\")
-        self.assertIn(f"--settings '{at}\\coworker-settings.json' '/goal ", run)
-        prompt = run.rsplit(" '", 1)[1]
-        self.assertTrue(run.endswith("'") and prompt.startswith("/goal "), "the goal is the last argument")
-        self.assertEqual(prompt[:-1], one["goal"])
+        self.assertIn(f"--settings '{at}\\coworker-settings.json' --output-format stream-json --verbose '/goal ", run)
+        self.assertTrue(run.endswith(f" 2>&1 | Tee-Object -FilePath '{at}\\log-{name}.jsonl' -Append"), run)
+        prompt = run.split(" --verbose '", 1)[1].split("' 2>&1", 1)[0]
+        self.assertTrue(prompt.startswith("/goal "), "the goal is the last argument")
+        self.assertEqual(prompt, one["goal"])
         for word in (f"section 1 of the plan {self.path.replace(chr(92), '/')}", f"the brief {one['brief_file']} says",
                      f"the report {one['report']} is written", "Stop after 60 turns"):
             self.assertIn(word, one["goal"], word)
@@ -208,7 +352,7 @@ class Coworker(unittest.TestCase):
         self.assertIn("$env:ANTHROPIC_PROFILE = 'p4-workers'", win[1])
         self.assertIn("$env:ANTHROPIC_CONFIG_DIR", win[1])
         sh = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=False, team=True,
-                             profile="p4-workers")[1]
+                             profile="p4-workers", headless=False)[1]
         self.assertEqual(sh[1], 'd="${ANTHROPIC_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/anthropic}"; '
                                 '[ -f "$d/credentials/p4-workers.json" ] && export ANTHROPIC_PROFILE=p4-workers')
         self.assertEqual(sh[2], "export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "ahead of the team variable")
@@ -266,9 +410,9 @@ class Coworker(unittest.TestCase):
         wrote = coworker.write(found, self.base)
         for one in found:
             self.assertEqual(sorted(os.listdir(one["folder"])),
-                             sorted(["coworker-settings.json", one["file"], os.path.basename(one["brief_file"]),
-                                     relay.NODE]))
-        self.assertEqual(len(wrote), 6)
+                             sorted(["coworker-settings.json", one["file"], one["resume_file"],
+                                     os.path.basename(one["brief_file"]), relay.NODE]))
+        self.assertEqual(len(wrote), 8)
         with open(found[0]["brief_file"], encoding="utf-8") as f:
             self.assertEqual(f.read().rstrip("\n"), found[0]["brief"])
 

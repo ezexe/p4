@@ -73,6 +73,14 @@ class Address(unittest.TestCase):
         deep = os.path.join(self.home, ".claude", ".claude", "p4", ".claude", "p4")
         self.assertEqual(node.place_of(self.home, deep), ("100101", [2, 1]))
 
+    def test_place_of_reads_the_new_sibling_layout_and_the_old_one(self):
+        for i, want in ((1, "101"), (2, "1001"), (3, "10001")):
+            self.assertEqual(node.place_of(self.home, relay.store_of(self.home, i))[0], want)
+            self.assertEqual(node.place_of(self.home, relay.old_store_of(self.home, i))[0], want)
+        deep = os.path.join(relay.store_of(self.home, 2), ".claude", "p4")
+        self.assertEqual(node.place_of(self.home, deep), ("100101", [2, 1]))
+        self.assertEqual(node.place_of(self.home, os.path.join(self.home, ".claude", "1", ".claude", "p4")), ("1", []))
+
     def test_two_tops_of_one_store_are_each_1(self):
         found = node.addresses(self.home, {"a": rec("a"), "b": rec("b"), "c": rec("c", "gone")})
         self.assertEqual(found, {"a": "1", "b": "1", "c": "1"})

@@ -2734,7 +2734,7 @@ class TerminalWorker(unittest.TestCase):
         ran = self.run_phi("--land")
         self.assertEqual(ran.returncode, 0, ran.stderr)
         files = sorted(os.listdir(self.node()))
-        self.assertEqual([f.split("-")[0].split(".")[0] for f in files], ["brief", "coworker", "node", "start"])
+        self.assertEqual([f.split("-")[0].split(".")[0] for f in files], ["brief", "coworker", "node", "resume", "start"])
         self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "sections 1 and 2 are one run")
         self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', ran.stdout, "it runs in the checkout")
         start = next(f for f in files if f.startswith("start-"))
