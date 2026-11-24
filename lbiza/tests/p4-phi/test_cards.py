@@ -574,25 +574,13 @@ class Guards(unittest.TestCase):
         self.assertIn("this session's own mode is not known", out["permissionDecisionReason"])
         self.assertIn("Leave `permission_mode` out", out["permissionDecisionReason"])
         self.assertIsNone(self.start(A), "the mode left out inherits the starter's, whatever it is")
-        # the mode the session's last prompt carried
-        r = self.t.hook("user-prompt-submit", A, {"hook_event_name": "UserPromptSubmit", "prompt": "carry on",
-                                                  "permission_mode": "bypassPermissions"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.t.session(A).get("permissionMode"), "bypassPermissions")
+        self.mode(A, "bypassPermissions")
         out = self.start(A, permission_mode="plan")
         self.assertEqual(out["permissionDecision"], "deny")
         self.assertIn("is of another class than this session's own `bypassPermissions`", out["permissionDecisionReason"])
         self.assertIsNone(self.start(A, permission_mode="bypassPermissions"), "of the starter's class")
-        # the hook's own input says the mode the session is in now, ahead of what was kept
-        path = os.path.join(self._tmp.name, A + "-t.jsonl")
-        write(path, "x")
-        r = self.t.hook("start-advice", A, {"hook_event_name": "PreToolUse", "permission_mode": "auto",
-                                            "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
-                                            "tool_input": {"initiation": "user_asked", "context": "fresh",
-                                                           "title": "a child", "use_worktree": False,
-                                                           "permission_mode": "plan",
-                                                           "prompt": "Read the docs.\nFiles: none"}})
-        self.assertEqual(r.stdout.strip(), "", "auto and plan are one class")
+        self.mode(A, "auto")
+        self.assertIsNone(self.start(A, permission_mode="plan"), "auto and plan are one class")
         self.assertEqual(cards.before_start({"permission_mode": "auto"}, "", TOP, (TOP, "top"))[:12], "phi (p4-phi)")
         self.assertEqual(cards.before_start({"permission_mode": "auto"}, "", "", (TOP, "top")), "", "no child: no step")
 
@@ -612,15 +600,16 @@ class Guards(unittest.TestCase):
         self.assertEqual(self.guard("store-guard", TOP, cmd)["permissionDecision"], "ask", "ezexe's own session")
 
     def start(self, who, **inp):
-        path = os.path.join(self._tmp.name, who + "-t.jsonl")
-        write(path, "x")
-        r = self.t.hook("start-advice", who, {"hook_event_name": "PreToolUse",
-                                              "tool_name": "mcp__ccd_session__start_session", "transcript_path": path,
-                                              "tool_input": {"initiation": "user_asked", "context": "fresh",
-                                                             "title": "a child", "use_worktree": False,
-                                                             "prompt": "Read the docs.\nFiles: none", **inp}})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)["hookSpecificOutput"] if r.stdout.strip() else None
+        """The step before a start, cards.before_start, for a start of `who`: its decision as the hook words it, None
+        for one it lets by. A session another session started is refused every desktop start by the start gate before
+        this step is reached, so the step is read here as the function it is, with the starter's mode from the app's
+        record."""
+        if not p4conf.cards_on(self.t.p4):
+            return None
+        own = str(jload(os.path.join(self.t.app, who + ".json")).get("permissionMode") or "")
+        why = cards.before_start({"initiation": "user_asked", **inp}, own, "" if who == TOP else TOP, (TOP, "top"),
+                                 self.t.proj)
+        return {"permissionDecision": "deny", "permissionDecisionReason": why} if why else None
 
     def mode(self, host, mode):
         path = os.path.join(self.t.app, host + ".json")

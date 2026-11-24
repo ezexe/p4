@@ -224,7 +224,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
 
   <section class="block" aria-label="The model and effort a worker starts with">
     <h2>A worker's model and effort</h2>
-    <p class="intro">The start calls p4-phi drafts carry the <code>model</code> and the <code>effort</code> of the step's role in the skill <code>sub-agentic</code>, and a new top session carries neither, so it keeps its parent session's. The start tool takes a model id of the same family as the starter's or cheaper, and ignores a higher one. The kind of the step decides both, and the brief says them in one line, <code>Model and effort: &lt;model&gt; at &lt;effort&gt; effort</code>.</p>
+    <p class="intro">The start calls p4-phi drafts carry the <code>model</code> and the <code>effort</code> of the step's role in the skill <code>sub-agentic</code>, and an orchestrator under the session that started it carries neither, so it keeps its starter's. The start tool takes a model id of the same family as the starter's or cheaper, and ignores a higher one. The kind of the step decides both, and the brief says them in one line, <code>Model and effort: &lt;model&gt; at &lt;effort&gt; effort</code>.</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Kind of step</th><th>Role</th><th>Model</th><th>Effort</th></tr></thead>
@@ -234,7 +234,7 @@ footer{margin-top:34px;padding-top:14px;border-top:1px solid var(--line);font-si
           <tr><td><code>design</code>: a design or a decision with its sources</td><td>writer</td><td><code>claude-opus-5-5</code></td><td><code>medium</code></td></tr>
           <tr><td><code>plan</code>: a brief that says its session starts in plan mode, and a step that plans</td><td>planner</td><td><code>claude-fable-5-2</code></td><td>the parent session's own</td></tr>
           <tr><td><code>review</code>: a review, an audit or a check of another's work</td><td>cross-check</td><td><code>claude-sonnet-5-5</code></td><td><code>medium</code></td></tr>
-          <tr><td><code>top</code>: a brief that makes a new top session</td><td>orchestrator</td><td>the parent session's own</td><td>the parent session's own</td></tr>
+          <tr><td><code>top</code>: a brief that says its session is an orchestrator under the session that started it</td><td>orchestrator</td><td>the parent session's own</td><td>the parent session's own</td></tr>
         </tbody>
       </table>
     </div>
@@ -316,18 +316,16 @@ function steps(kind,ask){
        html:"A worker is where a work step runs, so the step is done here, in the files the worker's brief names. Its reads across files, long commands and checks go down from here. Switch the asking session to the orchestrator to see how the step arrived."}
     ];
     return [
-      {dir:"down",legs:["tc"],by:"The orchestrator starts a worker",say:"The start call carries the brief down.",
+      {dir:"down",legs:["tc"],by:"The orchestrator starts a worker",say:"The draft carries the brief down.",
        html:"The brief is the step's words, a line <code>Files:</code> with the paths the worker may write, what it must leave done, “report when done”, and the line that says its model and effort. Steps that share a file go to one worker as a serial run. Steps with disjoint files each get a worker, and each worker writes in the one checkout, held to its Files: paths, so a start whose paths overlap a running worker's is refused.",
-       code:call("mcp__ccd_session__start_session",{initiation:"user_asked",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",model:"claude-opus-5-5",effort:"medium",
-         prompt:"Fix the ten review findings in relay.py.\nFiles: lbiza/plugins/p4-phi/scripts/relay.py\nDone looks like: test_relay.py passes and relay.py is committed by phi.py commit.\nReport when done.\n\nModel and effort: claude-opus-5-5 at medium effort, since this is a build that changes behaviour, a writer's, as the skill sub-agentic gives it."})},
-      {dir:"down",legs:["tc"],by:"Or it shows a suggested task card",say:"A card carries the same brief down.",
-       html:"On a turn that another session began, the app refuses <code>user_asked</code>. The orchestrator shows the worker as a suggested task card, the same call with <code>initiation</code> <code>own_initiative</code>, which ezexe starts in this session. The app nests the worker under the session that showed the card, and p4-phi keeps no request for it.",
-       code:call("mcp__ccd_session__start_session",{initiation:"own_initiative",context:"fresh",use_worktree:false,title:"Fix the review findings in relay.py",model:"claude-opus-5-5",effort:"medium",
-         prompt:"<the whole brief, with its Files: line and its model and effort>"})},
+       code:"phi.py draft \"Fix the ten review findings in relay.py\"\nphi.py draft --start <draft id>\n\nmcp__terminal__run_in_terminal {\"title\": \"tw-fix-the-ten-review-fi-<id>\", \"cwd\": \"<checkout>\", \"command\": \"<the start file>\"}"},
+      {dir:"down",legs:["tc"],by:"It waits for the report file",say:"The worker is a terminal session.",
+       html:"A worker below an orchestrator starts in the Terminal panel, never as a desktop session: <code>draft --start</code> gives it a node, writes its brief, settings and start file there and prints the one call that opens its tab, and <code>coworkers --wait --report</code> waits for its report file.",
+       code:"phi.py coworkers --wait --report <node>/report-<name>.md"},
       {dir:"hold",legs:["tc"],by:"The orchestrator ends its turn",say:"The worker works. The orchestrator is free.",
        html:"The orchestrator plans, messages and manages sessions, decides with ezexe and lands the work. It does not wait on the worker."},
       {dir:"up",legs:["tc"],by:"The worker reports",say:"The report comes back up.",
-       html:"When the worker ends its turn, its report reaches its parent session beside that session's next message. The worker leaves its outcome there as a <code>replaces:</code> note and counts as archived from then on. The orchestrator lands the work, meaning merge and push."}
+       html:"When the worker ends, it has written its report file, which the orchestrator reads. The orchestrator lands the work, meaning merge and push."}
     ];
   }
   if(kind==="read")return [

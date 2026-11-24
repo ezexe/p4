@@ -2,16 +2,17 @@
 
 ## A puppeteer
 
-A puppeteer is a session nobody started that ezexe filed in the sidebar section "puppeteers", and it controls the orchestrators of other trees.
-The line that has it file an orchestrator it started names the section, and `mcp__ccd_sidebar__move_sessions` takes that section's id, which `mcp__ccd_sidebar__list_sections` or `mcp__ccd_sidebar__list_groups` answers: the line gives the id itself where the plugin's hooks module asked those tools, which it does unless the store's `phi.json` sets `app_tools` false.
-Its rule is handed once, beside its first message after p4-phi sees the filing; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
+A puppeteer is a session nobody started that started an orchestrator which is still live, and it controls the orchestrators it started.
+Nothing records them by hand: the live sessions whose record names it as their starter are its controlled sessions, read from the store's records and from the app's newest records, and an orchestrator it starts stays attached under it and is detached by nothing.
+A session that started no orchestrator is an orchestrator, and its workers are terminal sessions too.
+Its rule is handed once, beside its first message after p4-phi sees that it started one; its board, `board.md` in its session folder, says on its head how it is kept; and the line p4-phi hands at a boundary, a controlled tree that closed or every controlled session idle with no request waiting, says to keep what the board lacks with `note`.
 Claude Code compacts a session by itself, so a boundary carries no compact question and no line for ezexe to type, and after a compaction, typed or automatic, the SessionStart entry hands a puppeteer its board's path first.
 When a controlled tree closes or a controlled session reports done, a puppeteer is handed one line naming the open issues of the repositories its controlled sessions work in that no live session's record holds as its issue, each once.
 Beside each one the line names the running orchestrator whose topic covers it, picked as `route_down` picks one for ezexe's words, so the puppeteer sends it straight there in one message, and one that no running orchestrator covers is named as the start of a new orchestrator.
 The line tells the puppeteer to close what a landed commit covers and to route or start the rest, and none of them is put to ezexe as a choice.
 The puppeteer's own watcher lists those issues at its slow looks, with one `gh issue list` a repository and no more often than it reads GitHub, and keeps them in `open-issues.json` in the puppeteer's folder, so no hook reads GitHub for the line.
 `P4_PHI_WATCH_NET` at `0` keeps the look from listing, and with `phi.issues` false, or `P4_PHI_ISSUES` at `0`, the line names none.
-A controlled session is told once when it comes to have a puppeteer, and once when that ends.
+A controlled session is told once that the session that started it is its puppeteer, which a session another session started asks for a new orchestrator with `request ... --to-puppeteer`, never by a start of its own.
 Each request of ezexe's to a puppeteer is a row of its ledger, `asks.md` beside its board: a short topic, the session that holds it by full title and id, its state, and what waits on ezexe.
 Every message of ezexe's opens a row, whatever its words and also while another row waits on ezexe, unless it is a status question about existing work such as "where does it stand" or "did it land", or a reply with nothing after it.
 The same words again join their row while it is live, and open a new row once it is finished.
@@ -34,12 +35,10 @@ A message is a status question only when each of its sentences is a question or 
 What follows such a reply or id opens a request of its own when it asks for more than the answer, and nothing else ezexe says ends a wait.
 Beside each of the puppeteer's messages, a short line gives the counts by state and names the page.
 A message of ezexe's that `route_down` sends to a controlled session's topic is drafted no start.
-A puppeteer's turns hold messages only, and every other task goes to its one standing worker, which it starts under itself with the brief line `Standing worker of its puppeteer` and which splits its task groups into standing coworkers.
-A second such start is refused while the first is live, and a puppeteer's shell call or edit is answered with a line that sends the task to its worker.
-The worker's and each coworker's first message says what it is, that it hands up a page's path and its counts and never publishes a result as an Artifact or a file unless ezexe asks, and that it keeps a state page, `state.md` in the scratchpad directory the app names for its first turn, the folder its hooks get as `scratchpad_dir`.
-A coworker whose brief holds the line `Issues coworker of its standing worker` is the issues coworker, kept on its record as `standingGroup`, and the worker's first message names that line.
-One session publishes the issues of a tree: under a puppeteer the issues coworker of its standing worker, that worker until a brief marks such a coworker, and the puppeteer until it has a worker, and under no puppeteer the tree's orchestrator.
+A puppeteer's own edits and shell calls are checked as any session's are, and a task that is on no orchestrator's topic gets a new orchestrator, while a task that is its own it does itself.
+A session another session started starts no desktop session of its own: its start is refused with the `draft` command, since each worker below an orchestrator starts in the Terminal panel.
+One session publishes the issues of a tree: the session nobody started at its top, a puppeteer or an orchestrator, and a terminal worker publishes none and writes each finding into its report as one `Finding:` line.
 A Bash or PowerShell call that runs `gh issue create` in any other session is refused with one line that names the `Finding:` form and that session by full title, since a permission rule on the command holds in every session that reads its settings file and cannot tell one session from another.
 `phi.issues` false turns that refusal off with the rest of the issue loop.
 A worker whose brief asks for no change takes no issue and is handed the `Finding:` form at its first message, as a writing worker whose brief names no open issue is.
-At a message carrying reports, a puppeteer is handed a line naming each reporting session whose effort to raise, lower or set low with `set_session_effort`, and it changes a running session's model with `set_session_model` only where effort alone does not fit that session's work and its context is worth keeping, since the app raises its own card for a model above the caller's.
+A puppeteer tunes a running session's effort with `set_session_effort`, and changes its model with `set_session_model` only where effort alone does not fit that session's work and its context is worth keeping, since the app raises its own card for a model above the caller's.

@@ -1126,7 +1126,6 @@ class NativeCalls(unittest.TestCase):
         self.assertLess(got.index("`mcp__ccd_session__list_start_targets`"), got.index("exactly the call given"))
         self.assertIn("never guessed", got)
 
-    @unittest.skip("docs/puppeteer.html holds the rule's words, and the pages are rewritten by section 6 of the plan")
     def test_the_page_of_the_puppeteer_says_the_rule_as_controls_hands_it(self):
         """The script of docs/puppeteer.html shows the rule a puppeteer is told once. Its function RULE holds the
         words of controls.RULE as rule_text fills them where `phi.upkeep` is off, with the page's own names for the

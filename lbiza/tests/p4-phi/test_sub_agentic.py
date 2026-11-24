@@ -112,7 +112,7 @@ class HandOuts(unittest.TestCase):
         self.assertIn("a writer's, as the skill sub-agentic gives it", call["prompt"])
 
     def test_a_planner_starts_on_fable_at_its_starters_own_effort(self):
-        self.assertIn("`claude-fable-5-2` and no `effort`", table()["planner"][1])
+        self.assertIn("terminal worker in plan mode", table()["planner"][1])
         self.assertEqual(plans.CHILD_LEVELS_DEFAULT["plan"], {"model": "claude-fable-5-2", "effort": "inherit"})
         self.assertEqual(plans.ROLES["plan"], "planner")
         brief = "It starts in plan mode, and writes the plan of the exporter's move.\nFiles: none"
