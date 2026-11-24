@@ -981,7 +981,7 @@ class Terminal(Base):
         self.assertEqual(waited.returncode, 0, waited.stderr)
         self.assertIn("is there", waited.stdout)
 
-    def planner_draft(self, settings=None):
+    def planner_draft(self, settings=None, extra=()):
         """Starts a planner's draft; its start file's text, its resume file's text, the output and the node folder."""
         t = self.t
         if settings is not None:
@@ -992,7 +992,7 @@ class Terminal(Base):
         write(os.path.join(t.dir(TOP), "drafts", did + ".json"), json.dumps({
             "id": did, "title": "Plan the ports table move", "parent": TOP, "verdict": "start", "context": "fresh",
             "brief": "Plan the ports table move.\nThis session starts in plan mode.\nFiles: none", "gate": []}))
-        r = t.cli(TOP, "draft", "--start", did)
+        r = t.cli(TOP, "draft", "--start", did, *extra)
         self.assertEqual(r.returncode, 0, r.stderr)
         name = coworker.draft_name("Plan the ports table move", did)
         folder = relay.nodes(t.p4)[name]
@@ -1082,6 +1082,19 @@ class Terminal(Base):
         line = next(x for x in r.stdout.split("\n") if "mcp__terminal__open_terminal_tab" in x)
         self.assertLess(line.index("open_terminal_tab"), line.index("run_in_terminal"))
         self.assertIn('"tab_id": "<the tab_id it returned>"', line)
+
+    def test_a_draft_started_with_a_checkout_works_commits_and_lands_there(self):
+        repo = os.path.join(self.t.tmp, "other-repo")
+        os.makedirs(repo)
+        there = os.path.abspath(repo).replace("\\", "/")
+        start, _, out, name = self.planner_draft(extra=("--checkout", repo))
+        self.assertRegex(start.replace("\\", "/"), r"(?:Set-Location|cd)\b[^\n]*" + re.escape(there))
+        with open(os.path.join(relay.nodes(self.t.p4)[name], f"brief-{name}.md"), encoding="utf-8") as f:
+            brief = f.read().replace("\\", "/")
+        self.assertIn(f"Work in {there},", brief)
+        self.assertIn(f"commit --checkout {there} -m", brief)
+        land = next(x for x in out.replace("\\", "/").splitlines() if "--land" in x)
+        self.assertIn(f'--checkout "{there}"', land)
 
     def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
         start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})

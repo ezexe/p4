@@ -1868,7 +1868,8 @@ def command(a, me):
         print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged"), file=sys.stderr)
         return 0
     if a.cmd == "draft" and a.start:
-        for line in start_draft(home, s, a.start, base, a.task):
+        where = os.path.abspath(a.checkout) if a.checkout else base
+        for line in start_draft(home, s, a.start, where, a.task):
             print(line)
         return 0
     if a.cmd == "draft":
@@ -1917,6 +1918,9 @@ def add_parsers(sub, common):
             p.add_argument("--start", default="", metavar="DRAFT",
                            help="start the terminal worker of a kept draft that has a parent: its node, brief and "
                                 "start file, and the call that opens its tab")
+            p.add_argument("--checkout", default="", metavar="REPO",
+                           help="with --start: the repository the worker runs and commits in; without it, the "
+                                "session's folder")
             p.add_argument("--task", default="", metavar="FILE",
                            help="with --start: a file holding the task in your own words, which the worker's brief "
                                 "carries under `## The task`")
