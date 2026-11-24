@@ -1165,9 +1165,8 @@ def background_text(home, s, own=False, slim=False):
 
 def findings_text(home, s, new, store=""):
     """The line under the reports of a session's workers that carry `Finding:` lines, '' when none does. A
-    worker passes them up unchanged in its own report; an orchestrator that a puppeteer controls
-    leaves them to that puppeteer, whose board lists them; any other orchestrator publishes and places
-    them itself. A finding on a file or an issue another live session holds goes straight to that session, named
+    session another session started passes them up unchanged in its own report; the session nobody started at
+    the top of the tree publishes and places them itself. A finding on a file or an issue another live session holds goes straight to that session, named
     beside it by the address book, book.py; only the rest go up for an issue."""
     import book
     found, held, own, bk = [], [], [], {}
@@ -1212,17 +1211,8 @@ def findings_text(home, s, new, store=""):
     if spawned_from(s):
         rest = (f"{head}. Pass each one up unchanged in this session's own report, and publish no issue for it:\n"
                 + listed)
-    elif controls.puppeteer_of(s, store)[0]:
-        pid = controls.puppeteer_of(s, store)[0]
-        by, by_title, kind = controls.publisher(home, s, store)
-        does = ("it publishes the issues they need and places" if by == pid else
-                f"{controls.PUBLISHER[kind].replace('its puppeteer', 'that puppeteer')}, \"{by_title}\" `{by}`, "
-                f"publishes the issues they need, while the puppeteer places")
-        rest = (f"{head}. They go up to the puppeteer \"{controls.full_title(pid)}\" `{pid}`, whose board "
-                f"lists them, and {does} the session that resolves each: this "
-                f"session publishes none.")
     else:
-        rest = (f"{head}, and no puppeteer controls this session tree, so the findings in them are this "
+        rest = (f"{head}, and no session started this one, so the findings in them are this "
                 f"session's to publish and place. Check each against the open issues and the running sessions, and "
                 f"send one a running session covers to that session; for the rest, publish the issue and place the "
                 f"session that resolves it, as a child of the session in this tree that holds its files or as a new "
@@ -1639,21 +1629,6 @@ PHI_PY = re.compile(r"(?:^|[\/'\"\s])phi\.py\b")
 PYTHONS = ("python", "python3", "py", "uv", "pythonw")
 
 
-def h_puppeteer_tool(payload):
-    """PreToolUse on a shell command or a file edit: a puppeteer's turns hold messages only, so the task goes to its
-    standing worker. A subagent's call and a call that runs phi.py itself, such as `note` or `controls`, get
-    nothing."""
-    me = Me(payload)
-    if not me.home or not me.id or payload.get("agent_id"):
-        return ""
-    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if "phi.py" in str(inp.get("command") or ""):
-        return ""
-    line = controls.tool_line(load_session(me.home, me.id), me.store)
-    RAN["puppeteer_tool"] = bool(line)
-    return line
-
-
 def h_wrap_up(payload):
     """PostToolUse on wrap_up: a session that keeps a state page is told to bring it up to date, to read its context
     with the app's own count and, past the line, to clear its idle coworkers and then itself."""
@@ -2059,15 +2034,6 @@ def h_user_prompt_submit(payload):
     pad = str(payload.get("scratchpad_dir") or "").replace("\\", "/").rstrip("/")
     if pad and not s.get("scratchpadDir"):        # the app's scratchpad of the first turn: a clear's new
         s["scratchpadDir"] = pad                  # conversation still finds the state page written there
-    stand = (controls.worker_first(me.home, s, payload.get("prompt"), me.store)
-             if spawned_from(s) and not load_turns(me.home, s["sessionId"]) else "")
-    if stand:                                      # a puppeteer's standing worker or coworker: what it is
-        RAN["standing"] = s.get("standingKind")
-        parts.insert(0, notice(stand))
-    usage = controls.usage_line(me.home, s, payload.get("prompt"), me.store, by)
-    if usage:                                      # a puppeteer watches its worker's and coworkers' context
-        RAN["usage"] = True
-        parts.insert(0, notice(usage))
     # ezexe's own message: a handed-over task is none, and to a puppeteer, neither is one the app marks as another
     # session's; an orchestrator's routing still reads the work another session hands it
     ezexes = req if req and not handed_over(payload.get("prompt")) else ""
@@ -2349,10 +2315,9 @@ TURN_TAIL = 65536             # bytes from the end of a turns.jsonl that hold it
 def starter_cli(home, s):
     """The session that started `s`, as the address `$.session.send({ to: { sessionId } })` takes: the CLI session
     id on the app's record of the starter, which is what `$.session.id()` answers there, else the last one its
-    session.json holds. '' for a session nobody started, for a starter no record names a CLI session of, and for a
-    puppeteer's standing worker or coworker, whose own first line asks it for the message its turn ends with."""
+    session.json holds. '' for a session nobody started and for a starter no record names a CLI session of."""
     above = spawned_from(s)
-    if not above or s.get("standingKind") in ("worker", "coworker"):
+    if not above:
         return ""
     cli = str(app_record(above).get("cliSessionId") or "")
     if not cli:
@@ -2772,13 +2737,6 @@ def h_start_advice(payload):
     if inp.get("proposal_id") and not inp.get("prompt"):
         return None                                 # starting a card already made: nothing to decide
     card = inp.get("initiation") == "own_initiative"
-    why = controls.start_refused(me.home, load_session(me.home, me.id), inp.get("prompt"), me.store)
-    if why is None:                                 # a puppeteer's standing worker, the first one
-        RAN["standing_start"] = True
-        return None
-    if why:                                         # a second while the first is live
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
-                                       "permissionDecisionReason": why}}
     mine = load_session(me.home, me.id)
     cap = caps_text(me.home, mine) if mine.get("sessionId") else ""
     if cap:                                         # as deep, or with as many live sessions, as p4-phi allows
@@ -3533,7 +3491,6 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "self-archive": ("PreToolUse", h_self_archive)}
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "cards-guard", "plan",
                                      "memory-gap", "self-archive", "task-stop")})
-ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
 HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)
 HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_check)

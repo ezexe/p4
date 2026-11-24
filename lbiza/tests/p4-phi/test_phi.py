@@ -1920,7 +1920,7 @@ class NoWriteUnderClaude(unittest.TestCase):
     """Row B7 of the plugin defaults inventory: every write under .claude asks ezexe, even in bypass mode, so no line
     p4-phi hands a session names a place under .claude to write. A state page is kept in the app's scratchpad."""
 
-    PUP, WORKER, CO = "local_pup00001", "local_wrk00001", "local_cow00001"
+    PUP, CO = "local_pup00001", "local_cow00001"
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -1928,11 +1928,7 @@ class NoWriteUnderClaude(unittest.TestCase):
         t.record(TOP, title="Narwhal exporter")
         t.record(KID, TOP, "Fix the dropped row")
         t.record(self.PUP, title="Control the exporter tree")
-        t.record(self.WORKER, started_by=self.PUP, title="Puppeteer's standing worker")
-        t.record(self.CO, started_by=self.WORKER, title="a standing coworker")
-        write(os.path.join(t.tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
-            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers", "mode": "code"}],
-                                                 "assignments": {"code:" + self.PUP: "cg-1"}}}}}}))
+        t.record(self.CO, started_by=self.PUP, title="a coworker of the puppeteer")
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -1959,21 +1955,16 @@ class NoWriteUnderClaude(unittest.TestCase):
         import controls
         said = {}
         for host, first in ((TOP, TASK), (KID, HANDED), (self.PUP, "Control the trees"),
-                            (self.WORKER, "Run the puppeteer's checks.\n" + controls.WORKER_BRIEF),
                             (self.CO, "Check the archives.\nFiles: none")):
             said[host, "start"] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": "startup"})
             said[host, "first"] = self.run_hook(PROMPT, host, {"hook_event_name": "UserPromptSubmit",
                                                                 "prompt": first})
-        for host in (TOP, KID, self.WORKER, self.CO):
+        for host in (TOP, KID, self.CO):
             for source in ("compact", "clear"):
                 said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
-        said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
+        said[self.CO, "wrap_up"] = self.wrap_up(self.CO)
         for key, text in said.items():
             self.assertEqual(writes_under_claude(text), [], key)
-        page = self.pad(self.WORKER) + "/state.md"
-        self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
-        self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
-        self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
         for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
 

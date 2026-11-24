@@ -1607,31 +1607,6 @@ test('a plain shell call starts no python, whatever the store holds', async ($, 
   expect(seen.checks).toEqual([])
 })
 
-test('a puppeteer is checked at each edit and shell call', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  mock.clock(on)
-  const seen = machine(on, {})
-  on('tool.check', () => ALLOW)
-  const edit = (): never => call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' })
-
-  // Another session's marker opens nothing for this one.
-  seen.files[`${PHI}/.puppeteers/cli-0002`] = ''
-  await $.tool.check(edit())
-  await $.tool.check(bash('ls'))
-  expect(seen.checks).toEqual([])
-
-  seen.files[`${PHI}/.puppeteers/cli-0001`] = ''
-  await $.tool.check(edit())
-  await $.tool.check(call('Write', { file_path: 'a.py', content: 'x' }))
-  await $.tool.check(call('NotebookEdit', { notebook_path: 'a.ipynb', new_source: 'x' }))
-  await $.tool.check(bash('ls'))
-  expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Edit', 'Write', 'NotebookEdit', 'Bash'])
-
-  // A tool hook.py has no check for is not read.
-  await $.tool.check(call('Read', { file_path: 'a.py' }))
-  expect(seen.checks.length).toBe(4)
-})
-
 test("an edit is checked in a project whose store holds the paths marker, and not in one with no marker", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   mock.clock(on)
@@ -2744,10 +2719,10 @@ test('a script the module runs is handed the variables a command hook gets, so b
   // Python's markers are read in the store python wrote them to, the main checkout's, and one in the worktree's
   // store opens nothing.
   const before = seen.checks.length
-  seen.files[`${other}/.claude/p4/phi/.puppeteers/cli-0001`] = ''
+  seen.files[`${other}/.claude/p4/phi/.paths/on`] = ''
   await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
   expect(seen.checks.length).toBe(before)
-  seen.files[`${project}/.claude/p4/phi/.puppeteers/cli-0001`] = ''
+  seen.files[`${project}/.claude/p4/phi/.paths/on`] = ''
   await $.tool.check(call('Edit', { file_path: 'a.py', old_string: 'a', new_string: 'b' }))
   expect(seen.checks.length).toBe(before + 1)
 })

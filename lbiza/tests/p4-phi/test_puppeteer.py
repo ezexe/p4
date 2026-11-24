@@ -1093,11 +1093,6 @@ class Look(Base):
         rec.pop("cliSessionId")                     # no record names one: the last its session.json holds
         write(os.path.join(t.app, TOP + ".json"), json.dumps(rec))
         self.assertEqual(self.look(KID)["starter"], CLI[TOP])
-        path = self.path(KID, "session.json")
-        kid = json.loads(read(path))
-        kid["standingKind"] = "worker"
-        write(path, json.dumps(kid))
-        self.assertNotIn("starter", self.look(KID), "a standing worker writes its own closing message")
 
     def test_a_look_on_a_deleted_session_folder_writes_nothing_and_makes_no_folder(self):
         """ezexe/p4#206: a session folder that is gone gets no look, and one deleted while a look runs is not made

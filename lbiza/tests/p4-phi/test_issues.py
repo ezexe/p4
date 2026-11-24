@@ -667,9 +667,6 @@ class FindingsGoUp(unittest.TestCase):
         t.record(TOP, title="top")
         t.record(A, TOP, title="the x fix")
         t.record(SUP, title="Watch the demo trees")
-        write(os.path.join(tmp, "claude_desktop_config.json"), json.dumps({"preferences": {"epitaxyPrefs": {
-            "dframe-group-scopes": {"acct/org": {"groups": [{"id": "cg-1", "name": "puppeteers"}],
-                                                 "assignments": {"code:" + SUP: "cg-1"}}}}}}))
         self.work = os.path.join(t.proj, "work").replace("\\", "/")
         write(os.path.join(self.work, "lib", "x.py"), "x = 1\n")
         for args in (("init", "-q", "-b", "main"), ("add", "-A"), ("commit", "-qm", "one"),
@@ -716,7 +713,8 @@ class FindingsGoUp(unittest.TestCase):
             self.assertIn(self.FORM, first)
             self.assertIn("passes those lines up unchanged", first)
             self.assertNotIn("Finding:", listed, "said at the first message only")
-        t.cli(SUP, "controls", TOP)
+        t.record(TOP, SUP, title="top")             # the puppeteer starts the orchestrator, which stays under it
+        t.say(TOP, "carry on")
         kid = "Finding: lib/x.py drops the last row; source: lib/x.py line 1; test: test_x.py; files: lib/x.py"
         top = "Finding: the importer reads one row too many; source: lib/y.py line 9; test: test_y.py; files: lib/y.py"
         t.stop(A, "Fix the off-by-one", report="Fixed lib/x.py.\n" + kid, uuid="a1")
@@ -734,7 +732,7 @@ class FindingsGoUp(unittest.TestCase):
                    "pushes.\n")
         gap = self.record(A, "Write", {"file_path": mem}, "ok", "toolu_write01", P4_PHI_PLUGIN_ROOT=self.plug)
         with self.subTest("the plugin-gap line names the puppeteer and not `gh issue create`"):
-            self.assertIn(f"the puppeteer \"Watch the demo trees\" `{SUP}`", gap)
+            self.assertIn(f"\"Watch the demo trees\" `{SUP}`, publishes the issue", gap)
             self.assertIn("Finding: ", gap)
             self.assertNotIn("gh issue create", gap)
         self.assertEqual(self.created(), [], "and no issue is filed by anyone")
@@ -770,7 +768,7 @@ class FindingsGoUp(unittest.TestCase):
         why = self.refused(A)
         with self.subTest("a worker's call is denied with the form and the publisher's title, in one line"):
             self.assertIn(self.FORM, why)
-            self.assertIn(f"the orchestrator of its tree, \"top\" `{TOP}`", why)
+            self.assertIn(f"the session nobody started at its top, \"top\" `{TOP}`", why)
             self.assertIn("into this session's report", why)
             self.assertNotIn("\n", why)
         with self.subTest("the same call in the publisher's session passes"):
@@ -814,64 +812,31 @@ class FindingsGoUp(unittest.TestCase):
                                                    P4_PHI_ISSUES="0")), "the switch turns it off")
         self.assertEqual(self.created(), [])
 
-    def test_under_a_puppeteer_only_the_issues_coworker_of_its_standing_worker_publishes(self):
-        """ezexe/p4#227: under a puppeteer the publisher is the issues coworker of the puppeteer's standing worker
-        once one is on record, else the standing worker, else the puppeteer. The call passes in that session and is
-        denied in every other session of the puppeteer's trees, the puppeteer's own among them, with the publisher's
-        full title in the reason."""
+    def test_under_a_puppeteer_only_the_puppeteer_publishes(self):
+        """ezexe/p4#227: the publisher of a tree is the session nobody started at its top, a puppeteer where one
+        started the tree's orchestrator. The call passes there and is denied in every other session of its trees,
+        with the publisher's full title in the reason."""
         t = self.t
-        t.record(WRK, SUP, title="Run the puppeteer's checks")
-        t.record(COW, WRK, title="Draft and publish the issues")
-        t.record(COW2, WRK, title="Check the archives")
+        t.record(TOP, SUP, title="top")
         t.say(SUP, "Watch the demo trees")
         t.say(TOP, "Build the demo")
-        t.cli(SUP, "controls", TOP)
         t.say(A, f"Fix the off-by-one in {self.work}/lib/x.py and commit it. Archive when done.")
-        with self.subTest("with no standing worker on record the puppeteer publishes"):
+        with self.subTest("the puppeteer's own call passes"):
             self.assertEqual(self.refused(SUP), "")
-            self.assertIn(f"its puppeteer, \"Watch the demo trees\" `{SUP}`", self.refused(TOP))
-            self.assertIn(f"`{SUP}`", self.refused(A))
-        said = context(t.say(WRK, "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF))
-        with self.subTest("then its standing worker, which is told the line that marks the issues coworker"):
-            self.assertIn(f"`{controls.ISSUES_BRIEF}`", said)
-            self.assertEqual(self.refused(WRK), "")
-            why = self.refused(SUP)
-            self.assertIn(f"its standing worker, \"Run the puppeteer's checks\" `{WRK}`", why)
-            self.assertIn("Send that session the finding with SendMessage", why)
-            self.assertIn(self.FORM, why)
-        said = context(t.say(COW, "Check each finding against the open issues and publish the ones that need one.\n"
-                                  + controls.ISSUES_BRIEF))
-        t.say(COW2, "Check the archives.\nFiles: none")
-        with self.subTest("the brief line marks the issues coworker on its record"):
-            self.assertIn("the one session whose `gh issue create` runs", said)
-            self.assertEqual(t.session(COW).get("standingGroup"), "issues")
-            self.assertNotIn("standingGroup", t.session(COW2))
-        with self.subTest("the call passes in the issues coworker's session"):
-            self.assertEqual(self.refused(COW), "")
-        title = f"\"Draft and publish the issues\" `{COW}`"
-        with self.subTest("and is denied in the puppeteer's, with the coworker's title in the reason"):
-            why = self.refused(SUP)
-            self.assertIn(f"the issues coworker of its standing worker, {title}", why)
-            self.assertIn(self.FORM, why)
-        with self.subTest("and in its standing worker's, another coworker's and each session of a controlled tree"):
-            self.assertIn(f"its own issues coworker, {title}", self.refused(WRK))
-            for host in (COW2, TOP, A):
+        title = f"\"Watch the demo trees\" `{SUP}`"
+        with self.subTest("and is denied below it, with its title in the reason"):
+            for host in (TOP, A):
                 why = self.refused(host)
-                self.assertIn(f"the issues coworker of its puppeteer's standing worker, {title}", why, host)
+                self.assertIn(title, why, host)
+                self.assertIn(self.FORM, why, host)
                 self.assertIn("into this session's report", why, host)
         mem = os.path.join(t.p4, "temportal", "memory", "children-on-parent-branch.md")
         write(mem, "---\nname: children-on-parent-branch\ndescription: x\nmetadata:\n  type: feedback\n---\n\n"
                    "A session started from another works on the parent's branch, and only the parent merges and "
                    "pushes.\n")
         gap = self.record(A, "Write", {"file_path": mem}, "ok", "toolu_write02", P4_PHI_PLUGIN_ROOT=self.plug)
-        with self.subTest("the plugin-gap line names the issues coworker as the session that publishes"):
-            self.assertIn(f"the issues coworker of its puppeteer's standing worker, {title}, publishes the issue",
-                          gap)
-        app = os.path.join(t.app, COW + ".json")
-        write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))
-        with self.subTest("once the app has archived the coworker, the standing worker publishes again"):
-            self.assertEqual(self.refused(WRK), "")
-            self.assertIn(f"`{WRK}`", self.refused(SUP))
+        with self.subTest("the plugin-gap line names it as the session that publishes"):
+            self.assertIn(f"{title}, publishes the issue", gap)
         self.assertEqual(self.created(), [])
 
 

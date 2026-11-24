@@ -607,104 +607,10 @@ class Supervisor(unittest.TestCase):
         self.assertNotIn("permissionDecision", out, "p4-phi keeps no refusal of its own")
         self.assertIn("set_session_effort", controls.RULE)
 
-    def test_a_worker_under_a_puppeteer_hands_up_a_pages_path_and_counts_and_never_publishes(self):   # 226
-        t = self.t
-        t.say(PUP, "Control the trees")
-        t.record(NEW, started_by=PUP, title="Puppeteer's standing worker")
-        ctx = context(t.say(NEW, "Run the puppeteer's archive checks and counts.\n" + controls.WORKER_BRIEF))
-        self.assertIn("page's path and its counts", ctx)
-        self.assertIn("never the page's text", ctx)
-        self.assertIn("Artifact", ctx)
-        self.assertIn("unless ezexe asks", ctx)
-
-    def test_a_puppeteers_turns_hold_messages_and_its_standing_worker_does_the_rest(self):          # 211
-        t = self.t
-        t.say(PUP, "Control the trees")
-        brief = "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF
-        said, _ = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker", "prompt": brief})
-        self.assertNotIn("refused", said, "the first standing worker is let through")
-        t.record(WORKER, started_by=PUP, title="Puppeteer's standing worker")
-        pad = os.path.join(t.tmp, "app-scratchpad", "worker").replace("\\", "/")
-        ctx = context(t.hook(PROMPT, WORKER, {"hook_event_name": "UserPromptSubmit", "prompt": brief,
-                                              "scratchpad_dir": pad}))
-        self.assertIn("standing coworker", ctx)
-        self.assertIn("Model and effort:", ctx)
-        self.assertIn("one closing message to the puppeteer", ctx)
-        self.assertIn(f"{pad}/state.md", ctx, "its state page, in the app's scratchpad")
-        self.assertNotIn(os.path.join(t.dir(WORKER), "state.md").replace("\\", "/"), ctx, "never under .claude")
-        self.assertNotIn("temportal/tmp", ctx, "a started session is told no scratchpad in the store")
-        said, out = self.pre(PUP, START, {"initiation": "user_asked", "title": "Standing worker again",
-                                          "prompt": brief})
-        self.assertEqual(out.get("permissionDecision"), "deny", "a second standing worker while the first is live")
-        self.assertIn(WORKER, said)
-        said, _ = self.pre(PUP, "Bash", {"command": "ls E:/x"})
-        self.assertIn(WORKER, said, "a shell call of the puppeteer is sent to its standing worker")
-        said, _ = self.pre(PUP, "Bash", {"command": f'{phi.commands()} note "the importer waits" --source "x"'})
-        self.assertNotIn(WORKER, said, "its own phi.py note call is its work")
-        said, _ = self.pre(PUP, "Bash", {"command": "ls E:/x"}, agent_id="agent_x1")
-        self.assertNotIn(WORKER, said, "a subagent of the puppeteer is not the puppeteer")
-        copad = os.path.join(t.tmp, "app-scratchpad", "co1").replace("\\", "/")
-        for sid in (CO1, CO2):
-            t.record(sid, started_by=WORKER, title="a standing coworker")
-            said = {"hook_event_name": "UserPromptSubmit", "prompt": "Check the archives.\nFiles: none"}
-            if sid == CO1:
-                said["scratchpad_dir"] = copad
-            self.assertIn("standing coworker", context(t.hook(PROMPT, sid, said)))
-        t.hook(PROMPT, CO1, {"hook_event_name": "UserPromptSubmit", "prompt": "next",
-                             "scratchpad_dir": copad + "-after-a-clear"})
-        ctx = context(t.say(PUP, f'<cross-session-message from="{WORKER}">Checked 4 archives; page: x.md'
-                                 f'</cross-session-message>'))
-        line = next((x for x in ctx.splitlines() if "get_usage" in x and WORKER in x), "")
-        for sid in (WORKER, CO1, CO2):
-            self.assertIn(sid, line)
-        self.assertIn(f"{controls.CLEAR_AT} percent", line)
-        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, "and now?")), "only at its report")
-        # the hooks module keeps each session's measure in usage.json: a session with one is read there, not asked
-        report = f'<cross-session-message from="{WORKER}">Checked 5 archives.</cross-session-message>'
-
-        def measured(sid, percent):
-            write(os.path.join(t.dir(sid), phi.USAGE_FILE), json.dumps(
-                {"at": 1, "context": {"tokens": percent * 10000, "window": 1000000, "percent": percent},
-                 "rateLimits": []}))
-        measured(WORKER, controls.CLEAR_AT + 12)
-        measured(CO1, controls.CLEAR_AT - 1)
-        line = next((x for x in context(t.say(PUP, report)).splitlines() if f"worker `{WORKER}` reported" in x), "")
-        self.assertIn(f"`{WORKER}` at {controls.CLEAR_AT + 12} percent", line, "past the line, by its own measure")
-        # the report the worker's hooks module sends at its turn's end names the worker as `from-session`, beside
-        # the socket it came over, as the transcripts of the desktop app show it
-        sent = (f'<cross-session-message from="uds:\\\\.\\pipe\\LOCAL\\cc-msg-001111dc" from-session="{WORKER}" '
-                f'from-name="worker" from-mode="bypass">phi (p4-phi): this session ended a turn. Its report follows, '
-                f'and needs no reply.\n\nChecked 6 archives.</cross-session-message>')
-        self.assertIn(f"worker `{WORKER}` reported", context(t.say(PUP, sent)))
-        other = sent.replace(WORKER, CO1)
-        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, other)), "a coworker's report is not its")
-        self.assertEqual(controls.usage_line(t.p4, t.session(PUP), sent, t.p4, "user"), "",
-                         "ezexe's own message that quotes a report is none")
-        self.assertIn("usage.json", line)
-        self.assertNotIn(CO1, line, "a coworker measured under the line is not named")
-        self.assertRegex(line, rf"No measure is kept of `{CO2}`: read `mcp__ccd_session_mgmt__get_usage`")
-        self.assertEqual(line.count("get_usage"), 1, "only the session with no measure is asked for one")
-        self.assertIn("clear_session", line)
-        measured(CO2, controls.CLEAR_AT)
-        line = next((x for x in context(t.say(PUP, report)).splitlines() if f"worker `{WORKER}` reported" in x), "")
-        self.assertNotIn("get_usage", line, "every session measured: no session is asked for its usage")
-        self.assertIn(f"`{CO2}` at {controls.CLEAR_AT} percent", line, "at the line counts as past it")
-        self.assertIn("naming them", line)
-        for sid in (WORKER, CO2):
-            measured(sid, controls.CLEAR_AT - 20)
-        write(os.path.join(t.dir(CO1), phi.USAGE_FILE), '{"at":1,"context":{"window":1000000},"rateLimits":[]}')
-        self.assertNotIn(f"worker `{WORKER}` reported", context(t.say(PUP, report)),
-                         "every measure under the line, a fresh window among them: no line")
-        r = t.hook("session-start", CO1, {"hook_event_name": "SessionStart", "source": "compact"})
-        page = f"{copad}/state.md"              # the scratchpad of its first turn, kept across a clear
-        self.assertTrue(context(r).startswith("phi (p4-phi): ") and page in context(r).split("\n", 1)[0],
-                        context(r)[:300])
-
-    def test_the_publisher_of_a_tree_is_the_issues_coworker_then_the_standing_worker_then_the_puppeteer(self):  # 227
-        """ezexe/p4#227: controls.publisher names the one session that publishes the issues of a tree. Under no
-        puppeteer that is the tree's orchestrator. Under a puppeteer it is the issues coworker of the puppeteer's
-        standing worker once a coworker's brief marks one on record, else the standing worker, else the puppeteer,
-        for every session of the puppeteer's own tree and of each tree it controls, in any store."""
+    def test_the_publisher_of_a_tree_is_the_session_nobody_started_at_its_top(self):  # 227
+        """ezexe/p4#227: controls.publisher names the one session that publishes the issues of a tree: the session
+        nobody started at its top. Under a puppeteer that is the puppeteer, for every session of its own tree, and
+        under none it is the tree's own top, which may be the session itself."""
         from unittest import mock
         t = self.t
 
@@ -713,43 +619,34 @@ class Supervisor(unittest.TestCase):
             store = os.path.join(proj or t.proj, ".claude", "p4")
             with mock.patch.dict(os.environ, t.env(host, proj)), mock.patch.dict(phi.RECORDS, clear=True):
                 return controls.publisher(store, phi.load_session(store, host), store)
-
-        def archive(host):
-            app = os.path.join(t.app, host + ".json")
-            write(app, json.dumps({**json.loads(read(app)), "isArchived": True}))
-        everywhere = ((PUP, None), (TOP, None), (KID, None), (TOP2, None))
         t.say(PUP, "Control the trees")
         t.say(TOP, "Build the exporter")
         t.say(TOP2, "Build the importer")
         t.say(TOP3, "Something else")
         t.say(KID, "Fix the row")
-        self.assertEqual(publisher(KID), (TOP, "Build the narwhal exporter", "puppeteer"),
-                         "a session nobody started that started one is the top of its own tree")
+        self.assertEqual(publisher(KID), TOP, "a tree under no puppeteer: its top")
+        self.assertEqual(publisher(TOP), TOP, "the top publishes for its own tree")
+        self.assertEqual(publisher(TOP3), TOP3, "a session that started none: itself")
         self.control(TOP, TOP2)
         t.say(TOP, "carry on")                      # each learns of its starter at its next message
         t.say(TOP2, "carry on")
-        self.assertEqual(publisher(TOP3), (TOP3, "An orchestrator nobody put under the puppeteer", ""))
-        pup = (PUP, "Control the exporter and the importer trees, and tell ezexe where each stands", "puppeteer")
-        for host, proj in everywhere:
-            self.assertEqual(publisher(host, proj), pup, host)
-        t.record(WORKER, started_by=PUP, title="Puppeteer's standing worker")
-        t.say(WORKER, "Run the puppeteer's checks and counts.\n" + controls.WORKER_BRIEF)
-        worker = (WORKER, "Puppeteer's standing worker", "standing worker")
-        for host, proj in everywhere + ((WORKER, None),):
-            self.assertEqual(publisher(host, proj), worker, host)
-        t.record(CO1, started_by=WORKER, title="Check the archives")
-        t.record(CO2, started_by=WORKER, title="Draft and publish the issues")
-        t.say(CO1, "Check the archives.\nFiles: none")
-        self.assertEqual(publisher(KID), worker, "a coworker whose brief lacks the line is no issues coworker")
-        t.say(CO2, "Publish each finding that needs an issue.\n" + controls.ISSUES_BRIEF)
-        self.assertEqual(t.session(CO2).get("standingGroup"), "issues", "the brief's line marks it on its record")
-        coworker = (CO2, "Draft and publish the issues", "issues coworker")
-        for host, proj in everywhere + ((WORKER, None), (CO1, None), (CO2, None)):
-            self.assertEqual(publisher(host, proj), coworker, host)
-        archive(CO2)
-        self.assertEqual(publisher(KID), worker, "an issues coworker the app archived publishes nothing")
-        archive(WORKER)
-        self.assertEqual(publisher(TOP2), pup, "nor does an archived standing worker")
+        for host in (PUP, TOP, KID, TOP2):
+            self.assertEqual(publisher(host), PUP, host)
+        self.assertEqual(publisher(TOP3), TOP3, "an orchestrator nobody started stays its own tree's")
+
+    def test_a_gh_issue_create_is_refused_below_the_publisher_with_its_full_title(self):
+        t = self.t
+        t.say(PUP, "Control the trees")
+        t.say(TOP, "Build the exporter")
+        self.control(TOP)
+        t.say(TOP, "carry on")
+        from unittest import mock
+        with mock.patch.dict(os.environ, t.env(TOP)), mock.patch.dict(phi.RECORDS, clear=True):
+            why = controls.create_refused(t.p4, phi.load_session(t.p4, TOP), t.p4)
+            own = controls.create_refused(t.p4, phi.load_session(t.p4, PUP), t.p4)
+        self.assertEqual(own, "", "the publisher's own call passes")
+        self.assertIn(f"\"Control the exporter and the importer trees, and tell ezexe where each stands\" `{PUP}`", why)
+        self.assertIn("Finding:", why)
 
 
 class TreeAndClicks(unittest.TestCase):
@@ -1044,7 +941,7 @@ class OpenIssues(unittest.TestCase):
         with self.subTest("the one a live worker's record holds is not named"):
             self.assertNotIn("ezexe/demo#7", ctx)
         with self.subTest("it says to close what a landed commit covers and to route or start the rest"):
-            self.assertIn("close each one a landed commit already covers", line)
+            self.assertIn("Close each one a landed commit already covers", line)
             self.assertIn("Send each other one straight to the orchestrator named beside it", line)
             self.assertIn("start a new orchestrator for each one that names none", line)
         with self.subTest("and holds no ask of ezexe for it"):
@@ -1248,7 +1145,7 @@ class NativeCalls(unittest.TestCase):
         page = read(os.path.join(SRC, "..", "..", "..", "..", "docs", "puppeteer.html"))
         names = {"cmd": "PHI", "board": "boardPath()", "restate": "RESTATE"}
         text = "phi (p4-phi): " + controls.RULE.format(
-            worker=controls.WORKER_BRIEF, archives=controls.ARCHIVES[0], asks=controls.ARCHIVES[1],
+            archives=controls.ARCHIVES[0], asks=controls.ARCHIVES[1],
             **{key: "\x00" + name + "\x00" for key, name in names.items()})
         parts = text.split("\x00")                 # words and names by turns, joined as the script joins them
         said = "+".join(part if i % 2 else json.dumps(part, ensure_ascii=False) for i, part in enumerate(parts))

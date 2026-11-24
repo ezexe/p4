@@ -1055,7 +1055,6 @@ async function isChecked(
   $: EngineInterface,
   e: ToolCheckInput,
   root: string,
-  sessionId: string,
   text: string,
 ): Promise<boolean> {
   const tool = String(e.tool)
@@ -1071,8 +1070,6 @@ async function isChecked(
   if (isShell && CARDS_ON.test(text)) return true
   // A session some session's paths are held against, whose edit phi.py's path guard reads.
   if (isEdit && (await $.fs.exists(`${phi}/.paths/on`).catch(() => false))) return true
-  // A puppeteer, whose every edit and shell call phi.py reads.
-  if (await isMarked($, `${phi}/.puppeteers`, sessionId)) return true
 
   return false
 }
@@ -1125,7 +1122,7 @@ async function check($: EngineInterface, e: ToolCheckInput): Promise<Said> {
     const project = await projectOf($)
     const sessionId = await $.session.id()
     const call = { tool_name: String(e.tool), tool_input: e.input }
-    if (!(await isChecked($, e, project, sessionId, JSON.stringify(call)))) return {}
+    if (!(await isChecked($, e, project, JSON.stringify(call)))) return {}
     const python = await findPython($)
     if (python === undefined) return {}
     const plugin = slashed($.plugin.root)

@@ -281,8 +281,8 @@ class Hook(unittest.TestCase):
     def test_a_child_with_no_supervisor_session_above_it_writes_the_gap_for_its_top_level_session(self):
         self.t.record(KID, TOP, title="the flush child")
         got = self.wrote(memory(self.t.p4, "children-on-parent-branch", CHILD_RULE), host=KID)
-        self.assertIn(f"the orchestrator \"top\" `{TOP}` of this session tree, which no puppeteer "
-                      f"controls, publishes the issue and places the session that resolves it", got)
+        self.assertIn(f"the session nobody started at the top of this session tree, \"top\" `{TOP}`, "
+                      f"publishes the issue and places the session that resolves it", got)
         self.assertIn("This session publishes no issue and starts no session for it.", got)
         self.assertNotIn("gh issue create", got)
 

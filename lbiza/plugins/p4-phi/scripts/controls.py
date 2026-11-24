@@ -16,11 +16,9 @@ watcher every orchestrator has is puppeteer.py's and is another thing.
                ezexe changed during the run and its notes by kind. After a compaction its path is the first thing the
                puppeteer is handed.
   findings     no session publishes a new issue on its own. A finding goes up in the reports of the session tree as one
-               `Finding:` line, and the puppeteer that controls the tree places the session that resolves it, while
-               one session publishes what needs an issue for every tree it controls: the issues coworker of its
-               standing worker, that worker until such a coworker is on record, and the puppeteer until it has a
-               worker. Where none controls the tree, its orchestrator does both. `publisher` names that session, and
-               a `gh issue create` in any other session is refused with its title.
+               `Finding:` line, and one session publishes what needs an issue and places the session that resolves
+               it: the session nobody started at the top of the tree, a puppeteer or an orchestrator. `publisher`
+               names that session, and a `gh issue create` in any other session is refused with its title.
   a boundary   a controlled tree has closed, or every controlled session is idle with no request waiting. The
                puppeteer is told once to keep what is not on its board with `note`. Claude Code compacts a
                session by itself and p4-phi asks ezexe nothing about it. p4-phi speaks only
@@ -290,28 +288,21 @@ RULE = (
     "This session is a puppeteer: it is a session nobody started that started an orchestrator, so it controls the "
     "orchestrators it started, which stay attached under it as its workers. `{cmd} controls` prints where each "
     "stands. Its board is {board}, and what "
-    "p4-phi cannot see goes on it through `{cmd} note`. Its turns hold messages only: ezexe's, which it answers "
-    "directly where it can, the decisions that are ezexe's, the archive calls, {archives}, "
-    "and the start of each new orchestrator. The app continues it with a short note when a session it started ends a turn, and "
-    "p4-phi hands it one line per controlled session's turn; it relays none of these to ezexe and acts only on what "
-    "is ezexe's. Work ezexe gives it on a controlled session's topic goes straight to that orchestrator in one "
-    "SendMessage holding {restate}, a `Files:` line and what done looks like, and that session briefs and starts a "
-    "worker of its own for it. A topic none covers gets a new orchestrator that this session starts. "
-    "Every other task "
-    "goes to its one standing worker, which it starts under itself with the line `{worker}` in the brief: archive "
-    "checks, never the archiving, store record corrections, landing checks, counts, audits, and the issues that "
-    "flow up, which the worker's issues coworker drafts and publishes, handing each number up for this session to "
-    "record with `{cmd} note \"<the finding> as #N\" --source \"<the issue>\" --kind published`. Beside that worker "
-    "it starts only new "
-    "orchestrators, since the app nests a session under its starter for good. It checks the orchestrators and its "
-    "own worker for stalls and context, and tunes "
-    "their effort from their reports, with no one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging "
-    "each change on its board. It changes a running session's model, by "
-    "`mcp__ccd_session_mgmt__set_session_model`, only where effort alone does not fit that session's work and its "
-    "context is worth keeping, and starts a new session otherwise. A `Finding:` line "
-    "stays on its board until such a note holds its text. It shows ezexe a result in its reply as a short "
-    "table or list, with the full page kept in the store's notes, and publishes no Artifact and sends no file "
-    "unless ezexe asks.{asks}")
+    "p4-phi cannot see goes on it through `{cmd} note`. The app continues it with a short note when a session it "
+    "started ends a turn, and p4-phi hands it one line per controlled session's turn; it relays none of these to "
+    "ezexe and acts only on what is ezexe's. The archive calls are {archives}. Work ezexe gives it on a controlled "
+    "session's topic goes straight to that orchestrator in one SendMessage holding {restate}, a `Files:` line and "
+    "what done looks like, and that session briefs and starts a worker of its own for it. A task on no "
+    "orchestrator's topic gets a new orchestrator that this session starts, and a task that is its own it does "
+    "itself. It checks the orchestrators for stalls and context, and tunes their effort from their reports, with no "
+    "one asking, by `mcp__ccd_session_mgmt__set_session_effort`, logging each change on its board. It changes a "
+    "running session's model, by `mcp__ccd_session_mgmt__set_session_model`, only where effort alone does not fit "
+    "that session's work and its context is worth keeping, and starts a new session otherwise. A `Finding:` line "
+    "stays on its board until a note of kind `published` holds its text: this session publishes the issues that "
+    "flow up, once it has checked them against the open issues and the running sessions, and records each with "
+    "`{cmd} note \"<the finding> as #N\" --source \"<the issue>\" --kind published`. It shows ezexe a result in its "
+    "reply as a short table or list, with the full page kept in the store's notes, and publishes no Artifact and "
+    "sends no file unless ezexe asks.{asks}")
 # The two places of RULE that word the archive: who answers for the call, and the sentence that ends the rule. With
 # `phi.upkeep` on, the call is the upkeep line's and no sentence leaves it to ezexe.
 ARCHIVES = ("which the app puts to ezexe on its approval card outside Auto mode and Bypass permissions mode",
@@ -334,49 +325,9 @@ ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so it starts no
        "one line to ezexe.")
 
 
-# --- the puppeteer's standing worker ----------------------------------------------------------------------------------
-#
-# A puppeteer's turns hold messages only. Every other task runs in one standing worker it starts under itself, which
-# splits its task groups into standing coworkers. The worker's brief holds one line naming it, so the start is let
-# through and a second is refused while the first is live.
+# --- a state page, and when a session clears itself --------------------------------------------------------------
 
-WORKER_BRIEF = "Standing worker of its puppeteer"
-WORKER_LINE = re.compile(r"(?m)^\s*Standing worker of its puppeteer\b")
-ISSUES_BRIEF = "Issues coworker of its standing worker"      # the line of a coworker's brief that marks it on record
-ISSUES_LINE = re.compile(r"(?m)^\s*Issues coworker of its standing worker\b")
 CLEAR_AT = 60                    # percent of a session's context past which it clears itself and resumes from its page
-HAND_UP = ("It hands {up} a page's path and its counts, never the page's text, and it never publishes a result as "
-           "an Artifact or sends it as a file unless ezexe asks.")
-STATE_PAGE = ("It keeps its task, its queue, its open items and the sessions it works with by id on a state page, "
-              "{page}, rewritten at each turn's end, so it resumes from that page after a compaction or a clear.")
-WORKER_FIRST = ("phi (p4-phi): this session is the standing worker of the puppeteer \"{title}\" `{pid}`. It does every "
-                "task of that puppeteer's that is not a message: archive checks, corrections of store records, "
-                "landing checks, counts, audits, and the issues that flow up, which its issues coworker drafts and "
-                "publishes. In this turn, since the app refuses starts in a turn another session's message began, it "
-                "starts a standing coworker for each group of its tasks, each brief with a line `Model and effort: "
-                "<model> at <effort> effort` naming the smallest model the group needs: Opus for judging work such as "
-                "issue writing, Sonnet for mechanical checks, Haiku for plain reads. The brief of the coworker that "
-                "drafts and publishes the issues also holds the line `" + ISSUES_BRIEF + "`, which makes it the one "
-                "session of the puppeteer's trees whose `gh issue create` runs; until one is on record that call "
-                "runs here. Each coworker ends every turn "
-                "with one message to it, and it ends each turn with one closing message to the puppeteer holding "
-                "only what is ezexe's or what the puppeteer asked for. " + HAND_UP + " " + STATE_PAGE)
-COWORKER_FIRST = ("phi (p4-phi): this session is a standing coworker of \"{title}\" `{pid}`, the standing worker of a "
-                  "puppeteer. It ends every turn with one message to that worker. " + HAND_UP + " " + STATE_PAGE)
-ISSUES_FIRST = (" Its brief makes it the issues coworker: the one session whose `gh issue create` runs for the trees "
-                "that puppeteer controls. It checks each finding against the open issues and the running sessions, "
-                "publishes the ones that need an issue, and hands each number up.")
-
-
-def is_worker_brief(text):
-    """True for a brief that holds the standing worker's line."""
-    return bool(WORKER_LINE.search(str(text or "")))
-
-
-def worker_of(s):
-    """The sessionId of a puppeteer's standing worker, '' for none."""
-    w = s.get("standingWorker")
-    return w if isinstance(w, str) else ""
 
 
 def live(sid):
@@ -389,112 +340,22 @@ STATE_NAME = "state.md in its own scratchpad directory, the one the app names"
 
 
 def state_page(s):
-    """A standing session's state page: state.md in the app's scratchpad of its first turn, never under .claude,
+    """A session's state page: state.md in the app's scratchpad of its first turn, never under .claude,
     where every write asks ezexe."""
     pad = str(s.get("scratchpadDir") or "").rstrip("/")
     return f"{pad}/state.md" if pad else STATE_NAME
-
-
-def start_refused(home, s, brief, store):
-    """For a puppeteer's start of its standing worker: None to let it through, or the reason a second one is refused
-    while the first is live. '' for any other start."""
-    if not is_worker_brief(brief) or not is_puppeteer(s, store):
-        return ""
-    held = worker_of(s)
-    if held and live(held):
-        return (f"phi (p4-phi): this start is refused: this puppeteer's standing worker {link(held)} `{held}` is "
-                f"live, and a puppeteer has one. Send it the work with SendMessage.")
-    return None
-
-
-def worker_first(home, s, prompt, store):
-    """The standing worker's or a standing coworker's first message: what it is and how it hands up. It records the
-    worker on its puppeteer's session, and a coworker whose brief holds ISSUES_BRIEF as the issues coworker, by
-    `standingGroup` on its own record; the caller saves `s`. '' for any other session."""
-    pid = PHI.spawned_from(s)
-    if not pid:
-        return ""
-    up = PHI.load_session(home, pid)
-    page = state_page(s)
-    if is_worker_brief(prompt) and is_puppeteer(up, store):
-        up["standingWorker"] = s["sessionId"]
-        PHI.save_session(home, up)
-        s["standingKind"] = "worker"
-        return WORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="its puppeteer")
-    if up.get("standingKind") == "worker":
-        s["standingKind"] = "coworker"
-        said = COWORKER_FIRST.format(title=full_title(pid, up), pid=pid, page=page, up="that worker")
-        if ISSUES_LINE.search(str(prompt or "")):
-            s["standingGroup"] = "issues"
-            said += ISSUES_FIRST
-        return said
-    return ""
-
-
-def tool_line(s, store):
-    """A puppeteer's tool call that is no message: one line that sends the task to its standing worker. '' for any
-    other session."""
-    if not is_puppeteer(s, store):
-        return ""
-    held = worker_of(s)
-    if held and live(held):
-        return (f"phi (p4-phi): this session is a puppeteer and its turns hold messages only. Send this task to its "
-                f"standing worker {link(held)} `{held}` in one SendMessage, with a `Files:` line and what done looks "
-                f"like.")
-    return (f"phi (p4-phi): this session is a puppeteer and its turns hold messages only. Start its standing worker "
-            f"under itself, the brief holding the line `{WORKER_BRIEF}`, and send it this task.")
-
-
-def usage_line(home, s, prompt, store, by=""):
-    """A puppeteer, at a message carrying its standing worker's report: one line naming those of the worker and its
-    coworkers whose context passed the line, for the puppeteer to name to the worker. Each one's share is Claude
-    Code's last measure of it, which the plugin's hooks module keeps in usage.json in the session's folder and
-    phi.usage_of reads, so no session is asked for it. A session with no measure kept, which no hooks module wrote
-    for, is still named for one `get_usage` read. '' otherwise, and where every measure reads under the line.
-    `by` is whose words the prompt is by its origin, rows.whose, and the sender is the one the message's wrapper
-    names, rows.sender_of: a report the worker's hooks module sent names the worker as `from-session`, beside the
-    socket it came over, and a message the worker's model sent names it as `from`."""
-    held = worker_of(s)
-    if not held or by not in ("", "session") or rows.sender_of(prompt) != held or not is_puppeteer(s, store):
-        return ""
-    every = relay._sessions(home)
-    ids = [held] + sorted(k for k, v in every.items() if PHI.spawned_from(v) == held and live(k))
-    at = clear_at(store)
-    past, unmeasured = [], []
-    for k in ids:
-        kept = PHI.usage_of(home, k)
-        share = (kept.get("context") or {}).get("percent")
-        if not kept:
-            unmeasured.append(k)
-        elif share is not None and share >= at:    # a fresh window holds no share yet: nothing to clear
-            past.append(f"`{k}` at {share:g} percent")
-    if not past and not unmeasured:
-        return ""
-    clears = ("so that session brings its state page up to date and calls `mcp__ccd_session_mgmt__clear_session` "
-              "with `\"self\"` at its turn's end")
-    said = [f"phi (p4-phi): its standing worker `{held}` reported."]
-    if past:
-        said.append(f"By Claude Code's last measure of each, kept in its usage.json, the context of "
-                    f"{', '.join(past)} passes {at:g} percent: send the worker one line naming "
-                    f"{'it' if len(past) == 1 else 'them'}, {clears}.")
-    if unmeasured:
-        named = ', '.join(f'`{k}`' for k in unmeasured)
-        said.append(f"No measure is kept of {named}: read `mcp__ccd_session_mgmt__get_usage` for each, and "
-                    + (f"name in that line any whose context passes {at:g} percent." if past else
-                       f"send the worker one line naming any whose context passes {at:g} percent, {clears}."))
-    return " ".join(said)
 
 
 STATE_IN_TASK = re.compile(r"\bState page:\s*(\S+?)[.,;]?(?=\s|$)")
 
 
 def page_of_task(home, s):
-    """The state page a session keeps: the one its p4-phi task names, else a standing worker's or coworker's own;
+    """The state page a session keeps: the one its p4-phi task names, else its own where it was told to keep one;
     '' for none."""
     m = STATE_IN_TASK.search(PHI.clean(s.get("task")))
     if m:
         return m.group(1).replace("\\", "/")
-    if s.get("standingKind") in ("worker", "coworker") or s.get("pageTold"):
+    if s.get("pageTold"):
         return state_page(s)
     return ""
 
@@ -594,7 +455,7 @@ def board_path(home, sid):
 def rule_text(home, s):
     archives, asks = ARCHIVES_UPKEEP if UPKEEP else ARCHIVES
     return RULE.format(cmd=PHI.commands(), board=board_path(home, s["sessionId"]),
-                       restate=PHI.RESTATE, worker=WORKER_BRIEF, archives=archives, asks=asks)
+                       restate=PHI.RESTATE, archives=archives, asks=asks)
 
 
 def pair_text(s, store=""):
@@ -620,56 +481,25 @@ def ask_text(s, pid=""):
     return ASK.format(cmd=PHI.commands(), title=full_title(pid)) if pid else ""
 
 
-def issues_coworker(home, worker):
-    """The live coworker of a standing worker whose brief marked it the issues coworker, the first started when
-    there are two; '' for none."""
-    marked = [(str(k.get("createdAt") or ""), sid) for sid, k in relay._sessions(home).items()
-              if PHI.spawned_from(k) == worker and k.get("standingGroup") == "issues" and live(sid)]
-    return min(marked)[1] if marked else ""
-
-
-PUBLISHER = {"issues coworker": "the issues coworker of its puppeteer's standing worker",
-             "standing worker": "its puppeteer's standing worker", "puppeteer": "its puppeteer",
-             "": "the orchestrator of its tree"}
-
-
 def publisher(home, s, store=""):
-    """The session that publishes the issues a session's findings need, the one session of its tree whose
-    `gh issue create` runs. Under a puppeteer, which is the top of the session's chain or controls it: the issues
-    coworker of that puppeteer's standing worker once one is on record, else the standing worker, else the
-    puppeteer. Under none: the orchestrator of its tree, which may be the session itself. Returns its sessionId,
-    its full title, and what it is, a key of PUBLISHER: "issues coworker", "standing worker", "puppeteer", or ''
-    for an orchestrator no puppeteer controls."""
-    chain = PHI.chain_of(home, s["sessionId"])
-    top = (PHI.load_session(home, chain[-1]) or {"sessionId": chain[-1]}) if chain else s
-    pid, pstore = (top["sessionId"], home) if is_puppeteer(top, store) else puppeteer_of(top, store)
-    if not pid:
-        return top["sessionId"], full_title(top["sessionId"], top), ""
-    p = top if pid == top["sessionId"] else PHI.load_session(pstore, pid)
-    worker = worker_of(p)
-    if worker and live(worker):
-        co = issues_coworker(pstore, worker)
-        return (co, full_title(co), "issues coworker") if co else (worker, full_title(worker), "standing worker")
-    return pid, full_title(pid, p), "puppeteer"
+    """The sessionId of the one session that publishes the issues of this session's tree: the session nobody
+    started at its top."""
+    sid = str(s.get("sessionId") or "")
+    chain = relay.above(home, sid) if sid else []
+    return chain[-1] if chain else sid
 
 
 def create_refused(home, s, store=""):
     """For a `gh issue create` in the session `s`: '' in the session that publishes for its tree, else the one line
     that refuses the call, naming the `Finding:` form and that session by full title. A session below it writes the
-    line into its report; its puppeteer and its standing worker, which the reports go up to, send it the line."""
-    sid, title, kind = publisher(home, s, store)
+    line into its report."""
+    sid = publisher(home, s, store)
     if sid == s["sessionId"]:
         return ""
-    who = PUBLISHER[kind]
-    above = kind in ("issues coworker", "standing worker") and (is_puppeteer(s, store)
-                                                              or s.get("standingKind") == "worker")
-    if above:                                      # said of the session's own worker or coworker
-        who = "its own issues coworker" if s.get("standingKind") == "worker" else who.replace("its puppeteer's", "its")
-    how = ("Send that session the finding with SendMessage, as one line in this form" if above else
-           "Write the finding into this session's report as one line in this form, which goes up unchanged")
     return (f"phi (p4-phi): this call is refused: no session publishes a new issue on its own, and `gh issue create` "
-            f"runs only in the session that publishes for this session's tree, {who}, \"{title}\" `{sid}`. {how}: "
-            f"`{issues.FINDING_FORM}`.")
+            f"runs only in the session that publishes for this session's tree, the session nobody started at its "
+            f"top, \"{full_title(sid)}\" `{sid}`. Write the finding into this session's report as one line in this "
+            f"form, which goes up unchanged: `{issues.FINDING_FORM}`.")
 
 
 # --- sessions that come under control without a command ----------------------------------------------------------------
@@ -836,9 +666,8 @@ def board(home, s):
     lines += ["", "## Findings", ""]
     if found:
         lines += ["The `Finding:` lines of the reports of the controlled sessions and of the sessions of their trees. "
-                  "The issues coworker of this puppeteer's standing worker publishes each one that needs an issue, "
-                  "once it has checked the open issues and the running sessions, and hands its number up; this "
-                  "puppeteer records it with `phi.py note \"<the finding> as #N\" --kind published`, and places the "
+                  "This puppeteer publishes each one that needs an issue, once it has checked the open issues and "
+                  "the running sessions, records it with `phi.py note \"<the finding> as #N\" --kind published`, and places the "
                   "session that resolves it: the controlled session whose tree holds its files is sent it in one "
                   "SendMessage, and one no controlled session covers gets a new orchestrator.", ""]
     lines += [f"- \"{full_title(sid, k)}\" `{sid}`: {line}" for sid, k, line in found] or ["None."]
@@ -1194,7 +1023,7 @@ def open_issues_text(home, s):
     return (f"phi (p4-phi): this session's watcher last listed {'this issue' if len(rows) == 1 else 'these issues'} "
             f"as open on the repositories the controlled sessions work in and held by no live session. An open issue "
             f"there is this puppeteer's to resolve, and none of them is a question for "
-            f"ezexe. Have its standing worker close each one a landed commit already covers. Send each other one "
+            f"ezexe. Close each one a landed commit already covers. Send each other one "
             f"straight to the orchestrator named beside it, in one SendMessage holding the issue's link and "
             f"{PHI.RESTATE}, and start a new orchestrator for each one that names none. Each is named here "
             f"once" + (f", and {more} more wait for the next tree that closes or reports done" if more > 0 else "")

@@ -332,30 +332,20 @@ def advice(home, store, s, path, root=None, before=""):
         disk["gapsTold"] = (told + [sig])[-50:]
         relay._write_json(spath, disk)
     import controls                                # the session that publishes the issues of this session tree
-    sid, title, kind = controls.publisher(home, s, store)
+    sid = controls.publisher(home, s, store)
+    title = controls.full_title(sid)
     repo = proj["repo"]
     says = re.sub(r"(?<!\.)\.$", "", relay._short(rule, 600))      # its last full stop would stand before the `;`
     line = (f"Finding: the plugin in {repo} does not carry the feedback memory \"{name}\", which says: {says}; "
             f"source: {relay.norm(path)}; test: <the test in {repo} that shows the plugin does it>; files: <the paths "
             f"in {repo} a fix changes>")
-    standing = kind in ("issues coworker", "standing worker")   # it publishes, and its puppeteer places
-    if sid == s["sessionId"] and standing:
-        up = (f"This session is {controls.PUBLISHER[kind]}, so the issue is its own to publish: it publishes the "
-              f"issue in {repo} and hands its number up to its puppeteer, which places the session that resolves it.")
-    elif sid == s["sessionId"]:
-        up = ("This session is " + ("the puppeteer" if kind else
-                                    "the orchestrator of its tree, and no puppeteer controls it")
-              + f", so the finding is its own to publish and place: it publishes the issue in {repo} and places the "
-                f"session that resolves it.")
-    elif standing:
-        up = (f"The report carries it up unchanged, and the session that publishes for this session tree, "
-              f"{controls.PUBLISHER[kind]}, \"{title}\" `{sid}`, publishes the issue, while its puppeteer places the "
-              f"session that resolves it. This session publishes no issue and starts no session for it.")
+    if sid == s["sessionId"]:
+        up = ("This session is the session nobody started at the top of its tree, so the finding is its own to "
+              f"publish and place: it publishes the issue in {repo} and places the session that resolves it.")
     else:
-        who = (f"the puppeteer \"{title}\" `{sid}`, which controls this session tree," if kind else
-               f"the orchestrator \"{title}\" `{sid}` of this session tree, which no puppeteer controls,")
-        up = (f"The report carries it up unchanged, and {who} publishes the issue and places the session that resolves "
-              f"it. This session publishes no issue and starts no session for it.")
+        up = (f"The report carries it up unchanged, and the session nobody started at the top of this session tree, "
+              f"\"{title}\" `{sid}`, publishes the issue and places the session that resolves it. This session "
+              f"publishes no issue and starts no session for it.")
     where = (f" Its project on this machine is {proj['cwd']}." if proj.get("cwd") else
              " No checkout of it is known on this machine.")
     tied = (f" Once the issue is filed, the memory is tied to it by one line in its front matter, "
