@@ -1395,21 +1395,37 @@ def start_draft(home, s, did, base):
     node = relay.nodes(home).get(s["sessionId"]) or home
     name = coworker.draft_name(d["title"], d["id"])
     planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
-    done = "The plan of the brief is written and put to ezexe" if planner else \
-        "The task of the brief is done and its checks pass"
-    one = coworker.worker(name, d["brief"], done, base, home, s["sessionId"], node, team=planner,
-                          mode="plan" if planner else coworker.LAND_MODE,
-                          prompt=coworker.planner_task(d["title"]) if planner else "",
-                          profile=phi.worker_profile(home))
+    headless = phi.worker_mode(home) == "print"
+    plan_file = (os.path.join(home, *p4conf.PLANS.split("/"), f"{name}.md").replace("\\", "/")
+                 if planner and headless else "")
+    if plan_file:
+        done = f"The plan of the brief is written to {plan_file} and read in rounds by its three readers"
+    elif planner:
+        done = "The plan of the brief is written and put to ezexe"
+    else:
+        done = "The task of the brief is done and its checks pass"
+    one = coworker.worker(name, d["brief"], done, base, home, s["sessionId"], node,
+                          team=planner and not headless,
+                          mode="plan" if planner and not headless else coworker.LAND_MODE,
+                          prompt=coworker.planner_task(d["title"], plan_file) if planner else "",
+                          profile=phi.worker_profile(home), plan_file=plan_file, headless=headless)
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
     coworker.write([one], base, home)
     checkout = base.replace("\\", "/")
-    return [f"worker `{name}`: its report {one['report']}",
-            "`mcp__terminal__run_in_terminal` with " + json.dumps(
-                {"title": name, "cwd": checkout, "command": one["typed"]}, ensure_ascii=False),
-            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
-            f"{one['report']}`"]
+    out = [f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
+                                  f"{one['log']}" if headless else
+                                  f"session {one['session']}, its report {one['report']}"),
+           "`mcp__terminal__run_in_terminal` with " + json.dumps(
+               {"title": name, "cwd": checkout, "command": one["typed"]}, ensure_ascii=False),
+           f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
+           f"{one['report']}`",
+           f"Where it ends with no report, continue it in a Terminal-panel tab with `{one['resume_typed']}`"]
+    if plan_file:
+        out.append(f"Its plan is {plan_file}: once the report is there, read it and put the plan to ezexe; on "
+                   f"approval land it with `{phi.commands()} coworkers \"{plan_file}\" --checkout \"{checkout}\" "
+                   "--land`")
+    return out
 
 
 # --- parallel: the readings of an under-determined message, as one workflow run ------------------------------------------
