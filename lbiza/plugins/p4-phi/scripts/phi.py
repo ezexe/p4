@@ -43,6 +43,7 @@ message and P4_PHI_RULES=0 the memory lines. P4_PHI_WAIT sets how long a first m
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
 
+import datetime
 import glob
 import hashlib
 import json
@@ -85,6 +86,10 @@ WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic prof
 WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
 WORKER_MODES = ("print", "interactive")
 WORKER_PAIRS = {"print": "p4-workers", "interactive": ""}   # the profile a mode pairs with where nothing sets one
+POOL_LOW = 0.9                     # a pool is low at or over this share of its window (Max) or its budget (API credit)
+CREDIT_REFUSED = re.compile(r"credit balance (?:is )?too low", re.I)   # the API's refusal of a p4-workers run, 2026-11-24
+REFUSAL_HOURS = 24                 # a credit refusal keeps the API pool low this long, then one print worker tries it again
+POOL_ROWS = 20                     # pool_state reads the logs of this many latest start rows, never the whole ledger
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
 # plain stdout, are capped at 10,000 characters", each string "measured separately", and over the limit "Claude Code
@@ -2636,14 +2641,22 @@ def worker_settings(home, sid="", text=""):
         mode_from = "the piece of work"
     else:
         mode, mode_from = WORKER_MODE, "the default"
+    pools = None
     if isinstance(rec.get("workerProfile"), str):
         profile, profile_from = rec["workerProfile"], "the session's workerProfile"
     elif isinstance(conf.get("worker_profile"), str):
         profile, profile_from = conf["worker_profile"], "phi.json worker_profile"
     else:
         profile, profile_from = WORKER_PAIRS[mode], f"the pair of {mode}"
+        pools = pool_state(home) if home else None
+        if pools and mode == "print" and pools["api"]["low"] and not pools["max"]["low"]:
+            profile, profile_from = "", f"the pools: API credit low, {pools['api']['why']}"
+        elif pools and mode == "print" and pools["api"]["low"]:
+            reason = (reason + "; " if reason else "") + "both pools are low, so the pair applies"
+        elif pools and mode == "interactive" and pools["max"]["low"]:
+            reason = (reason + "; " if reason else "") + f"the Max plan is low ({pools['max']['why']}), and interactive work has no other pool"
     return {"mode": mode, "profile": profile, "mode_from": mode_from, "profile_from": profile_from,
-            "reason": reason}
+            "reason": reason, "pools": pools}
 
 
 def worker_line(settings):
@@ -2657,21 +2670,155 @@ def worker_record(home, row):
     append_line(os.path.join(home, "phi", "worker-starts.jsonl"), {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), **row})
 
 
+def log_of_row(home, row):
+    """The stream-json log a start row of worker-starts.jsonl names, or, where that file is gone, the one file
+    `<home>/phi/tree/**/<name>/log-<name>.jsonl`, since the session-tree migration moved the nodes; the named path
+    where neither is there or several match."""
+    named, name = row.get("log") or "", row.get("name") or ""
+    if named and os.path.exists(named):
+        return named
+    if name and home:
+        hits = glob.glob(os.path.join(glob.escape(home), "phi", "tree", "**", glob.escape(name), f"log-{glob.escape(name)}.jsonl"),
+                         recursive=True)
+        if len(hits) == 1:
+            return hits[0].replace("\\", "/")
+    return named
+
+
+def last_rate_limit(log):
+    """The `rate_limit_info` of the last `rate_limit_event` row of the stream-json log `log`, {} where there is none
+    or the file is not there. A `-p` run on the claude.ai sign-in writes such rows; one on an API profile does not."""
+    info = {}
+    try:
+        with open(log, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if '"rate_limit_event"' not in line:
+                    continue
+                try:
+                    row = json.loads(line.strip().lstrip("\ufeff"))
+                except ValueError:
+                    continue
+                if isinstance(row, dict) and isinstance(row.get("rate_limit_info"), dict):
+                    info = row["rate_limit_info"]
+    except OSError:
+        pass
+    return info
+
+
+def pool_state(home, now=None):
+    """What is left of each pool, as {"api": {"low", "why", "spent_month", "budget"}, "max": {"low", "why",
+    "utilization", "resets_at"}}. The API credit has no documented balance: it is low where the latest worker on an
+    API profile ended refused for credit, or where this month's summed `total_cost_usd` estimates reach POOL_LOW of
+    `worker_api_budget_usd` in phi.json. The Max plan's windows are read from the freshest `usage.json` of the
+    store's sessions, whose `rateLimits` the hooks module writes from `$.session.usage()`, else from the latest
+    `rate_limit_event` of a `-p` worker on the claude.ai sign-in; it is low where a window not yet reset has status
+    `allowed_warning` or `rejected`, or utilization at or over POOL_LOW."""
+    import coworker
+    now = time.time() if now is None else now
+    conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
+    rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl")) if home else []
+    month = time.strftime("%Y-%m", time.localtime(now))
+    budget = conf.get("worker_api_budget_usd")
+    budget = budget if isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0 else None
+    api = {"low": False, "why": "", "spent_month": 0.0, "budget": budget}
+    mx = {"low": False, "why": "", "utilization": None, "resets_at": None}
+    last_api, last_api_at, last_info = {}, 0.0, {}
+    # the month's spend sums the outcome rows' costs, which need no log read; the logs are read for the latest
+    # POOL_ROWS starts only
+    profile_of = {r.get("name"): r.get("profile") for r in rows_ if r.get("event") == "start"}
+    start_of = {r.get("name"): r for r in rows_ if r.get("event") == "start"}
+    for r in rows_:
+        if r.get("event") != "outcome" or not profile_of.get(r.get("name")) or not str(r.get("time", "")).startswith(month):
+            continue
+        cost = r.get("total_cost_usd")
+        if not isinstance(cost, (int, float)):   # a wait at the report: the final result lands in the log a turn later
+            cost = coworker.last_result(log_of_row(home, start_of[r["name"]]), final=True).get("total_cost_usd")
+        if isinstance(cost, (int, float)):
+            api["spent_month"] += cost
+    for r in [r for r in rows_ if r.get("event") == "start"][-POOL_ROWS:]:
+        log = log_of_row(home, r)
+        if r.get("profile"):
+            res = coworker.last_result(log)
+            if res:
+                last_api = res
+                try:
+                    last_api_at = time.mktime(time.strptime(str(r.get("time")), "%Y-%m-%dT%H:%M:%S"))
+                except ValueError:
+                    last_api_at = 0.0
+        else:
+            last_info = last_rate_limit(log) or last_info
+    said = " ".join(str(last_api.get(k, "")) for k in ("result", "errors"))
+    if last_api.get("is_error") is True and CREDIT_REFUSED.search(said) and now - last_api_at < REFUSAL_HOURS * 3600:
+        api["low"], api["why"] = True, "the latest API-credit worker was refused for credit"
+    elif budget and api["spent_month"] >= POOL_LOW * budget:
+        api["low"], api["why"] = True, f"{api['spent_month']:.2f} of {budget:g} USD estimated this month"
+    windows = last_info.get("unifiedWindows") if isinstance(last_info.get("unifiedWindows"), dict) else {}
+    if not windows and last_info:
+        windows = {last_info.get("rateLimitType") or "window": {"utilization": last_info.get("utilization"),
+                                                                "resetsAt": last_info.get("resetsAt"),
+                                                                "status": last_info.get("status")}}
+    # The freshest usage.json of the store's sessions, which the hooks module writes from $.session.usage(), wins
+    # over a -p worker's rate_limit_event: every session on the claude.ai sign-in writes one.
+    fresh = {}
+    for path in glob.glob(os.path.join(glob.escape(home), "phi", "**", USAGE_FILE), recursive=True) if home else ():
+        d = read_json(path)
+        if isinstance(d.get("rateLimits"), list) and d["rateLimits"] and isinstance(d.get("at"), (int, float)) \
+                and d["at"] > fresh.get("at", 0):
+            fresh = d
+    if fresh:
+        windows = {}
+        for e in fresh["rateLimits"]:
+            if not isinstance(e, dict) or not isinstance(e.get("percentUsed"), (int, float)):
+                continue
+            try:
+                resets = datetime.datetime.fromisoformat(str(e.get("resetsAt")).replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                continue
+            windows[e.get("kind") or "window"] = {"utilization": e["percentUsed"] / 100, "resetsAt": resets,
+                                                  "status": None}
+    for wname, w in windows.items():
+        if not isinstance(w, dict) or not isinstance(w.get("resetsAt"), (int, float)) or w["resetsAt"] <= now:
+            continue
+        u = w.get("utilization")
+        if isinstance(u, (int, float)) and (mx["utilization"] is None or u > mx["utilization"]):
+            mx["utilization"], mx["resets_at"] = u, w["resetsAt"]
+        if w.get("status") in ("allowed_warning", "rejected") or (isinstance(u, (int, float)) and u >= POOL_LOW):
+            mx["low"] = True
+            mx["why"] = f"the {wname} window at {u if u is not None else '?'} ({w.get('status')})"
+    return {"api": api, "max": mx}
+
+
+def pools_line(p):
+    """The one line `balance` and a start print for pool_state's result."""
+    a, m = p["api"], p["max"]
+    spent = f"{a['spent_month']:.2f}" + (f" of {a['budget']:g}" if a["budget"] else "") + " USD estimated this month"
+    used = "unknown" if m["utilization"] is None else f"{m['utilization']:.2f} used"
+    return (f"pools: API credit {'low' if a['low'] else 'ok'} ({a['why'] or spent}), "
+            f"Max plan {'low' if m['low'] else 'ok'} ({m['why'] or used})")
+
+
 def worker_start(home, settings, name, starter, kind, log, report):
     """The row a start of a terminal worker appends, and the line it prints."""
+    p = settings.get("pools")
     worker_record(home, {"event": "start", "name": name, "starter": starter, "kind": kind, "mode": settings["mode"],
                          "profile": settings["profile"], "mode_from": settings["mode_from"],
                          "profile_from": settings["profile_from"], "reason": settings["reason"],
-                         "log": log, "report": report})
+                         "log": log, "report": report,
+                         "pools": ({"api_low": p["api"]["low"], "api_spent_month": round(p["api"]["spent_month"], 4),
+                                    "max_low": p["max"]["low"], "max_utilization": p["max"]["utilization"]}
+                                   if p else None)})
     return worker_line(settings)
 
 
-def worker_outcome(home, name, how, result):
+def worker_outcome(home, name, how, result, log=""):
     """The row a `--wait --report` appends when its wait ends, with the cost and turns of the log's last result."""
     row = {"event": "outcome", "name": name, "how": how}
     for k in ("total_cost_usd", "num_turns", "is_error", "subtype", "duration_ms"):
         if k in result:
             row[k] = result[k]
+    info = last_rate_limit(log) if log else {}
+    if info:
+        row["rate_limit"] = info
     worker_record(home, row)
 
 
@@ -2681,7 +2828,7 @@ def worker_balance(home):
     import coworker
     rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
     mode_of_ = {r.get("name"): r.get("mode") for r in rows_ if r.get("event") == "start"}
-    log_of = {r.get("name"): r.get("log") for r in rows_ if r.get("event") == "start" and r.get("log")}
+    log_of = {r.get("name"): log_of_row(home, r) for r in rows_ if r.get("event") == "start"}
     # A worker writes its report a turn or more before its run's final result row, so an outcome row a wait made at
     # the report holds no cost: the cost and turns are read from the log's final result where the row lacks them.
     for r in rows_:
@@ -2700,7 +2847,7 @@ def worker_balance(home):
         done = sum(1 for r in outs if r.get("how") == "done" and r.get("is_error") is not True)
         out.append(f"{mode}: {len(starts_)} starts, {done} done, {failed} failed, cost {sum(costs):.4f} total"
                    f" {sum(costs) / len(costs) if costs else 0:.4f} mean, turns {sum(turns) / len(turns) if turns else 0:.1f} mean")
-    return "\n".join(out)
+    return "\n".join(out) + "\n" + pools_line(pool_state(home))
 
 
 def worker_for(home, sid, mode=None, profile=None):
@@ -4176,7 +4323,7 @@ def main(argv=None):
                 tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
                 log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
                 how, waited = coworker.wait_report(report, me.home, tab, log=log)
-                worker_outcome(me.home, tab, how, coworker.last_result(log))
+                worker_outcome(me.home, tab, how, coworker.last_result(log), log)
                 if how == "ended":
                     r = coworker.last_result(log)
                     print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "

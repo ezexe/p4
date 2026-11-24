@@ -20,6 +20,7 @@ memories never handed again, which the app loads, and a memory changed mid-sessi
 the prompt's cap held on a page; a hook never failing a call; hooks.json's shape and the words given to a session.
 """
 
+import datetime
 import json
 import os
 import re
@@ -2847,6 +2848,176 @@ class TerminalWorker(unittest.TestCase):
         now[0] = 0.0
         self.assertEqual(coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
                                               sleep=lambda s: now.__setitem__(0, now[0] + s)), ("long", 30))
+
+
+class PoolState(unittest.TestCase):
+    """pool_state, log_of_row, last_rate_limit, and the pool-aware worker_settings, each on its own temp store."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-pools-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        self.now = time.time()
+
+    def ledger(self):
+        return os.path.join(self.home, "phi", "worker-starts.jsonl")
+
+    def stamp(self, ago=0.0):
+        return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.now - ago))
+
+    def row(self, row, ago=0.0):
+        phi.append_line(self.ledger(), {"time": self.stamp(ago), **row})
+
+    def start(self, name, profile, lines=(), ago=0.0, mode="print"):
+        log = os.path.join(self.home, "logs", f"log-{name}.jsonl").replace("\\", "/")
+        if lines is not None:
+            write(log, "".join(json.dumps(x) + "\n" for x in lines))
+        self.row({"event": "start", "name": name, "mode": mode, "profile": profile, "log": log}, ago)
+        return log
+
+    def window(self, u, resets=None, status="allowed"):
+        resets = self.now + 3600 if resets is None else resets
+        return {"type": "rate_limit_event", "rate_limit_info": {
+            "status": status, "resetsAt": resets, "rateLimitType": "seven_day",
+            "unifiedWindows": {"seven_day": {"utilization": u, "resetsAt": resets, "status": status}}}}
+
+    def usage(self, sid, pct, limits=True):
+        iso = datetime.datetime.fromtimestamp(self.now + 3600, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        write(os.path.join(self.home, "phi", "sessions", sid, "usage.json"), json.dumps(
+            {"at": self.now * 1000,
+             "rateLimits": [{"kind": "seven_day", "percentUsed": pct, "resetsAt": iso}] if limits else []}))
+
+    refused = {"type": "result", "is_error": True, "result": "Credit balance is too low"}
+    ok = {"type": "result", "is_error": False, "total_cost_usd": 0.1}
+
+    def test_log_of_row_falls_back_to_the_one_tree_file(self):
+        named = os.path.join(self.base, "gone", "log-w1.jsonl").replace("\\", "/")
+        self.assertEqual(phi.log_of_row(self.home, {"name": "w1", "log": named}), named)
+        tree = os.path.join(self.home, "phi", "tree", "local_x", "w1", "log-w1.jsonl")
+        write(tree, "")
+        self.assertEqual(os.path.normpath(phi.log_of_row(self.home, {"name": "w1", "log": named})),
+                         os.path.normpath(tree))
+        write(os.path.join(self.home, "phi", "tree", "local_y", "w1", "log-w1.jsonl"), "")
+        self.assertEqual(phi.log_of_row(self.home, {"name": "w1", "log": named}), named)
+
+    def test_last_rate_limit_is_the_last_rows_info(self):
+        log = os.path.join(self.base, "l.jsonl")
+        write(log, json.dumps(self.window(0.1)) + "\n" + json.dumps(self.window(0.5)) + "\n")
+        self.assertEqual(phi.last_rate_limit(log)["unifiedWindows"]["seven_day"]["utilization"], 0.5)
+        self.assertEqual(phi.last_rate_limit(os.path.join(self.base, "none.jsonl")), {})
+        write(log, json.dumps(self.ok) + "\n")
+        self.assertEqual(phi.last_rate_limit(log), {})
+
+    def test_api_pool_low_on_a_credit_refusal_until_a_success_or_24_hours(self):
+        self.start("w1", "p4-workers", [self.refused])
+        self.assertTrue(phi.pool_state(self.home, self.now)["api"]["low"])
+        self.start("w2", "p4-workers", [self.ok])
+        self.assertFalse(phi.pool_state(self.home, self.now)["api"]["low"])
+        os.remove(self.ledger())
+        self.start("w3", "p4-workers", [self.refused], ago=25 * 3600)
+        self.assertFalse(phi.pool_state(self.home, self.now)["api"]["low"])
+
+    def test_api_pool_low_on_this_months_estimates_of_api_profile_workers_only(self):
+        write(os.path.join(self.home, "phi", "phi.json"), json.dumps({"worker_api_budget_usd": 1}))
+        self.start("w1", "p4-workers", [self.ok])
+        self.start("w2", "", [self.ok])
+        self.row({"event": "outcome", "name": "w2", "how": "done", "total_cost_usd": 5.0})
+        self.row({"event": "outcome", "name": "w1", "how": "done", "total_cost_usd": 0.5})
+        self.assertFalse(phi.pool_state(self.home, self.now)["api"]["low"])
+        self.row({"event": "outcome", "name": "w1", "how": "done", "total_cost_usd": 0.45})
+        self.assertTrue(phi.pool_state(self.home, self.now)["api"]["low"])
+        os.remove(self.ledger())
+        self.start("w1", "p4-workers", [self.ok], ago=40 * 86400)
+        self.row({"event": "outcome", "name": "w1", "how": "done", "total_cost_usd": 0.95}, ago=40 * 86400)
+        self.assertFalse(phi.pool_state(self.home, self.now)["api"]["low"])
+
+    def test_max_pool_reads_the_freshest_usage_json_over_a_worker_log(self):
+        self.start("w1", "", [self.window(0.95)])
+        self.usage("s1", 93)
+        got = phi.pool_state(self.home, self.now)["max"]
+        self.assertTrue(got["low"])
+        self.assertAlmostEqual(got["utilization"], 0.93)
+        self.usage("s1", 50)
+        got = phi.pool_state(self.home, self.now)["max"]
+        self.assertFalse(got["low"], "the usage.json wins over the older log at 0.95")
+        self.assertAlmostEqual(got["utilization"], 0.5)
+        self.usage("s1", 50, limits=False)
+        self.assertTrue(phi.pool_state(self.home, self.now)["max"]["low"], "an empty rateLimits list is skipped")
+
+    def test_max_pool_from_a_profile_off_workers_rate_limit_event(self):
+        self.start("w1", "", [self.window(0.95)])
+        self.assertTrue(phi.pool_state(self.home, self.now)["max"]["low"])
+        os.remove(self.ledger())
+        self.start("w1", "", [self.window(0.95, resets=self.now - 10)])
+        self.assertFalse(phi.pool_state(self.home, self.now)["max"]["low"])
+        os.remove(self.ledger())
+        self.start("w1", "", [self.window(0.5, status="allowed_warning")])
+        self.assertTrue(phi.pool_state(self.home, self.now)["max"]["low"])
+
+    def test_worker_settings_moves_a_pair_profile_to_off_when_only_the_api_pool_is_low(self):
+        self.start("w1", "p4-workers", [self.refused])
+        self.usage("s1", 10)
+        got = phi.worker_settings(self.home)
+        self.assertEqual((got["mode"], got["profile"]), ("print", ""))
+        self.assertTrue(got["profile_from"].startswith("the pools"))
+        write(os.path.join(self.home, "phi", "phi.json"), json.dumps({"worker_profile": "p4-workers"}))
+        self.assertEqual(phi.worker_settings(self.home)["profile"], "p4-workers", "phi.json's profile wins")
+        os.remove(os.path.join(self.home, "phi", "phi.json"))
+        self.usage("s1", 95)
+        got = phi.worker_settings(self.home)
+        self.assertEqual(got["profile"], "p4-workers")
+        self.assertIn("both pools are low", got["reason"])
+
+    def test_a_session_workerprofile_wins_over_the_pools(self):
+        self.start("w1", "p4-workers", [self.refused])
+        write(os.path.join(self.home, "phi", "sessions", "s9", "session.json"),
+              json.dumps({"id": "s9", "workerProfile": "p4-workers"}))
+        got = phi.worker_settings(self.home, "s9")
+        self.assertEqual((got["profile"], got["profile_from"], got["pools"]),
+                         ("p4-workers", "the session's workerProfile", None))
+
+    def test_worker_settings_interactive_warns_on_a_low_max_and_ignores_a_low_api(self):
+        write(os.path.join(self.home, "phi", "phi.json"), json.dumps({"worker_mode": "interactive"}))
+        self.usage("s1", 95)
+        got = phi.worker_settings(self.home)
+        self.assertEqual((got["mode"], got["profile"]), ("interactive", ""))
+        self.assertIn("Max plan", got["reason"])
+        os.remove(os.path.join(self.home, "phi", "sessions", "s1", "usage.json"))
+        self.start("w1", "p4-workers", [self.refused])
+        got = phi.worker_settings(self.home)
+        self.assertEqual((got["profile"], got["reason"]), ("", ""))
+
+    def test_a_profile_off_start_whose_log_is_missing_feeds_nothing(self):
+        self.start("w1", "", None)
+        got = phi.pool_state(self.home, self.now)
+        self.assertFalse(got["max"]["low"] or got["api"]["low"])
+        self.assertIsNone(got["max"]["utilization"])
+
+    def test_with_no_ledger_the_settings_are_the_pairs_plus_pools(self):
+        got = phi.worker_settings(self.home)
+        self.assertEqual((got["mode"], got["profile"], got["profile_from"]), ("print", "p4-workers", "the pair of print"))
+        self.assertIn("pools", got)
+
+    def test_balance_ends_with_a_pools_line_and_counts_a_moved_log(self):
+        named = os.path.join(self.base, "gone", "log-w1.jsonl").replace("\\", "/")
+        self.row({"event": "start", "name": "w1", "mode": "print", "profile": "p4-workers", "log": named})
+        self.row({"event": "outcome", "name": "w1", "how": "done"})
+        write(os.path.join(self.home, "phi", "tree", "local_x", "w1", "log-w1.jsonl"),
+              json.dumps({"type": "result", "is_error": False, "total_cost_usd": 0.4, "num_turns": 2}) + "\n")
+        out = phi.worker_balance(self.home)
+        self.assertIn("cost 0.4000 total", out)
+        self.assertTrue(out.splitlines()[-1].startswith("pools: API credit "), out)
+
+    def test_start_and_outcome_rows_keep_the_pools_and_the_rate_limit(self):
+        phi.worker_start(self.home, phi.worker_settings(self.home), "w1", "s", "land", "l", "r")
+        log = os.path.join(self.base, "l.jsonl")
+        write(log, json.dumps(self.window(0.3)) + "\n")
+        phi.worker_outcome(self.home, "w1", "done", {}, log)
+        start, out = phi.read_rows(self.ledger())
+        self.assertEqual(set(start["pools"]), {"api_low", "api_spent_month", "max_low", "max_utilization"})
+        self.assertEqual(out["rate_limit"]["status"], "allowed")
 
 
 class CommitCommand(unittest.TestCase):
