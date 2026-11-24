@@ -494,9 +494,16 @@ STATUS_LINES = 5                        # a plan's STATUS line is taken out of i
 
 
 def _sha256(path):
+    """The stamp's hash of the plan at `path`, as `plan close` of p4-phi takes it: over its text with a leading BOM
+    out and every CRLF and CR read as LF, encoded as UTF-8, so a git autocrlf checkout of the synced store moves no
+    closed plan back."""
     import hashlib
     with open(path, "rb") as f:
-        return hashlib.sha256(f.read()).hexdigest()
+        text = f.read().decode("utf-8", errors="surrogateescape")
+    if text.startswith("﻿"):
+        text = text[1:]
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
 def _stamps(path):

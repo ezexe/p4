@@ -1320,7 +1320,8 @@ class Unstamped(unittest.TestCase):
 
     def stamp(self, name, sha=None):
         import hashlib
-        sha = sha or hashlib.sha256(open(os.path.join(self.done, name), "rb").read()).hexdigest()
+        with open(os.path.join(self.done, name), "rb") as f:      # the LF text, as plan close hashes it
+            sha = sha or hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
         with open(self.record, "a", encoding="utf-8") as f:
             f.write(json.dumps({"name": name, "sha256": sha, "closed": "2026-01-01", "audit": "x"}) + "\n")
 
@@ -1378,6 +1379,32 @@ class Unstamped(unittest.TestCase):
         self.assertEqual(data.split(b"\r\n")[0::2][0], b"# Crlf")
         self.assertTrue(data.split(b"\r\n")[1].startswith(b"Unclosed: "))
         self.assertTrue(data.endswith(b"body\r\n"))
+
+    def test_a_plan_closed_with_lf_stays_rewritten_with_crlf_cr_or_a_bom(self):
+        """Section 20 of audit-before-a-plan-closes: the hash is over the text with a leading BOM out and every
+        CRLF and CR read as LF, so a git autocrlf checkout of the synced store moves no closed plan back."""
+        kept = os.path.join(self.done, "closed.md")
+        lf = f"# A plan\n{self.STATUS}\n\nbody\n".encode("utf-8")
+        with open(kept, "wb") as f:
+            f.write(lf)
+        self.stamp("closed.md")
+        for data in (lf.replace(b"\n", b"\r\n"), lf.replace(b"\n", b"\r"), b"\xef\xbb\xbf" + lf,
+                     b"\xef\xbb\xbf" + lf.replace(b"\n", b"\r\n")):
+            with open(kept, "wb") as f:
+                f.write(data)
+            self.assertEqual(lifetime.sweep(self.p4), "", data[:12])
+            self.assertTrue(os.path.exists(kept))
+        with open(kept, "wb") as f:
+            f.write(lf + b"an edit\n")
+        self.assertIn("closed.md", lifetime.sweep(self.p4))
+        self.assertFalse(os.path.exists(kept))
+
+    def test_grandfathering_hashes_the_lf_text_without_a_bom(self):
+        import hashlib
+        with open(os.path.join(self.done, "old.md"), "wb") as f:
+            f.write(b"\xef\xbb\xbf# Old\r\nbody\r\n")
+        lifetime.sweep(self.p4)
+        self.assertEqual(json.loads(read(self.record))["sha256"], hashlib.sha256(b"# Old\nbody\n").hexdigest())
 
 
 if __name__ == "__main__":

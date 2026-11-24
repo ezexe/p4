@@ -598,7 +598,7 @@ class Stamp(Repo):
         dest = planclose.close(path, self.repo, self.home, today="2026-11-24")
         import hashlib
         with open(dest, "rb") as f:
-            sha = hashlib.sha256(f.read()).hexdigest()
+            sha = hashlib.sha256(f.read().replace(b"\r\n", b"\n")).hexdigest()
         self.assertEqual(self.rows(), [{"name": "the-exporter-s-move.md", "sha256": sha, "closed": "2026-11-24",
                                         "audit": f"{self.base[:8]}..{self.two[:8]}"}])
         self.assertTrue(planclose.stamped(dest))
@@ -639,6 +639,53 @@ class Stamp(Repo):
         dest = planclose.close(os.path.join(self.home, self.put("x.md")), self.repo, self.home, today="2026-11-24")
         self.assertEqual([r["name"] for r in self.rows()], ["old.md", "the-exporter-s-move.md"])
         self.assertTrue(planclose.stamped(os.path.join(self.home, "complete", "old.md")))
+        self.assertTrue(planclose.stamped(dest))
+
+
+class StampLineEnds(Stamp):
+    """Section 20 of audit-before-a-plan-closes: the stamp's hash is taken over the text with a leading BOM out and
+    every CRLF and CR read as LF, and the stamp row is written before the plan goes into complete/."""
+
+    def test_a_plan_closed_with_lf_stays_stamped_rewritten_with_crlf_cr_or_a_bom(self):
+        path = os.path.join(self.home, "x.md")
+        with open(path, "wb") as f:
+            f.write(self.plan().encode("utf-8"))
+        dest = planclose.close(path, self.repo, self.home, today="2026-11-24")
+        with open(dest, "rb") as f:
+            lf = f.read()
+        self.assertNotIn(b"\r", lf)
+        for data in (lf.replace(b"\n", b"\r\n"), lf.replace(b"\n", b"\r"), b"\xef\xbb\xbf" + lf,
+                     b"\xef\xbb\xbf" + lf.replace(b"\n", b"\r\n")):
+            with open(dest, "wb") as f:
+                f.write(data)
+            self.assertTrue(planclose.stamped(dest), data[:12])
+        with open(dest, "wb") as f:
+            f.write(lf + b"an edit\n")
+        self.assertFalse(planclose.stamped(dest))
+
+    def test_the_stamp_is_the_hash_of_the_lf_text_without_a_bom(self):
+        import hashlib
+        path = os.path.join(self.home, "x.md")
+        with open(path, "wb") as f:
+            f.write(b"\xef\xbb\xbf" + self.plan().replace("\n", "\r\n").encode("utf-8"))
+        dest = planclose.close(path, self.repo, self.home, today="2026-11-24")
+        with open(dest, "rb") as f:
+            text = f.read().decode("utf-8").lstrip("﻿").replace("\r\n", "\n")
+        self.assertEqual(self.rows()[-1]["sha256"], hashlib.sha256(text.encode("utf-8")).hexdigest())
+
+    def test_the_stamp_row_is_written_before_the_file(self):
+        from unittest import mock
+        seen = []
+        real = planclose.stamp
+
+        def spy(shelf, name, data, closed, audit):
+            seen.append((name, os.path.exists(os.path.join(shelf, name))))
+            return real(shelf, name, data, closed, audit)
+
+        with mock.patch.object(planclose, "stamp", spy):
+            dest = planclose.close(os.path.join(self.home, self.put("x.md")), self.repo, self.home,
+                                   today="2026-11-24")
+        self.assertEqual(seen, [(os.path.basename(dest), False)])
         self.assertTrue(planclose.stamped(dest))
 
 

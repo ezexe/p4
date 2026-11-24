@@ -276,9 +276,9 @@ def close(path, checkout, home=None, today=None):
     `home`, under its title's name, numbered where that name is taken, or taken between free_name and the write.
     Where `home` is None it is the plan's own folder, or that folder's parent where the plan sits in one of the
     SHELVES. The plan's line ends, LF or CRLF, are kept. A plan already in `complete/` is refused as closed already.
-    The plans already in `complete/` are grandfathered first, and the plan written is then stamped in
-    `complete/.closed.jsonl` with {"name", "sha256", "closed", "audit"}, the hash of the bytes written. Returns the
-    path it moved the plan to."""
+    The plans already in `complete/` are grandfathered first, and the plan is stamped in `complete/.closed.jsonl`
+    with {"name", "sha256", "closed", "audit"}, _sha256 of the bytes it writes, before it writes them there, so a
+    sweep between the two never finds it unstamped. Returns the path it moved the plan to."""
     if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() == COMPLETE:
         raise Refused([f"{path} is in complete/ already: the plan is closed"])
     with open(path, encoding="utf-8", newline="") as f:
@@ -306,29 +306,37 @@ def close(path, checkout, home=None, today=None):
     data = end.join(lines).encode("utf-8")
     wanted = title_name(text) or os.path.basename(path)
     own = os.path.normcase(os.path.abspath(path))
+    base, head = got["range"]
     while True:
         dest = os.path.join(shelf, free_name(home, wanted, own=path))
         if os.path.normcase(os.path.abspath(dest)) == own:    # the plan sits where it would go: it is closed
             raise Refused([f"{path} is in complete/ already: the plan is closed"])
+        # the stamp comes before the file, so a sweep between the two never finds the plan unstamped
+        stamp(shelf, os.path.basename(dest), data, today, f"{base}..{head}")
         try:
             with open(dest, "xb") as f:
                 f.write(data)
             break
         except FileExistsError:         # taken since free_name looked: free_name now passes it by
             continue
-    base, head = got["range"]
-    stamp(shelf, os.path.basename(dest), data, today, f"{base}..{head}")
     os.remove(path)
     return dest
 
 
 def _sha256(data):
-    return hashlib.sha256(data).hexdigest()
+    """The stamp's hash of a plan's bytes `data`: taken over its text with a leading BOM out and every CRLF and CR
+    read as LF, encoded as UTF-8, so a line-end change such as a git autocrlf checkout leaves a plan stamped.
+    p4-temportal's lifetime.py hashes the same way."""
+    text = data.decode("utf-8", errors="surrogateescape")
+    if text.startswith("﻿"):
+        text = text[1:]
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8", errors="surrogateescape")).hexdigest()
 
 
 def stamp(shelf, name, data, closed, audit):
     """Append to `shelf`/.closed.jsonl the row {"name", "sha256", "closed", "audit"} of the plan `name` whose bytes
-    are `data`."""
+    are `data`, the hash _sha256's."""
     row = {"name": name, "sha256": _sha256(data), "closed": closed, "audit": audit}
     with open(os.path.join(shelf, CLOSED), "a", encoding="utf-8", newline="\n") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -354,7 +362,8 @@ def stamps(shelf):
 
 
 def stamped(path):
-    """True where the file at `path`'s current bytes match a stamp row of its name in its folder's .closed.jsonl."""
+    """True where _sha256 of the file at `path`'s current bytes matches a stamp row of its name in its folder's
+    .closed.jsonl."""
     try:
         with open(path, "rb") as f:
             sha = _sha256(f.read())
