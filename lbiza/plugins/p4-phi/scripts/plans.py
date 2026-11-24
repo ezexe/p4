@@ -643,6 +643,30 @@ def build_in_planner_for(rec, conf, default=BUILD_IN_PLANNER):
     return default, "the default"
 
 
+def build_route(on, max_low, max_free):
+    """("planner" or "print", why): the planner builds where the setting is on, the Max plan is not low and a Max
+    slot is free; else `-p` workers do."""
+    if not on:
+        return "print", "build_in_planner is off, so -p workers build it"
+    if max_low:
+        return "print", "the Max plan is low, so -p workers build it"
+    if max_free <= 0:
+        return "print", "no Max slot is free, so -p workers build it"
+    return "planner", "build_in_planner is on and a Max slot is free"
+
+
+def built_report(report):
+    """The second report of a planner that builds: `report-<name>.md` becomes `report-<name>-built.md`."""
+    return report[:-3] + "-built.md" if report.endswith(".md") else report + "-built.md"
+
+
+def build_message(plan, built, nums, checkout):
+    """What the planner is told once ezexe approved the plan: build it, with no worktree and one commit a section."""
+    return (f"Your plan {plan} is approved. Build sections {', '.join(nums)} in {checkout}: no worktree and no branch, "
+            "commit only by phi.py commit, one commit a section, push and merge nothing. Run each section's Checks, "
+            f"write its Evidence into the plan, and when every check passes write {built} and end the turn.")
+
+
 CODE =re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
                   r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
                   r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)

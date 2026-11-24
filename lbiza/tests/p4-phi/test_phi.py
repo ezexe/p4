@@ -3706,5 +3706,115 @@ class BuildInPlanner(unittest.TestCase):
             phi.worker_for(self.home, "s1", build="yes")
 
 
+class BuildByPlanner(unittest.TestCase):
+    """The build route of a section plan: the planner on its Max slot, or None for `-p` workers; its built report."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-build-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        self.folder = os.path.join(self.base, "node").replace("\\", "/")
+        self.conf = os.path.join(self.home, "phi", "phi.json")
+        self.ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+
+    def rows(self):
+        return phi.read_rows(self.ledger)
+
+    def build(self):
+        return phi.build_by_planner(self.home, "/p/plan.md", "/repo", "tp-2-1-ab12", "", self.folder, ["2", "3"])
+
+    def test_the_route_is_the_planner_where_the_setting_is_true_the_max_plan_not_low_and_a_slot_free(self):
+        write(self.conf, json.dumps({"build_in_planner": True}))
+        before = phi.pool_slots(self.home)["running"]["max"]
+        lines, why = self.build()
+        self.assertIn("a Max slot is free", why)
+        self.assertEqual(len(lines), 3)
+        self.assertIn("coworkers --wait --report", lines[1])
+        self.assertTrue(lines[1].rstrip("`").endswith("report-tp-2-1-ab12-built.md"))
+        self.assertIn("Yes, and use auto mode", lines[2])
+        self.assertIn('"to": "tp-2-1-ab12"', lines[2])
+        (row,) = self.rows()
+        self.assertEqual((row["event"], row["name"], row["kind"], row["mode"], row["profile"]),
+                         ("start", "tp-2-1-ab12-built", "build", "interactive", ""))
+        self.assertEqual(phi.pool_slots(self.home)["running"]["max"], before + 1)
+
+    def test_the_route_is_print_where_the_setting_is_false_the_max_plan_low_or_no_max_slot_is_free(self):
+        write(self.conf, json.dumps({"build_in_planner": False}))
+        self.assertIsNone(self.build()[0])
+        write(self.conf, json.dumps({"build_in_planner": True}))
+        iso = datetime.datetime.fromtimestamp(time.time() + 3600, datetime.timezone.utc).isoformat()
+        usage = os.path.join(self.home, "phi", "sessions", "s1", "usage.json")
+        write(usage, json.dumps({"at": time.time() * 1000, "rateLimits": [
+            {"kind": "seven_day", "percentUsed": 95, "resetsAt": iso.replace("+00:00", "Z")}]}))
+        lines, why = self.build()
+        self.assertIsNone(lines)
+        self.assertIn("Max plan is low", why)
+        os.remove(usage)
+        write(self.conf, json.dumps({"build_in_planner": True, "worker_slots": {"max": 0}}))
+        lines, why = self.build()
+        self.assertIsNone(lines)
+        self.assertIn("no Max slot is free", why)
+        self.assertEqual(self.rows(), [], "no row is written where the route is print")
+
+    def test_wait_report_on_the_built_report_returns_done_and_the_outcome_row_ends_the_start(self):
+        write(self.conf, json.dumps({"build_in_planner": True}))
+        self.build()
+        built = os.path.join(self.folder, "report-tp-2-1-ab12-built.md").replace("\\", "/")
+        os.makedirs(self.folder, exist_ok=True)
+        ran = subprocess.Popen([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", "--wait",
+                                "--report", built, "--p4", self.home, "--session", "local_plan0001"],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               env={**os.environ, "P4_PHI_APP_SESSIONS": os.path.join(self.base, "app")})
+        time.sleep(3)
+        write(built, "built")
+        out, err = ran.communicate(timeout=60)
+        self.assertEqual(ran.returncode, 0, err)
+        self.assertIn(f"done: {built}", out.replace("\\", "/"))
+        outcome = self.rows()[-1]
+        self.assertEqual((outcome["event"], outcome["name"], outcome["how"]), ("outcome", "tp-2-1-ab12-built", "done"))
+        self.assertEqual([r["name"] for r in phi.running_workers(self.home)], [])
+
+
+class RunningBuilds(unittest.TestCase):
+    """running_workers: a build row is held to BUILD_HOURS, a retry's start is not ended by an old outcome."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-running-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.home = os.path.join(os.path.realpath(self._tmp.name), ".claude", "p4")
+        os.makedirs(os.path.join(self.home, "phi"))
+        self.now = time.time()
+
+    def row(self, row, hours=0.0):
+        stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.now - hours * 3600))
+        phi.append_line(os.path.join(self.home, "phi", "worker-starts.jsonl"), {"time": stamp, **row})
+
+    def names(self):
+        return [r["name"] for r in phi.running_workers(self.home, self.now)]
+
+    def start(self, name, hours, **more):
+        self.row({"event": "start", "name": name, "mode": "interactive", "profile": "", "log": "", "report": "",
+                  **more}, hours)
+
+    def test_a_build_row_counts_at_five_hours_and_not_at_nine(self):
+        self.start("a-built", 5, kind="build")
+        self.start("b-built", 9, kind="build")
+        self.assertEqual(self.names(), ["a-built"])
+
+    def test_a_start_its_outcome_and_a_second_start_of_the_name_count_once(self):
+        self.start("x", 0.5, kind="build")
+        self.row({"event": "outcome", "name": "x", "how": "long"}, 0.4)
+        self.assertEqual(self.names(), [])
+        self.start("x", 0.1, kind="build")
+        self.assertEqual(self.names(), ["x"])
+
+    def test_a_planner_row_is_held_at_an_hour_and_a_half_and_a_plain_interactive_row_is_cut_at_the_hour(self):
+        self.start("p", 1.5, kind="plan")
+        self.start("i", 1.5)
+        self.assertEqual(self.names(), ["p"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

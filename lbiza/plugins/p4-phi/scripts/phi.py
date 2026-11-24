@@ -94,6 +94,7 @@ REFUSAL_HOURS = 24                 # a credit refusal keeps the API pool low thi
 WORKER_SLOTS = {"api": 4, "max": 2}   # phi.json `worker_slots`: how many terminal workers each pool runs at once
 INTERACTIVE_HOURS = 1              # an interactive worker with neither log nor report is running for this long
 RUNNING_HOURS = 2                  # a start row with no outcome, report or final result is running for this long
+BUILD_HOURS = 8                    # a planner's build row (kind `build`) is running for this long without its report
 LAND_COST = 0.4                    # USD a landing worker is taken to cost where no outcome row says better
 POOL_ROWS = 20                     # pool_state reads the logs of this many latest start rows, never the whole ledger
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
@@ -2817,10 +2818,12 @@ def running_workers(home, now=None):
     import coworker
     now = time.time() if now is None else now
     rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl")) if home else []
-    ended = {r.get("name") for r in rows_ if r.get("event") == "outcome"}
     out = {}
     for r in rows_:
-        if r.get("event") != "start" or r.get("name") in ended:
+        if r.get("event") == "outcome":            # an outcome ends the starts before it, not a retry's after it
+            out.pop(r.get("name"), None)
+            continue
+        if r.get("event") != "start":
             continue
         try:
             at = time.mktime(time.strptime(str(r.get("time")), "%Y-%m-%dT%H:%M:%S"))
@@ -2831,9 +2834,11 @@ def running_workers(home, now=None):
             continue
         interactive = r.get("mode") == "interactive" and not r.get("log")    # no log, so no result row to end it
         planner = interactive and r.get("kind") == "plan"    # it reads in rounds: its report, or RUNNING_HOURS, ends it
-        if now - at > (INTERACTIVE_HOURS if interactive and not planner else RUNNING_HOURS) * 3600:
+        build = r.get("kind") == "build"                     # a planner that builds: its built report, or BUILD_HOURS
+        hours = BUILD_HOURS if build else INTERACTIVE_HOURS if interactive and not planner else RUNNING_HOURS
+        if now - at > hours * 3600:
             continue
-        if interactive and not planner:        # its node's transcript, idle QUIET seconds, frees its slot
+        if interactive and not planner and not build:   # its node's transcript, idle QUIET seconds, frees its slot
             seen = [os.path.getmtime(f) for f in coworker.kept(r.get("name"), home, "") if os.path.isfile(f)]
             if seen and now - max(seen) >= coworker.QUIET:
                 continue
@@ -2988,6 +2993,24 @@ def worker_start(home, settings, name, starter, kind, log, report):
                                     "max_low": p["max"]["low"], "max_utilization": p["max"]["utilization"]}
                                    if p else None)})
     return worker_line(settings)
+
+
+def build_by_planner(home, plan, checkout, name, starter, folder, nums):
+    """Route a section plan's build: where plans.build_route says planner, write the `<name>-built` start row and
+    return the lines to print (the wait, the card's answer, the SendMessage call), else (None, why)."""
+    on, src = build_in_planner(home, starter)
+    slots = pool_slots(home)
+    way, why = plans.build_route(on, slots["pools"]["max"]["low"], slots["max"])
+    if way != "planner":
+        return None, why
+    built = plans.built_report(f"{folder}/report-{name}.md")
+    worker_record(home, {"event": "start", "name": f"{name}-built", "starter": starter, "kind": "build",
+                         "mode": "interactive", "profile": "", "mode_from": src, "profile_from": "the Max plan",
+                         "reason": why, "log": "", "report": built, "pools": None})
+    call = json.dumps({"to": name, "message": plans.build_message(plan, built, nums, checkout)}, ensure_ascii=False)
+    return [f"phi: {why}: `{name}` builds it on its Max slot",
+            f"First start this wait, as one background command: `{commands()} coworkers --wait --report {built}`",
+            f"Then answer its ExitPlanMode card in its tab with \"Yes, and use auto mode\", then `SendMessage` {call}"], why
 
 
 def result_of(log, quiet=None, clock=time.time, sleep=time.sleep, step=1):

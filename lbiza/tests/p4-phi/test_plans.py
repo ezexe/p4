@@ -2199,5 +2199,22 @@ class BuildInPlannerFor(unittest.TestCase):
                          (True, "the default"))
 
 
+class BuildRoute(unittest.TestCase):
+    def test_the_planner_builds_only_where_the_setting_is_on_the_max_plan_is_not_low_and_a_slot_is_free(self):
+        self.assertEqual(plans.build_route(True, False, 1)[0], "planner")
+        for args, why in (((False, False, 1), "build_in_planner is off"), ((True, True, 1), "the Max plan is low"),
+                          ((True, False, 0), "no Max slot is free")):
+            way, said = plans.build_route(*args)
+            self.assertEqual(way, "print")
+            self.assertIn(why, said)
+
+    def test_the_built_report_and_the_message_that_asks_for_it(self):
+        self.assertTrue(plans.built_report("/n/report-tp-1-1-ab12.md").endswith("report-tp-1-1-ab12-built.md"))
+        self.assertEqual(plans.built_report("/n/r"), "/n/r-built.md")
+        said = plans.build_message("/p/plan.md", "/n/report-x-built.md", ["2", "3"], "/repo")
+        for part in ("/p/plan.md", "/n/report-x-built.md", "one commit a section", "sections 2, 3", "/repo"):
+            self.assertIn(part, said)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
