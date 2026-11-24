@@ -1865,7 +1865,7 @@ def h_session_start(payload):
         first = controls.compacted(me.home, s)     # a puppeteer's board path before anything else
         RAN["pair"] = "compacted"
     elif source in ("compact", "clear"):
-        first = controls.state_first(me.home, s)   # a standing worker's or coworker's state page first
+        first = controls.state_first(me.home, s)   # the state page of any session that keeps one, first
     save_session(me.home, s)
     # past the app's cap of 10,000 characters Claude sees a preview of the first 2,000 and the file's path, so what
     # asks the session to act comes first: the page to resume from and the notices, then the background, and last
@@ -2733,8 +2733,8 @@ def h_go_guard(payload):
 
 def h_start_advice(payload):
     """PreToolUse on mcp__ccd_session__start_session. It denies the starts that break a cap, MAX_DEPTH or
-    MAX_CHILDREN, a controlled session's new orchestrator, which its puppeteer starts instead, a puppeteer's second
-    standing worker, a brief that changes files and names none, and one whose files a running session holds. For
+    MAX_CHILDREN, a controlled session's new orchestrator, which its puppeteer starts instead, a brief that changes files
+    and names none, and one whose files a running session holds. For
     the rest it advises fork or fresh by relay.advise_start, from the parent's transcript size and how much of the parent's scope
     the brief's paths cover, for a writer's start as for any. It is silent when the call already does what is
     advised, else a permission `ask` with the reason, so ezexe sees it and decides. A start that passes
