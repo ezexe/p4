@@ -112,7 +112,10 @@ class Coworker(unittest.TestCase):
         self.assertEqual(len(wrote), 6)
         with open(os.path.join(found[0]["folder"], "coworker-settings.json"), encoding="utf-8") as f:
             settings = json.load(f)
-        self.assertEqual(list(settings), ["enabledPlugins"])
+        self.assertLessEqual(set(settings), {"enabledPlugins", "claudeMdExcludes"})
+        self.assertIn("enabledPlugins", settings)
+        self.assertEqual([x for x in settings.get("claudeMdExcludes", []) if x.startswith(self.base.replace("\\", "/"))],
+                         [], "no exclude is of this test's own making; one above the temp folder is the machine's")
         self.assertEqual(sorted(settings["enabledPlugins"]),
                          ["p4-phi@p4-marketplace", "p4-temportal@p4-marketplace"])
         self.assertEqual(set(settings["enabledPlugins"].values()), {False})
