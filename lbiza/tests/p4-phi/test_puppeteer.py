@@ -1147,7 +1147,8 @@ class WorkerSettings(Base):
 
     def test_the_paired_defaults_and_the_explicit_profile_that_wins(self):
         t = self.t
-        self.assertIn("ANTHROPIC_PROFILE = 'p4-workers'", self.start(TOP, self.LAND))
+        # PowerShell's `$env:ANTHROPIC_PROFILE = 'p4-workers'` or sh's `export ANTHROPIC_PROFILE=p4-workers`
+        self.assertRegex(self.start(TOP, self.LAND), r"ANTHROPIC_PROFILE ?= ?'?p4-workers")
         self.assertIn("mode print (the piece of work), profile p4-workers (the pair of print)", self.out)
         self.setUp()
         t = self.t
