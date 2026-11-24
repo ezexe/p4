@@ -58,8 +58,13 @@ EDITS = ("Write", "Edit", "NotebookEdit")
 SHELLS = ("Bash", "PowerShell", "mcp__terminal__run_in_terminal")
 # a run of a shell line, once normalised, that may be one path segment: what sits between separators, spaces,
 # quotes, brackets and the marks of a chain, a redirection or an option's value
-RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
+ESCQ = ""     # an escaped quote (`\"`, or a backtick before `"`) once shell_words has read it: it opens no quote
+RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
 QUOTES = ("'", '"')
+# a nested shell a line runs, where a glob in a quote is a path the inner shell expands
+NESTED = re.compile(r"(?i)\b(?:sh|bash|zsh|dash)(?:\.exe)?\b[^\n]*?\s-\w*c\b|\bcmd(?:\.exe)?\s+/[ck]\b"
+                    r"|\b(?:powershell|pwsh)(?:\.exe)?\b[^\n]*?\s-(?:c|command|ec|encodedcommand)\b"
+                    r"|-EncodedCommand\b|\bInvoke-Expression\b|\biex\b")
 PLANS_FOLDER = "plan-planner"
 UNDER_COMPLETE = re.compile(r"(?i)(?:^|/)plan-planner/complete(?:/|$)")
 # what keeps a shell line from being one command alone: a chain (`;`, `|`, `&`, a newline, a backtick or a `$(`),
@@ -389,10 +394,14 @@ def grandfather(home, today=None):
     return names
 
 
-def normal(text):
+def normal(text, sep=True):
     """`text` with its paths normalised: either slash is `/`, repeated separators are one, and a `./` segment is
-    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`."""
-    out = re.sub(r"/{2,}", "/", str(text or "").replace("\\", "/"))
+    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`
+    or `+` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`). One before any other
+    character is a separator where `sep` is true, as PowerShell and Windows read it, and an escape, dropped, where
+    it is false, as bash reads `comp\\lete`: names_complete reads a line both ways."""
+    out = re.sub(r"\\(?=[|(){}+])" if sep else r"\\(?=[\s\S])", "", str(text or ""))
+    out = re.sub(r"/{2,}", "/", out.replace("\\", "/"))
     out = re.sub(r"/\.(?=/)", "", out)
     out = re.sub(r"(?<![\w.])\./", "", out)
     return out
@@ -478,14 +487,19 @@ def _braces(word):
     return done + words
 
 
-def shell_words(cmd):
+def shell_words(cmd, escq=True):
     """The shell line `cmd` read as a shell reads its words, so a guard sees the path it builds: a PowerShell
     backtick escape is its character (``comp`lete``); a word of more than one part with no whitespace in a quote
     loses its quotes (`comp''lete`, `"plan-planner/comp"lete`), while a word quoted whole, or whose quote holds a
     space, keeps them; a brace list is read as its words (`{complete,todo}/` is `complete/ todo/`); and a trailing
     dot of a path part (`complete./`), or a trailing space of one inside a quote, is dropped, as Windows does. A
-    name built from a variable is left as it is."""
-    line = re.sub(r"`(.)", r"\1", str(cmd or ""), flags=re.S)
+    name built from a variable is left as it is. An escaped quote (`\\"`, a backtick before `"`) toggles no quote
+    state where `escq` is true and does where it is false: bash's `\\\\"` closes a quote and PowerShell has no `\\"`
+    escape, so names_complete reads a line both ways."""
+    line = str(cmd or "")
+    if escq:
+        line = re.sub(r'`"|(?<=\\)"', ESCQ, line)     # an escaped quote toggles no quote state
+    line = re.sub(r"`(.)", r"\1", line, flags=re.S)
     out = []
     for word in _split(line):
         parts = _parts(word)
@@ -501,7 +515,71 @@ def shell_words(cmd):
     return re.sub(r"(?<=[^\s/\\.])\.+(?=[/\\'\"\s]|$)", "", line)
 
 
-def names_complete(cmd, cwd):
+def in_quote(line, at):
+    """True where the character of `line` at index `at` is inside a quote that is still open there."""
+    quote = ""
+    for c in line[:at]:
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in QUOTES:
+            quote = c
+    return bool(quote)
+
+
+# the one shape a heredoc or a here-string is data in: the whole command is a write of its text to a path
+PATH = r"""(?:"[^"$`\r\n]*"|'[^'\r\n]*'|[^\s;|&<>()$`"'#]+)"""
+HEREDOC_LINE = re.compile(r"(?i)[ \t]*(?:cat[ \t]*>>?|tee(?:[ \t]+-a)?)[ \t]+" + PATH + r"[ \t]+<<(-?)[ \t]*"
+                          r"(?:(?P<q>['\"])(?P<w>[A-Za-z_]\w*)(?P=q)|(?P<b>[A-Za-z_]\w*))[ \t]*\r?")
+SINK = (r"[ \t]*\|(?:[ \t]*(?:set-content|add-content|out-file)(?:[ \t]+(?:-path[ \t]+|-filepath[ \t]+)?" + PATH
+        + r"|[ \t]+-encoding[ \t]+\w+)+)[ \t]*\r?")
+HERESTRING_OPEN = re.compile(r"@(['\"])[ \t]*\r?")
+VALUE_LINE = re.compile(r"(?i)[ \t]*(?:set|add)-content[ \t]+(?:-path[ \t]+)?" + PATH + r"[ \t]+-value[ \t]+@(['\"])[ \t]*\r?")
+EXPANDS = re.compile(r"[$`]")       # an unquoted heredoc and a `@"` here-string run a `$(...)` and a backtick
+
+
+def data_out(cmd, tool=""):
+    """`cmd` without the body of its heredoc or here-string where the whole command is one of these shapes and
+    nothing else, and `cmd` as it is otherwise:
+    - `cat > <path> <<D`, `cat >> <path> <<D`, `tee <path> <<D` or `tee -a <path> <<D`, with `D` bare or in one pair
+      of quotes and nothing else on that line, the body running to a line that is exactly `D`, and only blank
+      lines after it;
+    - `@'` or `@"` on a line of its own, the body, then `'@` or `"@` and only `| Set-Content <path>`,
+      `| Add-Content <path>` or `| Out-File <path>` (with `-Path`, `-FilePath` and `-Encoding <word>`); or
+      `Set-Content`/`Add-Content -Path <path> -Value @'`, the body ending at `'@` and nothing after.
+    A heredoc shape is data only for the `Bash` tool and a here-string shape only for `PowerShell`: bash reads
+    `@'` as an open quote, and a PowerShell tab reached by `mcp__terminal__run_in_terminal` runs a heredoc's body
+    lines, so on any other tool no shape is data. A body that an unquoted heredoc or a `@"` here-string would expand (`$` or a backtick) is no data. The path
+    stays in the line, so a target under complete/ is read as a path."""
+    text = str(cmd or "")
+    lines = text.split("\n")
+    m = HEREDOC_LINE.fullmatch(lines[0]) if tool == "Bash" else None
+    if m:
+        word, quoted = m.group("w") or m.group("b"), bool(m.group("q"))
+        for end in range(1, len(lines)):
+            if (lines[end].rstrip("\r").lstrip("\t") if m.group(1) else lines[end].rstrip("\r")) == word:
+                if (all(not x.strip() for x in lines[end + 1:])
+                        and (quoted or not EXPANDS.search("\n".join(lines[1:end])))):
+                    return lines[0]
+                return text
+        return text
+    if tool != "PowerShell":
+        return text
+    o, v = HERESTRING_OPEN.fullmatch(lines[0]), VALUE_LINE.fullmatch(lines[0])
+    if not (o or v):
+        return text
+    quote = (o or v).group(1)
+    for end in range(1, len(lines)):
+        if lines[end].startswith(quote + "@"):      # PowerShell ends a here-string at the first such line
+            rest = lines[end][2:]
+            tail_ok = re.fullmatch(SINK, rest, re.I) if o else not rest.strip()
+            if (tail_ok and all(not x.strip() for x in lines[end + 1:])
+                    and (quote == "'" or not EXPANDS.search("\n".join(lines[1:end])))):
+                return lines[0] + "\n" + lines[end]
+            return text
+    return text
+
+
+def names_complete(cmd, cwd, tool=""):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
     matches it, with a separator beside it (`complete/`, `/complete`, `/comp*`), or quoted alone as a path's part
@@ -509,9 +587,17 @@ def names_complete(cmd, cwd):
     separator beside it, as in `-m "audit complete"` or `grep complete`, is none. A glob outside a quote, as in
     `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
     `complete` outside a quote is a segment too. The line is read by shell_words first, so `comp''lete`,
-    ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`."""
-    line = normal(shell_words(cmd))
+    ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`. It is read four ways, an escaped quote
+    toggling the quote state or not and a backslash an escape or a separator, and refused where any reading names
+    `complete`. `tool` says which shape of data_out counts."""
+    data = data_out(cmd, tool)
+    return any(_names_complete(normal(shell_words(data, escq), sep), cwd)
+               for escq in (True, False) for sep in (False, True))
+
+
+def _names_complete(line, cwd):
     planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
+    nested = bool(NESTED.search(line))      # a nested shell expands a glob inside the quote it is given in
     for m in RUN.finditer(line):
         if not is_complete(m.group(0)):
             continue
@@ -519,10 +605,13 @@ def names_complete(cmd, cwd):
         after = line[m.end()] if m.end() < len(line) else ""
         if "/" in (before, after):
             return True
+        if nested and planners and m.group(0).lower() != COMPLETE:
+            return True
         if before and before in QUOTES and after == before:
             return True
         if (planners or m.group(0).lower() != COMPLETE) and before not in QUOTES and after not in QUOTES:
-            return True
+            if m.group(0).lower() == COMPLETE or not in_quote(line, m.start()):   # `grep 'a[a-z]*|x'` is no path
+                return True
     return False
 
 
@@ -616,7 +705,7 @@ def guard(tool, tool_input, cwd=None):
         return None
     if tool in SHELLS:
         cmd = str(inp.get("command") or "")
-        if not names_complete(cmd, cwd) or is_close_line(cmd, cwd) or is_read_only(cmd):
+        if not names_complete(cmd, cwd, tool) or is_close_line(cmd, cwd) or is_read_only(cmd):
             return None
         return ("phi (p4-phi): this command is refused: it names a `complete` folder, which a plan enters only "
                 "by `phi.py plan close <plan> --checkout <repo>`, past the gate of its Evidence and its `## Audit`. "

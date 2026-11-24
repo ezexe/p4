@@ -127,6 +127,19 @@ class Linear(Base):
         self.assertIn("reported \"Ported; the suite passes.\"", text3)
         self.assertTrue(os.path.exists(self.path(TOP, "ledger.json")))
 
+    def test_a_report_that_asks_ezexe_what_its_context_decides_is_relayed_as_a_status_not_a_question(self):
+        t = self.t
+        t.say(TOP, TASK)
+        t.say(KID, handed("Port the flush to the new writer. Archive when done."))
+        t.stop(KID, "Port the flush", report="Ported. Tell me now if ezexe wants X instead.")
+        text = self.ledger()[0]
+        self.assertIn("Its default stands, so relay this as a status, not as a question card.", text)
+        self.assertNotIn("reported \"Ported. Tell me now", text)
+        t.stop(KID, "Port the flush", report="Ported. Approve the plan?")
+        text = self.ledger()[0]
+        self.assertNotIn("relay this as a status", text)
+        self.assertIn("reported \"Ported. Approve the plan?\"", text)
+
     def test_a_live_agent_team_is_a_part_of_the_ledger_and_one_that_is_over_is_not(self):
         t = self.t
         t.say(TOP, TASK)
@@ -981,7 +994,7 @@ class Terminal(Base):
         self.assertEqual(waited.returncode, 0, waited.stderr)
         self.assertIn("is there", waited.stdout)
 
-    def planner_draft(self, settings=None):
+    def planner_draft(self, settings=None, extra=()):
         """Starts a planner's draft; its start file's text, its resume file's text, the output and the node folder."""
         t = self.t
         if settings is not None:
@@ -992,7 +1005,7 @@ class Terminal(Base):
         write(os.path.join(t.dir(TOP), "drafts", did + ".json"), json.dumps({
             "id": did, "title": "Plan the ports table move", "parent": TOP, "verdict": "start", "context": "fresh",
             "brief": "Plan the ports table move.\nThis session starts in plan mode.\nFiles: none", "gate": []}))
-        r = t.cli(TOP, "draft", "--start", did)
+        r = t.cli(TOP, "draft", "--start", did, *extra)
         self.assertEqual(r.returncode, 0, r.stderr)
         name = coworker.draft_name("Plan the ports table move", did)
         folder = relay.nodes(t.p4)[name]
@@ -1082,6 +1095,58 @@ class Terminal(Base):
         line = next(x for x in r.stdout.split("\n") if "mcp__terminal__open_terminal_tab" in x)
         self.assertLess(line.index("open_terminal_tab"), line.index("run_in_terminal"))
         self.assertIn('"tab_id": "<the tab_id it returned>"', line)
+
+    def test_a_draft_started_with_a_checkout_works_commits_and_lands_there(self):
+        repo = os.path.join(self.t.tmp, "other-repo")
+        os.makedirs(repo)
+        there = os.path.abspath(repo).replace("\\", "/")
+        start, _, out, name = self.planner_draft(extra=("--checkout", repo))
+        self.assertRegex(start.replace("\\", "/"), r"(?:Set-Location|cd)\b[^\n]*" + re.escape(there))
+        with open(os.path.join(relay.nodes(self.t.p4)[name], f"brief-{name}.md"), encoding="utf-8") as f:
+            brief = f.read().replace("\\", "/")
+        self.assertIn(f"Work in {there},", brief)
+        self.assertIn(f"commit --checkout {there} -m", brief)
+        land = next(x for x in out.replace("\\", "/").splitlines() if "--land" in x)
+        self.assertIn(f'--checkout "{there}"', land)
+
+    def test_a_print_draft_started_with_background_prints_its_log_and_calls_no_terminal(self):
+        """Where every tab is held: `--background` starts the `-p` worker detached and prints its log; an interactive
+        worker is named as needing a tab and keeps its tab lines."""
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        with mock.patch.object(subprocess, "Popen") as popen:
+            r = t.cli(TOP, "draft", "--start", did, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(popen.call_count, 1, "the worker's start file is run as one detached process")
+        name = coworker.draft_name("Fix the ports table", did)
+        log = f"{relay.nodes(t.p4)[name]}/log-{name}.jsonl".replace("\\", "/")
+        self.assertIn(f"started in the background, its log {log}", r.stdout.replace("\\", "/"))
+        self.assertNotIn("mcp__terminal__", r.stdout)
+        did2 = self.kept_draft("Fix the ports map", "Fix the ports map.\nFiles: src/map.py", did="drf-0abcdef013")
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "This session starts in plan mode.\nezexe approves the plan with ExitPlanMode.\n")
+        with mock.patch.object(subprocess, "Popen") as popen:
+            r = t.cli(TOP, "draft", "--start", did2, "--task", task, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        popen.assert_not_called()
+        self.assertIn("is interactive: it needs a tab", r.stdout)
+        self.assertIn("mcp__terminal__open_terminal_tab", r.stdout)
+
+    def test_a_background_start_that_fails_leaves_an_outcome_row_failed(self):
+        """Where `start_background` raises (no shell on PATH), the start row gets an outcome row `failed` with the
+        error, which is printed, so the slot is not held for RUNNING_HOURS."""
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        with mock.patch.object(subprocess, "Popen", side_effect=FileNotFoundError("no powershell on PATH")):
+            r = t.cli(TOP, "draft", "--start", did, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        name = coworker.draft_name("Fix the ports table", did)
+        with open(os.path.join(t.p4, "phi", "worker-starts.jsonl"), encoding="utf-8") as f:
+            rows = [json.loads(x) for x in f if x.strip()]
+        out = [x for x in rows if x.get("event") == "outcome" and x.get("name") == name]
+        self.assertEqual([x["how"] for x in out], ["failed"], rows)
+        self.assertIn("no powershell on PATH", out[0]["error"])
+        self.assertIn("no powershell on PATH", r.stdout)
 
     def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
         start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})

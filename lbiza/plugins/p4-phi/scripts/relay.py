@@ -987,6 +987,55 @@ def take_warnings(home, sid, s):
 TURN_WARNINGS = 3          # turn reports kept for one session's next message; older ones are dropped as told
 
 
+# --- a report that asks ezexe what the sender's context decides ----------------------------------------------------
+#
+# ezexe is asked only about a change to what a plan is meant to do, approval of a new plan, spend beyond the pools and
+# an irreversible action outside the repo. A report line that puts anything else to ezexe, such as "tell me if ezexe
+# wants X instead", is a call the sender's context covers: the sender's default stands and the puppeteer relays the line
+# as a status, not as a question card.
+EZEXE_OWN = re.compile(
+    r"\bapprov\w*|\bnew plan\b|\bplan(?:'s|s)?\s+(?:intent|goal|purpose|scope|objective)|meant to do"
+    r"|\bspen[dt]\w*|\bbudget|\bcredits?\b|\bpools?\b|\bbilling|\bMax plan"
+    r"|\birreversib\w*|(?:can't|cannot|can not|not) be undone|\bforce[- ]push|\bdelet\w*|\bdestroy\w*"
+    r"|\bpublish\w*|\bdeploy\w*|outside the repo|\bcredential\w*|\bpassword|\bsecret"
+    r"|\bapi[ -]?keys?\b|\bforce(?:d|s)?\b"
+    r"|\bpush(?:ing)?\s+(?:\w+\s+){0,2}to\s+(?:origin|the remote|upstream|main)\b"
+    r"|\b(?:post|release|token|permission|sign[ -]?in|log[ -]?in|pay|purchase|drop|install|restart)(?:s|ed|ing)?\b",
+    re.I)   # the last two lines hold the words of plans.AUTHORITY that reach outside the repo; a push or merge
+            # inside it is a PR-split call, so "Should I push it as one PR or two?" is flagged
+EZEXE_IF = re.compile(
+    r"\b(?:tell|let|say|ping|message|notify|warn|shout|speak up|object|reply)\b[^.?!\n]{0,40}?"
+    r"\b(?:if|whether|unless)\s+(?:ezexe|the user)\s+(?:wants?|prefers?|would\s+(?:like|rather|prefer)|likes?|needs?"
+    r"|objects?|minds?|disagrees?)\b", re.I)
+EZEXE_SHOULD = re.compile(
+    r"\b(?:should|shall|do you want|would you like|want me to)\b[^?\n]{0,80}\b(?:(?:one|1|a single|single|the same|same"
+    r"|separate|two|2)\s+(?:PRs?|pull requests?|commits?|branch(?:es)?)|(?:which|what)\s+order|in\s+(?:which|what)\s+order)\b"
+    r"|\b(?:which|what)\s+order\b"
+    r"|\b(?:should|shall)\s+(?:I|we)\s+(?:fix|handle|land|ship|split|order)\b[^?\n]{0,80}\b(?:or|first|before|after)\b",
+    re.I)
+
+
+def asks_ezexe(line):
+    """`line`, stripped, when it puts to ezexe a call the sender's context covers; '' otherwise, and '' for a line
+    that touches one of ezexe's four matters."""
+    text = str(line or "").strip()
+    if not text or EZEXE_OWN.search(text):
+        return ""
+    return text if EZEXE_IF.search(text) or EZEXE_SHOULD.search(text) else ""
+
+
+def asks_ezexe_in(report):
+    """The lines of a report that asks_ezexe flags, in order."""
+    return [t for t in (asks_ezexe(l) for l in str(report or "").splitlines()) if t]
+
+
+def default_status(title, lines):
+    """The status line the puppeteer relays for a flagged report, in place of a question card."""
+    said = " ".join(f"\"{_short(l, 200)}\"" for l in lines)
+    return (f"\"{title}\" put to ezexe what its own context decides: {said} Its default stands, so relay this as a status, "
+            f"not as a question card.")
+
+
 # --- deltas ----------------------------------------------------------------------------------------------------------
 
 def _git(cwd, *args, timeout=None):

@@ -521,6 +521,24 @@ class TreeOfPlans(unittest.TestCase):
         pend = relay._session(self.t.p4, TOP).get("relayPending") or []
         self.assertTrue(any("ended its turn on a question" in w["text"] and A in w["text"] for w in pend))
 
+    def test_a_report_asking_ezexe_what_the_context_decides_is_relayed_as_a_status_and_a_plan_approval_is_not(self):
+        s = relay._session(self.t.p4, A)
+        plans.turn_relay(self.t.p4, s, {"id": "r1", "report": "Moved it. Tell me now if ezexe wants X instead."}, [])
+        pend = relay._session(self.t.p4, TOP).get("relayPending") or []
+        self.assertTrue(any("relay this as a status, not as a question card" in w["text"] for w in pend), pend)
+        self.assertFalse(any("ended its turn on a question" in w["text"] for w in pend))
+        # a plan's approval is ezexe's: no status line, and not a question the parent answers itself, so it goes up as one
+        self.assertEqual(relay.asks_ezexe_in("Moved it. Approve the plan?"), [])
+        self.assertEqual(plans.waiting_on("Moved it. Approve the plan?"), "")
+        plans.turn_relay(self.t.p4, s, {"id": "r2", "report": "Moved it. Approve the plan?"}, [])
+        pend = relay._session(self.t.p4, TOP).get("relayPending") or []
+        self.assertFalse(any("Approve the plan" in w["text"] for w in pend), "no status line, no self-answer nag")
+        # each of ezexe's four matters is left in the report as the question it asks, beside a line that is flagged
+        for q in ("Approve the plan?", "Does the plan's intent change to Y?", "Is a new plan wanted for Z?",
+                  "May I spend past the pools?", "Can I delete the remote branch? It cannot be undone."):
+            self.assertEqual(relay.asks_ezexe_in("Tell me now if ezexe wants X instead.\n" + q),
+                             ["Tell me now if ezexe wants X instead."], q)
+
     def test_an_up_line_is_said_once(self):
         """An up line, such as "the parent has moved past your root step", is said once, not at every boundary."""
         self.plan(A, items("Rewrite p4conf.LAYOUT", "Move recall/ into phi/", "Commit the move", "Tell docs"))
@@ -2184,6 +2202,51 @@ class OwnLines(unittest.TestCase):
             self.assertIn("turn:x:0", s["relayWarned"], "a dropped report counts as told, so it is not queued again")
         finally:
             shutil.rmtree(home, ignore_errors=True)
+
+
+class BuildInPlannerFor(unittest.TestCase):
+    def test_the_session_then_phi_json_then_the_default(self):
+        self.assertEqual(plans.build_in_planner_for({"buildInPlanner": False}, {"build_in_planner": True}),
+                         (False, "the session's buildInPlanner"))
+        self.assertEqual(plans.build_in_planner_for({}, {"build_in_planner": False}),
+                         (False, "phi.json build_in_planner"))
+        self.assertEqual(plans.build_in_planner_for({}, {}), (True, "the default"))
+
+    def test_a_non_bool_is_skipped(self):
+        self.assertEqual(plans.build_in_planner_for({"buildInPlanner": "no"}, {"build_in_planner": 0}),
+                         (True, "the default"))
+
+
+class BuildRoute(unittest.TestCase):
+    def test_the_planner_builds_only_where_the_setting_is_on_the_max_plan_is_not_low_and_a_slot_is_free(self):
+        self.assertEqual(plans.build_route(True, False, 1)[0], "planner")
+        for args, why in (((False, False, 1), "build_in_planner is off"), ((True, True, 1), "the Max plan is low"),
+                          ((True, False, 0), "no Max slot is free")):
+            way, said = plans.build_route(*args)
+            self.assertEqual(way, "print")
+            self.assertIn(why, said)
+
+    def test_the_built_report_and_the_message_that_asks_for_it(self):
+        self.assertTrue(plans.built_report("/n/report-tp-1-1-ab12.md").endswith("report-tp-1-1-ab12-built.md"))
+        self.assertEqual(plans.built_report("/n/r"), "/n/r-built.md")
+        said = plans.build_message("/p/plan.md", "/n/report-x-built.md", ["2", "3"], "/repo")
+        for part in ("/p/plan.md", "/n/report-x-built.md", "one commit a section", "sections 2, 3", "/repo"):
+            self.assertIn(part, said)
+
+    def test_the_message_names_forward_slash_paths_and_no_backslash(self):
+        said = plans.build_message("E:\\p\\plan.md", "E:\\n\\report-built.md", ["2"], "E:\\repo")
+        for part in ("E:/p/plan.md", "E:/n/report-built.md", "E:/repo"):
+            self.assertIn(part, said)
+        self.assertNotIn("\\", said)
+
+    def test_the_message_gives_the_evidence_line_form(self):
+        self.assertIn("**Evidence:**", plans.build_message("/p/plan.md", "/n/r-built.md", ["2"], "/repo"))
+
+    def test_a_section_with_that_evidence_line_is_landed(self):
+        import sections
+        text = "# Plan\n\n## 1. A\n\n**Evidence:** abc1234, a.py:3, 5 passed\n\n- **Files:** `a.py`\n"
+        found = sections.parse(text)[1]
+        self.assertTrue(found and found[0]["landed"])
 
 
 if __name__ == "__main__":

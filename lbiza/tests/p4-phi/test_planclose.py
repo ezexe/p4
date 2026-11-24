@@ -722,5 +722,209 @@ class ShellWords(unittest.TestCase):
         self.assertIsNone(self.refused("mv x.md plan-planner/todo/"))
 
 
+class RegexEscapes(unittest.TestCase):
+    """Section 2 of two-level-planning-fixes: a backslash before a regex or shell metacharacter is an escape, not a
+    path separator."""
+    ELSEWHERE = "E:/projects/p4-phi/p4"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd=self.ELSEWHERE)
+
+    def test_a_regex_alternation_names_no_path(self):
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}\\?' f"))
+
+    def test_a_windows_path_with_complete_is_still_refused(self):
+        self.assertIn("refused", self.refused("Move-Item x.md E:\\p\\plan-planner\\complete\\x.md", "PowerShell"))
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner\\.\\complete\\x.md", "PowerShell"))
+
+
+class DotAndNested(unittest.TestCase):
+    """Section 8 of two-level-planning-fixes: a backslash dot is a separator, a quoted glob counts in a nested
+    shell, and an escaped quote toggles no quote state."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+
+    def refused(self, cmd, tool="Bash", cwd=PLANS):
+        return planclose.guard(tool, {"command": cmd}, cwd=cwd)
+
+    def test_a_windows_write_of_the_closed_record_is_refused(self):
+        path = self.PLANS.replace("/", "\\") + "\\complete\\.closed.jsonl"
+        self.assertIn("refused", planclose.guard("Write", {"file_path": path}))
+        self.assertEqual(planclose.normal("plan-planner\\.\\complete"), "plan-planner/complete")
+
+    def test_a_nested_shell_glob_in_a_quote_counts(self):
+        self.assertIn("refused", self.refused("sh -c 'mv x comp*'"))
+        self.assertIn("refused", self.refused("bash -c \"mv x comp*\""))
+        self.assertIn("refused", self.refused("powershell -Command \"Move-Item x.md comp*\"", "PowerShell"))
+        self.assertIn("refused", self.refused("pwsh -c 'Move-Item x.md comp*'", "PowerShell"))
+
+    def test_a_quoted_glob_with_no_nested_shell_is_none(self):
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("echo 'a comp* b'"))
+
+    def test_an_escaped_quote_toggles_no_quote_state(self):
+        self.assertIsNone(self.refused("grep \"a\\\"b[a-z]*|x\" f"))
+        self.assertIsNone(self.refused("grep \"a`\"b[a-z]*|x\" f", "PowerShell"))
+
+
+class Heredocs(unittest.TestCase):
+    """Section 10 of two-level-planning-fixes: a heredoc's or here-string's text is data, its target a path."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def guard(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/p4-phi/p4")
+
+    def test_an_append_to_a_plan_file_with_a_body_naming_complete_passes(self):
+        for tag in ("'EOF'", "EOF", "-EOF"):
+            cmd = f"cat >> {self.PLANS}/two-level-planning-fixes.md <<{tag}\n{self.BODY}EOF\n"
+            self.assertIsNone(self.guard(cmd), tag)
+
+    def test_a_here_string_to_add_content_on_a_plan_file_passes(self):
+        cmd = (f"@'\n{self.BODY}'@ | Add-Content -Path {self.PLANS}/two-level-planning-fixes.md")
+        self.assertIsNone(self.guard(cmd, "PowerShell"))
+
+    def test_a_target_in_complete_is_still_refused(self):
+        cmd = f"cat > {self.PLANS}/complete/x.md <<'EOF'\nhello\nEOF\n"
+        self.assertIn("refused", self.guard(cmd))
+        cmd = f"@'\nhello\n'@ | Set-Content -Path {self.PLANS}/complete/x.md"
+        self.assertIn("refused", self.guard(cmd, "PowerShell"))
+
+    def test_a_heredoc_fed_to_a_shell_still_counts(self):
+        self.assertIn("refused", self.guard(f"bash <<'EOF'\nmv x {self.PLANS}/complete/\nEOF\n"))
+        self.assertIn("refused", self.guard(f"cat <<'EOF' | sh\nmv x {self.PLANS}/complete/\nEOF\n"))
+        self.assertIn("refused", self.guard(f"python3 - <<'EOF'\nopen('{self.PLANS}/complete/x','w')\nEOF\n"))
+
+    def test_a_here_string_fed_to_iex_still_counts(self):
+        cmd = f"@'\nMove-Item x.md {self.PLANS}/complete/\n'@ | iex"
+        self.assertIn("refused", self.guard(cmd, "PowerShell"))
+
+    def test_a_command_after_the_heredoc_is_still_read(self):
+        cmd = f"cat <<'EOF' > /tmp/x\nhi\nEOF\nmv x {self.PLANS}/complete/\n"
+        self.assertIn("refused", self.guard(cmd))
+
+
+class HeredocShape(unittest.TestCase):
+    """Section 13 of two-level-planning-fixes: a heredoc or a here-string is data in one whole-command shape only,
+    and an ambiguous escape is read both ways. The bypass cases are the review's probe1.py."""
+    C = "comp" + "lete"
+    D = "plan-planner/" + C + "/"
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/x")
+
+    def test_each_bypass_of_the_review_is_refused(self):
+        D = self.D
+        cases = {
+            "newline sh": f"cat <<EOF |\nmv x.md {D}\nEOF\nsh",
+            "continued sh": f"cat <<EOF \\\n| sh\nmv x.md {D}\nEOF",
+            "quoted sh": f"cat <<EOF | \"sh\"\nmv x.md {D}\nEOF",
+            "dash": f"cat <<EOF | dash\nmv x.md {D}\nEOF",
+            "ksh": f"cat <<EOF | ksh\nmv x.md {D}\nEOF",
+            "$SHELL": f"cat <<EOF | $SHELL\nmv x.md {D}\nEOF",
+            "py": f"py - <<EOF\nimport shutil; shutil.move('x.md', '{D}x.md')\nEOF",
+            "python3.12": f"python3.12 - <<EOF\nimport shutil; shutil.move('x.md', '{D}x.md')\nEOF",
+            "source": f"source <(cat <<EOF\nmv x.md {D}\nEOF\n)",
+            "dot stdin": f". /dev/stdin <<EOF\nmv x.md {D}\nEOF",
+            "xargs": f"xargs mv <<EOF\nx.md\n{D}\nEOF",
+            "while read": f"while read a b; do mv \"$a\" \"$b\"; done <<EOF\nx.md {D}x.md\nEOF",
+            "patch": f"patch -p0 <<EOF\n--- /dev/null\n+++ {D}x.md\n@@ -0,0 +1 @@\n+x\nEOF",
+            "awk": f"awk '{{system($0)}}' <<EOF\nmv x.md {D}\nEOF",
+            "file then sh": f"cat > s <<EOF\nmv x.md {D}\nEOF\nsh s",
+            "delimiter EOF-X": f"cat <<EOF-X\nhi\nEOF-X\nmv x.md {D}\nEOF",
+            "delimiter quoted suffix": f"cat <<'EOF'x\nhi\nEOFx\nmv x.md {D}\nEOF",
+            "opener in comment": f"# <<EOF\nmv x.md {D}\nEOF",
+            "opener in quote": f"echo '<<EOF'\nmv x.md {D}\nEOF",
+            "arithmetic shift": f"echo $((1<<FOO))\nmv x.md {D}\nFOO",
+            "opener then mv": f"cat <<EOF; mv x.md {D}\nhi\nEOF",
+            "unquoted body runs": f"cat > a.txt <<EOF\n$(mv x.md {D})\nEOF",
+            "tee into": f"tee {D}x.md <<EOF\nhi\nEOF",
+            "cat into": f"cat > {D}x.md <<'EOF'\nhi\nEOF",
+        }
+        for label, cmd in cases.items():
+            self.assertIn("refused", self.refused(cmd) or "", label)
+
+    def test_each_here_string_bypass_is_refused(self):
+        D = self.D
+        cases = {
+            "sink": f"@'\nx\n'@ | Set-Content {D}x.md",
+            "second command": f"@'\nx\n'@ | Set-Content a.txt; Move-Item a.txt {D}",
+            "then run": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1; & ./s.ps1",
+            "dot-source": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1; . ./s.ps1",
+            "pass through": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1 -PassThru | ForEach-Object {{ $_ }}",
+            "opener in comment": f"# @'\nMove-Item x.md {D}\n'@ | Set-Content x'",
+            "next line runs": f"@'\nMove-Item x.md {D}\n'@ | Set-Content s.ps1\npwsh -File s.ps1",
+            "iex": f"@'\nMove-Item x.md {D}\n'@ | iex",
+            "expanding body": f"@\"\n$(Move-Item x.md {D})\n\"@ | Set-Content a.txt",
+        }
+        for label, cmd in cases.items():
+            self.assertIn("refused", self.refused(cmd, "PowerShell") or "", label)
+
+    def test_the_shapes_of_data_pass(self):
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        for cmd, tool in (
+                (f"cat >> {plan} <<'EOF'\n{self.BODY}EOF\n", "Bash"),
+                (f"tee -a {plan} <<'EOF'\n{self.BODY}EOF", "Bash"),
+                (f"@'\n{self.BODY}'@ | Add-Content -Path {plan}", "PowerShell"),
+                (f"@'\n{self.BODY}'@ | Out-File -Encoding utf8 {plan}", "PowerShell"),
+                (f"Add-Content -Path {plan} -Value @'\n{self.BODY}'@", "PowerShell"),
+                (f"cat > E:/x/cmd/notes.md <<'EOF'\nsee {self.D}\nEOF", "Bash")):
+            self.assertIsNone(self.refused(cmd, tool), cmd)
+
+    def test_a_target_under_complete_is_refused_in_each_shape(self):
+        self.assertIn("refused", self.refused(f"cat > {self.PLANS}/{self.C}/x.md <<'EOF'\nhi\nEOF"))
+        self.assertIn("refused", self.refused(f"@'\nhi\n'@ | Set-Content {self.PLANS}/{self.C}/x.md", "PowerShell"))
+
+    def test_an_escaped_quote_is_read_both_ways(self):
+        self.assertIn("refused", self.refused('mv "a\\\\" "plan-planner/comp"lete/'))
+        self.assertIn("refused", self.refused('Move-Item "a\\" "plan-planner/comp"lete/', "PowerShell"))
+        self.assertIn("refused", self.refused("mv 'a\\\"' \"plan-planner/comp\"lete/"))
+        self.assertIsNone(self.refused("grep \"a\\\"b[a-z]*|x\" f"))
+
+    def test_a_backslash_before_a_wildcard_is_read_both_ways(self):
+        self.assertIn("refused", self.refused("Remove-Item plan-planner\\?omplete\\x.md", "PowerShell"))
+        self.assertIn("refused", self.refused("Remove-Item plan-planner\\*lete\\x.md", "PowerShell"))
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}' f"))
+
+
+class ShapeByTool(unittest.TestCase):
+    """Section 15 of two-level-planning-fixes: a data shape counts only on its own shell's tool, and a backslash
+    before any other character is read both ways."""
+    C = "comp" + "lete"
+    D = "plan-planner/" + C + "/"
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/x")
+
+    def test_a_here_string_sent_as_bash_is_refused(self):
+        D = self.D
+        inject = f"'; mv x.md {D}x.md; echo '"
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        for label, cmd in {
+                "single": f"@'\n{inject}\n'@ | Add-Content -Path {plan}",
+                "double": f"@\"\n{inject.replace(chr(39), chr(34))}\n\"@ | Add-Content -Path {plan}",
+                "value": f"Add-Content -Path {plan} -Value @'\n{inject}\n'@"}.items():
+            self.assertIn("refused", self.refused(cmd, "Bash") or "", label)
+
+    def test_a_backslash_before_a_letter_is_read_both_ways(self):
+        self.assertIn("refused", self.refused(f"mv x.md plan-planner/comp\\lete/"))
+        self.assertIn("refused", self.refused(f"cat > plan-planner/comp\\lete/x.md <<'EOF'\nhi\nEOF"))
+
+    def test_a_heredoc_typed_into_a_terminal_tab_is_refused(self):
+        cmd = f"cat > a.ps1 <<'EOF'\nMove-Item x.md {self.D}\nEOF\n"
+        self.assertIn("refused", self.refused(cmd, "mcp__terminal__run_in_terminal") or "")
+        self.assertEqual(planclose.data_out(cmd, "SomeOtherTool"), cmd)
+
+    def test_the_shapes_still_pass_on_their_own_tool(self):
+        plan = f"{self.PLANS}/two-level-planning-fixes.md"
+        self.assertIsNone(self.refused(f"cat >> {plan} <<'EOF'\n{self.BODY}EOF\n", "Bash"))
+        self.assertIsNone(self.refused(f"@'\n{self.BODY}'@ | Add-Content -Path {plan}", "PowerShell"))
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+
 if __name__ == "__main__":
     unittest.main()

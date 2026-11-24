@@ -59,6 +59,12 @@ No worker lands this.
 """
 
 
+TOP = ("# Top\n\n## Context\n\nNo planner.\n\n"
+       "## 1. Alpha\n\n- **Files:** `a.py`\n- **Depends on:** none\n- **Done when:** ALPHA-DONE\n\n"
+       "```md\n## inside the fence\n```\n\n"
+       "## 2. Beta\n\n- **Files:** `b.py`\n- **Depends on:** 1\n- **Done when:** BETA-DONE\n")
+
+
 class Sections(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -69,6 +75,19 @@ class Sections(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+
+    def test_a_planners_brief_holds_its_own_section_and_the_lines_that_route_it_to_an_interactive_planner(self):
+        import plans
+        title, found = sections.parse(TOP)
+        brief = sections.plan_brief(title, found[0])
+        self.assertIn("ALPHA-DONE", brief)
+        for other in ("BETA-DONE", "b.py", "Beta"):
+            self.assertNotIn(other, brief)
+        self.assertEqual(plans.worker_mode_for(brief)[0], "interactive")
+        self.assertTrue(plans.is_planner(title, brief))
+        self.assertEqual(sections.plan_name(title, found[1]), "Top, section 2: Beta")
+        self.assertIn("```md\n## inside the fence\n```", found[0]["text"], "the fence stays in the text, whole")
+        self.assertEqual([s["n"] for s in found], ["1", "2"], "a heading inside a fence is no section")
 
     def test_a_section_is_a_heading_outside_a_fence_that_names_files(self):
         title, found = sections.parse(PLAN, self.base)
@@ -299,6 +318,66 @@ It reads src/x.py for its names.
         self.assertEqual(sections.lint(plan), [], "a landed section runs with nothing")
         open_both = plan.replace("**Evidence:** abc1234\n", "")
         self.assertEqual({lens for lens, _ in sections.lint(open_both)}, {"fences", "sources"})
+
+
+class AsWritten(unittest.TestCase):
+    """A section's number and its `Depends on:`, read as the plan writes them."""
+
+    # the shape of section 3 of two-level planning as its planner wrote it
+    SHAPE = """# Two-level planning, section 3
+
+## Context
+
+Nothing lands here.
+
+## 3.1 The setting
+
+**Files:** `src/phi.py`, `tests/test_phi.py`
+**Depends on:** none (section 2 of the top plan is landed)
+**Checks:** `t1`
+
+## 3.2 The route
+
+**Files:** `src/plans.py`
+**Depends on:** 3.1
+**Checks:** as 3.1
+
+## 3.3 The CLI
+
+**Files:** same as 3.1
+**Depends on:** 3.1 (the same files)
+**Checks:** as 3.1
+"""
+
+    def test_a_dotted_heading_is_the_section_of_that_number(self):
+        _, found = sections.parse(self.SHAPE)
+        self.assertEqual([s["n"] for s in found], ["3.1", "3.2", "3.3"])
+        self.assertEqual(sections.plan_name("T", found[0]), "T, section 3.1: The setting")
+
+    def test_a_files_line_that_points_at_a_section_takes_its_files(self):
+        _, found = sections.parse(self.SHAPE)
+        self.assertEqual(found[2]["files"], found[0]["files"])
+        self.assertEqual(found[2]["said"], found[0]["said"])
+        _, two = sections.parse("# P\n\n## 1. A\n\n- **Files:** `a.py`\n\n## 2. B\n\n- **Files:** as 1\n")
+        self.assertEqual(two[1]["files"], two[0]["files"])
+        _, lost = sections.parse("# P\n\n## 1. A\n\n- **Files:** same as 9\n")
+        self.assertEqual(lost, [], "a pointer at no section names no files")
+
+    def test_a_depends_on_line_reads_its_numbers_before_any_prose(self):
+        _, found = sections.parse(self.SHAPE)
+        self.assertEqual([s["after"] for s in found], [[], ["3.1"], ["3.1"]])
+        self.assertEqual(sections.after_of("none"), [])
+        self.assertEqual(sections.after_of("none (section 2 of 5 is landed)"), [])
+        self.assertEqual(sections.after_of("1, 2 and 4 (3 is landed)"), ["1", "2", "4"])
+        self.assertEqual(sections.after_of("sections 1 to 5 of the top plan"), ["1"])
+        self.assertEqual(sections.needs([{"n": "9", "after": ["3.10", "3.2"]}]), ["3.2", "3.10"])
+
+    def test_lint_flags_two_sections_that_share_one_number(self):
+        plan = ("# P\n\n## 1. A\n\n- **Files:** `a.py`\n- **Checks:** `t`\n\n"
+                "## 1. B\n\n- **Files:** `b.py`\n- **Checks:** `t`\n")
+        lines = sections.lint(plan)
+        self.assertTrue(any("numbered 1" in line for _, line in lines), lines)
+        self.assertEqual(sections.lint(self.SHAPE), [])
 
 
 if __name__ == "__main__":

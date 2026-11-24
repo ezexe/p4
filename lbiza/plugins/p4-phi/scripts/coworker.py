@@ -32,6 +32,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 import uuid
 
@@ -196,6 +198,48 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
     return (f"{kind}-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", *named, *([f"export {TEAMS}=1"] if team else []),
                                   f"cd '{here}'", run + (f" 2>&1 | tee -a '{log}'" if headless else "")],
             f"sh '{at}/{kind}-{name}.sh'")
+
+
+BACKGROUND_HINT = ("where `mcp__terminal__open_terminal_tab` is refused because every tab is held, run the same "
+                   "command again with `--background`")
+
+
+def start_background(one, windows=None):
+    """Starts the `-p` worker `one` (an entry of land() or section_plans() that has a folder) as a detached process
+    that runs its start file, which writes the same log and report as a tab's start would, and returns its log's
+    path. The log is made empty first, so it is there at once. An interactive worker is never started so: it
+    returns "", and the caller names it as needing a tab."""
+    windows = upkeep.WINDOWS if windows is None else windows
+    if not one.get("log") or (one.get("settings") or {}).get("mode") == "interactive":
+        return ""
+    start = os.path.join(one["folder"], one["file"])
+    with open(one["log"], "a", encoding="utf-8"):
+        pass
+    if windows:
+        argv = [shutil.which("pwsh") and "pwsh" or "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", start]
+        kw = {"creationflags": 0x00000200 | 0x08000000}     # NEW_PROCESS_GROUP, NO_WINDOW: DETACHED_PROCESS left tee no log
+    else:
+        argv, kw = ["sh", start], {"start_new_session": True}
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     close_fds=True, **kw)
+    return one["log"].replace("\\", "/")
+
+
+def rerun(path, checkout, home, n):
+    """Withdraws the node of the run that holds section `n` where that run's worker reported and the plan holds no
+    `Evidence:` for it, so the next land starts it again. The run's name, or "" where no run reported that section.
+    The node's folder is removed whole: its report, brief and log are the old run's."""
+    for r in plan_runs(path, checkout, home):
+        if str(n) in r["sections"] and r["state"] == "done" and r["folder"]:
+            shutil.rmtree(r["folder"], ignore_errors=True)
+            relay.forget(home)
+            row = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "outcome", "name": r["name"], "how": "withdrawn"}
+            path_ = os.path.join(home, "phi", "worker-starts.jsonl")      # its old start row holds a slot no longer
+            os.makedirs(os.path.dirname(path_), exist_ok=True)
+            with open(path_, "a", encoding="utf-8", newline=chr(10)) as f:
+                f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + chr(10))
+            return r["name"]
+    return ""
 
 
 def _quoted(*paths):
@@ -373,20 +417,42 @@ def plan_title(path):
         return sections.parse(f.read())[0]
 
 
+def _reported(path, plan_sections, home):
+    """{section number: (node id, node folder)} of every section with no `Evidence:` whose last worker's node, a
+    worker node of this plan, holds its report: landed by its run whether or not the plan holds its line yet."""
+    pre, post = _named("tw", plan_title(path), ["@"], path).split("@")
+    open_ = {s["n"] for s in plan_sections if not s["landed"]}
+    out, at = {}, {}
+    for ident, folder in relay.nodes(home).items():
+        rec = relay.node_record(home, ident)
+        folder = folder.replace("\\", "/")
+        if (rec.get("kind") != "worker" or not (ident.startswith(pre) and ident.endswith(post))
+                or not os.path.exists(f"{folder}/report-{ident}.md")):
+            continue
+        when = relay.node_time(home, ident)
+        for n in (str(n) for n in rec.get("sections") or []):
+            if n in open_ and when >= at.get(n, 0.0):
+                at[n], out[n] = when, (ident, folder)
+    return out
+
+
 def plan_runs(path, checkout, home=""):
     """Every run of the plan at `path`, in the plan's order, landed ones too, so a run keeps its name from wave to
     wave: the sections that share a file, sections.file_runs, each as {"name", "sections", "group", "needs",
     "runner", "state", "folder", "report"}. `sections` are the run's sections not landed, `group` those sections
     whole and `needs` the sections of other runs it waits for. The state: `landed` where every section holds its
-    `Evidence:`; `done` where its worker's node holds its report; `ended` where its log's last row is a final
+    `Evidence:`; `done` where its worker's node holds its report, which the land output names `reported`, the
+    section's `Evidence:` being the session's to write; `ended` where its log's last row is a final
     result and no report came; `running` where its node is there and neither; `ready` where it was never started
     and every need is met, a met section being landed or in a run that is landed or done; `waiting` for the rest."""
     with open(path, encoding="utf-8") as f:
         _, found = sections.parse(f.read(), checkout)
     by_n = {s["n"]: s for s in found}
     nodes = relay.nodes(home) if home else {}
+    reported = _reported(path, found, home) if home else {}
+    rest = [dict(s, landed=False) for s in found if s["n"] not in reported]
     out = []
-    for run in sections.file_runs([dict(s, landed=False) for s in found]):
+    for run in sections.file_runs(rest):
         real = [by_n[s["n"]] for s in run]
         left = [s for s in real if not s.get("landed")]
         name = worker_name(path, [s["n"] for s in run])
@@ -407,9 +473,15 @@ def plan_runs(path, checkout, home=""):
             one["state"] = "todo"
         out.append(one)
     met = {s["n"] for s in found if s.get("landed")}
-    for r, run in zip(out, sections.file_runs([dict(s, landed=False) for s in found])):
+    for r, run in zip(out, sections.file_runs(rest)):
         if r["state"] in ("landed", "done"):
             met |= {s["n"] for s in run}
+    met |= set(reported)
+    for ident in dict.fromkeys(v[0] for _, v in sorted(reported.items(), key=lambda kv: sections._key(kv[0]))):
+        folder = next(v[1] for v in reported.values() if v[0] == ident)
+        out.append({"name": ident, "sections": sorted((n for n, v in reported.items() if v[0] == ident), key=sections._key),
+                    "group": [], "needs": [], "runner": {}, "folder": folder,
+                    "report": f"{folder}/report-{ident}.md", "state": "done"})
     for r in out:
         if r["state"] == "todo":
             r["state"] = "ready" if all(d in met or d not in by_n for d in r["needs"]) else "waiting"
@@ -487,24 +559,148 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
     return one
 
 
+PLANNER_PREFIX = "tp"                     # a section planner's name: tp-<section>-<n>-<mark>
+PLANNER_RUNNER = {"mode": "interactive", "pool": "max", "team": True, "said": "interactive"}
+
+
+def section_runs(path, checkout, home=""):
+    """(the top plan's title, one entry for each brief not landed, in the plan's order): {"name", "n", "head",
+    "needs", "text" (the planner's brief), "folder", "report", "state"}. The state: `done` where the
+    planner's node holds its report, which it writes before ExitPlanMode; `running` where its node is there and
+    no report; `ready` where it never started and every `Depends on:` is a section whose planner is done or no
+    section of the plan; `waiting` for the rest."""
+    with open(path, encoding="utf-8") as f:
+        title, found = sections.parse(f.read(), checkout)
+    nodes = relay.nodes(home) if home else {}
+    out = []
+    for s in found:
+        if s["landed"]:
+            continue
+        name = _named(PLANNER_PREFIX, s["head"], [s["n"]], path)
+        folder = (nodes.get(name) or "").replace("\\", "/")
+        one = {"name": name, "n": s["n"], "head": s["head"], "needs": list(s["after"]),
+               "text": sections.plan_brief(title, s), "folder": folder, "state": "todo",
+               "report": f"{folder}/report-{name}.md" if folder else ""}
+        if folder:
+            one["state"] = "done" if os.path.exists(one["report"]) else "running"
+        out.append(one)
+    by = {r["n"]: r for r in out}
+    for r in out:
+        if r["state"] == "todo":
+            r["state"] = "ready" if all(d not in by or by[d]["state"] == "done" for d in r["needs"]) else "waiting"
+    return title, out
+
+
+def section_plans(path, checkout, home, starter, settings, windows=None):
+    """One entry for each ready brief: the interactive planner that plans it, started once ezexe has the top plan,
+    as worker() makes it (a node, its brief, goal and start file, its pool settings), or `waits` where
+    `settings` (phi.slot_assigner's) has no slot for it, with no node claimed. Call it again, once a report is
+    there, to start what that frees."""
+    plan, checkout = os.path.abspath(path).replace("\\", "/"), checkout.replace("\\", "/")
+    _quoted(plan, checkout, home)
+    title, every = section_runs(plan, checkout, home)
+    with open(plan, encoding="utf-8") as f:
+        by = {s["n"]: s for s in sections.parse(f.read(), checkout)[1]}
+    out = []
+    try:
+        for r in every:
+            if r["state"] != "ready":
+                continue
+            st = settings(r["text"], PLANNER_RUNNER)
+            if st is None:
+                out.append({"name": r["name"], "sections": [r["n"]], "waits": True})
+                continue
+            one = worker(r["name"], r["text"], "The plan of the brief is written and put to ezexe", checkout, home,
+                         starter, [r["n"]], windows, team=True, mode="plan",
+                         prompt=planner_task(sections.plan_name(title, by[r["n"]])),
+                         profile=st["profile"], headless=False, level=plans.own_level(r["text"]) or None)
+            one.update(settings=st, sections=[r["n"]])
+            out.append(one)
+    except Exception:
+        _undo(home, out)
+        raise
+    return out
+
+
+def _bring_in(plan, home):
+    """(the plan's path, where it was brought in from): `plan` copied into the store's plans folder under its name
+    where it lies outside that folder. A file of that name there with the same text is the copy; one with other text
+    is left alone and (plan, "") comes back."""
+    folder = os.path.abspath(p4conf.sub(os.path.abspath(home), "plans"))
+    src = os.path.abspath(plan)
+    inside = os.path.normcase(folder).rstrip("\\/") + os.sep
+    if (os.path.normcase(src) + os.sep).startswith(inside):          # anywhere under the plans folder
+        return plan, ""
+    dest = os.path.join(folder, os.path.basename(src))
+    if os.path.isfile(dest):
+        with open(src, "rb") as a, open(dest, "rb") as b:
+            same = a.read() == b.read()
+        return (dest.replace("\\", "/"), plan) if same else (plan, "")
+    os.makedirs(folder, exist_ok=True)
+    shutil.copyfile(src, dest)
+    return dest.replace("\\", "/"), plan
+
+
+def collect(path, checkout, home=""):
+    """One entry for each brief, in the plan's order: {"name", "n", "head", "state", "plan" (the file the planner's
+    report names on its line `Plan file:`, "" where there is none), "report" (where the planner reported, else ""),
+    "read" (the plan's line that opens `Read:`, else ""), "moved_from"}, for the orchestrator to review and put to
+    ezexe. A plan file outside the store's plans folder is copied into it under the same name, and "plan" is the copy
+    and "moved_from" the original; where a file of that name is there with other text it is never overwritten, "plan"
+    stays the original and "moved_from" is ""."""
+    out = []
+    for r in section_runs(path, checkout, home)[1]:
+        plan, read, moved = "", "", ""
+        if r["state"] == "done":
+            try:
+                with open(r["report"], encoding="utf-8") as f:
+                    text = f.read()
+                for m in re.finditer(r"(?im)^[ \t>*-]*plan file(?:\*\*[ \t]*:|[ \t]*:(?:\*\*)?)[ \t]*`?([^`\r\n]*?)`?[ \t]*$",
+                                     text):                # one colon is required, so prose that opens "Plan file" is no line
+                    plan = m.group(1).strip().replace("\\", "/")
+                    if os.path.isfile(plan):
+                        break
+                    plan = ""
+                if plan and home:
+                    plan, moved = _bring_in(plan, home)
+                with open(plan, encoding="utf-8") as f:
+                    read = next((x.strip() for x in f.read().splitlines() if x.startswith("Read:")), "")
+            except OSError:
+                pass
+        out.append({"name": r["name"], "n": r["n"], "head": r["head"], "state": r["state"],
+                    "plan": plan if plan and os.path.isfile(plan) else "", "moved_from": moved,
+                    "report": r["report"] if r["state"] == "done" else "", "read": read})
+    return out
+
+
 def draft_name(title, did):
     """A drafted worker's name: `tw-`, the title's slug cut at 24 characters, and the draft id's last four."""
     stem = re.sub(r"[^a-z0-9]+", "-", str(title or "").lower()).strip("-")[:24].strip("-") or "work"
     return f"tw-{stem}-{str(did)[-4:]}"
 
 
+BOM16LE, BOM16BE = bytes([0xFF, 0xFE]), bytes([0xFE, 0xFF])
 GOAL_TAIL = 1 << 20              # the most of a log's end read for its last result row
 
 
 def last_result(log, offset=0, final=False):
     """The last `result` row of the stream-json log `log` written past byte `offset`, {} where there is none or the
-    file is not there. Lines that are no JSON object (a stderr line, a BOM) are skipped. With `final`, the row only
+    file is not there. A log that opens with a UTF-16 BOM or holds NUL bytes is read as UTF-16. Lines that are no
+    JSON object (a stderr line, a BOM) are skipped. With `final`, the row only
     where it is the last JSON row of the log, since a run under `/goal` may write a `result` row for a turn and go on."""
     try:
         with open(log, "rb") as f:
+            head = f.read(2)
             f.seek(0, 2)
-            f.seek(max(int(offset), f.tell() - GOAL_TAIL))
-            text = f.read().decode("utf-8", "replace")
+            at = max(int(offset), f.tell() - GOAL_TAIL)
+            f.seek(at)
+            data = f.read()
+        if head in (BOM16LE, BOM16BE) or bytes(1) in data:                  # a Windows PowerShell 5.1 log is UTF-16
+            if head == BOM16LE and at % 2:
+                data = data[1:]                                           # keep the code units aligned
+            text = data.decode("utf-16-be" if head == BOM16BE else "utf-16-le", "replace")
+        else:
+            text = data.decode("utf-8", "replace")
     except OSError:
         return {}
     for line in reversed(text.splitlines()):

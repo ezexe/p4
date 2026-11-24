@@ -554,6 +554,8 @@ def build(home, top, net=False):
                      "name": (rec or {}).get("name", ""), "working": working(home, sid),
                      "turns": len(turns), "lastTurn": str(last.get("time") or ""), "done": bool(last.get("done")),
                      "report": _short(last.get("report"), 160),
+                     "status": (relay.default_status(title, relay.asks_ezexe_in(last.get("report")))
+                                if relay.asks_ezexe_in(last.get("report")) else ""),
                      "step": {"addr": cur.get("addr"), "content": _short(cur.get("content"), 90)} if cur else None,
                      "stepsDone": sum(1 for x in steps if x.get("status") == "completed"), "steps": len(steps),
                      "open": [_short(x.get("content"), 90) for x in steps if x.get("status") != "completed"][:8],
@@ -632,7 +634,9 @@ def render(m):
             bits.append(f"issue {r['issue']} {r['issueState'] or 'state not read'}")
         if r["shard"]:
             bits.append("owned paths " + ", ".join(r["shard"]))
-        if r["report"]:
+        if r.get("status"):                        # a call its own context covers: a status line, not a question card
+            bits.append(r["status"])
+        elif r["report"]:
             bits.append(f"reported \"{r['report']}\"")
         name = f", {r['name']}" if r["name"] else ""
         out.append(f"{'  ' * r['depth']}- \"{r['title']}\" `{r['sessionId']}`{name}: " + "; ".join(bits))
@@ -1445,12 +1449,13 @@ def free_name(home, name):
         k += 1
 
 
-def start_draft(home, s, did, base, task=""):
+def start_draft(home, s, did, base, task="", background=False):
     """`draft --start`: the terminal worker of a kept draft. It claims the worker's node in the store nested in this
     session's, writes its brief, settings and start file there, and returns the lines to print: the worker's name and
     its report, the `mcp__terminal__run_in_terminal` call and the wait for its report. A draft with no parent is an
     orchestrator's and raises ValueError. `task` is a file of the task in the starter's own words, which the brief
-    carries under `## The task`."""
+    carries under `## The task`. With `background` a `print` worker is started by `coworker.start_background` and its
+    log's path printed, where every Terminal tab is held; an interactive worker is named as needing a tab."""
     import coworker
     phi = _phi()
     d = load_draft(home, s["sessionId"], did)
@@ -1481,16 +1486,23 @@ def start_draft(home, s, did, base, task=""):
                           profile=settings["profile"], plan_file=plan_file, headless=headless, level=level)
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
+    one["settings"] = settings                     # start_background reads the mode: an interactive worker needs a tab
     coworker.write([one], base, home)
     checkout = base.replace("\\", "/")
-    out = [phi.worker_start(home, settings, name, s["sessionId"], "plan" if planner else "work", one.get("log") or "",
-                            one["report"]),
+    started = phi.worker_start(home, settings, name, s["sessionId"], "plan" if planner else "work", one.get("log") or "",
+                               one["report"])
+    try:
+        begun = phi.start_lines(one, checkout, True) if background else [phi.tab_lines(name, checkout, one["typed"])]
+    except OSError as e:                           # no shell on PATH, say: the start row would hold its slot for RUNNING_HOURS
+        phi.worker_record(home, {"event": "outcome", "name": name, "how": "failed", "error": str(e)})
+        begun = [f"  `{name}` was not started in the background: {e}; its slot is freed"]
+    out = [started,
            f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
                                   f"{one['log']}" if headless else
                                   f"session {one['session']}, its report {one['report']}"),
            *([f"model and effort: {', '.join(f'{k} {v}' for k, v in sorted(level.items()))}, from the draft's own "
                 "lines"] if level else []),
-           phi.tab_lines(name, checkout, one["typed"]),
+           *begun,
            *([phi.trust_line()] if settings["mode"] == "interactive" else []),
            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
            f"{one['report']}`",
@@ -1868,7 +1880,8 @@ def command(a, me):
         print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged"), file=sys.stderr)
         return 0
     if a.cmd == "draft" and a.start:
-        for line in start_draft(home, s, a.start, base, a.task):
+        where = os.path.abspath(a.checkout) if a.checkout else base
+        for line in start_draft(home, s, a.start, where, a.task, a.background):
             print(line)
         return 0
     if a.cmd == "draft":
@@ -1917,9 +1930,15 @@ def add_parsers(sub, common):
             p.add_argument("--start", default="", metavar="DRAFT",
                            help="start the terminal worker of a kept draft that has a parent: its node, brief and "
                                 "start file, and the call that opens its tab")
+            p.add_argument("--checkout", default="", metavar="REPO",
+                           help="with --start: the repository the worker runs and commits in; without it, the "
+                                "session's folder")
             p.add_argument("--task", default="", metavar="FILE",
                            help="with --start: a file holding the task in your own words, which the worker's brief "
                                 "carries under `## The task`")
+            p.add_argument("--background", action="store_true",
+                           help="with --start: start a `-p` worker as a detached process and print its log, where "
+                                "every Terminal tab is held; an interactive worker is named as needing a tab")
         if name == "pioneer":
             p.add_argument("draft", help="the draft's id")
         if name == "routes":

@@ -2331,5 +2331,42 @@ class Partition(unittest.TestCase):
         self.assertFalse(os.path.exists(marker))
 
 
+class AsksEzexe(unittest.TestCase):
+    def test_a_report_that_asks_ezexe_what_the_senders_context_decides_is_flagged(self):
+        for line in ("Tell me now if ezexe wants the backstop as a separate PR instead.",
+                     "Say if ezexe prefers.",
+                     "Should I ship it in one PR or two?",
+                     "Which order should I run the sections in?",
+                     "Should I push it as one PR or two?",
+                     "Should I merge it in one PR or two?",
+                     "Which order should I fix the dropdown and the payload tests?",
+                     "Shall I fix it first or land the docs?"):
+            self.assertEqual(relay.asks_ezexe(line), line.strip(), line)
+
+    def test_a_line_on_one_of_ezexes_four_matters_is_not_flagged(self):
+        for line in ("Approve the plan?",
+                     "This spends past the API budget: go?",
+                     "Tell me if ezexe wants the plan's intent changed instead.",
+                     "Say if ezexe prefers to delete the old store.",
+                     "Tell me if ezexe wants the report posted.",
+                     "Should I push it to origin as one PR or two?",
+                     "Push the branch to origin first or open the PR?",
+                     "Tell me if ezexe approves the new plan."):
+            self.assertEqual(relay.asks_ezexe(line), "", line)
+
+    def test_a_report_that_states_its_decision_is_not_flagged(self):
+        for line in ("Done, nothing open.", "I decided one PR; the backstop ships with it."):
+            self.assertEqual(relay.asks_ezexe(line), "", line)
+
+    def test_the_flagged_lines_of_a_report_become_one_status_line(self):
+        report = "Done.\nShould I ship it in one PR or two?\nApprove the plan?"
+        lines = relay.asks_ezexe_in(report)
+        self.assertEqual(lines, ["Should I ship it in one PR or two?"])
+        text = relay.default_status("Fixer", lines)
+        self.assertIn("default stands", text)
+        self.assertIn("Should I ship it in one PR or two?", text)
+        self.assertEqual(relay.asks_ezexe_in("Approve the plan?"), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

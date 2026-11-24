@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
@@ -36,6 +37,9 @@ SMALL = "# A note\n\n## 1. The page\n\n- **Files:** `docs/export.md`\n\n" + f"{T
 WHO = "Plan: the exporter's \"move\" $HOME"
 TODAY = '{"enabledPlugins": {"p4-phi@p4-marketplace": false, "p4-temportal@p4-marketplace": false}}'
 PLANNER = "local_plan0001"
+TOP3 = ("# Top plan\n\n## Context\n\nNo planner.\n\n" + "".join(
+    f"## {k}. Part {k}\n\n- **Files:** `src/p{k}.py`\n- **Depends on:** none\n- **Done when:** MARK{k}\n\n"
+    for k in (1, 2, 3)))
 
 
 class Coworker(unittest.TestCase):
@@ -661,6 +665,73 @@ class Coworker(unittest.TestCase):
                                  text=True, timeout=60)
             self.assertEqual(old.returncode, 2, f"{gone} is gone")
 
+    def test_the_command_starts_the_planners_of_a_top_plan_and_collects_them(self):
+        top = os.path.join(self.base, "top.md")
+        with open(top, "w", encoding="utf-8") as f:
+            f.write(TOP3)
+        command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", top,
+                   "--p4", self.home, "--session", "cli-0001", "--checkout", self.base]
+        ran = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
+        self.assertEqual(ran.stdout.count("waits for a slot"), 1)
+        self.assertIn("coworkers --wait --report", ran.stdout)
+        import re
+        phi_py = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers"]
+
+        def reports_of(out):
+            return re.findall(r"(?m)^planner .*its report (\S+)$", out)
+
+        def wait(*reports):                             # a report is there: the wait returns at once
+            return subprocess.run(phi_py + ["--p4", self.home, "--session", "cli-0001", "--wait", "--report",
+                                            *reports], capture_output=True, text=True, timeout=60)
+        first = reports_of(ran.stdout)
+        self.assertEqual(len(first), 2)
+        for report in first:
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("done")
+        waits = wait(*first)
+        self.assertEqual(waits.returncode, 0, waits.stderr)
+        self.assertIn("--plan-sections", waits.stdout)
+        self.assertNotIn("--land", waits.stdout)
+        again = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(again.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "the third, on a freed slot")
+        self.assertNotIn("waits for a slot", again.stdout)
+        third = reports_of(again.stdout)
+        self.assertEqual(len(third), 1)
+        lone = subprocess.Popen(phi_py + ["--p4", self.home, "--session", "cli-0001", "--wait", "--report", third[0]],
+                                stdout=subprocess.PIPE, text=True)
+        try:
+            deadline = time.time() + 60
+            while lone.poll() is None and time.time() < deadline:   # wait_report counts a report written after the
+                with open(third[0], "w", encoding="utf-8") as f:    # wait began, so one write lands after it
+                    f.write("done")                                 # whatever the start-up time
+                time.sleep(1)
+            self.assertIn("--plan-sections", lone.communicate(timeout=10)[0], "one planner's wait says it too")
+        finally:
+            if lone.poll() is None:
+                lone.kill()
+        last = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(last.returncode, 0, last.stderr)
+        self.assertIn("every planner has reported", last.stdout)
+        got = subprocess.run(command + ["--collect"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.count("section "), 3)
+
+    def test_a_planners_slot_is_held_to_its_report_not_to_its_transcripts_quiet_or_the_interactive_hour(self):
+        row = {"event": "start", "name": "tp-x-1-aaaa", "kind": "plan", "mode": "interactive", "log": "",
+               "report": os.path.join(self.base, "report-tp-x-1-aaaa.md"),
+               "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 5400))}   # 90 minutes ago
+        os.makedirs(os.path.join(self.home, "phi"))
+        with open(os.path.join(self.home, "phi", "worker-starts.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n" + json.dumps({**row, "name": "w-y", "kind": "work"}) + "\n")
+        self.assertEqual([r["name"] for r in phi.running_workers(self.home)], ["tp-x-1-aaaa"],
+                         "past the interactive hour a worker is freed, a planner is not")
+        with open(row["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(phi.running_workers(self.home), [])
+
 
 WAVES = ("# Waves\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n\n"
          "## 2. B\n\n- **Files:** `src/b.py`\n- **Depends on:** none\n- **Checks:** `t b`\n"
@@ -691,6 +762,18 @@ class Waves(unittest.TestCase):
     def states(self):
         return {tuple(r["sections"]): r["state"] for r in coworker.plan_runs(self.path, "E:/repo", self.home)}
 
+    def test_a_plan_with_dotted_section_numbers_and_one_reported_run_lands(self):
+        nl = chr(10)
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(nl.join(["# Top plan", "", "## Context", "", "No planner.", ""]) + nl + "".join(
+                f"## 3.{k}. Part {k}{nl}{nl}- **Files:** `src/p{k}.py`{nl}- **Depends on:** none{nl}"
+                f"- **Done when:** MARK{k}{nl}{nl}" for k in (1, 2)))
+        first = [o for o in self.land() if o.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(sorted(sum(self.states(), ())), ["3.1", "3.2"])
+        self.assertIn("done", self.states().values())
+
     def test_the_first_wave_is_every_run_with_no_open_need_and_the_next_starts_when_its_need_reports(self):
         self.assertEqual(self.states(), {("1",): "ready", ("2",): "ready", ("3",): "waiting"})
         first = self.land()
@@ -706,6 +789,36 @@ class Waves(unittest.TestCase):
         wave2 = [one for one in self.land() if one.get("folder")]
         self.assertEqual([one["sections"] for one in wave2], [["3"]])
         self.assertEqual(coworker.worker_name(self.path, ["3"]), wave2[0]["name"], "a run keeps its name")
+
+    def test_a_section_whose_worker_reported_is_landed_and_a_new_section_on_its_file_runs_alone(self):
+        one = ("# Shared\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n")
+        two = one + "\n## 2. B\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t b`\n"
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one)
+        first = [x for x in self.land() if x.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(two)
+        relay.forget(self.home)
+        self.assertEqual(self.states(), {("1",): "done", ("2",): "ready"})
+        second = [x for x in self.land() if x.get("folder")]
+        self.assertEqual([x["sections"] for x in second], [["2"]])
+        self.assertEqual(second[0]["name"], coworker.worker_name(self.path, ["2"]))
+        self.assertIn("section 2", second[0]["brief"])
+        self.assertNotIn("section 1", second[0]["brief"])
+
+    def test_a_plan_whose_every_section_holds_evidence_stays_landed_where_its_workers_reported(self):
+        one = ("# Shared\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one)
+        first = [x for x in self.land() if x.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one.replace("## 1. A\n", "## 1. A\n\n**Evidence:** landed as abc1234\n"))
+        relay.forget(self.home)
+        self.assertEqual(self.states(), {(): "landed"})
 
     def test_a_section_runner_gives_its_worker_its_team_and_its_own_model_and_effort(self):
         seen = []
@@ -768,6 +881,183 @@ class Waves(unittest.TestCase):
         now[0] = mtime
         self.assertEqual(coworker.wait_any([report], longest=20, quiet=60, clock=lambda: now[0],
                                            sleep=lambda s: now.__setitem__(0, now[0] + s))[1], "long")
+
+
+class SectionPlanners(unittest.TestCase):
+    def setUp(self):
+        base = tempfile.TemporaryDirectory(prefix="p4-phi-sections-")
+        self.addCleanup(base.cleanup)
+        self.base = os.path.realpath(base.name)
+        self.path = os.path.join(self.base, "top.md")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(self.home)
+
+    def runs(self):
+        return {r["n"]: r for r in coworker.section_runs(self.path, "E:/repo", self.home)[1]}
+
+    def start(self, size=2):
+        free = [size - sum(r["state"] == "running" for r in self.runs().values())]
+
+        def pick(text, runner):
+            self.assertEqual(runner["mode"], "interactive")
+            free[0] -= 1
+            return {"mode": "interactive", "profile": "", "pool": "max"} if free[0] >= 0 else None
+        found = coworker.section_plans(self.path, "E:/repo", self.home, PLANNER, pick, windows=False)
+        coworker.write([o for o in found if o.get("folder")], "E:/repo", self.home)
+        relay.forget(self.home)
+        return found
+
+    def test_three_briefs_start_two_planners_on_two_slots_and_the_third_when_one_reports(self):
+        first = self.start()
+        self.assertEqual([o["sections"] for o in first if o.get("folder")], [["1"], ["2"]])
+        self.assertEqual([o["sections"] for o in first if o.get("waits")], [["3"]])
+        self.assertEqual({k: r["state"] for k, r in self.runs().items()},
+                         {"1": "running", "2": "running", "3": "ready"})
+        self.assertEqual([o for o in self.start() if o.get("folder")], [], "both slots are taken")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        third = [o for o in self.start() if o.get("folder")]
+        self.assertEqual([o["sections"] for o in third], [["3"]])
+
+    def test_each_planners_brief_and_start_hold_only_its_own_brief_and_route_it_to_plan_mode(self):
+        for one in [o for o in self.start(3) if o.get("folder")]:
+            n = one["sections"][0]
+            with open(one["brief_file"], encoding="utf-8") as f:
+                brief = f.read()
+            self.assertIn(f"MARK{n}", brief)
+            for k in "123".replace(n, ""):
+                self.assertNotIn(f"MARK{k}", brief)
+                self.assertNotIn(f"Part {k}", one["goal"])
+            self.assertIn("--permission-mode plan", one["lines"][-1])
+            self.assertIn("export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", one["lines"])
+            self.assertNotIn(" -p ", one["lines"][-1])
+            self.assertIn("Plan file:", brief)
+
+    def test_a_brief_waits_while_a_planner_it_depends_on_has_no_report(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3.replace("`src/p3.py`\n- **Depends on:** none", "`src/p3.py`\n- **Depends on:** 1"))
+        first = self.start(3)
+        self.assertEqual([o["sections"] for o in first if o.get("folder")], [["1"], ["2"]])
+        self.assertEqual(self.runs()["3"]["state"], "waiting")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(self.runs()["3"]["state"], "ready")
+
+    def test_collect_lists_each_sections_plan_file_report_and_read_line(self):
+        first = self.start()
+        made = os.path.join(coworker.p4conf.sub(self.home, "plans"), "quiet-fox.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(made), exist_ok=True)
+        with open(made, "w", encoding="utf-8") as f:
+            f.write("# T\n\nRead: one group, 2 rounds, clean\n")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"The rounds are logged.\n- Plan file: `{made}`\n")
+        got = {c["n"]: c for c in coworker.collect(self.path, "E:/repo", self.home)}
+        self.assertEqual(got["1"]["plan"], made)
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"Plan file saved below.\n**Plan file:** {made}\n")
+        self.assertEqual(coworker.collect(self.path, "E:/repo", self.home)[0]["plan"], made, "bold markup too")
+        self.assertEqual((got["1"]["state"], got["1"]["read"]), ("done", "Read: one group, 2 rounds, clean"))
+        self.assertEqual(got["1"]["report"], first[0]["report"].replace("\\", "/"))
+        self.assertEqual((got["2"]["plan"], got["2"]["report"], got["2"]["state"]), ("", "", "running"))
+        self.assertEqual(got["3"]["state"], "ready")
+
+    def _report_naming(self, other):
+        first = self.start()
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write(f"- Plan file: `{other}`\n")
+
+    def test_collect_copies_a_plan_from_another_folder_into_the_plans_folder(self):
+        other = os.path.join(self.base, "elsewhere", "linked-horizon.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w", encoding="utf-8") as f:
+            f.write("# T\n\nRead: from afar\n")
+        self._report_naming(other)
+        got = coworker.collect(self.path, "E:/repo", self.home)[0]
+        copy = os.path.join(coworker.p4conf.sub(self.home, "plans"), "linked-horizon.md").replace("\\", "/")
+        self.assertEqual((got["plan"], got["moved_from"], got["read"]), (copy, other, "Read: from afar"))
+        self.assertTrue(os.path.isfile(copy))
+        again = coworker.collect(self.path, "E:/repo", self.home)[0]       # the same text there is the copy
+        self.assertEqual((again["plan"], again["moved_from"]), (copy, other))
+
+    def test_collect_leaves_a_plan_anywhere_under_the_plans_folder_where_it_is(self):
+        folder = coworker.p4conf.sub(self.home, "plans")
+        report = self.start()[0]["report"]
+        for sub in ("todo", "unplanned", "complete"):
+            there = os.path.join(folder, sub, f"in-{sub}.md").replace("\\", "/")
+            os.makedirs(os.path.dirname(there), exist_ok=True)
+            with open(there, "w", encoding="utf-8") as f:
+                f.write("# T\n\nRead: here\n")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write(f"- Plan file: `{there}`\n")
+            got = coworker.collect(self.path, "E:/repo", self.home)[0]
+            self.assertEqual((got["plan"], got["moved_from"]), (there, ""), sub)
+            self.assertFalse(os.path.exists(os.path.join(folder, f"in-{sub}.md")), sub)
+
+    def test_collect_never_overwrites_a_different_file_of_that_name(self):
+        other = os.path.join(self.base, "elsewhere", "linked-horizon.md").replace("\\", "/")
+        os.makedirs(os.path.dirname(other))
+        with open(other, "w", encoding="utf-8") as f:
+            f.write("new text\n")
+        folder = coworker.p4conf.sub(self.home, "plans")
+        os.makedirs(folder, exist_ok=True)
+        there = os.path.join(folder, "linked-horizon.md")
+        with open(there, "w", encoding="utf-8") as f:
+            f.write("old text\n")
+        self._report_naming(other)
+        got = coworker.collect(self.path, "E:/repo", self.home)[0]
+        self.assertEqual((got["plan"], got["moved_from"]), (other, ""))
+        with open(there, encoding="utf-8") as f:
+            self.assertEqual(f.read(), "old text\n")
+
+    def test_a_sections_own_model_and_effort_set_its_planners_level(self):
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(TOP3.replace("MARK2", "MARK2\n- Model: claude-opus-5-5\n- Effort: high"))
+        found = {o["sections"][0]: o for o in self.start(3) if o.get("folder")}
+        self.assertIn("--model claude-opus-5-5 --effort high", found["2"]["lines"][-1])
+        self.assertIn("--model claude-sonnet-5-5", found["1"]["lines"][-1])
+
+
+class Background(unittest.TestCase):
+    def test_an_interactive_worker_is_never_started_in_the_background_and_a_run_with_no_report_is_not_withdrawn(self):
+        with tempfile.TemporaryDirectory() as d:
+            one = {"folder": d, "file": "start-x.ps1", "log": os.path.join(d, "log-x.jsonl"),
+                   "settings": {"mode": "interactive"}}
+            self.assertEqual(coworker.start_background(one), "")
+            self.assertFalse(os.path.exists(one["log"]), "nothing is made for it")
+            self.assertEqual(coworker.start_background({**one, "settings": {"mode": "print"}, "log": ""}), "",
+                             "a worker with no log is no -p worker")
+            plan, nl = os.path.join(d, "plan.md"), chr(10)
+            with open(plan, "w", encoding="utf-8") as f:
+                f.write(nl.join(["# P", "", "## 1. A", "", "- **Files:** `a.py`", "- **Checks:** `x`", ""]))
+            self.assertEqual(coworker.rerun(plan, d, os.path.join(d, "home"), 1), "")
+
+    def test_a_rerun_leaves_the_old_name_with_an_outcome_row_withdrawn(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, home = os.path.join(d, "plan.md"), os.path.join(d, "home")
+            os.makedirs(home)
+            with open(plan, "w", encoding="utf-8") as f:
+                f.write(chr(10).join(["# P", "", "## 1. A", "", "- **Files:** `a.py`", "- **Checks:** `x`", ""]))
+            with mock.patch.object(coworker, "plan_runs", return_value=[
+                    {"name": "tw-p-1", "sections": ["1"], "state": "done", "folder": os.path.join(d, "node")}]):
+                self.assertEqual(coworker.rerun(plan, d, home, 1), "tw-p-1")
+            with open(os.path.join(home, "phi", "worker-starts.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(x) for x in f]
+            self.assertEqual([(r["event"], r["name"], r["how"]) for r in rows], [("outcome", "tw-p-1", "withdrawn")])
+
+    def test_last_result_reads_a_utf16le_log_with_a_bom(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "log.jsonl")
+            text = "stderr line" + chr(13) + chr(10) + json.dumps({"type": "result", "result": "ok"}) + chr(13) + chr(10)
+            with open(log, "wb") as f:
+                f.write(bytes([0xFF, 0xFE]) + text.encode("utf-16-le"))
+            self.assertEqual(coworker.last_result(log)["result"], "ok")
+            self.assertEqual(coworker.last_result(log, final=True)["result"], "ok")
+
+    def test_the_hint_names_the_refused_tab_and_the_flag(self):
+        self.assertIn("open_terminal_tab", coworker.BACKGROUND_HINT)
+        self.assertIn("--background", coworker.BACKGROUND_HINT)
 
 
 if __name__ == "__main__":

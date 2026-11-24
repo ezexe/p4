@@ -630,6 +630,46 @@ def worker_mode_for(text):
     return "print", "landing, test and check work runs headless on the API credit"
 
 
+BUILD_IN_PLANNER = True
+
+
+def build_in_planner_for(rec, conf, default=BUILD_IN_PLANNER):
+    """(on, from): the session record's `buildInPlanner` where it is a bool, else phi.json's `build_in_planner`
+    where it is a bool, else `default`, with where it came from."""
+    if isinstance(rec.get("buildInPlanner"), bool):
+        return rec["buildInPlanner"], "the session's buildInPlanner"
+    if isinstance(conf.get("build_in_planner"), bool):
+        return conf["build_in_planner"], "phi.json build_in_planner"
+    return default, "the default"
+
+
+def build_route(on, max_low, max_free):
+    """("planner" or "print", why): the planner builds where the setting is on, the Max plan is not low and a Max
+    slot is free; else `-p` workers do."""
+    if not on:
+        return "print", "build_in_planner is off, so -p workers build it"
+    if max_low:
+        return "print", "the Max plan is low, so -p workers build it"
+    if max_free <= 0:
+        return "print", "no Max slot is free, so -p workers build it"
+    return "planner", "build_in_planner is on and a Max slot is free"
+
+
+def built_report(report):
+    """The second report of a planner that builds: `report-<name>.md` becomes `report-<name>-built.md`."""
+    return report[:-3] + "-built.md" if report.endswith(".md") else report + "-built.md"
+
+
+def build_message(plan, built, nums, checkout):
+    """What the planner is told once ezexe approved the plan: build it, with no worktree and one commit a section."""
+    plan, built, checkout = (str(p).replace("\\", "/") for p in (plan, built, checkout))
+    return (f"Your plan {plan} is approved. Build sections {', '.join(nums)} in {checkout}: no worktree and no branch, "
+            "commit only by phi.py commit, one commit a section, push and merge nothing. Run each section's Checks, "
+            "and write its Evidence into that plan file, under the section's `## ` heading, as one line "
+            "`**Evidence:** <commit sha>, <path:line>, <the check's result>`, not as a heading. "
+            f"When every check passes write {built} and end the turn.")
+
+
 CODE =re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
                   r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
                   r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)
@@ -1227,6 +1267,9 @@ def turn_relay(home, s, row, calls):
             unsent.append((oid, named))   # a step named by address or path, or words that change it, not progress
     parent = relay._parent(s)
     ask = waiting_on(report)
+    flagged = relay.asks_ezexe_in(report)
+    if parent and flagged:                      # a call its own context covers: relayed as a status, not a question card
+        relay.warn(home, parent, f"default:{sid}:{stamp}", relay.default_status(title, flagged))
     if parent and ask:
         relay.warn(home, parent, f"wait:{sid}:{stamp}",
                    f"\"{title}\", your worker, ended its turn on a question: \"{relay._short(ask, 240)}\". "
@@ -1235,7 +1278,7 @@ def turn_relay(home, s, row, calls):
     return unsent
 
 
-AUTHORITY = re.compile(r"\b(push|force|merge|publish|post|deploy|release|credential|password|token|secret|api key|"
+AUTHORITY = re.compile(r"\b(approv|new plan|plan's intent|push|force|merge|publish|post|deploy|release|credential|password|token|secret|api key|"
                        r"permission|sign[ -]?in|log[ -]?in|spend|pay|purchase|billing|delete|destroy|drop|"
                        r"irreversible|cannot be undone|restart|install)\w*", re.I)
 
