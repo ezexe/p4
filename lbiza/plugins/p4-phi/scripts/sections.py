@@ -19,7 +19,11 @@ import starts
 FENCE = re.compile(r"(?ms)^(`{3,}|~{3,}).*?^\1[ \t]*$")
 TITLE = re.compile(r"(?m)^# +(.+?)\s*$")
 HEAD = re.compile(r"(?m)^## +(.+?)\s*$")
-NUMBER = re.compile(r"(\d+)\b")
+NUMBER = re.compile(r"(\d+(?:\.\d+)*)\b")                   # `3` of `## 3. Name`, and `3.1` of `## 3.1 Name`
+# a `Files:` line that only points at another section: `as 3.1`, `same as 2`, `the same as section 2`
+POINTER = re.compile(r"^\W*(?:(?:the\s+)?same\s+)?as\s+(?:section\s+)?(\d+(?:\.\d+)*)\W*$", re.I)
+# a `Depends on:` line's numbers, read up to the first word that is prose: `1, 2 (3 landed)` is 1 and 2
+AFTER = re.compile(r"^\s*(?:sections?\s+)?(\d+(?:\.\d+)*(?:\s*(?:,|;|&|\band\b)\s*\d+(?:\.\d+)*)*)", re.I)
 LINE = r"(?im)^[ \t>*-]*(?:\*\*)?%s(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$"
 DEPENDS = re.compile(LINE % r"depends\s+on")
 CHECKS = re.compile(LINE % r"checks?")
@@ -53,6 +57,17 @@ def assumed_of(body):
     return sum(1 for x in said if not NOTHING.match(x))
 
 
+def after_of(said):
+    """The section numbers a `Depends on:` line names: only its numbers before any prose, so `none`, `none (section 2
+    is landed)` and `3.1 (as 2 says)` name nothing, nothing and 3.1."""
+    m = AFTER.match(re.sub(r"[`*]", "", said or ""))
+    return re.findall(r"\d+(?:\.\d+)*", m.group(1)) if m else []
+
+
+def _key(n):
+    return tuple(int(x) for x in n.split("."))
+
+
 def runner_of(body):
     """The runner a section names on its `Runner:` line, as {"mode", "pool", "team", "said"} with its `Model:` and
     `Effort:` lines as `level`, or {} where it names none: `print api`, `print max`, `print`, `interactive` or
@@ -81,12 +96,16 @@ def parse(text, base=""):
     bare = FENCE.sub(lambda m: " " * len(m.group(0)), raw)
     top = TITLE.search(bare)
     marks = list(HEAD.finditer(bare))
-    out = []
+    out, points = [], {}
     taken = {n.group(1) for n in (NUMBER.match(m.group(1)) for m in marks) if n}   # every number a heading opens with
     for k, m in enumerate(marks):
         end = marks[k + 1].start() if k + 1 < len(marks) else len(bare)
         body = bare[m.end():end]
         files = starts.files_of(body, base)
+        line = starts.FILES_LINE.search(body)
+        point = POINTER.match(starts.LIST_END.split(line.group(1).strip(), 1)[0].strip()) if line else None
+        if point:                                  # `Files: as 3.1`: that section's files, once all are read
+            files = ["-"]
         if not files:                              # no `Files:` line, or `Files: none`: context, and no worker's
             continue
         n = NUMBER.match(m.group(1))
@@ -97,13 +116,27 @@ def parse(text, base=""):
         else:                                      # the first number no heading opens with and no section took
             num = next(str(i) for i in range(1, len(marks) + 2) if str(i) not in taken)
             taken.add(num)
+        if point:
+            points[num] = point.group(1)
         out.append({"n": num, "head": m.group(1), "text": raw[m.end():end].strip(), "files": files, "said": said,
-                    "after": re.findall(r"\d+", after.group(1)) if after else [],
+                    "after": after_of(after.group(1)) if after else [],
                     # `Checks: none` names no check, as `Files: none` names no file
                     "checks": checks.group(1).rstrip(".") if checks and not starts.NO_FILES.match(checks.group(1))
                     else "",
                     "fences": len(FENCE.findall(raw[m.end():end])), "assumed": assumed_of(body),
                     "landed": bool(EVIDENCE.search(body)), "runner": runner_of(body), "body": body})
+    by = {s["n"]: s for s in reversed(out)}
+    for s in list(out):
+        if s["n"] in points:                       # follow a chain of pointers; a pointer to no files is no section
+            at, seen = points[s["n"]], {s["n"]}
+            while at in points and at not in seen:
+                seen.add(at)
+                at = points[at]
+            there = by.get(at)
+            if there is None or at in points:
+                out.remove(s)
+            else:
+                s["files"], s["said"] = list(there["files"]), there["said"]
     return (top.group(1) if top else "plan"), out
 
 
@@ -186,7 +219,7 @@ def file_runs(sections):
 def needs(run):
     """The section numbers a run waits for: each `Depends on:` of its sections that is no section of the run."""
     own = {s["n"] for s in run}
-    return sorted({d for s in run for d in s["after"] if d not in own}, key=lambda x: int(x))
+    return sorted({d for s in run for d in s["after"] if d not in own}, key=_key)
 
 
 def ready(sections, met=()):
@@ -251,6 +284,10 @@ def lint(text, base=""):
                 out.append(("fences", f"sections {b['n']} and {a['n']} both write {', '.join(shared)} and no "
                                       f"`Depends on:` orders them: put the file in one section or add "
                                       f"`Depends on: {b['n']}` to section {a['n']}"))
+    for i, a in enumerate(found):
+        if any(b["n"] == a["n"] for b in found[:i]):
+            out.append(("sources", f"two sections are numbered {a['n']}: a `Depends on: {a['n']}` names both, so "
+                                   "give each its own number"))
     for a in found:
         for d in a["after"]:
             if d not in have:
@@ -303,13 +340,13 @@ def name(title, run):
 
 def plan_name(title, s):
     """The title of a section's own plan: the top plan's title, the section's number and its heading."""
-    return f"{title}, section {s['n']}: " + re.sub(r"^\s*\d+[.):]?\s*", "", s["head"])
+    return f"{title}, section {s['n']}: " + re.sub(r"^\s*\d+(?:\.\d+)*[.):]?\s*", "", s["head"])
 
 
 def plan_brief(title, s):
     """The brief of the team planner of one section: the lines plans.PLANNER and plans.APPROVES route to an
     interactive planner, the section's own text and nothing of any other section."""
-    task = f"Plan section {s['n']} of the plan {title}: " + re.sub(r"^\s*\d+[.):]?\s*", "", s["head"])
+    task = f"Plan section {s['n']} of the plan {title}: " + re.sub(r"^\s*\d+(?:\.\d+)*[.):]?\s*", "", s["head"])
     return "\n".join([
         f"# {task}", "", f"Task: {task}.", "", "## The task", "",
         "This session starts in plan mode.", "ezexe approves the plan with ExitPlanMode.", "",
