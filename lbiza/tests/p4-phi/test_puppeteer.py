@@ -878,6 +878,54 @@ class Terminal(Base):
         again = t.cli(TOP, "draft", "--start", did)
         self.assertEqual(again.returncode, 2, "a worker is started once")
 
+    def test_a_draft_started_with_a_task_file_gives_the_worker_the_starters_task_and_its_done_line(self):
+        t = self.t
+        ctx, did = self.drafted()
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "Step one: run the exporter.\nDone looks like: the report holds X\n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--task <file>", r.stdout)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        name = coworker.draft_name(title, did)
+        folder = os.path.join(relay.nodes(t.p4)[name], "phi")
+        with open(os.path.join(folder, f"brief-{name}.md"), encoding="utf-8") as f:
+            brief = f.read()
+        self.assertIn("## The task", brief)
+        self.assertIn("Step one: run the exporter.", brief)
+        self.assertEqual(brief.count("Done looks like:"), 1)
+        self.assertLess(brief.index("## The task"), brief.index("phi draft "))
+        ext = "ps1" if os.name == "nt" else "sh"
+        with open(os.path.join(folder, f"start-{name}.{ext}"), encoding="utf-8") as f:
+            self.assertIn("the report holds X", f.read())
+
+    def test_a_draft_started_without_a_task_file_says_how_to_give_one(self):
+        t = self.t
+        ctx, did = self.drafted()
+        r = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pass `--task <file>`", r.stdout)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        name = coworker.draft_name(title, did)
+        with open(os.path.join(relay.nodes(t.p4)[name], "phi", f"brief-{name}.md"), encoding="utf-8") as f:
+            self.assertNotIn("## The task", f.read())
+
+    def test_a_missing_or_empty_task_file_exits_2(self):
+        t = self.t
+        ctx, did = self.drafted()
+        r = t.cli(TOP, "draft", "--start", did, "--task", os.path.join(t.tmp, "none.md"))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("phi:", r.stderr)
+        empty = os.path.join(t.tmp, "empty.md")
+        write(empty, "  \n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", empty)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("phi:", r.stderr)
+        with self.assertRaises(ValueError):
+            big = os.path.join(t.tmp, "big.md")
+            write(big, "x" * (puppeteer.TASK_CHARS_MOST + 1))
+            puppeteer.task_text(big)
+
     def test_an_orchestrators_draft_is_refused_there_and_keeps_its_desktop_call(self):
         t = self.t
         t.say(TOP, TASK)
