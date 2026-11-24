@@ -36,6 +36,9 @@ SMALL = "# A note\n\n## 1. The page\n\n- **Files:** `docs/export.md`\n\n" + f"{T
 WHO = "Plan: the exporter's \"move\" $HOME"
 TODAY = '{"enabledPlugins": {"p4-phi@p4-marketplace": false, "p4-temportal@p4-marketplace": false}}'
 PLANNER = "local_plan0001"
+TOP3 = ("# Top plan\n\n## Context\n\nNo planner.\n\n" + "".join(
+    f"## {k}. Part {k}\n\n- **Files:** `src/p{k}.py`\n- **Depends on:** none\n- **Done when:** MARK{k}\n\n"
+    for k in (1, 2, 3)))
 
 
 class Coworker(unittest.TestCase):
@@ -661,6 +664,73 @@ class Coworker(unittest.TestCase):
                                  text=True, timeout=60)
             self.assertEqual(old.returncode, 2, f"{gone} is gone")
 
+    def test_the_command_starts_the_planners_of_a_top_plan_and_collects_them(self):
+        top = os.path.join(self.base, "top.md")
+        with open(top, "w", encoding="utf-8") as f:
+            f.write(TOP3)
+        command = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", top,
+                   "--p4", self.home, "--session", "cli-0001", "--checkout", self.base]
+        ran = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
+        self.assertEqual(ran.stdout.count("waits for a slot"), 1)
+        self.assertIn("coworkers --wait --report", ran.stdout)
+        import re
+        phi_py = [sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers"]
+
+        def reports_of(out):
+            return re.findall(r"(?m)^planner .*its report (\S+)$", out)
+
+        def wait(*reports):                             # a report is there: the wait returns at once
+            return subprocess.run(phi_py + ["--p4", self.home, "--session", "cli-0001", "--wait", "--report",
+                                            *reports], capture_output=True, text=True, timeout=60)
+        first = reports_of(ran.stdout)
+        self.assertEqual(len(first), 2)
+        for report in first:
+            with open(report, "w", encoding="utf-8") as f:
+                f.write("done")
+        waits = wait(*first)
+        self.assertEqual(waits.returncode, 0, waits.stderr)
+        self.assertIn("--plan-sections", waits.stdout)
+        self.assertNotIn("--land", waits.stdout)
+        again = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(again.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "the third, on a freed slot")
+        self.assertNotIn("waits for a slot", again.stdout)
+        third = reports_of(again.stdout)
+        self.assertEqual(len(third), 1)
+        lone = subprocess.Popen(phi_py + ["--p4", self.home, "--session", "cli-0001", "--wait", "--report", third[0]],
+                                stdout=subprocess.PIPE, text=True)
+        try:
+            deadline = time.time() + 60
+            while lone.poll() is None and time.time() < deadline:   # wait_report counts a report written after the
+                with open(third[0], "w", encoding="utf-8") as f:    # wait began, so one write lands after it
+                    f.write("done")                                 # whatever the start-up time
+                time.sleep(1)
+            self.assertIn("--plan-sections", lone.communicate(timeout=10)[0], "one planner's wait says it too")
+        finally:
+            if lone.poll() is None:
+                lone.kill()
+        last = subprocess.run(command + ["--plan-sections"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(last.returncode, 0, last.stderr)
+        self.assertIn("every planner has reported", last.stdout)
+        got = subprocess.run(command + ["--collect"], capture_output=True, text=True, timeout=60)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(got.stdout.count("section "), 3)
+
+    def test_a_planners_slot_is_held_to_its_report_not_to_its_transcripts_quiet_or_the_interactive_hour(self):
+        row = {"event": "start", "name": "tp-x-1-aaaa", "kind": "plan", "mode": "interactive", "log": "",
+               "report": os.path.join(self.base, "report-tp-x-1-aaaa.md"),
+               "time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 5400))}   # 90 minutes ago
+        os.makedirs(os.path.join(self.home, "phi"))
+        with open(os.path.join(self.home, "phi", "worker-starts.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n" + json.dumps({**row, "name": "w-y", "kind": "work"}) + "\n")
+        self.assertEqual([r["name"] for r in phi.running_workers(self.home)], ["tp-x-1-aaaa"],
+                         "past the interactive hour a worker is freed, a planner is not")
+        with open(row["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(phi.running_workers(self.home), [])
+
 
 WAVES = ("# Waves\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n\n"
          "## 2. B\n\n- **Files:** `src/b.py`\n- **Depends on:** none\n- **Checks:** `t b`\n"
@@ -798,11 +868,6 @@ class Waves(unittest.TestCase):
         now[0] = mtime
         self.assertEqual(coworker.wait_any([report], longest=20, quiet=60, clock=lambda: now[0],
                                            sleep=lambda s: now.__setitem__(0, now[0] + s))[1], "long")
-
-
-TOP3 = ("# Top plan\n\n## Context\n\nNo planner.\n\n" + "".join(
-    f"## {k}. Part {k}\n\n- **Files:** `src/p{k}.py`\n- **Depends on:** none\n- **Done when:** MARK{k}\n\n"
-    for k in (1, 2, 3)))
 
 
 class SectionPlanners(unittest.TestCase):

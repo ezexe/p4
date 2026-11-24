@@ -2812,7 +2812,7 @@ def running_workers(home, now=None):
     """The start rows of worker-starts.jsonl whose worker still runs: no outcome row, no report file, no final
     `result` row in its log, and started less than RUNNING_HOURS ago. An interactive worker with no log is running
     INTERACTIVE_HOURS from its start at most, and not once its node's transcript was last written QUIET seconds
-    ago."""
+    ago. A planner, kind `plan`, runs until its report is there or RUNNING_HOURS pass."""
     import coworker
     now = time.time() if now is None else now
     rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl")) if home else []
@@ -2829,9 +2829,10 @@ def running_workers(home, now=None):
         if r.get("report") and os.path.exists(r["report"]):
             continue
         interactive = r.get("mode") == "interactive" and not r.get("log")    # no log, so no result row to end it
-        if now - at > (INTERACTIVE_HOURS if interactive else RUNNING_HOURS) * 3600:
+        planner = interactive and r.get("kind") == "plan"    # it reads in rounds: its report, or RUNNING_HOURS, ends it
+        if now - at > (INTERACTIVE_HOURS if interactive and not planner else RUNNING_HOURS) * 3600:
             continue
-        if interactive:                        # its node's transcript, idle QUIET seconds, frees its slot
+        if interactive and not planner:        # its node's transcript, idle QUIET seconds, frees its slot
             seen = [os.path.getmtime(f) for f in coworker.kept(r.get("name"), home, "") if os.path.isfile(f)]
             if seen and now - max(seen) >= coworker.QUIET:
                 continue
@@ -4374,6 +4375,13 @@ def main(argv=None):
                                 "file, brief and settings file there with its report's name, and print the "
                                 "terminal call that starts each: for after the approval, from a session in auto or "
                                 "bypass mode")
+            p.add_argument("--plan-sections", action="store_true",
+                           help="the plan is a top plan of briefs: start one interactive team planner for each "
+                                "brief whose `Depends on:` hold no open plan, on the free Max slots; call again once "
+                                "a planner reported to start what that frees")
+            p.add_argument("--collect", action="store_true",
+                           help="the plan is a top plan: print each section's plan file, its report and its "
+                                "`Read:` line")
             p.add_argument("--report", nargs="+", default=[], metavar="FILE",
                            help="with --wait: wait for this terminal worker's report file instead of for coworkers")
             p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
@@ -4603,6 +4611,7 @@ def main(argv=None):
             return 1 if found else 0
         if a.cmd == "sections":                    # an approved plan's runs: what `coworkers --land` prints
             a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, []
+            a.plan_sections = a.collect = False
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
@@ -4619,9 +4628,8 @@ def main(argv=None):
                     log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
                 if len(reports) > 1:
                     wave_outcomes(me.home, reports, report, how)
-                else:
-                    worker_outcome(me.home, tab, how, result_of(log) if how != "long" else coworker.last_result(log),
-                                   log)
+                elif how != "long":
+                    worker_outcome(me.home, tab, how, result_of(log), log)
                 if how == "ended":
                     r = coworker.last_result(log)
                     print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "
@@ -4636,9 +4644,12 @@ def main(argv=None):
                 rest = [r for r in reports if (r != report or how == "long") and not os.path.exists(r)]
                 if len(reports) > 1 and how != "long":
                     print("still running: " + " ".join(rest) if rest else "none still running")
-                if len(reports) > 1:
-                    print("land the plan again with `coworkers <plan> --checkout <checkout> --land` to start what this "
+                if all(os.path.basename(r).startswith("report-" + coworker.PLANNER_PREFIX + "-") for r in reports):
+                    print("run `coworkers <top plan> --checkout <checkout> --plan-sections` to start what this "
                           "frees, then wait again on the reports still running")
+                elif len(reports) > 1:
+                    print("land the plan again with `coworkers <plan> --checkout <checkout> --land` to start what "
+                          "this frees, then wait again on the reports still running")
                 return 0
             plan = os.path.abspath(a.plan) if a.plan else ""
             if a.wait is not None and not a.land:  # a round's wait on named coworkers, which only reads
@@ -4668,6 +4679,48 @@ def main(argv=None):
                 return 2
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
             mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
+            if a.collect:
+                for c in coworker.collect(plan, checkout, me.home):
+                    print(f"section {c['n']} `{c['name']}` ({c['state']}): plan {c['plan'] or 'none yet'}, report "
+                          f"{c['report'] or 'none yet'}" + (f"\n  {c['read']}" if c["read"] else ""))
+                    if c["state"] == "done" and c["plan"]:
+                        print(f"  once ezexe approves it: `{commands()} coworkers \"{c['plan']}\" --checkout "
+                              f"\"{checkout}\" --land`")
+                return 0
+            if a.plan_sections:
+                pick = slot_assigner(me.home, me.id)
+                try:
+                    found = coworker.section_plans(plan, checkout, me.home, safe_id(me.id), pick)
+                except ValueError as e:
+                    print(f"phi: {e}", file=sys.stderr)
+                    return 2
+                new = [one for one in found if one.get("folder")]
+                coworker.write(new, checkout, me.home)
+                print(slots_line(pick.slots))
+                for one in new:
+                    print(f"planner `{one['name']}`: section {one['sections'][0]}, its report {one['report']}")
+                    print(f"  pool {one['settings']['pool']}, " + worker_start(
+                        me.home, one["settings"], one["name"], safe_id(me.id), "plan", "", one["report"]))
+                    print(tab_lines(one["name"], checkout, one["typed"]))
+                    print(trust_line())
+                    print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
+                          f"`{one['resume_typed']}`")
+                for one in found:
+                    if one.get("waits"):
+                        print(f"waits for a slot: `{one['name']}`, section {one['sections'][0]}")
+                runs = coworker.section_runs(plan, checkout, me.home)[1]
+                for r in runs:
+                    if r["state"] == "waiting":
+                        print(f"waits on the plans of sections {', '.join(r['needs'])}: `{r['name']}`")
+                going = [r["report"] for r in runs if r["state"] == "running"]
+                if going:
+                    print(f"Then wait, as one background command: `{commands()} coworkers --wait --report "
+                          + " ".join(going) + "`; when it returns, run --plan-sections again to start what it frees.")
+                elif runs and all(r["state"] == "done" for r in runs):
+                    print(f"every planner has reported: `{commands()} coworkers \"{plan}\" --checkout "
+                          f"\"{checkout}\" --collect`")
+                done = bool(runs) and all(r["state"] == "done" for r in runs)
+                return 0 if new or going or done or any(o.get("waits") for o in found) else 2
             if a.land:                             # a terminal worker for each ready run, in LAND_MODE
                 # each terminal session is a node nested in the folder that holds this session's, found from its id
                 node_of = {"home": me.home, "starter": safe_id(me.id)}
