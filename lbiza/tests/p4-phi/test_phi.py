@@ -2755,6 +2755,64 @@ class TerminalWorker(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.node())), files)
         self.assertEqual({f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}, before)
 
+    def stub_claude(self):
+        """A `claude` on PATH that prints one result row, as the stream-json of a worker that ended."""
+        bin_ = os.path.join(self.base, "bin")
+        os.makedirs(bin_)
+        row = '{"type":"result","subtype":"success","is_error":false,"result":"stub ran"}'
+        if os.name == "nt":
+            with open(os.path.join(bin_, "claude.cmd"), "w", encoding="utf-8", newline="") as f:
+                f.write("@echo off" + chr(13) + chr(10) + "echo " + row + chr(13) + chr(10))
+        else:
+            at = os.path.join(bin_, "claude")
+            with open(at, "w", encoding="utf-8", newline="") as f:
+                f.write("#!/bin/sh" + chr(10) + "echo '" + row + "'" + chr(10))
+            os.chmod(at, 0o755)
+        return bin_
+
+    def test_land_with_background_starts_the_print_worker_itself_and_its_log_holds_what_the_stub_wrote(self):
+        self.mode("local_plan0001", "auto")
+        bin_ = self.stub_claude()
+        env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app, "PATH": bin_.replace(chr(92), "/") + os.pathsep + os.environ["PATH"]}
+        ran = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "coworkers", self.plan,
+                              "--p4", self.home, "--session", "local_plan0001", "--checkout", self.base, "--land",
+                              "--background"], capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertNotIn("mcp__terminal__open_terminal_tab", ran.stdout.replace(
+            "where `mcp__terminal__open_terminal_tab` is refused", ""))
+        log = next(f for f in os.listdir(self.node()) if f.startswith("log-"))
+        self.assertIn(log, ran.stdout.replace(chr(92), "/"), "the log's path is printed")
+        at = os.path.join(self.node(), log)
+        for _ in range(100):
+            with open(at, "rb") as f:           # Windows PowerShell's Tee-Object -Append writes UTF-16
+                if "stub ran" in f.read().replace(bytes(1), b"").decode("utf-8", "replace"):
+                    break
+            time.sleep(0.2)
+        else:
+            self.fail(f"the detached worker wrote no row into its log: {os.listdir(self.node())}: {ran.stdout}")
+
+    def test_land_prints_the_hint_for_a_refused_tab_and_no_background_start_without_the_flag(self):
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land")
+        self.assertIn("run the same command again with `--background`", ran.stdout)
+        self.assertEqual([f for f in os.listdir(self.node()) if f.startswith("log-")], [])
+
+    def test_land_names_a_reported_section_and_rerun_withdraws_its_node_and_starts_it_again(self):
+        self.mode("local_plan0001", "auto")
+        self.assertEqual(self.run_phi("--land").returncode, 0)
+        first = self.node()
+        report = next(f for f in os.listdir(first) if f.startswith("brief-")).replace("brief-", "report-")
+        write(os.path.join(first, report), "done"+chr(10))
+        listed = self.run_phi("--land")
+        self.assertIn("reported:", listed.stdout)
+        self.assertIn("--rerun 1", listed.stdout)
+        ran = self.run_phi("--land", "--rerun", "1")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertIn("is withdrawn", ran.stdout)
+        self.assertFalse(os.path.exists(os.path.join(self.node(), report)), "the old report went with its node")
+        self.assertIn("run_in_terminal", ran.stdout, "and the run starts again")
+        self.assertEqual(self.run_phi("--land", "--rerun", "9").returncode, 2)
+
     def test_land_of_a_plan_whose_every_run_is_landed_prints_the_audit_step_and_the_close(self):
         with open(self.plan, "w", encoding="utf-8") as f:
             f.write(WORKER_PLAN.replace("- **Checks:**", "- **Evidence:** abc1234, written\n- **Checks:**")

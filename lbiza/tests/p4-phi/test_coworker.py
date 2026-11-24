@@ -957,5 +957,24 @@ class SectionPlanners(unittest.TestCase):
         self.assertIn("--model claude-sonnet-5-5", found["1"]["lines"][-1])
 
 
+class Background(unittest.TestCase):
+    def test_an_interactive_worker_is_never_started_in_the_background_and_a_run_with_no_report_is_not_withdrawn(self):
+        with tempfile.TemporaryDirectory() as d:
+            one = {"folder": d, "file": "start-x.ps1", "log": os.path.join(d, "log-x.jsonl"),
+                   "settings": {"mode": "interactive"}}
+            self.assertEqual(coworker.start_background(one), "")
+            self.assertFalse(os.path.exists(one["log"]), "nothing is made for it")
+            self.assertEqual(coworker.start_background({**one, "settings": {"mode": "print"}, "log": ""}), "",
+                             "a worker with no log is no -p worker")
+            plan, nl = os.path.join(d, "plan.md"), chr(10)
+            with open(plan, "w", encoding="utf-8") as f:
+                f.write(nl.join(["# P", "", "## 1. A", "", "- **Files:** `a.py`", "- **Checks:** `x`", ""]))
+            self.assertEqual(coworker.rerun(plan, d, os.path.join(d, "home"), 1), "")
+
+    def test_the_hint_names_the_refused_tab_and_the_flag(self):
+        self.assertIn("open_terminal_tab", coworker.BACKGROUND_HINT)
+        self.assertIn("--background", coworker.BACKGROUND_HINT)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)

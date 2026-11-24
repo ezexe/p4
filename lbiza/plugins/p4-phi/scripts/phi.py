@@ -2950,6 +2950,20 @@ def tab_lines(name, checkout, typed):
                 {"tab_id": "<the tab_id it returned>", "command": typed}, ensure_ascii=False))
 
 
+def start_lines(one, checkout, background):
+    """The lines that start worker `one`: the two terminal calls, or with `background` the detached process of a `-p`
+    worker and its log, an interactive worker named as needing a tab. The refused-tab hint closes the tab's lines."""
+    import coworker
+    if background:
+        log = coworker.start_background(one)
+        if log:
+            return [f"  started in the background, its log {log}"]
+        return [f"  `{one['name']}` is interactive: it needs a tab, and is not started in the background",
+                tab_lines(one["name"], checkout, one["typed"])]
+    return [tab_lines(one["name"], checkout, one["typed"]), f"  {coworker.BACKGROUND_HINT[0].upper()}"
+            f"{coworker.BACKGROUND_HINT[1:]}"]
+
+
 def peak_at_once(home):
     """The most terminal workers that ran at the same time, overall and per pool, from worker-starts.jsonl: each
     from its start row to its outcome row, or to its log's last write where no outcome row came and the log holds a
@@ -4436,6 +4450,13 @@ def main(argv=None):
                            help="the plan is a top plan of briefs: start one interactive team planner for each "
                                 "brief whose `Depends on:` hold no open plan, on the free Max slots; call again once "
                                 "a planner reported to start what that frees")
+            p.add_argument("--background", action="store_true",
+                           help="with --land or --plan-sections: start each `-p` worker as a detached process that "
+                                "writes the same log and report, and print its log in place of the terminal calls; "
+                                "for where every terminal tab is held. An interactive worker is named as needing a tab")
+            p.add_argument("--rerun", default="", metavar="N",
+                           help="with --land: withdraw the node of the run of section N, whose worker reported with "
+                                "no `Evidence:` in the plan, and start it again")
             p.add_argument("--collect", action="store_true",
                            help="the plan is a top plan: print each section's plan file, its report and its "
                                 "`Read:` line")
@@ -4685,6 +4706,7 @@ def main(argv=None):
             a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, []
             a.plan_sections = a.collect = False
             a.planner = ""
+            a.background, a.rerun = False, ""
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
@@ -4774,7 +4796,7 @@ def main(argv=None):
                     print(f"planner `{one['name']}`: section {one['sections'][0]}, its report {one['report']}")
                     print(f"  pool {one['settings']['pool']}, " + worker_start(
                         me.home, one["settings"], one["name"], safe_id(me.id), "plan", "", one["report"]))
-                    print(tab_lines(one["name"], checkout, one["typed"]))
+                    print(chr(10).join(start_lines(one, checkout, a.background)))
                     print(trust_line())
                     print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
                           f"`{one['resume_typed']}`")
@@ -4816,6 +4838,17 @@ def main(argv=None):
                         print(f"phi: {why}")
                 # landing is headless work by the rule, so a section's own words, which may name modes, pick no
                 # mode: only a set mode or the section's Runner line does, and each run takes a slot of a pool
+                if a.rerun:
+                    try:
+                        again = coworker.rerun(plan, checkout, me.home, a.rerun)
+                    except ValueError as e:
+                        print(f"phi: {e}", file=sys.stderr)
+                        return 2
+                    if not again:
+                        print(f"phi: no run holds section {a.rerun} with a worker's report and no `Evidence:`: "
+                              "nothing is withdrawn", file=sys.stderr)
+                        return 2
+                    print(f"phi: `{again}` is withdrawn: its node is removed, and it starts again below")
                 pick = slot_assigner(me.home, me.id)
                 try:
                     found = coworker.land(plan, checkout, "", mode, claim=True, settings=pick, **node_of)
@@ -4845,7 +4878,7 @@ def main(argv=None):
                     print(f"  pool {one['settings']['pool']}, " + worker_start(
                         me.home, one["settings"], one["name"], safe_id(me.id), "land", one.get("log") or "",
                         one["report"]))
-                    print(tab_lines(one["name"], checkout, one["typed"]))
+                    print(chr(10).join(start_lines(one, checkout, a.background)))
                     if one["settings"]["mode"] == "interactive":
                         print(trust_line())
                     print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
@@ -4853,6 +4886,12 @@ def main(argv=None):
                 for one in found:
                     if one.get("waits"):
                         print(f"waits for a slot: `{one['name']}`, sections {', '.join(one['sections'])}")
+                for r in runs:
+                    if r["state"] == "done":
+                        print(f"reported: `{r['name']}`, sections {', '.join(r['sections'])}, its report "
+                              f"{r['report']}, and no `Evidence:` in the plan yet; to run it again: "
+                              f"`{commands()} coworkers \"{plan}\" --checkout \"{checkout}\" --land --rerun "
+                              f"{r['sections'][0]}`")
                 for r in runs:
                     if r["state"] == "waiting":
                         print(f"waits on sections {', '.join(r['needs'])}: `{r['name']}`, sections "

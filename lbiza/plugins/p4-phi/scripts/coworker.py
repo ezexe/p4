@@ -32,6 +32,8 @@ import hashlib
 import json
 import os
 import re
+import shutil
+import subprocess
 import time
 import uuid
 
@@ -196,6 +198,43 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
     return (f"{kind}-{name}.sh", [f"unset {' '.join(upkeep.CARRIED)}", *named, *([f"export {TEAMS}=1"] if team else []),
                                   f"cd '{here}'", run + (f" 2>&1 | tee -a '{log}'" if headless else "")],
             f"sh '{at}/{kind}-{name}.sh'")
+
+
+BACKGROUND_HINT = ("where `mcp__terminal__open_terminal_tab` is refused because every tab is held, run the same "
+                   "command again with `--background`")
+
+
+def start_background(one, windows=None):
+    """Starts the `-p` worker `one` (an entry of land() or section_plans() that has a folder) as a detached process
+    that runs its start file, which writes the same log and report as a tab's start would, and returns its log's
+    path. The log is made empty first, so it is there at once. An interactive worker is never started so: it
+    returns "", and the caller names it as needing a tab."""
+    windows = upkeep.WINDOWS if windows is None else windows
+    if not one.get("log") or (one.get("settings") or {}).get("mode") == "interactive":
+        return ""
+    start = os.path.join(one["folder"], one["file"])
+    with open(one["log"], "a", encoding="utf-8"):
+        pass
+    if windows:
+        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", start]
+        kw = {"creationflags": 0x00000200 | 0x08000000}     # NEW_PROCESS_GROUP, NO_WINDOW: DETACHED_PROCESS left tee no log
+    else:
+        argv, kw = ["sh", start], {"start_new_session": True}
+    subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     close_fds=True, **kw)
+    return one["log"].replace("\\", "/")
+
+
+def rerun(path, checkout, home, n):
+    """Withdraws the node of the run that holds section `n` where that run's worker reported and the plan holds no
+    `Evidence:` for it, so the next land starts it again. The run's name, or "" where no run reported that section.
+    The node's folder is removed whole: its report, brief and log are the old run's."""
+    for r in plan_runs(path, checkout, home):
+        if str(n) in r["sections"] and r["state"] == "done" and r["folder"]:
+            shutil.rmtree(r["folder"], ignore_errors=True)
+            relay.forget(home)
+            return r["name"]
+    return ""
 
 
 def _quoted(*paths):
@@ -397,7 +436,8 @@ def plan_runs(path, checkout, home=""):
     wave: the sections that share a file, sections.file_runs, each as {"name", "sections", "group", "needs",
     "runner", "state", "folder", "report"}. `sections` are the run's sections not landed, `group` those sections
     whole and `needs` the sections of other runs it waits for. The state: `landed` where every section holds its
-    `Evidence:`; `done` where its worker's node holds its report; `ended` where its log's last row is a final
+    `Evidence:`; `done` where its worker's node holds its report, which the land output names `reported`, the
+    section's `Evidence:` being the session's to write; `ended` where its log's last row is a final
     result and no report came; `running` where its node is there and neither; `ready` where it was never started
     and every need is met, a met section being landed or in a run that is landed or done; `waiting` for the rest."""
     with open(path, encoding="utf-8") as f:
