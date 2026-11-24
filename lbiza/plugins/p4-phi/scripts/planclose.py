@@ -17,6 +17,7 @@ deny reason for every other way into `complete/`.
 """
 
 import datetime
+import fnmatch
 import os
 import posixpath
 import re
@@ -31,10 +32,13 @@ HEAD = re.compile(r"(?m)^## +(.+?)\s*$")
 AUDIT = "Audit"                                 # the record's heading is exactly this, so `## Audit notes` is none
 AUDITED = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?audited(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*(.+?)[ \t]*$")
 RANGE = re.compile(r"([^\s:,`]+?)\.\.([^\s,`]+)")
-# `- Finding: <text>`, `- Finding 2: <text>` and `- Finding #2: <text>`
-FINDING = re.compile(r"(?i)^[ \t]*[-*][ \t]+(?:\*\*)?finding(?:[ \t]*#?[ \t]*\d+)?(?:\*\*)?[ \t]*:[ \t]*(?:\*\*)?[ \t]*"
-                     r"(.+?)[ \t]*$")
-BULLET = re.compile(r"(?m)^[ \t]*[-*][ \t]+.*$")
+# a bullet of Markdown: `-`, `*`, `+`, or a number with `.` or `)`
+MARK = r"(?:[-*+]|\d+[.)])"
+# `- Finding: <text>`, `- Finding 2: <text>`, `- Finding #2: <text>`, `1. Finding: <text>` and `+ Finding: <text>`
+FINDING = re.compile(r"(?i)^[ \t]*" + MARK + r"[ \t]+(?:\*\*)?finding(?:[ \t]*#?[ \t]*\d+)?(?:\*\*)?[ \t]*:[ \t]*"
+                     r"(?:\*\*)?[ \t]*(.+?)[ \t]*$")
+BULLET = re.compile(r"(?m)^[ \t]*" + MARK + r"[ \t]+.*$")
+BULLET_MARK = re.compile(r"^[ \t]*" + MARK + r"[ \t]+")
 NAMES_FINDING = re.compile(r"(?i)\bfinding")
 # the outcome is the last `: fixed|answered|open` of the line, so a finding's text may hold one of those words
 OUTCOME = re.compile(r"(?is)^(?P<text>.+):[ \t]*(?P<how>fixed|answered|open)\b[ \t]*,?[ \t]*(?P<rest>.*)$")
@@ -46,10 +50,11 @@ STATUS = re.compile(r"^STATUS:")
 
 EDITS = ("Write", "Edit", "NotebookEdit")
 SHELLS = ("Bash", "PowerShell", "mcp__terminal__run_in_terminal")
-PLANNER = re.compile(r"(?i)(?<![\w-])plan-planner(?![\w-])")
-# `complete` as a path segment once a line's paths are normalised: `complete/`, `/complete`, `'complete'` in a
-# Join-Path, and no `completed`, `complete.md` or `auto-complete`
-SEGMENT = re.compile(r"(?i)(?<![\w.-])complete(?![\w-]|\.\w)")
+# a run of a shell line, once normalised, that may be one path segment: what sits between separators, spaces,
+# quotes, brackets and the marks of a chain, a redirection or an option's value
+RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
+QUOTES = ("'", '"')
+PLANS_FOLDER = "plan-planner"
 UNDER_COMPLETE = re.compile(r"(?i)(?:^|/)plan-planner/complete(?:/|$)")
 # what keeps a shell line from being one command alone: a chain (`;`, `|`, `&`, a newline, a backtick or a `$(`),
 # a redirection (`>` or `<`) or a `#` comment, once a `&` that opens the line, PowerShell's call operator, is out
@@ -57,8 +62,11 @@ NOT_ONE = re.compile(r"[;|&\n\r`<>#]|\$\(")
 NOT_READ_ONLY = re.compile(r"[;|&\n\r`<>]|\$\(")
 CALL = re.compile(r"^&\s*")
 TOKEN = re.compile(r"\"[^\"]*\"|'[^']*'|[^\s\"']+")
-PYTHON = re.compile(r"(?i)^(?:python[\d.]*|pythonw|py)(?:\.exe)?$")
-TAKES_VALUE = ("-X", "-W")                      # python's options whose value is the next word
+# the interpreter of a close line, by its basename: python, python3, python.exe or py, and python3.exe or py.exe
+PYTHON = re.compile(r"(?i)^(?:python3?|py)(?:\.exe)?$")
+FLAGS = ("-I", "-3", "-u", "-B", "-E", "-s", "-S")    # the interpreter's flags a close line may hold, one to a word
+TAKES_VALUE = ("-X",)                                 # and `-X <opt>`, whose value is the next word
+PHI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "phi.py")    # the one phi.py a close line runs
 READ_ONLY = ("ls", "dir", "cat", "type", "get-childitem", "get-content", "grep", "rg")
 GIT_READ_ONLY = ("status", "log", "diff", "show")
 WRITES_ANYWAY = re.compile(r"(?i)^--(?:output|pre)\b")      # `git diff --output=<file>`, `rg --pre <command>`
@@ -130,7 +138,7 @@ def read(text):
         f = FINDING.match(b.group(0))
         if not f:
             if NAMES_FINDING.search(b.group(0)):
-                out["unread"].append(b.group(0).strip().lstrip("-*").strip())
+                out["unread"].append(BULLET_MARK.sub("", b.group(0)).strip())
             continue
         said = f.group(1).replace("**", "").strip()
         if NONE.match(said):
@@ -261,7 +269,10 @@ def close(path, checkout, home=None, today=None):
     answered`, in place of a STATUS line already there, and move the plan into `complete/` of the plans folder
     `home`, under its title's name, numbered where that name is taken, or taken between free_name and the write.
     Where `home` is None it is the plan's own folder, or that folder's parent where the plan sits in one of the
-    SHELVES. The plan's line ends, LF or CRLF, are kept. Returns the path it moved the plan to."""
+    SHELVES. The plan's line ends, LF or CRLF, are kept. A plan already in `complete/` is refused as closed already.
+    Returns the path it moved the plan to."""
+    if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() == COMPLETE:
+        raise Refused([f"{path} is in complete/ already: the plan is closed"])
     with open(path, encoding="utf-8", newline="") as f:
         raw = f.read()
     end = "\r\n" if "\r\n" in raw else "\n"
@@ -283,8 +294,11 @@ def close(path, checkout, home=None, today=None):
     shelf = os.path.join(home, COMPLETE)
     os.makedirs(shelf, exist_ok=True)
     wanted = title_name(text) or os.path.basename(path)
+    own = os.path.normcase(os.path.abspath(path))
     while True:
         dest = os.path.join(shelf, free_name(home, wanted, own=path))
+        if os.path.normcase(os.path.abspath(dest)) == own:    # the plan sits where it would go: it is closed
+            raise Refused([f"{path} is in complete/ already: the plan is closed"])
         try:
             with open(dest, "x", encoding="utf-8", newline="") as f:
                 f.write(end.join(lines))
@@ -314,13 +328,36 @@ def resolved(path, cwd):
     return head + posixpath.normpath(rest) if rest else p
 
 
+def is_complete(run):
+    """True where the run `run` is the segment `complete` in any case, or a glob that matches it, such as `comp*`
+    or `compl[e]te`; a run of `*` alone, which matches every name, is none."""
+    run = run.lower()
+    return run == COMPLETE or (bool(re.search(r"[*?\[]", run)) and run.strip("*") != ""
+                               and fnmatch.fnmatchcase(COMPLETE, run))
+
+
 def names_complete(cmd, cwd):
-    """True where the shell line `cmd`, normalised, names `complete` as a path segment and names `plan-planner`
-    too, or is run with the plans folder, `plan-planner`, as its cwd."""
+    """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
+    `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
+    matches it, with a separator beside it (`complete/`, `/complete`, `/comp*`), or quoted alone as a path's part
+    (`Join-Path 'E:/p/plan-planner' 'complete'`, `os.path.join('plan-planner', 'complete')`). A word with no
+    separator beside it, as in `-m "audit complete"` or `grep complete`, is none. A glob outside a quote, as in
+    `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
+    `complete` outside a quote is a segment too."""
     line = normal(cmd)
-    if not SEGMENT.search(line):
-        return False
-    return bool(PLANNER.search(line)) or posixpath.basename(normal(cwd or "").rstrip("/")).lower() == "plan-planner"
+    planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
+    for m in RUN.finditer(line):
+        if not is_complete(m.group(0)):
+            continue
+        before = line[m.start() - 1] if m.start() else ""
+        after = line[m.end()] if m.end() < len(line) else ""
+        if "/" in (before, after):
+            return True
+        if before and before in QUOTES and after == before:
+            return True
+        if (planners or m.group(0).lower() != COMPLETE) and before not in QUOTES and after not in QUOTES:
+            return True
+    return False
 
 
 def tokens(cmd):
@@ -337,29 +374,45 @@ def bare(word):
     return word[1:-1] if len(word) > 1 and word[0] == word[-1] and word[0] in "\"'" else word
 
 
-def is_close_line(cmd):
-    """True where the whole of `cmd` is one `phi.py plan close` invocation: a python launcher and its options or
-    phi.py itself, then `plan close` and its words, with no `#` comment, no `>` or `<` redirection and no chain."""
+def same_file(word, cwd, path):
+    """True where the path `word`, joined to `cwd` where it is relative, resolves to the file `path`."""
+    p = bare(word)
+    if cwd and not os.path.isabs(p):
+        p = os.path.join(cwd, p)
+    try:
+        return os.path.normcase(os.path.realpath(p)) == os.path.normcase(os.path.realpath(path))
+    except (OSError, ValueError):
+        return False
+
+
+def is_close_line(cmd, cwd=None):
+    """True where the whole of `cmd` is one `phi.py plan close` invocation: an interpreter (a basename python,
+    python3, python.exe or py) with flags of FLAGS and `-X <opt>` only, one to a word, then the phi.py beside this
+    file by its resolved path, then `plan close` and its words, with no `#` comment, no `>` or `<` redirection and
+    no chain. So `python -Ic "..." phi.py plan close` and a phi.py planted elsewhere are none. `cwd` is the one a
+    relative phi.py is joined to, this process's own where it is None."""
     line = CALL.sub("", cmd.strip())
     if NOT_ONE.search(line):
         return False
     words = tokens(cmd)
-    if not words:
+    if not words or not PYTHON.match(posixpath.basename(normal(bare(words[0])))):
         return False
-    i = 0
-    if PYTHON.match(posixpath.basename(normal(bare(words[0])))):
-        i = 1
-        while i < len(words) and words[i].startswith("-"):
-            if words[i] in ("-c", "-m") or words[i].startswith(("-c", "-m")):
-                return False
-            i += 2 if words[i] in TAKES_VALUE else 1
-    return (i + 2 < len(words) and posixpath.basename(normal(bare(words[i]))).lower() == "phi.py"
+    i = 1
+    while i < len(words) and words[i].startswith("-"):
+        if words[i] in TAKES_VALUE:
+            i += 2
+        elif words[i] in FLAGS:
+            i += 1
+        else:
+            return False
+    return (i + 2 < len(words) and same_file(words[i], cwd if cwd is not None else os.getcwd(), PHI)
             and [w.lower() for w in words[i + 1:i + 3]] == ["plan", "close"])
 
 
 def is_read_only(cmd):
     """True where `cmd` is one read-only command with no redirection and no chain: `ls`, `dir`, `cat`, `type`,
-    `Get-ChildItem`, `Get-Content`, `grep`, `rg`, or `git status`, `log`, `diff` or `show`."""
+    `Get-ChildItem`, `Get-Content`, `grep`, `rg`, or `git status`, `log`, `diff` or `show`, `git -C <path>` before
+    it or not."""
     if NOT_READ_ONLY.search(CALL.sub("", cmd.strip())):
         return False
     words = tokens(cmd)
@@ -368,16 +421,20 @@ def is_read_only(cmd):
     first = bare(words[0]).lower()
     if first in READ_ONLY:
         return True
-    return first == "git" and len(words) > 1 and words[1].lower() in GIT_READ_ONLY
+    if first != "git":
+        return False
+    i = 1
+    while i + 1 < len(words) and words[i] == "-C":
+        i += 2
+    return i < len(words) and words[i].lower() in GIT_READ_ONLY
 
 
 def guard(tool, tool_input, cwd=None):
     """The deny reason for a way into `plan-planner/complete/` other than `phi.py plan close`, or None:
     - a Write, Edit or NotebookEdit whose path, joined to the call's `cwd` where it is relative and normalised, is
       under it;
-    - a Bash, PowerShell or `mcp__terminal__run_in_terminal` line that, normalised, names `plan-planner` and a
-      `complete` segment, or a `complete` segment with the plans folder as its cwd, and is neither one
-      `phi.py plan close` line alone nor a read-only line.
+    - a Bash, PowerShell or `mcp__terminal__run_in_terminal` line that, normalised, names a `complete` segment, as
+      names_complete reads it, and is neither one `phi.py plan close` line alone nor a read-only line.
     `cwd` is the call's, this process's own where it is None."""
     inp = tool_input if isinstance(tool_input, dict) else {}
     tool = str(tool or "")
@@ -392,9 +449,10 @@ def guard(tool, tool_input, cwd=None):
         return None
     if tool in SHELLS:
         cmd = str(inp.get("command") or "")
-        if not names_complete(cmd, cwd) or is_close_line(cmd) or is_read_only(cmd):
+        if not names_complete(cmd, cwd) or is_close_line(cmd, cwd) or is_read_only(cmd):
             return None
-        return ("phi (p4-phi): this command is refused: it names plan-planner/complete, which a plan enters only "
+        return ("phi (p4-phi): this command is refused: it names a `complete` folder, which a plan enters only "
                 "by `phi.py plan close <plan> --checkout <repo>`, past the gate of its Evidence and its `## Audit`. "
-                "Run that line alone, and it writes the STATUS line and makes the move.")
+                "Run that line alone, with python and the plugin's own phi.py, and it writes the STATUS line and "
+                "makes the move.")
     return None

@@ -249,11 +249,12 @@ class Guard(unittest.TestCase):
         self.assertIn("refused", planclose.guard("PowerShell", {"command": cmd}))
 
     def test_a_plan_close_line(self):
-        cmd = f"python -I -X utf8 E:/p/scripts/phi.py plan close \"{self.PLANS}/complete/x.md\" --checkout E:/p"
+        phi = os.path.join(SRC, "phi.py")
+        cmd = f"python -I -X utf8 \"{phi}\" plan close \"{self.PLANS}/complete/x.md\" --checkout E:/p"
         self.assertIsNone(planclose.guard("Bash", {"command": cmd}))
-        ps = f"& \"C:\\py\\python.exe\" E:\\p\\scripts\\phi.py plan close {self.PLANS}\\complete\\x.md --checkout E:\\p"
+        win = phi.replace("/", "\\")
+        ps = f"& \"C:\\py\\python.exe\" {win} plan close {self.PLANS}\\complete\\x.md --checkout E:\\p"
         self.assertIsNone(planclose.guard("PowerShell", {"command": ps}))
-        self.assertIsNone(planclose.guard("Bash", {"command": f"phi.py plan close {self.PLANS}/complete/x.md"}))
 
     def test_a_plan_close_line_chained_with_a_move(self):
         cmd = f"python phi.py plan close a.md --checkout . && mv b.md {self.PLANS}/complete/b.md"
@@ -311,7 +312,6 @@ class GuardHoles(unittest.TestCase):
     def test_a_complete_segment_run_from_the_plans_folder(self):
         self.assertIn("refused", self.refused("mv x.md complete/", cwd=self.PLANS))
         self.assertIn("refused", self.refused(r"Move-Item x.md .\complete\x.md", "PowerShell", cwd=self.PLANS + "/"))
-        self.assertIsNone(self.refused("mv x.md complete/"))
         self.assertIsNone(self.refused("mv x.md todo/", cwd=self.PLANS))
 
     def test_no_complete_segment(self):
@@ -452,6 +452,128 @@ class CloseHoles(Repo):
             got = f.read()
         self.assertNotIn("\n", got.replace("\r\n", ""))
         self.assertTrue(got.split("\r\n")[1].startswith("STATUS: COMPLETED 2026-11-24: 2 sections;"))
+
+
+class GuardRound2(unittest.TestCase):
+    """Section 15 of audit-before-a-plan-closes: the holes the second audit, of 33cf9a60..61ac15e8, found in
+    guard()."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    ELSEWHERE = "E:/projects/p4-phi/p4"
+    PHI = os.path.join(SRC, "phi.py")
+
+    def refused(self, cmd, tool="Bash", cwd=ELSEWHERE):
+        return planclose.guard(tool, {"command": cmd}, cwd=cwd)
+
+    # a close line: an interpreter, allowed flags, the phi.py beside planclose.py, then `plan close`
+    def test_the_real_close_line_passes_in_bash_and_powershell(self):
+        plan, repo = f"{self.PLANS}/audit-before-a-plan-closes.md", "E:/projects/p4-phi/p4"
+        bash = f"python -I -X utf8 \"{self.PHI}\" plan close \"{plan}\" --checkout \"{repo}\""
+        self.assertTrue(planclose.is_close_line(bash, self.ELSEWHERE))
+        ps = "& " + bash.replace("/", "\\")
+        self.assertTrue(planclose.is_close_line(ps, self.ELSEWHERE))
+        for tool, cmd in (("Bash", bash), ("PowerShell", ps)):
+            sep = "\\" if tool == "PowerShell" else "/"
+            into = cmd.replace("audit-before-a-plan-closes.md", f"complete{sep}audit-before-a-plan-closes.md")
+            self.assertIsNone(self.refused(into, tool), into)
+        for exe in ("python3", "python.exe", "py", "C:/py/python.exe"):
+            self.assertTrue(planclose.is_close_line(f"{exe} \"{self.PHI}\" plan close x.md", self.ELSEWHERE), exe)
+        flags = "-I -X utf8 -3 -u -B -E -s -S"
+        self.assertTrue(planclose.is_close_line(f"python {flags} \"{self.PHI}\" plan close x.md", self.ELSEWHERE))
+        rel = os.path.relpath(self.PHI, os.path.dirname(SRC))
+        self.assertTrue(planclose.is_close_line(f"python {rel} plan close x.md", os.path.dirname(SRC)))
+
+    def test_a_combined_flag_is_refused(self):
+        cmd = ("python -Ic \"__import__('os').rename('plan-planner/x.md','plan-planner/complete/x.md') "
+               "and 'a'/phi.py\" plan close")
+        self.assertFalse(planclose.is_close_line(cmd, self.ELSEWHERE))
+        self.assertIn("refused", self.refused(cmd))
+        for flag in ("-Ic", "-IX", "-W", "-O", "-x", "-m"):
+            cmd = f"python {flag} \"{self.PHI}\" plan close {self.PLANS}/complete/x.md"
+            self.assertIn("refused", self.refused(cmd), flag)
+
+    def test_a_planted_phi_py_is_refused(self):
+        self.assertIn("refused", self.refused(f"python a/phi.py plan close {self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"python -I E:/elsewhere/phi.py plan close {self.PLANS}/complete/x"))
+
+    def test_no_interpreter_is_no_close_line(self):
+        self.assertIn("refused", self.refused(f"\"{self.PHI}\" plan close {self.PLANS}/complete/x.md"))
+        self.assertIn("refused", self.refused(f"node \"{self.PHI}\" plan close {self.PLANS}/complete/x.md"))
+
+    # a complete segment, plan-planner named or not
+    def test_a_complete_segment_with_a_separator_anywhere(self):
+        for cmd in ("mv x.md complete/", "mv x.md ./complete/x.md", "cp x.md E:/elsewhere/complete",
+                    "mv x.md COMPLETE/", r"Move-Item x.md .\complete\x.md"):
+            self.assertIn("refused", self.refused(cmd, "PowerShell" if "Move" in cmd else "Bash"), cmd)
+
+    def test_a_segment_a_glob_matches(self):
+        for cmd in ("mv x.md comp*", "mv x.md comp*/", "mv x.md compl[e]te/", "mv x.md E:/p/c?mplete/x.md",
+                    "Move-Item x.md comp*"):
+            self.assertIn("refused", self.refused(cmd, "PowerShell" if "Move" in cmd else "Bash"), cmd)
+        self.assertIsNone(self.refused("mv x.md todo*/"))
+        self.assertIsNone(self.refused("rm -rf build/*"))
+
+    # words
+    def test_complete_with_no_separator_is_a_word(self):
+        self.assertIsNone(self.refused(f"git commit -m \"audit complete\" -- {self.PLANS}/x.md"))
+        self.assertIsNone(self.refused("git commit -m \"audit complete\"", cwd=self.PLANS))
+        self.assertIsNone(self.refused(f"grep complete {self.PLANS}/x.md"))
+        self.assertIsNone(self.refused("echo complete"))
+
+    # git -C
+    def test_git_dash_c_reads_only(self):
+        for cmd in (f"git -C {self.ELSEWHERE} status {self.PLANS}/complete",
+                    f"git -C {self.ELSEWHERE} log -- plan-planner/complete",
+                    f"git -C {self.ELSEWHERE} diff plan-planner/complete/x.md",
+                    f"git -C {self.ELSEWHERE} show HEAD:plan-planner/complete/x.md",
+                    "git -C a -C b status complete/"):
+            self.assertIsNone(self.refused(cmd), cmd)
+        self.assertIn("refused", self.refused(f"git -C {self.ELSEWHERE} mv x.md plan-planner/complete/x.md"))
+        self.assertIn("refused", self.refused(f"git -C {self.ELSEWHERE} diff --output=complete/x.md"))
+
+
+class GateRound2(Repo):
+    """Section 15 of audit-before-a-plan-closes: the second audit's holes in check() and close()."""
+
+    def test_a_numbered_or_plus_finding_bullet_counts(self):
+        out = planclose.check(self.plan(findings=["1. Finding: b: open", "+ Finding: c: open"]), self.repo)
+        self.assertEqual(out, ["the finding `b` is open", "the finding `c` is open"])
+        out = planclose.check(self.plan(findings=["2) Finding: d: answered, why", "+ Finding: none"]), self.repo)
+        self.assertEqual(out, [])
+        out = planclose.check(self.plan(findings=["- Finding: none", "3. Findings - e: open"]), self.repo)
+        self.assertEqual(len(out), 1)
+        self.assertIn("`Findings - e: open` states no outcome", out[0])
+
+    def closes(self, path):
+        """close() run on a thread: its Refused or its path, or 'looped' where it has not returned in 20s."""
+        import threading
+        got = {}
+
+        def run():
+            try:
+                got["out"] = planclose.close(path, self.repo, today="2026-11-24")
+            except planclose.Refused as e:
+                got["out"] = e
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(20)
+        return got.get("out", "looped")
+
+    def test_a_closed_plan_is_refused_as_closed_already(self):
+        home = tempfile.mkdtemp()
+        try:
+            shelf = os.path.join(home, "complete")
+            os.makedirs(shelf)
+            for name in ("the-exporter-s-move.md", "x.md"):
+                path = os.path.join(shelf, name)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(self.plan())
+                out = self.closes(path)
+                self.assertIsInstance(out, planclose.Refused, f"{name}: {out}")
+                self.assertIn("closed", out.reasons[0])
+                self.assertTrue(os.path.exists(path))
+            self.assertEqual(sorted(os.listdir(shelf)), ["the-exporter-s-move.md", "x.md"])
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
 
 
 if __name__ == "__main__":
