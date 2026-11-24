@@ -51,15 +51,6 @@ class StartRequests(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def test_a_turn_ezexe_did_not_begin_is_told_what_its_brief_holds_and_no_request(self):
-        """A turn ezexe did not begin is told what a brief it writes holds, the files it covers on a `Files:` line,
-        and is told of no start request: the card such a turn proposes is the start tool's own text."""
-        ctx = context(self.t.say(KID, CROSS, P4_PHI_BOOK="1"))
-        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", ctx)
-        self.assertNotIn("write set", ctx)
-        self.assertNotIn("start request", ctx)
-        self.assertNotIn(" request \"<title>\"", ctx)
-
     def test_the_plain_start_request_is_gone_and_the_card_is_named_in_its_place(self):
         """The app's suggested task card holds a start a session may not make, desktop.md, "Start a task that Claude
         suggests", so p4-phi keeps no request for it: `phi.py request` with no `--to-puppeteer` is refused with the
@@ -83,20 +74,14 @@ class StartRequests(unittest.TestCase):
     def test_a_start_drafted_for_any_brief_passes_use_worktree_false(self):
         """Every session p4-phi starts works in its starter's checkout, on the paths of its `Files:` line, agent-teams.md,
         "Avoid file conflicts". So the call drafted for a brief that writes, one for a brief that only reads and one
-        for a new orchestrator all pass `use_worktree: false`, and the lines that draft a start say so."""
+        for a new orchestrator all pass `use_worktree: false`."""
         port = "Port the exporter's flush to the new writer and run its suite. Report when done."
         check = "Check what the exporter's flush does and report it."
         for brief in (port + "\nFiles: src/flush.py", port, port + "\nFiles: none", check + "\nFiles: none", check,
                       check + "\nFiles: src/flush.py", port + "\nFiles: the tests only", port + "\nFiles: read-only",
                       port + "\nFiles: src/flush.py\n" + phi.NEW_TOP_BRIEF, phi.NEW_TOP_BRIEF):
             self.assertIs(starts.use_worktree(brief), False, brief)
-        import plans
         import puppeteer
-        self.assertIn("`use_worktree: false`", plans.OWN_TREE)
-        self.assertNotIn("`use_worktree: true`", plans.OWN_TREE)
-        self.assertIn("`use_worktree: false`", plans.TOP_TREE)
-        self.assertIn("`use_worktree: false`", plans.CARD_EACH)
-        self.assertIn("`use_worktree: false`", phi.new_top_route())
         draft = {"title": "the flush", "context": "fresh", "brief": port, "background": "x" * 90, "parent": TOP}
         self.assertIs(puppeteer.call_of(draft)["use_worktree"], False, "a worker's draft")
         self.assertIs(puppeteer.call_of({**draft, "brief": check})["use_worktree"], False, "a reader's draft")
@@ -136,8 +121,6 @@ class StartRequests(unittest.TestCase):
             json.dump({"phi": {"file_sets": True}}, f)
         self.assertEqual(self.start(TOP, "Port the exporter's flush to the new writer. Report when done.")[0], "deny",
                          "the retired key switches nothing")
-        import plans
-        self.assertIn("`use_worktree: false`", plans.CARD_EACH)
 
     def test_a_start_whose_files_a_live_writer_covers_is_denied_with_its_id_until_the_writer_is_archived(self):
         """The start is refused, with the writer's id in its reason, for the same orchestrator's start and for

@@ -391,11 +391,7 @@ def _boundary(home, s, plan, started, text, lines, path, held):
             f"may need revising before it runs:\n" + "\n".join(f"- {x}" for x in lines))
 
 
-# --- the split advice ----------------------------------------------------------------------------------------------
-#
-# At a task list's first whole list and at each revision, judge() reads the open steps: a step that names a path no
-# other step names and that none of judge's reasons keeps here can run as its own worker. Two or more such
-# steps are named in one line; the rest stay here as sub-steps.
+# --- the words that keep a step with its session ------------------------------------------------------------------
 
 DEPENDS = re.compile(r"\b(after|then|once|using|uses|based on|depends? on|following|built on|with the results?|"
                      r"results? of|output of|from (?:the )?(?:step|previous|last)|step \d+)\b", re.I)
@@ -442,17 +438,6 @@ TABULATES = re.compile(r"^\W*(?:final\s+)?(?:[\w/-]+\s+){0,3}?(?:pass/fail\s+)?(
                        r"findings|steps?|checks?)\b", re.I)
 
 
-# The checkout a start gets, in the words of a line, as starts.use_worktree decides it for an exact call: every
-# session works in this checkout, a worker on the paths of its `Files:` line.
-OWN_TREE = ("`use_worktree: false`, so it works in this checkout on the paths of its `Files:` line and commits by "
-            "`phi.py commit`")
-TOP_TREE = "`use_worktree: false`, since an orchestrator works in this checkout as its workers do"
-# the route of a turn ezexe did not begin: what such a turn may start, and the card it proposes, are the start tool's
-# own text, so this names no `initiation` and holds only what that text lacks
-CARD_EACH = (f"Give each to `mcp__ccd_session__start_session`, `context` `fresh`, {OWN_TREE}, carrying the `model` "
-             "and `effort` named beside its step")
-
-
 def handed(st):
     """Why a step is handed out to nobody, or '': its item names the session it was delegated to. The app's own
     text gives an item of `update_plan` the field `session`, "When you delegated this step to a session you started:
@@ -460,92 +445,6 @@ def handed(st):
     already, so no line of p4-phi's asks for one to be started for it."""
     name = str((st or {}).get("session") or "").strip()
     return f"its `session` field names the session doing it, `{name}`" if name else ""
-
-
-def judge(plan, cwd):
-    """Judges the open steps. Returns those that can each run on their own, and the address and the reason of each
-    step that stays. A step whose item names its session stays, handed."""
-    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
-    paths = {st["addr"]: relay.paths_in(st.get("content"), cwd) for st in steps}
-    free, kept = [], []
-    for st in steps:
-        a, text = st["addr"], st.get("content", "")
-        if handed(st):
-            kept.append((a, handed(st)))
-            continue
-        dep = DEPENDS.search(text)
-        shared = [(o["addr"], p) for o in steps if o["addr"] != a for p in paths[a]
-                  if any(relay.overlap(p, q) for q in paths[o["addr"]])]
-        wait = WAITS.search(text)
-        if dep:
-            kept.append((a, f"leans on another step, \"{dep.group(0)}\""))
-        elif wait:
-            kept.append((a, f"waits on or passes on other work, \"{wait.group(0)}\""))
-        elif LANDS.search(text) or WATCHES_RUN.search(text) or INSTALLS.search(text):
-            kept.append((a, "checks or lands the other steps' work"))
-        elif ORCHESTRATES.search(text):
-            kept.append((a, "starts a check, test or session, which is orchestration"))
-        elif MANAGES.search(text):
-            kept.append((a, "manages a worker"))
-        elif TABULATES.search(text):
-            kept.append((a, "compiles or reports the other steps' results"))
-        elif TRACKS.search(text):
-            kept.append((a, "tracks what another session or ezexe does or decides"))
-        elif shared:
-            kept.append((a, f"shares {relay.show(shared[0][1], cwd)} with step {shared[0][0]}"))
-        elif len(words(text)) < QUICK_WORDS:
-            kept.append((a, "a quick thing"))
-        elif not paths[a]:
-            kept.append((a, "names no file, so it cannot be judged apart from the others"))
-        else:
-            free.append(st)
-    waits = sum(1 for _, why in kept if why.startswith("waits on"))
-    if steps and waits * 2 >= len(steps):          # a task list of waits and messages is serial as a whole
-        kept += [(st["addr"], "the task list is mostly waits and messages, so serial") for st in free]
-        free = []
-    return free, kept
-
-
-def split_advice(home, s, plan, owner_turn, cap):
-    """One line naming the steps that can each run as a worker, said once per set; '' when fewer than two."""
-    free, kept = judge(plan, s.get("cwd") or "")
-    # a read goes to p4-phi:finder and a run to the background, never a session. A team's question stays: a worker
-    # works in a worktree, where no lead starts, so the session that started it takes the question.
-    teams = [st for st in free if LEVELS and level_of(st.get("content")) == "team"]
-    kept += [(st["addr"], TEAM_KEPT) for st in teams]
-    subs = [st for st in free if LEVELS and level_of(st.get("content")) in ("read", "run")]
-    free = [st for st in free if st not in subs and st not in teams]
-    if len(free) < 2:
-        return ""
-    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
-    disk = relay._read_json(path)
-    told = [x for x in disk.get("splitAdvised") or [] if isinstance(x, str)]
-    new = [st for st in free if st.get("content", "") not in told]
-    if not new:
-        return ""                                 # a step advised once is never advised again
-    disk["splitAdvised"] = s["splitAdvised"] = told + [st.get("content", "") for st in new]
-    relay._write_json(path, disk)
-    free = new
-    named = "; ".join(f"{st['addr']} \"{relay._short(st.get('content'), 90)}\"" for st in free)
-    judged = ("Judged by the paths each step names and by its words: a step stays here when it names no path, shares "
-              "a path with another step, leans on or waits on other work, passes work on, checks or lands work, "
-              "starts a check or session, manages a worker, compiles results, tracks what another does or "
-              "ezexe decides, or has fewer than four content words.")
-    if cap:
-        return (f"phi (p4-phi): steps {named} could each run on their own, but {cap[0].lower() + cap[1:]} "
-                f"Every step stays here as a sub-step. {judged}")
-    route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
-             + OWN_TREE if owner_turn else CARD_EACH)
-    stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
-    each = "; ".join(f"{st['addr']} with {level_words(st.get('content'))}" for st in free)
-    sub = " ".join(f"Step {st['addr']} \"{relay._short(st.get('content'), 90)}\" "
-                   f"{LEVEL_WHAT[level_of(st.get('content'))]}: it goes to "
-                   f"{LEVEL_WHERE[level_of(st.get('content'))]}, not a session." for st in subs)
-    return (f"phi (p4-phi): steps {named} can each run on their own: no path another step names, nothing leaning "
-            f"on another step, more than a quick thing, and each writes files. {route}; one session per step, its "
-            f"brief that step's slice: the step's words, its paths and what it must leave done. Its model and "
-            f"effort: {each}. {LEVEL_HOW} " + (sub + " " if sub else "")
-            + f"Staying here as sub-steps: {stay}. {judged}")
 
 
 # --- the orchestrator orchestrates ----------------------------------------------------------------------------
@@ -602,8 +501,8 @@ OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
 BUILDS = re.compile(r"^\W*(?:fix|writ|add|chang|edit|implement|updat|remov|renam|creat|mak|refactor|port|rewrit|"
                     r"replac|patch|build|migrat|delet)\w*\b", re.I)
 AWAITS_WHY = "waits on or checks other sessions' reports, which only this session receives"
-# Planning is the orchestrator's own: top_advice's head names it first of what the session keeps itself for, and a
-# plan file has one writer, the session that holds it. Seen in an orchestrator on p4-phi 0.11.143: for its steps
+# Planning is the orchestrator's own: a plan file has one writer, the session that holds it. Seen in an
+# orchestrator on p4-phi 0.11.143: for its steps
 # "Enter plan mode", "Research how plans are built and distributed", "Write plan sections with fences and edits"
 # and "Put the plan to ezexe for approval" the advice named a new session in a worktree for each, and the nudge a
 # worker for the second. The opening verb decides, with the plan as its object and a few small words between them at
@@ -631,8 +530,7 @@ def awaits_sessions(text):
 
 
 def top_stays(text):
-    """Why an orchestrator keeps a step itself, or '' for a work step that goes to a child. The one answer for
-    top_groups and for phi.nudge_step, so the advice and the nudge never disagree."""
+    """Why an orchestrator keeps a step itself, or '' for a work step that goes to a child."""
     text = str(text or "")
     if awaits_sessions(text):                      # waiting on other sessions' results wins over the check rule
         return AWAITS_WHY
@@ -700,7 +598,6 @@ RUNS = re.compile(r"^\W*(?:run|re-?run|execute)\b", re.I)
 WRITES = re.compile(r"\b(?:fix\w*|writ\w*|add\w*|chang\w*|edit\w*|implement\w*|updat\w*|remov\w*|renam\w*|creat\w*|"
                     r"mak\w+|mov\w+|commit\w*|refactor\w*|port\w*|delet\w*|migrat\w*|rewrit\w*|replac\w*|patch\w*|"
                     r"push\w*|merg\w*|land\w*|releas\w*|ship\w*|install\w*)\b", re.I)
-LEVELS = True                 # phi.project_conf sets it from p4.json phi.levels
 # agent-teams.md, "Compare with subagents": "Use agent teams when teammates need to share findings, challenge each
 # other, and coordinate on their own." A step asks for one by its own words: several sides or lenses, competing
 # hypotheses, or a team named as the means. One that only names agent teams as its subject asks for none.
@@ -710,19 +607,6 @@ TEAMS = re.compile(r"\b(?:with|by) an? agent[- ]team\b"
                    r"|\b(?:with|by) competing (?:hypothes[ie]s|theories|explanations)\b", re.I)
 # A step that opens on a word of making is a writer's, whatever sides it names: WRITES holds no such word of its own.
 TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|document)\w*\b", re.I)
-LEVEL_WHAT = {"read": "only reads or searches", "run": "only runs a command",
-              "team": "is one question to read, review or argue from several sides at once"}
-EXPLORE = "the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says"
-BACKGROUND = "a Bash or PowerShell call of its own with `run_in_background: true`"
-TEAM = ("an agent team, led from a terminal session as the skill `p4-phi:phi` says under `A team in a terminal "
-        "session`")
-LEVEL_WHERE = {"read": EXPLORE, "run": BACKGROUND, "team": TEAM}  # where each such step goes
-# How each such line closes. A read and a run need no session at all. A team has a lead, which is a terminal
-# session, so its step is spared a worker and no more.
-LEVEL_NOT = {"read": "not a session", "run": "not a session", "team": "not a worker"}
-# Why a worker keeps a team's question: it works in a worktree, where no lead starts.
-TEAM_KEPT = ("asks for an agent team, which the session that started this one leads or starts, so the question goes "
-             "to it by message")
 
 
 def level_of(text):
@@ -751,8 +635,7 @@ def level_of(text):
 # it keeps the parent session's, but for an orchestrator's, which carries neither. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
 # start only, as its schema says. The kind of a step picks its entry of CHILD_LEVELS, which p4.json's
-# phi.child_levels can set; LEVEL_HOW says the rule to the session that makes the call. The caller's own effort is
-# the hook input's `effort.level`, "the effort level setting when the hook runs" by hooks.md, "Common input fields",
+# phi.child_levels can set. The caller's own effort is the hook input's `effort.level`, "the effort level setting when the hook runs" by hooks.md, "Common input fields",
 # where "`$CLAUDE_EFFORT` holds the same level.": phi.own_effort reads it into PARENT_EFFORT, and child_level names
 # no effort above it.
 
@@ -792,7 +675,7 @@ SAID_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?(model|effort)(?:\*\*)?[ \t]*:
                         r"([A-Za-z0-9][\w.-]*?)`?[ \t.]*$")
 MODEL_ID = re.compile(r"^(?:claude-[a-z0-9][a-z0-9.-]*|fable|mythos|opus|sonnet|haiku|inherit)$", re.I)
 LEVEL_LINE = re.compile(r"(?im)^[ \t>*-]*Model and effort:")
-# the one line level_line writes and LEVEL_CARD asks for, `Model and effort: <model> at <effort> effort`, with or
+# the one line level_line writes, `Model and effort: <model> at <effort> effort`, with or
 # without a reason after the effort; the parent session's own model is said in words
 ONE_LEVEL = re.compile(r"(?im)^[ \t>*-]*(?:\*\*)?Model and effort(?:\*\*)?:[ \t]*`?"
                        r"(the parent session's own model|[A-Za-z0-9][\w.-]*?)`?[ \t]+at[ \t]+`?([a-z]+)`?[ \t]+effort\b")
@@ -928,77 +811,6 @@ def level_words(text):
     if str(level["effort"]).lower() == "inherit":
         return f"{model}, and no `effort`, so it inherits this session's"
     return f"{model}, `effort` `{level['effort']}`"
-
-
-LEVEL_CARD = ("It carries the `model` and `effort` a start of its kind of work carries, said in one line of its brief, "
-              "`Model and effort: <model> at <effort> effort`.")
-# No line tells a session to read the plan limits before a start or an Agent call: how much of the plan a piece of
-# work spends is ezexe's, and a session neither weighs it nor stops for it.
-LEVEL_HOW = ("Each call carries the `model` and `effort` named beside its steps, which the role of its work in the "
-             "skill `p4-phi:sub-agentic` decides: a build or a design is a writer's, on Opus at medium effort; a "
-             "review is a cross-check's and static or mechanical work an integrator's, each on Sonnet at medium "
-             "effort; a plan written in plan mode is a planner's, on Fable at this session's own effort; a new top "
-             "session is an orchestrator's, on this session's own. Read that skill before the "
-             "first start, and say the shape in the reply's first line ahead of the calls. An effort above this "
-             "session's own is not accepted, so pass this session's own then. Each brief says them in one line, "
-             "`Model and effort: <model> at <effort> effort`; to choose otherwise, pass another `model` or `effort` "
-             "and say so in that line.")
-
-
-def top_advice(home, s, plan, owner_turn, cap, levels=None):
-    """The orchestrator's line: each work step, or serial run, to one fresh child, and with delegation on each
-    step that only reads to the subagent p4-phi:finder and each that only runs a command to a background
-    command, and each that asks for several sides to an agent team; said once per set. '' when no work step is
-    new."""
-    groups, kept = top_groups(plan, s.get("cwd") or "")
-    path = os.path.join(relay._dir(home, s["sessionId"]), "session.json")
-    disk = relay._read_json(path)
-    told = [x for x in disk.get("splitAdvised") or [] if isinstance(x, str)]
-    new = [g for g in groups if any(st.get("content", "") not in told for st in g)]
-    if not new:
-        return ""
-    disk["splitAdvised"] = s["splitAdvised"] = told + [st.get("content", "") for g in new for st in g
-                                                        if st.get("content", "") not in told]
-    relay._write_json(path, disk)
-
-    levels = LEVELS if levels is None else levels
-
-    def level(g):
-        return level_of(g[0].get("content")) if levels and len(g) == 1 else "session"
-
-    def child(g):
-        if level(g) != "session":
-            return (f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", which {LEVEL_WHAT[level(g)]}: "
-                    f"it goes to {LEVEL_WHERE[level(g)]}, {LEVEL_NOT[level(g)]}")
-        kinds = [child_kind(st.get("content")) for st in g]      # a run takes the model and effort of its hardest step
-        hardest = next(st for k in ("top", "plan", "design", "build", "review", "static")
-                       for st, kd in zip(g, kinds) if kd == k)
-        how = level_words(hardest.get("content"))
-        if len(g) == 1:
-            return f"step {g[0]['addr']} \"{relay._short(g[0].get('content'), 90)}\", with {how}"
-        return (f"steps {', '.join(st['addr'] for st in g)} in order, as one child: "
-                + ", ".join(f"\"{relay._short(st.get('content'), 70)}\"" for st in g) + f", with {how}")
-    named = "; ".join(f"({chr(97 + k)}) {child(g)}" for k, g in enumerate(new[:26]))
-    head = ("phi (p4-phi): this is the orchestrator of its tree, so it keeps itself free for orchestration: "
-            "planning, messaging and managing sessions, decisions with ezexe, and landing the work, meaning merge "
-            "and push.")
-    stay = ("; ".join(f"{a}, {why}" for a, why in kept)) or "none"
-    subs = [g for g in new[:26] if level(g) != "session"]
-    agents = "" if subs else ""                    # where it goes, named beside its step, says enough
-    if cap:
-        return (f"{head} Its work steps would each go to a child: {named}. But {cap[0].lower() + cap[1:]} "
-                f"Staying here meanwhile: every step.{agents}")
-    if subs and len(subs) == len(new[:26]):
-        return f"{head} Its work steps need no worker: {named}.{agents} Staying here: {stay}."
-    route = ("Start each now with `mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, "
-             + OWN_TREE if owner_turn else CARD_EACH)
-    return (f"{head} Hand its work steps to workers, split by the files they write: steps that share a file go "
-            f"to one child as a serial run, and steps with disjoint files each get a child: {named}. {route}. Each "
-            f"brief is its steps' words, a line `Files: <the paths it may write>`, what they must leave done, and "
-            f"\"report when done\", so the child "
-            f"leaves its outcome here as a replaces: note and counts as archived when it finishes. {LEVEL_HOW}"
-            f"{agents} Staying "
-            f"here: {stay}.")
 
 
 # --- subagents as tasks of the step that launched them -------------------------------------------------------------

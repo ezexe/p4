@@ -49,9 +49,6 @@ class Tracking(unittest.TestCase):
             "The top session merges the fold branch", "Write the sync script in src/sync.py"), "")
         self.assertEqual([a for a, why in kept if "tracks" in why], ["1", "2", "3", "4"])
         self.assertEqual([[st["content"] for st in g] for g in groups], [["Write the sync script in src/sync.py"]])
-        free, kept = plans.judge(plan_of("Ledger: p4-phi fixer pushes #25 in src/a.py",
-                                         "Write the store sync script and its workflow in src/sync.py"), "")
-        self.assertEqual([st["addr"] for st in free], ["2"])
 
 
 class Tree_(unittest.TestCase):

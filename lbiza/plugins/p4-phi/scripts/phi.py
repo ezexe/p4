@@ -37,7 +37,7 @@ asks for, and `goal set` is the hooks module's word that the goal command set it
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
 off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
-section of p4.json: `plan_mode`, `levels`, `top_orchestrates` and `child_levels`, read from the
+section of p4.json: `plan_mode` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the memory lines. P4_PHI_WAIT sets how long a first message waits for the app's
@@ -90,11 +90,9 @@ APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks m
 # own on what it adds beside a start or a prompt and no page for what would pass one. The same section says "Claude
 # Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap", which is what
 # the app's cut at a character count lacks. So acting_first puts the lines that ask the session to act first, inside
-# the preview, the rest follows whole, and READ_ALL leads when those lines alone pass the preview.
+# the preview, and the rest follows whole.
 APP_CAP = 10000
 APP_PREVIEW = 2000
-READ_ALL = ("phi (p4-phi): the lines below that ask this session to act run past the 2,000 characters the app shows "
-            "of a hook's text over its cap of 10,000. Read the file the app names for this text before going on.")
 RELAY_CHARS = 4000               # of what the sessions beside this one changed, beside one prompt: relay.rebase's room
 PHI_LEAD = re.compile(r"^phi \(p4-phi\)[^:]*:\s*")
 BACKGROUND_CHARS = 3000
@@ -1195,15 +1193,10 @@ def background_text(home, s, own=False, slim=False):
         return ""
     if chain:
         head = (f"phi (p4-phi): background for this session, \"{title_of(s)}\", from its parent session, "
-                f"\"{name_of(chain[0])}\", and the sessions linked to it. Use what is here where it fits; do not "
-                f"work it out again.")
+                f"\"{name_of(chain[0])}\", and the sessions linked to it.")
     else:
-        head = ("phi (p4-phi): background for this session from the sessions in this project before it. Use what "
-                "is here where it fits; do not work it out again.")
-    tail = (f"The page this comes from: {page_path(home, above)}. Keep a finding the next session would have to "
-            f"work out again: `{commands()} note \"<claim>\" --source \"<the file and line it was checked at>\"`. When something "
-            f"shows the task done: `{commands()} done \"<what was run and what it showed>\"`. Each turn's report "
-            f"is kept either way" + (" and reaches the parent session beside its next message." if chain else "."))
+        head = "phi (p4-phi): background for this session from the sessions in this project before it."
+    tail = f"The page this comes from: {page_path(home, above)}."
     room = BACKGROUND_CHARS - len(head) - len(tail) - 2
     text = "\n".join(body)
     if len(text) > room:
@@ -1338,30 +1331,25 @@ DECIDE = ("A question that the code, the history, the issues or the current outs
           f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
           "question reaches ezexe only once those cannot settle it.")
 PLANS_DIR = p4conf.PLANS            # from the store's root, as the keeper has it: no line names a place under the app's own folder
-LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
 PLAN_MODE = True              # p4.json phi.plan_mode: false withholds no plan tool from a started session
 GOAL_REVIEW = True            # p4.json phi.goal_review: false leaves the review of the change out of a worker's goal
-TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
 
 
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, GOAL_REVIEW, UPKEEP
+    global PLAN_MODE, GOAL_REVIEW, UPKEEP
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
         d = {}
     if not isinstance(d, dict):                    # a `phi` that is no section sets every key back to its default
         d = {}
-    TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
-    LEVELS_ON = d.get("levels") is not False
     PLAN_MODE = d.get("plan_mode") is not False
     GOAL_REVIEW = d.get("goal_review") is not False
     UPKEEP = d.get("upkeep") is True
     relay.UPKEEP = controls.UPKEEP = UPKEEP     # the words that leave an archive to ezexe go with it on
-    plans.LEVELS = LEVELS_ON
     plans.CHILD_LEVELS = plans.child_levels(d.get("child_levels"))   # one key sets each kind's model and effort
     apply_caps(d)
 
@@ -1371,7 +1359,6 @@ def project_conf(store):
 CAPS = {"max_depth": ("phi", "MAX_DEPTH", 1, 20), "max_children": ("phi", "MAX_CHILDREN", 1, 50),
         "sibling_turns": ("phi", "OTHERS", 0, 50), "own_turns": ("phi", "OWN", 0, 50),
         "chain_max": ("phi", "CHAIN_MAX", 1, 50), "turn_steps": ("phi", "TURN_STEPS", 1, 100),
-        "tree_checks": ("phi", "TREE_CHECKS", 0, 100),
         "keep_going_max": ("plans", "KEEP_GOING_MAX", 0, 7),       # under hooks.md's 8 consecutive continuations
         "watch_s": ("puppeteer", "WATCH_S", 1.0, 600.0), "stale_s": ("puppeteer", "STALE_S", 60.0, 30 * 86400.0)}
 # Each cap's default is the one p4conf.py declares for the key, not whatever the constant holds when apply_caps first
@@ -1405,33 +1392,6 @@ def new_top_first_act():
             f"its reports stop going to its parent session, then `{commands()} detach`.")
 
 
-ASK_ROUTE = ""                # set for a controlled session, which starts no new orchestrator itself
-
-
-def asks(s):
-    """Kept for this hook's run: how a controlled session gets a new orchestrator from its
-    puppeteer."""
-    globals()["ASK_ROUTE"] = controls.ask_route(s) if isinstance(s, dict) and not spawned_from(s) else ""
-
-
-def new_top_route(owner_turn=True):
-    """How an orchestrator starts a new orchestrator for a topic outside its task: what the start tool's own text
-    lacks, the files the brief covers on its `Files:` line and the two moves that detach the session to top level. In a
-    turn ezexe did not begin it names no `initiation`: what such a turn may start, and the card it proposes, are that
-    tool's own text. It passes `use_worktree: false`, as starts.use_worktree gives every start."""
-    if ASK_ROUTE:
-        return ASK_ROUTE
-    how = ("Start it with `mcp__ccd_session__start_session`, `initiation` `user_asked`" if owner_turn else
-           "Give it to `mcp__ccd_session__start_session`")
-    return (f"{how}, `context` `fresh`, {plans.TOP_TREE}, with the `model` and `effort` its kind of work gets, "
-            f"said in one line of the brief; its brief: {RESTATE}, and "
-            f"the lines \"{NEW_TOP_BRIEF} {new_top_first_act()}\" Both moves are needed: the app's detach to top "
-            f"level, else it stays nested under this session and reports here, and p4-phi's, which p4-phi also makes "
-            f"at the new session's first hook on that line. If it is still nested under this session at its first "
-            f"report, call `mcp__ccd_session_mgmt__detach_session` with its id yourself. Orchestrators are "
-            f"siblings, so each is told what the others change.")
-
-
 def depth_of(home, s):
     """How many sessions lie above this one: 0 for an orchestrator."""
     n, seen, cur = 0, set(), s
@@ -1455,129 +1415,15 @@ def caps_text(home, s):
     return ""
 
 
-FIRST_SPLIT = ("phi (p4-phi): this is this session's first message. In these sessions the app has let a started "
-               "session start others in its first turn and in the turns ezexe's own messages open, though no doc "
-               "states it. Plan its split now, before other work: every part of its task that writes files or makes a "
-               "decision gets a session of its own, one per disjoint set of files, started in this turn with "
-               "`mcp__ccd_session__start_session`, `initiation` `user_asked`, `context` `fresh`, " + plans.OWN_TREE
-               + " for every part, with a `Files:` line in the brief of a part that writes; where the app refuses that start, the part is shown as a "
-               "suggested task card, the start tool's `initiation` `own_initiative`, which ezexe presses in this "
-               "session. Subagents keep reads, "
-               "searches, single command runs and independent checks, which return a result and hold no files. A "
-               "part that writes files and comes up after this turn is shown as a suggested task card, the start "
-               "tool's `initiation` `own_initiative`, which ezexe presses in this session. It never runs in a "
-               "subagent. A task that is one part with one set of files stays here whole.")
-
-
-RESEARCH = ("Before it creates anything new, such as a module, a page, a format or a kind of test, this session finds "
-            "the documented terms for what it creates, from Anthropic's docs, the platform's docs or the field's "
-            "published sources, and a published implementation guide for that kind of work. It logs both, each with "
-            f"its source, in {DECISIONS}, "
-            "and builds by them. A name only this project uses stays only where no published source names the thing, "
-            "and the decisions file says where it looked.")
-RESEARCH_STEP_HEAD = ("phi (p4-phi): this task list creates something new with no step before it that finds the "
-                      "documented terms and an implementation guide:")
 CREATES = re.compile(r"^\W*(?:create|add|build|write|make|scaffold|introduce|design)\b[^.;]*?\b(?:modules?|plugins?|"
                      r"skills?|pages?|formats?|hooks?|commands?|subcommands?|class(?:es)?|scripts?|schemas?|agents?)\b",
                      re.I)
-RESEARCHES = re.compile(r"\b(?:find|research|look\s+up|read|survey)\b[^.;]*\b(?:terms?|names?|guides?|docs|"
-                        r"documentation)\b", re.I)
-
-
-def research_text(home, s):
-    """A writing worker's or coworker's first message: the line to find the documented terms and an
-    implementation guide before it creates anything, said once. '' for an orchestrator, a later message, the prompt
-    of an event such as a background report, and a session that writes nothing."""
-    if not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
-        return ""
-    if s.get("researchSaid") or s.get("turnBy") == "event":
-        return ""
-    files = s.get("fileSet")
-    if not (files if isinstance(files, list) else issues.writing(s.get("task"))):
-        return ""
-    s["researchSaid"] = True
-    RAN["research"] = True
-    return "phi (p4-phi): " + RESEARCH
-
-
-def research_step_text(home, s, plan):
-    """The line for a task list whose first step that creates something has no research step before it, said once
-    for that step; '' otherwise."""
-    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
-    at = next((k for k, st in enumerate(steps) if CREATES.search(str(st.get("content") or ""))), None)
-    if at is None or any(RESEARCHES.search(str(st.get("content") or "")) for st in steps[:at]):
-        return ""
-    st = steps[at]
-    path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
-    disk = read_json(path)
-    told = [x for x in disk.get("researchAdvised") or [] if isinstance(x, str)]
-    if st.get("content") in told:
-        return ""
-    disk["researchAdvised"] = s["researchAdvised"] = told + [st.get("content", "")]
-    write_atomic(path, json.dumps(disk, indent=1, ensure_ascii=False))
-    RAN["research_step"] = st.get("addr")
-    return (f"{RESEARCH_STEP_HEAD} step {st.get('addr')} \"{cut(clean(st.get('content')), 120)}\". Put a step before "
-            f"it that does so. {RESEARCH}")
-
-
-def first_split_text(home, s):
-    """A worker's or a coworker's first message: the line to plan its split while the app still lets it start
-    sessions, said once. '' for an orchestrator, a later message, the prompt of an event such as a background
-    report, a session in plan mode, which starts nothing that writes, a session with no task, and one a cap
-    holds."""
-    if not LEVELS_ON or not spawned_from(s) or not clean(s.get("task")) or load_turns(home, s["sessionId"]):
-        return ""
-    if s.get("firstSplitSaid") or s.get("turnBy") == "event" or s.get("planMode") is True:
-        return ""
-    if caps_text(home, s):
-        return ""
-    s["firstSplitSaid"] = True
-    RAN["first_split"] = True
-    return FIRST_SPLIT
 
 
 def from_peer(prompt, by=""):
     """True for another session's message: by its origin, rows.whose, and where the origin does not say, by the
     wrapper Claude Code puts around one."""
     return by == "session" or (not by and bool(re.search(r"<cross-session-message\b", str(prompt or ""))))
-
-
-def split_text(home, s, prompt, by=""):
-    """A turn another session's message started. What such a turn may start, and the card it proposes, are the start
-    tool's own text, so this line holds only what that text lacks: the caps, the files a brief names, and
-    for an orchestrator the brief line that detaches a new orchestrator to top level. It is short and keeps no
-    state, so every such turn carries it whole. '' for ezexe's own turns, the app's events and a session with no
-    task."""
-    if not clean(s.get("task")) or not from_peer(prompt, by):
-        return ""
-    cap = caps_text(home, s)
-    RAN["split"] = "cap" if cap else "brief"
-    return "phi (p4-phi): " + cap if cap else _split_full(home, s)
-
-
-def _split_full(home, s):
-    """What a brief written in a turn another session began holds beyond what the start tool asks of it: a
-    child's, its `Files:` line and its level line; a new orchestrator's, those and the line on which it is detached
-    to top level, or for a controlled orchestrator the request to its puppeteer. Every start passes
-    `use_worktree: false`, as starts.use_worktree gives."""
-    if spawned_from(s):
-        return ("phi (p4-phi): a task of its own in this turn, outside this session's task, goes out by "
-                "`mcp__ccd_session__start_session` with a brief that names the files it covers on a line "
-                f"`Files: <paths>`. {plans.LEVEL_CARD}")
-    head = "phi (p4-phi): a topic in this turn outside this orchestrator's task gets a new orchestrator of its own. "
-    if ASK_ROUTE:
-        ask = PHI_LEAD.sub("", controls.ask_text(s))
-        return head + ask[:1].upper() + ask[1:]
-    return (head + "It goes out by `mcp__ccd_session__start_session`, `context` `fresh`, `use_worktree: false`, "
-            "with the `model` and `effort` its kind of work gets, said in one line of its brief, which names "
-            f"the files it covers on a line `Files: <paths>` and carries the line \"{NEW_TOP_BRIEF}\": on that line "
-            "p4-phi detaches it to top level at its first message and has it call "
-            "`mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it under this "
-            "session.")
-
-
-FEATURE_STEP = re.compile(r"\bnew feature\b|^\W*(?:build|implement|design|introduce)\b[^.;]*\b(?:feature|loop|"
-                          r"lifecycle|mode|command|system|plugin|workflow)\b", re.I)
 
 
 def book_text(home, s, store, whole=False, named=False):
@@ -1591,25 +1437,6 @@ def book_text(home, s, store, whole=False, named=False):
         return book.line(home, s, store, whole=whole, named=named)
     except Exception:  # noqa: BLE001  a book it cannot write never costs the message its other lines
         return ""
-
-
-def feature_steps_text(home, s, plan, owner_turn):
-    """An orchestrator's own steps that are new features: each gets a new orchestrator, once per step."""
-    if spawned_from(s):
-        return ""
-    path = os.path.join(session_dir(home, s["sessionId"]), "session.json")
-    disk = read_json(path)
-    told = [x for x in disk.get("featureAdvised") or [] if isinstance(x, str)]
-    new = [st for st in plan.get("steps") or [] if st.get("status") != "completed"
-           and FEATURE_STEP.search(str(st.get("content") or "")) and st.get("content") not in told]
-    if not new:
-        return ""
-    if disk:
-        disk["featureAdvised"] = (told + [st.get("content") for st in new])[-50:]
-        write_atomic(path, json.dumps(disk, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
-    named = "; ".join(f"step {st.get('addr')} \"{cut(clean(st.get('content')), 90)}\"" for st in new)
-    return (f"phi (p4-phi): {named} is a new feature, and a feature is a new topic even within this task: it gets a "
-            f"new orchestrator of its own, not a child or a step here. {new_top_route(owner_turn)}")
 
 
 def render_page(home, sid):
@@ -1839,25 +1666,7 @@ def h_plan(payload):
     inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
     s = ensure_session(me.home, me.id, me.rec, me.cli)
     save_session(me.home, s)
-    asks(s)
     text = plans.record(me.home, s, inp)
-    if isinstance(inp.get("items"), list):        # the task list's first whole list, or a revision of it
-        s = load_session(me.home, me.id) or s
-        cap = caps_text(me.home, s)
-        advise = plans.split_advice if spawned_from(s) else plans.top_advice if TOP_ORCHESTRATES else None
-        if advise is plans.top_advice and controls.is_puppeteer(s, me.store):
-            advise = None                          # a puppeteer's steps are its own; it hands none out
-            RAN["pair"] = "puppeteer"
-        planning = mode_now(me, s, payload) == "plan"
-        if advise and planning:
-            advise = None                          # a plan is being written: nothing is handed out before its approval
-            RAN["pair"] = "planning"
-        advice = advise(me.home, s, plans.load(me.home, me.id), s.get("turnBy", "user") == "user", cap)             if advise else ""                      # none where the orchestrator does its own steps
-        RAN["split"] = "advised" if advice else ""
-        feat = "" if planning else feature_steps_text(me.home, s, plans.load(me.home, me.id),
-                                                      s.get("turnBy", "user") == "user")
-        research = research_step_text(me.home, s, plans.load(me.home, me.id))
-        text = "\n\n".join(p for p in (feat, research, advice, text) if p)
     if spawned_from(s) and any(k in inp for k in ("advance", "start", "done", "items")):
         s = load_session(me.home, me.id) or s      # the issue or the findings line, then the commits' check
         cwd = payload.get("cwd") or s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or ""
@@ -1867,74 +1676,13 @@ def h_plan(payload):
         save_session(me.home, s)
         RAN["issue"] = (s.get("issue") or {}).get("number", "")
         text = "\n\n".join(p for p in (line, flag, text) if p)
-    nudge_arm(me, load_session(me.home, me.id) or s)
     RAN["plan"] = len(text)
     return text or None
 
 
-def approved_runs_text(payload, s):
-    """At a plan's approval: the command that prints one start call for each run of the approved plan, with how many
-    sections and runs it holds. hooks.md, "ExitPlanMode": "In `PostToolUse`, `tool_response` is an object with `plan`
-    and `filePath` fields holding the approved plan". '' where the response names no file that is there, and for a
-    plan with no section that names files on a `Files:` line. A session ezexe is at makes the calls in its own turn.
-    A session another session started lands the runs itself by integrator subagents, each in a worktree it makes,
-    since the app refuses a start that runs at once in a turn ezexe's own message did not begin, and it reports the
-    branches to its starter, which reviews, tests, merges and pushes them; only a brief that says it builds nothing
-    has it hand the command back."""
-    resp = payload.get("tool_response") if isinstance(payload.get("tool_response"), dict) else {}
-    path = str(resp.get("filePath") or "")
-    if not path or not os.path.isfile(path):
-        return ""
-    try:
-        with open(path, encoding="utf-8") as f:
-            _, found = sections.parse(f.read(), str(payload.get("cwd") or s.get("cwd") or ""))
-    except (OSError, ValueError):
-        return ""
-    if not found:
-        return ""
-    shown = path.replace("\\", "/")
-    n, k = len(found), len(sections.runs(found))
-    head = (f"phi (p4-phi): the approved plan `{shown}` holds {n} section{'s' * (n != 1)} that change files, in "
-            f"{k} run{'s' * (k != 1)}. `{commands()} sections \"{shown}\"` prints one start call for each run, each "
-            "an integrator's in a git worktree of its own.")
-    RAN["runs"] = k
-    if spawned_from(s):
-        return (head + " Another session started this one, so this session lands the plan itself, in this turn. "
-                       f"Where this session is in auto or bypass permissions mode, `{commands()} coworkers \"{shown}\" "
-                       "--land` writes the start file, the brief and the report's name of one "
-                       "terminal worker for each group not landed and prints the terminal call that starts it: make "
-                       "that call, and take the report file the worker writes, which the same command with `--wait "
-                       "--report <that file>` waits for, as that group's report, with no message. Where the command "
-                       "says it starts none, and for every run no such worker lands, run the `sections` command above, "
-                       "and for each such run it prints, first make that run's git worktree, standing "
-                       "outside it, from `origin/main` freshly fetched, by `git -C <main checkout> fetch origin` and "
-                       "then `git -C <main checkout> worktree add -b <run> <main checkout>/.claude/worktrees/<run> "
-                       "origin/main`, and then start one `p4-phi:integrator` subagent on `sonnet` at `medium` effort "
-                       "in that worktree, in parallel where runs share no file. These are subagents and never "
-                       "sessions, since the app refuses a start that runs at once in a turn ezexe's own message did "
-                       "not begin, and a subagent waits on no card. Each brief is the call's `prompt`, which names "
-                       "the plan by its full path and its sections by number, carries their `Files:` line and "
-                       "`Checks:` command as what done looks like and has the agent stop and report where a fence "
-                       "does not fit, with two lines added: the worktree's path, and one commit per section there. "
-                       "Mend such a fence from the plan and send the mend to the same agent with SendMessage. "
-                       "Neither this session nor any run pushes, merges or raises a version. Once every run has "
-                       "reported with its checks passing, send the session that started this one one message that "
-                       "names each branch, its commits and its check results: that message is this session's done. "
-                       "Await no reply to it, set no wait for one, and stop each background task, watch and "
-                       "subscription this session started before that turn ends. "
-                       "That session reads each branch's change, raises the version, runs the plugin's whole test "
-                       "folder, pushes by fast-forward and closes the plan. Only where this session's brief says it "
-                       "builds nothing does it hand that command back in its report for that session to run.")
-    return head + " Run it now and make the calls it prints, in this turn."
-
-
 def h_plan_mode(payload):
     """PostToolUse on EnterPlanMode and ExitPlanMode: whether this session plans, kept for mode_now, since no hook
-    event tells of a change of the permission mode and the two tools change it inside a turn. hooks.md has
-    PostToolUse run "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval, and at
-    it every session is handed the command that prints the approved plan's runs, approved_runs_text, and an
-    orchestrator what plan mode held back: the advice on its open work steps and the feature line, as h_plan
-    builds them."""
+    event tells of a change of the permission mode and the two tools change it inside a turn. It returns nothing."""
     me = Me(payload)
     if not me.home or not me.id or payload.get("agent_id") or payload.get("hook_event_name") != "PostToolUse":
         return None                                # a subagent's call, or one that failed, such as a plan sent
@@ -1943,25 +1691,10 @@ def h_plan_mode(payload):
     s["planMode"] = str(payload.get("tool_name") or "") == "EnterPlanMode"
     save_session(me.home, s)
     RAN["pair"] = "planning" if s["planMode"] else "approved"
-    runs = "" if s["planMode"] else approved_runs_text(payload, s)
-    if s["planMode"] or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, me.store):
-        return runs or None
-    plan = plans.load(me.home, me.id)
-    if not plan.get("steps"):
-        return runs or None
-    owner = s.get("turnBy", "user") == "user"
-    advice = plans.top_advice(me.home, s, plan, owner, caps_text(me.home, s))
-    feat = feature_steps_text(me.home, s, plan, owner)
-    nudge_arm(me, load_session(me.home, me.id) or s)
-    return "\n\n".join(p for p in (runs, feat, advice) if p) or None
+    return None
 
 
-# --- the nudge: an orchestrator doing a work step itself ------------------------------------------------------
-#
-# The marker <store>/phi/.nudge/<CLI session id> exists while an orchestrator's step in progress is a work step it
-# has not been nudged on. The plugin's hooks module runs the check of a session's own edit only while this marker or
-# a puppeteer's names the session, and that of its plain shell call only then or where the store's failure model
-# weighs shell calls, so every other such call starts no python.
+# --- the shell words work_command reads a command by -----------------------------------------------------------
 
 NUDGE_LOOKING = (LOOKING | frozenset("""uniq basename dirname realpath stat du df env type command jq less more nl
 column od xxd sha1sum sha256sum md5sum cmp comm false read set ps tasklist whoami hostname uname history
@@ -1972,42 +1705,6 @@ GIT_READ = frozenset("status log diff show branch rev-parse remote fetch ls-file
                      "config grep cat-file show-ref ls-tree".split())
 GIT_LANDS = frozenset("add commit merge push pull tag rebase cherry-pick stash notes".split())
 REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(?!&|/dev/null|\$null|nul\b)\S", re.I)
-
-
-def nudge_marker(me):
-    return os.path.join(me.store or me.home, "phi", ".nudge", SAFE.sub("_", str(me.cli))[:80])
-
-
-def nudge_key(step):
-    return f"{step.get('addr')}:" + hashlib.sha1(str(step.get("content") or "").encode("utf-8")).hexdigest()[:10]
-
-
-def nudge_step(home, s):
-    """The orchestrator's step in progress when it is a work step not nudged on yet, else None."""
-    if not s or spawned_from(s) or not TOP_ORCHESTRATES or controls.is_puppeteer(s, store_at(s.get("cwd"))):
-        return None
-    plan = plans.load(home, s["sessionId"])
-    st = plans.step_of(plan, plan.get("current") or "") if plan.get("steps") else None
-    text = str((st or {}).get("content") or "")
-    if not st or st.get("status") == "completed" or plans.handed(st) or plans.top_stays(text):
-        return None                                # the advice's own answer
-    return None if nudge_key(st) in (s.get("nudged") or []) else st
-
-
-def nudge_arm(me, s):
-    """The marker made while a nudge is owed, removed otherwise."""
-    if not me.cli:
-        return
-    path = nudge_marker(me)
-    try:
-        if nudge_step(me.home, s):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(s["sessionId"] + "\n")
-        elif os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass
 
 
 ASSIGN = re.compile(r"^(?:export\s+|set\s+)?\$?([A-Za-z_]\w*)\s*=\s*('[^']*'|\"[^\"]*\"|\S*)\s*(.*)$", re.S)
@@ -2087,30 +1784,6 @@ def work_call(s, name, inp):
     return False
 
 
-TREE_CHECKS = 6               # read-only checks of its trees an orchestrator runs in one work step as orchestration
-TREE_CHECK = re.compile(r"(?:^|[\s;&|(])(?:git\s+(?:-C\s+\S+\s+)?(?:log|status|diff|show|branch|fetch|rev-parse|"
-                        r"ls-files)\b|gh\s+(?:issue|pr|run|api|repo)\b|\S*phi\.py[\"']?\s+(?:tree|show|controls|"
-                        r"background)\b)", re.I)
-
-
-def tree_checked(me, s, st):
-    """An orchestrator's read-only check of its trees in a work step, such as a session list, `git log`,
-    `gh issue list` or `gh issue view`: counted, and never handed off while they are few. Past TREE_CHECKS in one
-    step it is told once that the rest is a read for the subagent `p4-phi:finder`. None while they are few."""
-    key = nudge_key(st)
-    held = s.get("treeChecks") if isinstance(s.get("treeChecks"), dict) else {}
-    n = (int(held.get("n") or 0) if held.get("key") == key else 0) + 1
-    s["treeChecks"] = {"key": key, "n": n}
-    save_session(me.home, s)
-    if n != TREE_CHECKS + 1:
-        return None
-    RAN["tree_checks"] = n
-    return (f"phi (p4-phi): step {st.get('addr')} has now run {n} read-only checks of its trees here. A few, such as "
-            f"a session list, `git log`, `gh issue list` or `gh issue view`, are this orchestrator's own "
-            f"orchestration; past {TREE_CHECKS} the rest is a read across the trees: hand it to "
-            f"{plans.EXPLORE}. Said once for this step.")
-
-
 def h_puppeteer_tool(payload):
     """PreToolUse on a shell command or a file edit: a puppeteer's turns hold messages only, so the task goes to its
     standing worker. A subagent's call and a call that runs phi.py itself, such as `note` or `controls`, get
@@ -2135,49 +1808,6 @@ def h_wrap_up(payload):
     line = controls.clear_line(me.home, load_session(me.home, me.id), me.store)
     RAN["clear"] = bool(line)
     return line
-
-
-def h_nudge(payload):
-    """PreToolUse on Edit, Write and shell commands in an orchestrator with a task list: one line, once per
-    step, that the work goes to a worker. Never a block; reading, git's reading and landing commands are never
-    nudged."""
-    me = Me(payload)
-    if not me.home or not me.id or not me.cli or not os.path.exists(nudge_marker(me)):
-        return None
-    s = load_session(me.home, me.id)
-    st = nudge_step(me.home, s)
-    if not st:
-        try:
-            os.remove(nudge_marker(me))
-        except OSError:
-            pass
-        return None
-    if mode_now(me, s, payload) == "plan":         # a plan is being written: the step is nudged once it is approved
-        return None
-    inp = payload.get("tool_input") if isinstance(payload.get("tool_input"), dict) else {}
-    if not work_call(s, str(payload.get("tool_name") or ""), inp):
-        if str(payload.get("tool_name") or "") in SHELL_TOOLS and TREE_CHECK.search(str(inp.get("command") or "")):
-            return tree_checked(me, s, st)         # a few read-only checks of its trees are orchestration
-        return None
-    level = plans.level_of(st.get("content")) if LEVELS_ON else "session"
-    if level == "run" and inp.get("run_in_background") is True:
-        return None                                # the step's command already runs where the rule sends it
-    s["nudged"] = (list(s.get("nudged") or []) + [nudge_key(st)])[-50:]
-    save_session(me.home, s)
-    nudge_arm(me, s)
-    RAN["nudge"] = st.get("addr")
-    if level != "session":                         # a read, a run and a team's question each need no worker
-        return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step "
-                f"{st.get('addr')}, \"{cut(clean(st.get('content')), 120)}\", {plans.LEVEL_WHAT[level]}: hand it to "
-                f"{plans.LEVEL_WHERE[level]}. "
-                f"Said once for this step.")
-    return (f"phi (p4-phi): this is the orchestrator, kept free for orchestration, and step {st.get('addr')}, "
-            f"\"{cut(clean(st.get('content')), 120)}\", is work: hand it to a worker with "
-            f"`mcp__ccd_session__start_session`, `context` `fresh`, {plans.OWN_TREE}, "
-            f"{plans.level_words(st.get('content'))}, its brief that step, a "
-            f"line `Files: <the paths it may write>`, the line `{plans.level_line(plans.child_level(st.get('content')))}` "
-            f"and \"report when done\", and keep this session for planning, messaging and landing. Said once for this "
-            f"step.")
 
 
 def keep_plan_file(me, path, payload=None):
@@ -2372,7 +2002,6 @@ def h_session_start(payload):
     mark_fork(s, me, payload)
     source = payload.get("source") or "startup"
     RAN["start"] = source
-    asks(s)
     lost = source in ("compact", "clear")
     text = book_line = ""
     if not (source == "startup" and not spawned_from(s) and not s.get("task")
@@ -2447,16 +2076,11 @@ def acting_first(parts, keep=()):
     """Every part whole, the ones in `keep` first and the rest in their order. A part in `keep` asks the session to
     act at this message, so it leads: past the app's cap of APP_CAP characters Claude is passed only the first
     APP_PREVIEW of them with the path of the file that holds the text. No part is cut or kept back, since that file
-    is the app's to write. When the text passes the cap and the parts in `keep` alone pass the preview, READ_ALL
-    leads them, since the app does not ask Claude to read its file."""
+    is the app's to write."""
     parts = [p for p in parts if p]
     kept = {id(p) for p in keep if p}
     first = [p for p in parts if id(p) in kept]
-    text = "\n\n".join(first + [p for p in parts if id(p) not in kept])
-    if len(text) > APP_CAP and sum(len(p) + 2 for p in first) + len(READ_ALL) > APP_PREVIEW:
-        RAN["read_all"] = True
-        return READ_ALL + "\n\n" + text
-    return text
+    return "\n\n".join(first + [p for p in parts if id(p) not in kept])
 
 
 def touches_of(home, s):
@@ -2591,9 +2215,6 @@ def h_user_prompt_submit(payload):
         s["scratchpadDir"] = pad                  # conversation still finds the state page written there
     stand = (controls.worker_first(me.home, s, payload.get("prompt"), me.store)
              if spawned_from(s) and not load_turns(me.home, s["sessionId"]) else "")
-    first_split = first_split_text(me.home, s)
-    if first_split:
-        parts.insert(0, notice(first_split))
     if stand:                                      # a puppeteer's standing worker or coworker: what it is
         RAN["standing"] = s.get("standingKind")
         parts.insert(0, notice(stand))
@@ -2601,9 +2222,6 @@ def h_user_prompt_submit(payload):
     if usage:                                      # a puppeteer watches its worker's and coworkers' context
         RAN["usage"] = True
         parts.insert(0, notice(usage))
-    research = research_text(me.home, s)
-    if research:
-        parts.insert(0, notice(research))
     if detached_now:
         parts.insert(0, notice("phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
                         "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
@@ -2645,8 +2263,7 @@ def h_user_prompt_submit(payload):
         route = ""
     book_line = "" if route else book_text(me.home, s, me.store)
     parts.append(pup)
-    split = split_text(me.home, s, payload.get("prompt"), by) if not route else ""
-    last = route or "\n\n".join(x for x in (book_line, split) if x)
+    last = route or book_line
     save_session(me.home, s)
     # the rebase check, on every message: its warnings lead, then the notices, then what the sessions beside this
     # one changed and the rest, whole
@@ -2667,7 +2284,6 @@ def pair_parts(me, s, req, changed="", notice=lambda text: text):
         told = controls.pair_text(s, me.store)
         if told:
             RAN["pair"] = "controlled"
-        asks(s)
         answers = controls.answers_text(me.home, s) if s.get("puppeteer") else ""
         return [p for p in (told, answers) if p]
     RAN["pair"] = "puppeteer"
@@ -3333,9 +2949,10 @@ def h_go_guard(payload):
 
 
 def h_start_advice(payload):
-    """PreToolUse on mcp__ccd_session__start_session. It denies two starts: a controlled session's new
-    orchestrator, which its puppeteer starts instead, and a puppeteer's second standing worker. For the rest it
-    advises fork or fresh by relay.advise_start, from the parent's transcript size and how much of the parent's scope
+    """PreToolUse on mcp__ccd_session__start_session. It denies the starts that break a cap, MAX_DEPTH or
+    MAX_CHILDREN, a controlled session's new orchestrator, which its puppeteer starts instead, a puppeteer's second
+    standing worker, a brief that changes files and names none, and one whose files a running session holds. For
+    the rest it advises fork or fresh by relay.advise_start, from the parent's transcript size and how much of the parent's scope
     the brief's paths cover, for a writer's start as for any. It is silent when the call already does what is
     advised, else a permission `ask` with the reason, so ezexe sees it and decides. A start that passes
     `use_worktree: true` is asked about once: every session p4-phi starts works in its starter's checkout, on the
@@ -3358,6 +2975,12 @@ def h_start_advice(payload):
     if why:                                         # a second while the first is live
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                        "permissionDecisionReason": why}}
+    mine = load_session(me.home, me.id)
+    cap = caps_text(me.home, mine) if mine.get("sessionId") else ""
+    if cap:                                         # as deep, or with as many live sessions, as p4-phi allows
+        RAN["caps"] = True
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": "phi (p4-phi): this start is refused: " + cap}}
     if starts.claim(me.home, inp.get("prompt"), me.id, card=card):
         RAN["claimed"] = "card" if card else True   # a start request's call, given exactly: the asker decided it
         return None
@@ -4105,7 +3728,6 @@ HOOKS = {"session-start": ("SessionStart", h_session_start),
          "self-archive": ("PreToolUse", h_self_archive)}
 ROUTED.update({k: HOOKS[k] for k in ("start-advice", "branch-guard", "store-guard", "cards-guard", "plan",
                                      "memory-gap", "self-archive", "task-stop")})
-ROUTED["nudge"] = ("PreToolUse", h_nudge)
 ROUTED["puppeteer-tool"] = ("PreToolUse", h_puppeteer_tool)
 ROUTED["wrap-up"] = ("PostToolUse", h_wrap_up)
 HOOKS["go-guard"] = ROUTED["go-guard"] = ("PreToolUse", h_go_guard)

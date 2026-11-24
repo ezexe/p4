@@ -305,11 +305,9 @@ class Supervisor(unittest.TestCase):
                  "Check the trees' results against GitHub", "Rewrite flush_rows in src/exporter.py")
         t.say(PUP, "Control the two trees")
         t.say(TOP3, "Control the two trees")
-        self.assertIn("worker", context(self.plan(TOP3, *steps)), "any other orchestrator")
         ctx = context(self.plan(PUP, *steps))
         self.assertNotIn("worker", ctx)
         self.assertNotIn("start_session", ctx)
-        self.assertFalse(os.path.exists(os.path.join(t.p4, "phi", ".nudge", CLI[PUP])), "and no nudge")
         t.say(TOP, "Build it")                      # a controlled session, mid-turn
         t.cli(PUP, "controls", TOP)
         r = t.stop(PUP, "Control the two trees", report="Waiting on \"Build the narwhal exporter\".")

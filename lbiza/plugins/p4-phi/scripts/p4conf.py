@@ -38,8 +38,6 @@ DEFAULTS = {
     "phi": {                             # p4-phi's session tree
         "home": None,                    # the git remote of a store whose session tree this project shares
         "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
-        "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
-        "levels": True,                  # false: no delegation rule
         "plan_mode": True,               # false: p4-phi's plan rule, which hands plan mode, is left out
         "goal_review": True,             # false: a worker's goal asks for no review of its change by a reader
                                          # that has not seen the conversation
@@ -56,7 +54,6 @@ DEFAULTS = {
         "own_turns": 3,                  # a session's own last turns its start background carries
         "chain_max": 8,                  # sessions above one whose tasks its background carries
         "turn_steps": 12,                # the steps of one turn a report keeps
-        "tree_checks": 6,                # the sessions of the tree checked at once for a stall
         "keep_going_max": 2,             # turns the hooks module starts for upkeep in a row
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
@@ -140,8 +137,9 @@ WRITTEN = "_written"
 # 14 leaves to the copy that wrote them. 16 came with the removal of the group `recall`, which a store that still
 # holds it keeps, since READ_WHEN_SET names it. 17 came with the defaults of p4.json held by the plugin that reads
 # them, each in a file of its own. 18 came with the removal of the key `phi.act_dont_wait`, which a store that still
-# holds it keeps unread.
-GEN = 18
+# holds it keeps unread. 19 came with the removal of the keys `phi.top_orchestrates`, `phi.levels` and
+# `phi.tree_checks`, which a store that still holds them keeps unread.
+GEN = 19
 
 
 def _leaves(d, prefix=""):

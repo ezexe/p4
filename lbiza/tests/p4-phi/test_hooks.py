@@ -421,11 +421,10 @@ class PathChecks(unittest.TestCase):
                                                  "tool_input": {key: self.mine("a.py")}})
             self.assertNotIn("deny", r.stdout, tool)
 
-    def test_the_path_guard_stands_ahead_of_the_nudge_in_the_check_of_each_edit_tool(self):
+    def test_the_check_of_each_edit_tool_names_the_path_guard_and_the_puppeteer_tool(self):
         import hook
         for tool in ("Edit", "Write", "NotebookEdit"):
-            self.assertEqual(hook.PHI_CHECK[tool][0], "path-guard", tool)
-            self.assertIn("nudge", hook.PHI_CHECK[tool], tool)
+            self.assertEqual(hook.PHI_CHECK[tool], ("path-guard", "puppeteer-tool"), tool)
 
     def bash(self, *changed, diff=True):
         resp = {"stdout": "", "stderr": ""}
@@ -534,7 +533,7 @@ class ZeroConfiguration(unittest.TestCase):
         self.assertFalse(os.path.exists(p4conf.sub(p4, "store")), "with no phi/store")
         self.assertFalse(os.path.exists(p4conf.sub(p4, "models")), "and no phi/models")
         conf = p4conf.load(p4, write=False)["phi"]
-        self.assertEqual((conf["levels"], conf["top_orchestrates"], conf["home"]),
+        self.assertEqual((conf["plan_mode"], conf["goal_review"], conf["home"]),
                          (True, True, None), "p4.json is written with the working defaults")
         self.env["P4_PHI_WATCH"] = "0"       # only so this test leaves no watcher behind in its temporary folder
         start, said, pre, plain, stop = self.handlers()

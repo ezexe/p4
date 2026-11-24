@@ -453,8 +453,7 @@ class Linear(Base):
 
 
 class WorkerSplit(Base):
-    """A worker splits at its first message, while the app still lets it start sessions: a part that writes files
-    or decides runs in a session of its own, and a subagent that wrote files is a level miss on the ledger."""
+    """A subagent that wrote files is a level miss on the ledger."""
 
     def plan(self, host, inp):
         r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
@@ -468,39 +467,6 @@ class WorkerSplit(Base):
                        text=True, timeout=60, env=self.t.env(host, P4_RECALL_SYNC="1"))
         self.assertEqual(r.returncode, 0, r.stderr)
         return r
-
-    def test_a_workers_first_message_is_told_to_start_its_writing_parts_now(self):
-        t = self.t
-        t.say(TOP, TASK)
-        first = context(t.say(KID, handed("Port the flush to the new writer and document it. Report when done.")))
-        self.assertIn("Plan its split now", first)
-        self.assertIn("In these sessions the app has let a started session start others in its first turn", first,
-                      "what the app has shown, not a documented rule")
-        self.assertIn("where the app refuses that start, the part is shown as a suggested task card", first)
-        self.assertIn("one per disjoint set of files", first)
-        self.assertIn("Subagents keep reads, searches, single command runs and independent checks", first)
-        self.assertIn("is shown as a suggested task card", first, "a writing part that comes up later is a card")
-        self.assertNotIn("start request", first, "the card holds it, and p4-phi keeps no request for it")
-        t.stop(KID, "Port the flush", report="half way")
-        self.assertNotIn("Plan its split now", context(t.say(KID, "carry on")), "said at the first message only")
-        self.assertNotIn("Plan its split now", context(t.say(TOP, "and the exporter?")), "never to an orchestrator")
-
-    def test_a_step_that_edits_files_is_named_for_a_session_and_a_read_for_a_subagent(self):
-        t = self.t
-        p = t.proj
-        t.say(TOP, TASK)
-        t.say(KID, handed("Port the flush and its docs. Report when done."))
-        ctx = self.plan(KID, {"items": [
-            {"content": f"Edit {p}/src/export/flush.py to write through the new writer", "status": "in_progress"},
-            {"content": f"Rewrite the flush page in {p}/docs/flush.md with the new calls", "status": "pending"},
-            {"content": f"Find every caller of {p}/src/export/legacy.py across the exporter", "status": "pending"}],
-            "scope": "first_task"})
-        sessions = ctx.split("can each run on their own")[0]
-        self.assertIn("\"Edit ", sessions)
-        self.assertIn("\"Rewrite the flush page", sessions)
-        self.assertNotIn("Find every caller", sessions, "a read is no session of its own")
-        self.assertIn("the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says",
-                      ctx.split("can each run on their own")[1])
 
     def test_a_subagent_that_wrote_files_is_a_level_miss_on_the_ledger(self):
         t = self.t
@@ -552,31 +518,8 @@ class WorkerSplit(Base):
 
 
 class TermsAndGuides(Base):
-    """A session about to create something finds its documented terms and an implementation guide first, logs both
-    with their sources in its decisions file, and builds by them."""
-
-    plan = WorkerSplit.plan
-
-    def test_a_writing_workers_first_message_carries_the_research_line(self):
-        t = self.t
-        t.say(TOP, TASK)
-        first = context(t.say(KID, handed("Add a retry module for the flush writer.\nFiles: src/export/retry.py\n"
-                                           "Report when done.")))
-        self.assertIn("documented terms", first)
-        self.assertIn(phi.RESEARCH, first)
-        t.stop(KID, "Add a retry module", report="half way")
-        self.assertNotIn(phi.RESEARCH, context(t.say(KID, "carry on")), "said at the first message only")
-        t.record(KID2, TOP, title="the exporter check")
-        checker = context(t.say(KID2, handed("Check that the exporter's tests pass and report.\nFiles: none")))
-        self.assertNotIn(phi.RESEARCH, checker, "a read-only worker creates nothing")
-
-    def test_a_start_draft_carries_the_research_step(self):
-        t = self.t
-        t.say(TOP, TASK)
-        t.stop(TOP, TASK, report="planned")
-        brief = call_in(context(t.say(TOP, RETRY)))["prompt"]
-        self.assertIn("documented terms", brief)
-        self.assertIn(phi.RESEARCH, brief)
+    """A start draft carries the line that has the session decide by research and log the decision with its source
+    in its decisions file."""
 
     def test_a_start_draft_carries_the_decide_by_research_line(self):
         """A writing start whose message names its files and one whose message names none both carry the
@@ -606,25 +549,6 @@ class TermsAndGuides(Base):
         got, want = puppeteer.call_of(with_line), puppeteer.call_of(bare)
         self.assertEqual((got.get("model"), got.get("effort")), (want.get("model"), want.get("effort")))
         self.assertIn(phi.DECIDE, got["prompt"], "the line itself still reaches the child")
-
-    def test_a_plan_with_no_research_step_before_its_first_creating_step_is_advised_one(self):
-        t = self.t
-        t.say(TOP, TASK)
-        t.say(KID, handed("Add a retry module for the flush writer. Report when done."))
-        ctx = self.plan(KID, {"items": [
-            {"content": "Create the retry module src/export/retry.py", "status": "in_progress"},
-            {"content": "Wire the retry into the flush writer", "status": "pending"}], "scope": "first_task"})
-        self.assertIn("documented terms", ctx)
-        self.assertIn(phi.RESEARCH_STEP_HEAD, ctx)
-        self.assertIn("\"Create the retry module", ctx.split(phi.RESEARCH_STEP_HEAD)[1])
-        t.record(KID2, TOP, title="the retry module")
-        t.say(KID2, handed("Add a retry module for the flush writer. Report when done."))
-        ok = self.plan(KID2, {"items": [
-            {"content": "Find the documented terms and an implementation guide for a retry module",
-             "status": "in_progress"},
-            {"content": "Create the retry module src/export/retry.py", "status": "pending"}], "scope": "first_task"})
-        self.assertNotIn(phi.RESEARCH_STEP_HEAD, ok, "a plan that researches first is advised nothing")
-
 
 class WatcherCaps(unittest.TestCase):
     def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):

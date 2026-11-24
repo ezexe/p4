@@ -2509,7 +2509,7 @@ class ImportLine(unittest.TestCase):
             p4conf.watch(self.project, self.start)
             self.assertEqual(keeper.call_count, 1, "and not again at every start")
             # a P4_* setting changed, a record with no p4-phi part, another file naming autoMemoryDirectory
-            p4conf.set_key(self.p4, "phi.levels", False)
+            p4conf.set_key(self.p4, "phi.goal_review", False)
             rec = self.rec()
             rec.pop("phi", None)
             _write(os.path.join(self.p4, "claude-settings.json"), rec)

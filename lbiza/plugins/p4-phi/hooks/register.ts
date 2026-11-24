@@ -73,8 +73,8 @@ const MOST_SUBMITTED = 16
 
 // How long python may take over one call's check.
 const CHECK_MS = 10_000
-// The tools hook.py has a check for, as its PHI_CHECK reads them. An edit is checked only for a session that owes a
-// nudge or is a puppeteer, a shell call only where a filter below passes it, and the rest always: a message to
+// The tools hook.py has a check for, as its PHI_CHECK reads them. An edit is checked only for a session that is a
+// puppeteer or where the path guard's marker is, a shell call only where a filter below passes it, and the rest always: a message to
 // another session, a session archiving itself and a session's start.
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
@@ -1080,8 +1080,8 @@ async function isChecked(
   if (isShell && CARDS_ON.test(text)) return true
   // A session some session's paths are held against, whose edit phi.py's path guard reads.
   if (isEdit && (await $.fs.exists(`${phi}/.paths/on`).catch(() => false))) return true
-  // A top-level session that owes a nudge, and a puppeteer, whose every edit and shell call phi.py reads.
-  if ((await isMarked($, `${phi}/.nudge`, sessionId)) || (await isMarked($, `${phi}/.puppeteers`, sessionId))) return true
+  // A puppeteer, whose every edit and shell call phi.py reads.
+  if (await isMarked($, `${phi}/.puppeteers`, sessionId)) return true
 
   return false
 }

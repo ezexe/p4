@@ -131,10 +131,5 @@ class HandOuts(unittest.TestCase):
         call = {"context": "fork", "prompt": "Fix relay.py"}
         self.assertEqual(plans.with_level(call), call)
 
-    def test_a_search_goes_to_the_finder_whose_file_names_its_model(self):
-        self.assertEqual(plans.LEVEL_WHERE["read"], plans.EXPLORE)
-        self.assertIn("`p4-phi:finder`", plans.EXPLORE)
-
-
 if __name__ == "__main__":
     unittest.main()

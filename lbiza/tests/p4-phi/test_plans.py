@@ -496,42 +496,8 @@ class TreeOfPlans(unittest.TestCase):
         task = plans._agent(plans.load(t.p4, A), "agente196")
         self.assertEqual(set(task), {"id", "tool", "agent", "status", "anchorSeen", "stepText"}, "no field added")
 
-    def three(self, *extra):
-        p = self.t.proj
-        return items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                     f"Rewrite the parser tables in {p}/src/parse/tables.py for speed",
-                     f"Document the store layout in {p}/docs/layout.md with examples", *extra)
-
-    def test_three_disjoint_steps_are_advised_to_split(self):
-        self.t.say(B, "Do the three parts")
-        ctx = self.plan(B, self.three())
-        self.assertIn("can each run on their own", ctx)
-        for a in ("2.1", "2.2", "2.3"):
-            self.assertIn(a, ctx.split("can each run")[0])
-        self.assertIn("`initiation` `user_asked`", ctx)
-        self.assertIn("`use_worktree: false`, so it works in this checkout on the paths of its `Files:` line and "
-                      "commits by `phi.py commit`", ctx)
-        self.assertNotIn("use_worktree: true", ctx, "no step is started in a worktree")
-        self.assertNotIn("a git worktree and on a branch of its own", ctx)
-        self.assertNotIn("on this session's branch", ctx)
-        self.assertIn("Judged by", ctx)
-        self.assertNotIn("can each run", self.plan(B, {"advance": True}) or "", "said once per set")
-        done = self.three()
-        done["items"][0]["status"] = "completed"
-        done["items"][1]["status"] = "in_progress"
-        self.assertNotIn("can each run", self.plan(B, done) or "", "steps advised before are not again")
-        more = self.three(f"Draw the import graph of {self.t.proj}/tools/graph.py for the docs site")
-        again = self.plan(B, more) or ""
-        self.assertIn("2.4", again.split("can each run")[0], "a new free step is named")
-        self.assertNotIn("2.2 \"", again.split("can each run")[0])
-
     def test_steps_naming_no_file_stay_and_drawn_trees_match_nothing(self):
-        """A step that names no file stays, and neither a session link nor a drawn tree's addresses match a step."""
-        plan = {"steps": [{"addr": "1", "content": "SA1 keep tasks of a reworded step", "status": "in_progress"},
-                          {"addr": "2", "content": "SA2 anchor and down-line for sub-agents", "status": "pending"}]}
-        free, kept = plans.judge(plan, "")
-        self.assertEqual(free, [])
-        self.assertIn("names no file", kept[0][1])
+        """Neither a session link nor a drawn tree's addresses match a step."""
         steps = [{"addr": "1", "content": "Waits and relays stay in place"},
                  {"addr": "2", "content": "Run every suite, commit, fast-forward"}]
         linked = ("Started:\n- [Record and check phi's own lines\u2026](claude://claude.ai/epitaxy/local_ab12)\n"
@@ -543,60 +509,6 @@ class TreeOfPlans(unittest.TestCase):
         report = ("Here is the tree:\n\u251c\u2500\u2500 x/ \u251c\u2500\u2500 child for step 1 plan: 1.1, 1.2\n"
                   "```\nstep 2 plan: 2.1 run every suite\n```\nNothing else.")
         self.assertEqual(plans.matches(report, steps, [], ""), [])
-
-    def test_a_task_list_of_waits_and_messages_is_serial(self):
-        """A task list made mostly of waits and messages is serial, so none of its steps is advised to split."""
-        plan = {"steps": [{"addr": "1", "content": "Wait for SA1 and SA2 on main", "status": "in_progress"},
-                          {"addr": "2", "content": "Tester confirms nodes_test 14/14 on both lists", "status": "pending"},
-                          {"addr": "3", "content": "Push p4 and phi main", "status": "pending"},
-                          {"addr": "4", "content": "Tell the side chat the reply can go", "status": "pending"}]}
-        free, kept = plans.judge(plan, "")
-        self.assertEqual(free, [])
-        self.assertEqual([a for a, _ in kept], ["1", "2", "3", "4"])
-        self.assertEqual(plans.split_advice(self.t.p4, relay._session(self.t.p4, B), plan, True, ""), "")
-        mine = {"steps": [{"addr": "1", "content": "Waits and relays stay in place", "status": "in_progress"},
-                          {"addr": "2", "content": "Run every suite, commit, fast-forward", "status": "pending"}]}
-        self.assertEqual(plans.judge(mine, "")[0], [], "a landing step anywhere in its words stays")
-
-    def test_a_step_that_checks_or_lands_the_others_stays(self):
-        self.t.say(B, "Do the parts")
-        ctx = self.plan(B, self.three("Test, commit and fast-forward main after review"))
-        self.assertIn("2.4, ", ctx)
-        self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
-
-    def test_a_step_using_anothers_results_stays_in_place(self):
-        self.t.say(B, "Do the parts")
-        ctx = self.plan(B, self.three("Write the summary report using the exporter's results for the release"))
-        self.assertIn("2.4, leans on another step, \"using\"", ctx)
-        self.assertNotIn("2.4 \"", ctx.split("can each run")[0])
-
-    def test_two_steps_on_one_file_stay_in_place(self):
-        p = self.t.proj
-        self.t.say(B, "Do the parts")
-        ctx = self.plan(B, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                 f"Speed up the buffered flush path in {p}/src/export/flush.py for large rows",
-                                 f"Document the store layout in {p}/docs/layout.md with examples"))
-        self.assertNotIn("can each run", ctx or "", "one free step is no split")
-
-    def test_past_the_cap_everything_stays_in_place(self):
-        self.t.say(B, "Do the three parts")
-        for k in range(8):
-            self.t.record(f"local_cap{k:05d}", B, title=f"cap {k}")
-            self.t.say(f"local_cap{k:05d}", "work")
-        ctx = self.plan(B, self.three())
-        self.assertIn("Every step stays here as a sub-step", ctx)
-        self.assertNotIn("user_asked", ctx)
-
-    def test_in_a_turn_another_session_began_the_advice_names_no_initiation(self):
-        """What a turn another session began may start, and the card it proposes, are the start tool's own text: the
-        advice there names the tool and each step's model and effort, never an `initiation`, a refusal or a card."""
-        self.t.say(B, "Do the three parts")
-        self.t.say(B, '<cross-session-message from="local_x">go on</cross-session-message>')
-        ctx = self.plan(B, self.three())
-        self.assertIn("Give each to `mcp__ccd_session__start_session`", ctx)
-        self.assertIn("carrying the `model` and `effort` named beside its step", ctx)
-        for restated in ("`initiation`", "refuses", "suggested task card", "start request"):
-            self.assertNotIn(restated, ctx)
 
     def test_a_child_waiting_on_a_question_the_chain_can_settle_is_flagged_up(self):
         """Act-don't-wait: the parent hears of a child's open question that is not ezexe's to answer."""
@@ -1042,20 +954,6 @@ class Levels(unittest.TestCase):
                             ("Port the exporter to the new writer", "session"),
                             ("Find and remove the dead flags", "session")):
             self.assertEqual(plans.level_of(text), level, text)
-        p = self.t.proj
-        ctx = self.plan(TOP, items("Find where the exporter is configured across src/", "Run test_flush.py",
-                                   f"Port the exporter in {p}/src/export/flush.py to the new writer"))
-        self.assertIn("which only reads or searches: it goes to the plugin's subagent `p4-phi:finder`, which runs on "
-                      "`haiku` at `low` effort as its file says, not a session", ctx)
-        self.assertIn("which only runs a command: it goes to a Bash or PowerShell call of its own with "
-                      "`run_in_background: true`, not a session", ctx)
-        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
-        self.assertIn("split by the files they write", ctx)
-        s = relay._session(self.t.p4, TOP)
-        plain = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
-            {"addr": "9", "content": "Find where the ports table is read across lib/", "status": "pending"}]},
-            True, "", levels=False)
-        self.assertNotIn("`Explore`", plain, "with delegation off every work step is a child's")
 
     def test_a_step_argued_from_several_sides_is_named_for_an_agent_team_and_one_that_writes_is_not(self):
         """agent-teams.md, "Compare with subagents": "Use agent teams when teammates need to share findings,
@@ -1071,23 +969,10 @@ class Levels(unittest.TestCase):
                             ("Build the exporter with an agent team", "session"),
                             ("Read the hooks docs and list what PreToolUse may return", "read")):
             self.assertEqual(plans.level_of(text), level, text)
-        p = self.t.proj
-        ctx = self.plan(TOP, items("Review the exporter's retry design from several angles",
-                                   f"Port the exporter in {p}/src/export/flush.py to the new writer"))
-        self.assertIn(f"it goes to {plans.LEVEL_WHERE['team']}, {plans.LEVEL_NOT['team']}", ctx)
-        self.assertIn("mcp__ccd_session__start_session", ctx, "the step that writes still goes to a worker")
-        s = relay._session(self.t.p4, A)
-        worker = {"steps": [{"addr": str(n), "content": c, "status": "pending"} for n, c in enumerate((
-            f"Argue the retry design of {p}/src/export/retry.py from opposing sides",
-            f"Port the exporter in {p}/src/export/flush.py to the new writer, with its tests",
-            f"Port the importer in {p}/src/import/read.py to the new reader, with its tests"), 1)]}
-        said = plans.split_advice(self.t.p4, {**s, "splitAdvised": []}, worker, True, "")
-        self.assertNotIn(plans.LEVEL_WHERE["team"], said, "a worker is named no team")
-        self.assertIn(f"1, {plans.TEAM_KEPT}", said, "and the step stays with its reason")
 
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
-        """A child's card advice carries the `model` and `effort` keys, the plugin-gap line hands no start call at
-        all, and a sentence beginning "Model:" is no choice of the parent session's."""
+        """The plugin-gap line hands no start call at all, and a sentence beginning "Model:" is no choice of the
+        parent session's."""
         import gaps
         plug = os.path.join(self._tmp.name, "plugproj")
         os.makedirs(os.path.join(plug, ".claude", "p4"))
@@ -1104,11 +989,6 @@ class Levels(unittest.TestCase):
         said = gaps.advice(self.t.p4, self.t.p4, s, mem, root=plug)
         self.assertIn("\nFinding: the plugin in team/plug", said)
         self.assertNotIn("start_session", said, "the plugin-gap line hands no start call: its finding goes up")
-        kid = phi._split_full(self.t.p4, relay._session(self.t.p4, A))
-        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", kid)
-        self.assertNotIn("suggested task card", kid, "the card is the start tool's own text")
-        self.assertIn("It carries the `model` and `effort` a start of its kind of work carries", kid)
-        self.assertIn("with the `model` and `effort` its kind of work gets", phi._split_full(self.t.p4, s))
         self.assertEqual(plans.said_level("Model: ranker.pt is rebuilt\nEffort: low on the first pass"), {},
                          "a sentence that begins with Model: or Effort: names no choice")
         self.assertEqual(plans.said_level("Model: ranker.pt\nEffort: loud"), {}, "nor an unknown model or effort")
@@ -1120,23 +1000,6 @@ class Levels(unittest.TestCase):
         self.assertEqual((call["model"], call["effort"]), ("claude-opus-5-5", "medium"),
                          "its kind's choice stands: a build is a writer's")
 
-    def test_the_advice_for_a_batch_of_starts_names_no_read_of_the_plan_limits(self):
-        """The advice of plans.top_advice for two work steps tells a session to read no plan limit: how much of the
-        plan a piece of work spends is ezexe's, and a session neither weighs it nor stops for it. The advice names no
-        stop or restart of a running session either, and a worker's split advice is the same."""
-        s = relay._session(self.t.p4, TOP)
-        said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
-            {"addr": "1", "content": "Write the puppeteer pages under docs/", "status": "pending"},
-            {"addr": "2", "content": "Change how plans.py reads the address of a step", "status": "pending"}]}, True, "")
-        self.assertIn("Each call carries the `model` and `effort`", said)
-        for word in ("get_usage", "plan limits", "stop_session", "restart", "start it again", "set_session_model"):
-            self.assertNotIn(word, said, word)
-        self.assertNotIn("get_usage", plans.LEVEL_HOW)
-        p = self.t.proj
-        kid = self.plan(A, items(f"Edit {p}/src/export/flush.py to write through the new writer",
-                                 f"Rewrite the flush page in {p}/docs/flush.md with the new calls"))
-        self.assertNotIn("get_usage", kid, "a worker's split advice names no read either")
-
     def test_a_child_session_is_started_with_a_model_and_an_effort_that_fit_its_step(self):
         """A child that writes static pages under docs/ starts on a cheaper model and a lower effort than its parent."""
         import puppeteer
@@ -1147,13 +1010,6 @@ class Levels(unittest.TestCase):
         self.assertEqual(plans.child_level("Review the relay's design")["kind"], "review")
         self.assertEqual(plans.child_kind("Bump the version to 0.10.1"), "static")
         self.assertEqual(plans.child_kind("Rename the README's headings and fix phi.py"), "build", "code decides")
-        s = relay._session(self.t.p4, TOP)
-        said = plans.top_advice(self.t.p4, {**s, "splitAdvised": []}, {"steps": [
-            {"addr": "1", "content": docs, "status": "pending"},
-            {"addr": "2", "content": script, "status": "pending"}]}, True, "")
-        self.assertIn(f"\"{docs}\", with `model` `claude-sonnet-5-5`, `effort` `medium`", said)
-        self.assertIn(f"\"{script}\", with `model` `claude-opus-5-5`, `effort` `medium`", said)
-        self.assertIn("Each brief says them in one line, `Model and effort: ", said)
         brief = "Write the puppeteer pages. Report when done.\nFiles: docs/puppeteer.html"
 
         def requested(title, text):
@@ -1229,46 +1085,30 @@ class ParentEffort(unittest.TestCase):
 
     def test_a_step_whose_item_names_its_session_is_handed_out_to_nobody(self):
         """An item of `update_plan` has the field `session`, by the tool's own text "When you delegated this step to
-        a session you started: that session's short name". p4-phi kept a step's words and status alone, so its line
-        after each task list told an orchestrator to start a session for a step a session was already doing. A step
-        keeps the field, and such a step stays where it is with that as the reason: the line hands out the other
-        work steps alone, no step once every work step names its session, and the nudge on an edit is quiet."""
+        a session you started: that session's short name". A step keeps the field, and such a step stays where it
+        is with that as the reason, so top_groups hands out the other
+        work steps alone, no step once every work step names its session."""
         t, p = self.t, self.t.proj
         port = f"Port the exporter in {p}/src/export/flush.py to the new writer"
         parse = f"Rewrite the parser in {p}/src/parse.py for the new grammar"
-        ctx = self.plan(TOP, {"scope": "first_task", "items": [
+        self.plan(TOP, {"scope": "first_task", "items": [
             {"content": port, "status": "in_progress", "session": " exporter-port "},
             {"content": parse, "status": "pending"}, {"content": "Commit and push", "status": "pending"}]})
-        self.assertIn("(a) step 2 \"Rewrite the parser", ctx)
-        handed, stays = ctx.split("Staying here: ", 1)
-        self.assertNotIn("step 1 \"", handed, "the step a session does is no child's to start")
-        self.assertNotIn("Port the exporter", handed)
-        self.assertIn("1, its `session` field names the session doing it, `exporter-port`", stays)
         kept = plans.load(t.p4, TOP)
         self.assertEqual([st.get("session") for st in kept["steps"]], ["exporter-port", None, None])
-        self.assertIsNone(phi.nudge_step(t.p4, relay._session(t.p4, TOP)), "no nudge to hand step 1 to a worker")
         self.plan(TOP, {"advance": True})
         self.assertEqual(plans.load(t.p4, TOP)["steps"][0].get("session"), "exporter-port", "kept through an advance")
         steps = [{"addr": "1", "content": port, "status": "in_progress", "session": "exporter-port"},
                  {"addr": "2", "content": parse, "status": "pending", "session": "parser"}]
         self.assertEqual(plans.top_groups({"steps": steps}, p)[0], [], "every work step names its session")
-        self.assertEqual(plans.judge({"steps": steps}, p)[0], [])
-        self.assertEqual(plans.top_advice(t.p4, {**relay._session(t.p4, TOP), "splitAdvised": []}, {"steps": steps},
-                                          True, ""), "")
-        self.assertEqual(plans.split_advice(t.p4, {**relay._session(t.p4, TOP), "splitAdvised": []}, {"steps": steps},
-                                            True, ""), "")
         bare = [{k: v for k, v in st.items() if k != "session"} for st in steps]
         self.assertEqual(len(plans.top_groups({"steps": bare}, p)[0]), 2, "with no session named, each is a child's")
-        self.assertEqual(len(plans.judge({"steps": bare}, p)[0]), 2)
 
-    def test_a_start_call_for_a_build_step_from_a_starter_at_medium_names_no_effort_above_medium(self):
+    def test_the_level_a_task_list_is_seen_at_is_kept_and_holds_a_build_childs_effort(self):
         p = self.t.proj
-        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                   f"Rewrite the parser in {p}/src/parse.py for the new grammar", "Commit and push"),
-                        effort={"level": "medium"})
-        self.assertIn("with `model` `claude-opus-5-5`, `effort` `medium`", ctx)
-        for above in ("high", "xhigh", "max"):
-            self.assertNotIn(f"`effort` `{above}`", ctx, "no start is named above its starter's effort")
+        self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
+                             f"Rewrite the parser in {p}/src/parse.py for the new grammar", "Commit and push"),
+                  effort={"level": "medium"})
         self.assertEqual(relay._session(self.t.p4, TOP).get("effort"), "medium", "the level seen is kept on the record")
         plans.PARENT_EFFORT = "low"
         self.assertEqual(plans.child_level(self.BUILD),
@@ -1333,18 +1173,8 @@ class TopOrchestrates(unittest.TestCase):
 
     plan = TreeOfPlans.plan
 
-    def check(self, host, tool, inp, tid, **more):
-        """A tool call's check through `lookup-check`, which the hooks module runs for a checked call."""
-        root = os.path.dirname(SRC)
-        body = {"session_id": CLI[host], "cwd": self.t.proj, "hook_event_name": "PreToolUse", "tool_name": tool,
-                "tool_input": inp, "tool_use_id": tid, **more}
-        r = inproc.run(["sh", os.path.join(root, "hooks", "recall-hook.sh"), "lookup-check"],
-                       input=json.dumps(body), capture_output=True, text=True, timeout=60, env=self.t.env(host))
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)["hookSpecificOutput"].get("additionalContext", "") if r.stdout.strip() else ""
-
     def test_a_step_that_plans_stays_and_a_step_that_builds_code_about_plans_is_work(self):
-        """The advice's own head keeps planning with the orchestrator, and a plan file has one writer."""
+        """Planning stays with the orchestrator, and a plan file has one writer."""
         for stays in ("Enter plan mode", "Research how plans are built and distributed",
                       "Write plan sections with fences and edits", "Put the plan to ezexe for approval",
                       "Plan the exporter's move"):
@@ -1362,131 +1192,38 @@ class TopOrchestrates(unittest.TestCase):
         for stays in ("Start run A and run B", "Launch the two runs of the plan"):
             self.assertEqual(plans.top_stays(stays), "starts a check, test or session, which is orchestration", stays)
 
-    def test_in_plan_mode_a_task_list_is_answered_with_no_start(self):
-        """hooks.md, "Common input fields": `permission_mode` is the current permission mode, `"plan"` among its
-        values. A session in plan mode edits nothing but its plan, so its task list hands out no start."""
-        body = {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                "tool_input": items(f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer"),
-                "tool_response": "Plan updated."}
-        r = self.t.hook("plan", TOP, {**body, "permission_mode": "plan"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("orchestrator of its tree", r.stdout)
-        r = self.t.hook("plan", TOP, {**body, "permission_mode": "default"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("orchestrator of its tree", r.stdout, "the same list out of plan mode is advised as before")
-
-    def test_in_plan_mode_a_feature_step_gets_no_new_orchestrator_and_a_work_step_no_nudge(self):
-        p = self.t.proj
-        body = {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                "tool_input": items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                    "Add a new feature: an importer for the old format"),
-                "tool_response": "Plan updated.", "permission_mode": "plan"}
-        r = self.t.hook("plan", TOP, body)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertNotIn("a new orchestrator of its own", r.stdout)
-        edit = {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"}
-        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_pm1", permission_mode="plan"), "")
-        self.assertTrue(self.check(TOP, "Edit", edit, "toolu_pm2", permission_mode="default"),
-                        "the step is nudged once the session is out of plan mode")
-
-    def test_plan_mode_entered_and_left_inside_a_turn_is_known_and_the_approval_hands_out_the_advice(self):
+    def test_plan_mode_entered_and_left_inside_a_turn_is_known(self):
         """hooks.md names no event for a change of the permission mode, and the hooks module's check hands python
         no mode, so the records of `EnterPlanMode` and `ExitPlanMode` are the word of it. PostToolUse runs
-        "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval."""
-        p = self.t.proj
+        "immediately after a tool completes successfully", so `ExitPlanMode`'s is the approval. The records hand
+        the session nothing."""
         tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}
         r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "EnterPlanMode"})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), r.stderr)
-        self.assertNotIn("orchestrator of its tree", self.plan(TOP, items(
-            f"Port the exporter in {p}/src/export/flush.py to the new writer")) or "", "no mode in the input")
-        edit = {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"}
-        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1"), "", "no nudge while the session plans")
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), True)
         r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode",
                                            "hook_event_name": "PostToolUseFailure"})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a plan sent back is no approval")
-        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1b"), "", "and the session still plans")
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), True, "and the session still plans")
         r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode", "agent_id": "agent-1"})
         self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a subagent's call is not the session's approval")
-        self.assertEqual(self.check(TOP, "Edit", edit, "toolu_in1c"), "", "and the session still plans")
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), True, "and the session still plans")
         r = self.t.hook("plan-mode", TOP, {**tool, "tool_name": "ExitPlanMode"})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("orchestrator of its tree", r.stdout, "the advice plan mode held back, at the approval")
-        self.assertIn("(a) step 1 \\\"Port the exporter", r.stdout)
-        self.assertTrue(self.check(TOP, "Edit", edit, "toolu_in2"), "and the step is nudged again")
-
-    def test_the_approval_names_the_command_that_prints_the_approved_plans_runs(self):
-        """hooks.md, "ExitPlanMode": "In `PostToolUse`, `tool_response` is an object with `plan` and `filePath`
-        fields holding the approved plan". At the approval the session is handed `phi.py sections` with that path."""
-        path = os.path.join(self._tmp.name, "the-plan.md")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("# The exporter's move\n\n## Context\n\nNo worker lands this.\n\n"
-                    "## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Depends on:** none\n\n"
-                    "## 2. The flush\n\n- **Files:** `src/export/flush.py`\n- **Depends on:** 1\n\n"
-                    "## 3. The page\n\n- **Files:** `docs/export.md`\n- **Depends on:** none\n")
-        shown = path.replace("\\", "/")
-        tool = {"hook_event_name": "PostToolUse", "tool_name": "ExitPlanMode", "tool_input": {}}
-
-        def said(host, response):
-            r = self.t.hook("plan-mode", host, {**tool, "tool_response": response})
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"] if r.stdout.strip() else ""
-
-        top = said(TOP, {"plan": "the plan", "filePath": path})
-        self.assertIn(f"the approved plan `{shown}` holds 3 sections that change files, in 2 runs", top)
-        self.assertIn(f'phi.py" sections "{shown}"`', top)
-        self.assertIn("Run it now and make the calls it prints", top)
-        kid = said(A, {"plan": "the plan", "filePath": path})
-        self.assertIn("this session lands the plan itself", kid)
-        self.assertNotIn("Run it now", kid)
-        self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path + ".gone"}), "", "no such file: no line")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("# A plan\n\n## Context\n\nNothing to land.\n")
-        self.assertEqual(said(TOP, {"plan": "the plan", "filePath": path}), "", "no Files line: no run to start")
-
-    def approval_line(self, host):
-        path = os.path.join(self._tmp.name, "the-runs.md")
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("# The runs\n\n## 1. The writer\n\n- **Files:** `src/export/writer.py`\n- **Depends on:** none\n")
-        r = self.t.hook("plan-mode", host, {"hook_event_name": "PostToolUse", "tool_name": "ExitPlanMode",
-                                            "tool_input": {}, "tool_response": {"plan": "p", "filePath": path}})
-        self.assertEqual(r.returncode, 0, r.stderr)
-        return json.loads(r.stdout)["hookSpecificOutput"]["additionalContext"]
-
-    def test_a_started_sessions_approval_line_has_it_start_the_runs_itself_and_report_the_branches(self):
-        """The app refuses a start that runs at once in a turn ezexe's own message did not begin, so a planner
-        another session started lands its runs by integrator subagents, each in a worktree it makes, and hands its
-        starter the branches, which that session reviews, tests, merges and pushes."""
-        kid = self.approval_line(A)
-        for word in ("this session lands the plan itself, in this turn",
-                     "worktree add -b <run> <main checkout>/.claude/worktrees/<run> origin/main",
-                     "one `p4-phi:integrator` subagent on `sonnet` at `medium` effort",
-                     "never sessions", "one commit per section", "SendMessage",
-                     "Neither this session nor any run pushes, merges or raises a version",
-                     "names each branch, its commits and its check results",
-                     "pushes by fast-forward and closes the plan"):
-            self.assertIn(word, kid, word)
-        self.assertEqual(kid.count("builds nothing"), 1, "the exception is said once")
-        self.assertNotIn("put that command in this session's report", kid)
-
-    def test_a_top_sessions_approval_line_is_unchanged(self):
-        top = self.approval_line(TOP)
-        self.assertIn("Run it now and make the calls it prints, in this turn.", top)
-        for word in ("lands the plan itself", "p4-phi:integrator", "worktree add", "builds nothing"):
-            self.assertNotIn(word, top, word)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), r.stderr)
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), False, "the approval ends it")
 
     def test_a_prompts_own_mode_is_over_what_a_plan_mode_tool_said_before_it(self):
         tool = {"hook_event_name": "PostToolUse", "tool_input": {}, "tool_response": {}}
         self.t.hook("plan-mode", TOP, {**tool, "tool_name": "EnterPlanMode"})
         self.t.hook("user-prompt-submit", TOP, {"hook_event_name": "UserPromptSubmit", "prompt": "carry on",
                                                 "permission_mode": "default"})
-        self.assertIn("orchestrator of its tree", self.plan(TOP, items(
-            f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer")))
+        self.assertEqual(phi.mode_now(type("Me", (), {"id": TOP})(), relay._session(self.t.p4, TOP), {}), "default")
         self.assertEqual(hook.PHI_RECORD["EnterPlanMode"], hook.PHI_RECORD["ExitPlanMode"])
 
     def test_the_two_plan_mode_tools_reach_their_record_through_the_runner_as_hooks_json_runs_it(self):
         """recall-hook.sh ends a call that worked and printed no word that reads like an error before python
         starts, unless an arm of it names the call. Run without P4_RECALL_SYNC, as a session runs it, the two tools
-        reach phi.py's record, and the approval's answer comes back beside the result."""
+        reach phi.py's record, and neither answers with a line."""
         runner = os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh")
         env = self.t.env(TOP)
         env.pop("P4_RECALL_SYNC", None)
@@ -1499,22 +1236,12 @@ class TopOrchestrates(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             return r.stdout
 
-        self.assertNotIn("orchestrator of its tree", ran("EnterPlanMode", "toolu_run_in"))
-        self.assertNotIn("orchestrator of its tree", self.plan(TOP, items(
-            f"Port the exporter in {self.t.proj}/src/export/flush.py to the new writer")) or "")
-        self.assertIn("orchestrator of its tree", ran("ExitPlanMode", "toolu_run_out"))
+        self.assertEqual(ran("EnterPlanMode", "toolu_run_in").strip(), "")
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), True)
+        self.assertEqual(ran("ExitPlanMode", "toolu_run_out").strip(), "")
+        self.assertIs(relay._session(self.t.p4, TOP).get("planMode"), False)
 
-    def test_a_top_sessions_work_step_is_advised_to_a_child_and_landing_stays(self):
-        p = self.t.proj
-        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                   "Run the suites, commit and push the exporter"))
-        self.assertIn("orchestrator of its tree", ctx)
-        self.assertIn("(a) step 1 \"Port the exporter", ctx)
-        self.assertIn("`initiation` `user_asked`", ctx)
-        self.assertIn("report when done", ctx)
-        self.assertIn("Staying here: 2, checks or lands the work", ctx)
-        self.assertNotIn("(b)", ctx, "the landing step is no child")
-        self.assertNotIn("orchestrator of its tree", self.plan(TOP, {"advance": True}) or "", "said once per set")
+    def test_a_top_sessions_landing_steps_stay_with_it(self):
         landing = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in
                              enumerate(("Test and commit the port", "Merge and push main", "Release 0.9"))]}
         groups, kept = plans.top_groups(landing, "")
@@ -1530,71 +1257,6 @@ class TopOrchestrates(unittest.TestCase):
         groups, kept = plans.top_groups(plan, "")
         self.assertEqual([a for a, _ in kept], [str(k + 1) for k in range(len(named))])
         self.assertEqual([st["content"] for g in groups for st in g], list(work), "work goes to children")
-
-    def test_a_project_can_keep_its_work_in_the_top_session(self):
-        """p4.json's phi.top_orchestrates false leaves out the top-level rule, its split advice and its nudge."""
-        with open(os.path.join(self.t.p4, "p4.json"), "w", encoding="utf-8") as f:
-            json.dump({"phi": {"top_orchestrates": False}}, f)
-        p = self.t.proj
-        ctx = self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                   "Run the suites, commit and push the exporter"))
-        self.assertNotIn("orchestrator of its tree", ctx or "")
-        self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "tk1"), "",
-                         "no nudge to hand the step to a child")
-        self.assertNotIn("keeps itself free for orchestration",
-                         context(self.t.say(TOP, "carry on", P4_PHI_BOOK="1")))
-
-    def test_a_serial_pair_of_work_steps_becomes_one_child(self):
-        p = self.t.proj
-        ctx = self.plan(TOP, items(f"Write the parser in {p}/src/parse.py",
-                                   f"Then add tests for the parser in {p}/tests/test_parse.py",
-                                   f"Document the store layout in {p}/docs/layout.md with examples",
-                                   "Commit and fast-forward main"))
-        self.assertIn("(a) steps 1, 2 in order, as one child", ctx)
-        self.assertIn("(b) step 3 \"Document", ctx)
-        self.assertNotIn("(c)", ctx)
-        self.assertIn("4, checks or lands the work", ctx)
-        kid = self.plan(A, items(f"Write the parser in {p}/src/parse.py", f"Document it in {p}/docs/layout.md now"))
-        self.assertNotIn("orchestrator of its tree", kid or "", "a child keeps the split rules of a child")
-
-    def test_the_nudge_fires_once_on_a_top_session_edit_and_never_on_git_status(self):
-        p = self.t.proj
-        self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit and push"))
-        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
-        self.assertTrue(os.path.exists(marker), "armed while a work step is in progress")
-        self.assertEqual(self.check(TOP, "Bash", {"command": "git status"}, "toolu_n1"), "")
-        self.assertEqual(self.check(TOP, "Bash", {"command": "git log --oneline -3 && git diff"}, "toolu_n2"), "")
-        self.assertEqual(self.check(TOP, "Read", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n3"), "")
-        said = self.check(TOP, "Edit", {"file_path": f"{p}/src/export/flush.py", "old_string": "a", "new_string": "b"},
-                          "toolu_n4")
-        self.assertIn("this is the orchestrator", said)
-        self.assertIn("hand it to a worker", said)
-        self.assertFalse(os.path.exists(marker), "disarmed once said")
-        self.assertEqual(self.check(TOP, "Edit", {"file_path": f"{p}/src/export/x.py"}, "toolu_n5"), "", "once a step")
-        self.plan(TOP, {"advance": True})
-        self.assertFalse(os.path.exists(marker), "a landing step owes no nudge")
-        self.assertEqual(self.check(TOP, "Bash", {"command": "git commit -am port && git push"}, "toolu_n6"), "")
-        self.t.say(A, "Do the layout")
-        self.plan(A, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit it"))
-        self.assertEqual(self.check(A, "Edit", {"file_path": f"{p}/src/export/flush.py"}, "toolu_n7"), "",
-                         "a child is never nudged")
-
-    def test_a_step_that_only_runs_a_command_goes_to_a_background_command_and_the_plugin_ships_no_runner(self):
-        """tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command
-        as a background task and continue working while it runs.", and interactive-mode.md, "How backgrounding
-        works": "Output is written to a file and Claude can retrieve it using the Read tool". So the plugin ships no
-        agent that runs a command: an orchestrator's step that only runs one is nudged to a background call of its
-        own, and a call that is in the background already gets no line."""
-        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(SRC), "agents", "runner.md")))
-        self.plan(TOP, items("Run test_flush.py", "Commit and push"))
-        run = {"command": "python test_flush.py"}
-        self.assertEqual(self.check(TOP, "Bash", {**run, "run_in_background": True}, "toolu_b1"), "",
-                         "it runs where the rule sends it")
-        said = self.check(TOP, "Bash", run, "toolu_b2")
-        self.assertIn("only runs a command: hand it to a Bash or PowerShell call of its own with "
-                      "`run_in_background: true`", said)
-        self.assertNotIn("p4-phi:", said, "no agent of the plugin's own is named for a command")
-        self.assertEqual(self.check(TOP, "Bash", run, "toolu_b3"), "", "said once for the step")
 
     def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_named_to_its_parent(self):
         t, C = self.t, self.C
@@ -1645,8 +1307,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertEqual([a for a, _ in kept], ["3", "4", "5"],
                          "only landing and managing a child stay with the orchestrator")
 
-    def test_one_function_answers_for_the_advice_and_the_nudge(self):
-        """top_groups and nudge_step take one answer, top_stays, so the advice and the nudge never disagree."""
+    def test_top_stays_tells_a_step_the_orchestrator_keeps_from_one_that_goes_to_a_child(self):
         for work in ("Verify the tree", "Confirm the store holds no stray file", "Validate the manifest in src/m.json",
                      "Check 3: confirm the docs match the code", "Audit the hooks for a missing matcher",
                      "Inspect the anchor for stale nodes", "Write the sync script in src/sync.py"):
@@ -1655,12 +1316,6 @@ class TopOrchestrates(unittest.TestCase):
                       "Verify the sub-session's report", "Check the session's own landed work", "Merge and push main",
                       "Confirm the fix, then commit", "Wait until the port lands", "Tell the docs session to go"):
             self.assertTrue(plans.top_stays(stays), stays)
-        self.plan(TOP, items("Verify phi's session tree matches the app", "Sync the store"))
-        s = relay._session(self.t.p4, TOP)
-        self.assertEqual((phi.nudge_step(self.t.p4, s) or {}).get("content"),
-                         "Verify phi's session tree matches the app", "the orchestrator is nudged to hand it off")
-        self.plan(TOP, {"advance": True})
-        self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "syncing a store is its own")
 
     def test_seeing_landed_work_through_stays_and_a_watch_of_anything_else_is_work(self):
         """Seen in an orchestrator on p4-phi 0.11.133 and 0.11.134: for its steps "Watch GitHub's run on piece D"
@@ -1684,20 +1339,13 @@ class TopOrchestrates(unittest.TestCase):
             self.assertEqual(plans.top_stays(work), "", work)
         # a pipeline that passes its schema test is code of the repository, and none of the session's own work
         self.assertEqual(plans.top_stays("Check the data pipeline passes the schema test"), "")
-        # the advice gives a child only the watch that is work, and the split advice keeps an update that names a path
+        # a child is given only the watch that is work
         steps = [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
             "Watch GitHub's run on piece D", "Update the installed plugins from lbiza/plugins/p4-phi",
             "Watch the lock file in src/lock.py while two hooks write"))]
         groups, kept = plans.top_groups({"steps": steps}, "")
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["3"]])
         self.assertEqual([a for a, _ in kept], ["1", "2"])
-        self.assertEqual(dict(plans.judge({"steps": steps}, "")[1])["2"], "checks or lands the other steps' work")
-        # and the nudge is silent on the watch, and speaks on the work step after it
-        self.plan(TOP, items("Watch GitHub's run on piece D", "Port the CLI in src/cli.py"))
-        self.assertIsNone(phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)), "the watch is its own")
-        self.plan(TOP, {"advance": True})
-        self.assertEqual((phi.nudge_step(self.t.p4, relay._session(self.t.p4, TOP)) or {}).get("content"),
-                         "Port the CLI in src/cli.py")
 
     def test_queueing_sending_passing_or_handing_to_a_session_is_orchestration(self):
         groups, kept = plans.top_groups({"steps": [
@@ -1855,22 +1503,12 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(B, plans._children(t.p4, TOP), "a record deleted from the app leaves the session tree")
 
     def test_a_session_management_step_stays_at_the_top(self):
-        p = self.t.proj
-        ctx = self.plan(TOP, items("Archive the finished orchestrator-rule child",
-                                   f"Port the exporter in {p}/src/export/flush.py to the new writer",
-                                   "Relay the new layout to the docs session", "Start a child session for the docs",
-                                   "Review the port child's report", "Message the layout child about the move"))
-        self.assertIn("(a) step 2 \"Port the exporter", ctx)
-        self.assertNotIn("(b)", ctx, "no session-management step is advised to a child")
-        self.assertNotIn("Archive the finished", ctx.split("Staying here")[0])
         groups, kept = plans.top_groups({"steps": [
             {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
                 "Archive the finished orchestrator-rule child", "Check the docs child's progress",
                 "Send the exporter child its brief", "Start the dev server and port the CLI in src/cli.py"))]}, "")
         self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]], "starting a server is work")
-        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
-        self.assertFalse(os.path.exists(marker), "archiving a child owes no nudge")
         # ezexe/p4#203: the tree's levels are named worker and coworker, and a step that manages one stays here too
         self.assertEqual(plans.top_stays("Start a worker for the docs"), "manages a worker, which is orchestration")
         groups, kept = plans.top_groups({"steps": [
@@ -1880,21 +1518,6 @@ class TopOrchestrates(unittest.TestCase):
                 "Stop the worker pool in src/pool.py"))]}, "")
         self.assertEqual([a for a, _ in kept], ["1", "2", "3", "4"])
         self.assertEqual([[st["addr"] for st in g] for g in groups], [["5", "6"]], "a worker pool is work, not a session")
-
-    def test_phis_own_commands_are_never_nudged(self):
-        p = self.t.proj
-        self.plan(TOP, items(f"Port the exporter in {p}/src/export/flush.py to the new writer", "Commit and push"))
-        marker = os.path.join(self.t.p4, "phi", ".nudge", CLI[TOP])
-        self.assertTrue(os.path.exists(marker))
-        for k, cmd in enumerate((
-                'P=E:/projects/p4/lbiza/plugins/p4-phi/scripts/phi.py; python -I -X utf8 "$P" note "a; b > c" --source x',
-                'python -I -X utf8 "E:/p4/scripts/phi.py" done "ran the suites"',
-                'cd /e/p4 && export P=/e/p4/phi.py && python "${P}" done ok',
-                '$P = "E:/p4/phi.py"; & python $P note "x"')):
-            self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"toolu_p{k}"), "", cmd)
-        self.assertTrue(os.path.exists(marker), "still armed")
-        self.assertIn("this is the orchestrator",
-                      self.check(TOP, "Bash", {"command": 'P=x; python "$P" note y && make'}, "toolu_p9"))
 
     def test_top_level_sessions_hear_each_other_as_siblings_and_an_archived_one_drops_out(self):
         t, T2 = self.t, "local_top00002"
@@ -2481,19 +2104,12 @@ class WaitsOnReports(unittest.TestCase):
         self._tmp.cleanup()
 
     plan = TreeOfPlans.plan
-    check = TopOrchestrates.check
 
     def test_a_step_that_waits_on_reports_stays_with_the_orchestrator(self):
-        t = self.t
         groups, kept = plans.top_groups({"steps": [{"addr": str(k + 1), "content": c, "status": "pending"}
                                                    for k, c in enumerate(self.STEPS)]}, "")
-        self.assertEqual(groups, [], "top_advice hands neither to a child")
+        self.assertEqual(groups, [], "neither goes to a child")
         self.assertEqual(kept, [("1", plans.AWAITS_WHY), ("2", plans.AWAITS_WHY)])
-        s = relay._session(t.p4, TOP)
-        self.assertEqual(plans.top_advice(t.p4, {**s, "splitAdvised": []}, {"steps": [
-            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(self.STEPS)]}, True, ""), "")
-        ctx = self.plan(TOP, items(*self.STEPS)) or ""
-        self.assertNotIn("Hand its work steps to workers", ctx)
 
     def test_other_steps_stay_or_go_by_the_same_rules(self):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
@@ -2504,23 +2120,6 @@ class WaitsOnReports(unittest.TestCase):
                      "Collect the timings of the build in out/t.csv", "Verify phi's session tree matches the app",
                      "Check 1: nothing hidden in AppData", "Write the report of the run in docs/run.md"):
             self.assertEqual(plans.top_stays(work), "", work)
-
-    def test_a_top_sessions_read_only_checks_of_its_trees_are_not_handed_off_while_they_are_few(self):
-        t = self.t
-        self.plan(TOP, items("Port the exporter in src/export/flush.py to the new writer", "Merge and push main"))
-        reads = ("git log --oneline -5", "gh issue list -R ezexe/p4 --state open", "gh issue view 55 -R ezexe/p4",
-                 "git status --short", "git -C ../p4 log -1", "gh pr list")
-        for k, cmd in enumerate(reads):
-            self.assertEqual(self.check(TOP, "Bash", {"command": cmd}, f"tu-r{k}"), "", cmd)
-        said = self.check(TOP, "Bash", {"command": "git log --stat -3"}, "tu-r7")
-        self.assertIn("has now run 7 read-only checks of its trees here", said)
-        self.assertIn("hand it to the plugin's subagent `p4-phi:finder`, which runs on `haiku` at `low` effort as its file says", said)
-        self.assertNotIn("worker", said)
-        self.assertEqual(self.check(TOP, "Bash", {"command": "git log -1"}, "tu-r8"), "", "said once for the step")
-        self.assertIn("is work: hand it to a worker",
-                      self.check(TOP, "Bash", {"command": "sed -i s/a/b/ src/export/flush.py"}, "tu-w1"),
-                      "a working command is still nudged")
-
 
 class DoerAndObject(unittest.TestCase):
     """Messaging or handing to sessions stays with the orchestrator; running checks yourself goes to a child."""

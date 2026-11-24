@@ -1021,18 +1021,6 @@ class NewTask(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), "", "phi.py detach with no id: itself")
 
-    def test_a_feature_step_in_a_broadly_tasked_top_is_a_new_topic(self):
-        """A broad task does not swallow every feature step of its task list."""
-        self.say(TOP, "Sort out the claude dev desktop app files in appdata or temp, and the plugins around them")
-        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                                      "tool_input": {"items": [{"content": "Build the child-session issue loop feature",
-                                                                "status": "pending"},
-                                                               {"content": "Move the tmp folders", "status": "pending"}]},
-                                      "tool_response": "Plan updated."}, P4_PHI_BOOK="1")
-        ctx = context(r)
-        self.assertIn("step 1 \"Build the child-session issue loop feature\" is a new feature", ctx)
-        self.assertNotIn("step 2 \"Move", ctx.split("is a new feature")[0])
-
     def test_a_detached_top_level_session_is_never_counted_as_archived_on_its_former_parent(self):
         """Counting as archived, the archive lines and parent steps read spawnedFrom.sessionId, never its `from`."""
         import plans
@@ -1077,58 +1065,6 @@ class NewTask(unittest.TestCase):
         self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished a turn</side-sessions-event>"), "")
         self.assertEqual(self.say(TOP, "<task-notification>done</task-notification>"), "")
 
-    RESTATED = ("refuses", "`user_asked`", "`own_initiative`", "suggested task card", "start request", "as said before")
-
-    def split_line(self, text, mark):
-        """The one piece of a prompt's context that holds `mark`, p4-phi's line for a turn another session began."""
-        got = [p for p in text.split("\n\n") if mark in p]
-        self.assertEqual(len(got), 1, text)
-        return got[0]
-
-    def test_a_turn_another_session_started_is_told_only_what_the_start_tool_lacks(self):
-        """What a turn ezexe's words did not start may start, and the card it proposes, are the start tool's own
-        text, so p4-phi's line there restates neither. It holds the files a brief names on its `Files:` line and,
-        for an orchestrator, the brief line on which a new orchestrator is detached to top level. It keeps no state, so
-        each such turn carries the same line, after a compaction too."""
-        self.say(TOP, TASK)
-        mark = "outside this orchestrator's task gets a new orchestrator of its own"
-        line = self.split_line(
-            self.say(TOP, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'), mark)
-        self.assertIn(f"carries the line \"{phi.NEW_TOP_BRIEF}\"", line)
-        self.assertIn("names the files it covers on a line `Files: <paths>`", line)
-        self.assertNotIn("write set", line)
-        self.assertIn("`mcp__ccd_session_mgmt__detach_session` with `\"self\"`", line)
-        for restated in self.RESTATED:
-            self.assertNotIn(restated, line)
-        self.assertLess(len(line), 700)
-        again = self.say(TOP, '<cross-session-message from="local_x">and Z as well</cross-session-message>')
-        self.assertEqual(self.split_line(again, mark), line, "no state: the same line at each such turn")
-        self.assertNotIn("splitTold", jload(os.path.join(self.t.dir(TOP), "session.json")))
-        self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "compact"}, P4_PHI_BOOK="1")
-        whole = self.say(TOP, '<cross-session-message from="local_x">and W</cross-session-message>')
-        self.assertEqual(self.split_line(whole, mark), line, "and after a compaction")
-        self.assertEqual(self.say(TOP, "<side-sessions-event>a session finished</side-sessions-event>"), "")
-        self.say(KID, HANDED)
-        kid = self.split_line(
-            self.say(KID, '<cross-session-message from="local_x">please also look at Y</cross-session-message>'),
-            "a task of its own in this turn")
-        self.assertIn("a brief that names the files it covers on a line `Files: <paths>`", kid)
-        self.assertIn("`Model and effort: <model> at <effort> effort`", kid)
-        for restated in self.RESTATED:
-            self.assertNotIn(restated, kid)
-        from unittest import mock
-        import plans
-        with mock.patch.object(phi, "ASK_ROUTE", ""):
-            route, asked = phi.new_top_route(False), phi.new_top_route(True)
-        self.assertIn("a line `Files: <paths>`", route, "the files it covers, which the start tool's text lacks")
-        self.assertIn("Both moves are needed: the app's detach to top level", route, "and the detach")
-        for restated in self.RESTATED + ("`initiation`",):
-            self.assertNotIn(restated, route)
-            self.assertNotIn(restated, plans.CARD_EACH)
-        self.assertIn("`initiation` `user_asked`", asked, "a turn ezexe began names the start it asked for")
-        with open(phi.__file__, encoding="utf-8") as f:
-            self.assertNotIn("splitTold", f.read(), "the once-then-short state is gone")
-
     def test_a_deep_or_full_session_starts_no_session(self):
         """The caps: three deep in the tree, or eight live children."""
         home = self.t.p4
@@ -1147,6 +1083,63 @@ class NewTask(unittest.TestCase):
                   json.dumps({"sessionId": f"local_k{k}", "spawnedFrom": {"sessionId": TOP}}))
         self.assertIn("live sessions of its own", phi.caps_text(home, phi.load_session(home, TOP)))
 
+    def start(self, host, brief="Check what the exporter's flush does and report it.\nFiles: none"):
+        """What p4-phi's hook answers a start call with: its decision and reason, both '' when it says nothing."""
+        call = {"initiation": "user_asked", "title": "the check", "context": "fresh", "use_worktree": False,
+                "prompt": brief, "background": "The exporter top holds the port; this child takes the flush. " * 2}
+        r = self.t.hook("start-advice", host, {"hook_event_name": "PreToolUse",
+                                               "tool_name": "mcp__ccd_session__start_session", "tool_input": call})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout).get("hookSpecificOutput", {}) if r.stdout.strip() else {}
+        return out.get("permissionDecision", ""), out.get("permissionDecisionReason", "")
+
+    def test_a_start_from_a_session_at_phi_max_depth_is_refused_with_the_caps_words(self):
+        """The caps are held at the start: a session as deep as phi.MAX_DEPTH starts none, and one a level above
+        may."""
+        up = TOP
+        for k, sid in enumerate(("local_d1", "local_d2", "local_d3")):
+            self.t.record(sid, up, title=f"depth {k + 1}")
+            self.say(sid, "Task:\nCheck the exporter. Report when done.\nFiles: none")
+            up = sid
+        self.assertEqual(self.start("local_d2"), ("", ""), "two deep: one more level is allowed")
+        decision, why = self.start("local_d3")
+        self.assertEqual(decision, "deny")
+        self.assertEqual(why, "phi (p4-phi): this start is refused: " + phi.caps_text(
+            self.t.p4, phi.load_session(self.t.p4, "local_d3")))
+        self.assertIn("This session is 3 deep in the session tree, the most p4-phi allows", why)
+
+    def test_a_start_from_a_session_with_phi_max_children_live_sessions_is_refused(self):
+        """A session with phi.MAX_CHILDREN live sessions of its own starts no ninth, and one with fewer may."""
+        home = self.t.p4
+        self.say(TOP, TASK)
+        self.assertEqual(self.start(TOP), ("", ""), "below both caps")
+        for k in range(phi.MAX_CHILDREN):
+            write(os.path.join(home, "phi", "sessions", f"local_k{k}", "session.json"),
+                  json.dumps({"sessionId": f"local_k{k}", "spawnedFrom": {"sessionId": TOP}}))
+        decision, why = self.start(TOP)
+        self.assertEqual(decision, "deny")
+        self.assertIn("this start is refused: This session has ", why)
+        self.assertIn("live sessions of its own, the most p4-phi allows", why)
+
+    def test_a_task_list_hands_a_top_session_its_boundary_text_alone_and_the_approval_hands_it_nothing(self):
+        """update_plan from a top session with three steps answers with what plans.record says of the list, and
+        ExitPlanMode answers with nothing."""
+        p = self.t.proj
+        self.say(TOP, TASK)
+        steps = [{"content": f"Port the exporter in {p}/src/export/flush.py to the new writer", "status": "in_progress"},
+                 {"content": f"Rewrite the parser in {p}/src/parse.py for the new grammar", "status": "pending"},
+                 {"content": "Commit and push", "status": "pending"}]
+        r = self.t.hook("plan", TOP, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                      "tool_input": {"items": steps, "scope": "first_task"},
+                                      "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        said = context(r)
+        for word in ("start_session", "orchestrator of its tree", "new feature", "documented terms", "worker"):
+            self.assertNotIn(word, said, word)
+        r = self.t.hook("plan-mode", TOP, {"hook_event_name": "PostToolUse", "tool_name": "ExitPlanMode",
+                                           "tool_input": {}, "tool_response": {"plan": "p"}})
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), r.stderr)
+
     def test_a_project_sets_its_caps_in_p4_json(self):
         """ezexe/p4#125: the caps a project would decide are p4.json `phi` keys; a value of the wrong type or out of
         range keeps the default, and a store that sets none gets the defaults back."""
@@ -1156,11 +1149,11 @@ class NewTask(unittest.TestCase):
         self.say(TOP, TASK)
         write(os.path.join(home, "p4.json"), json.dumps({"phi": {
             "max_depth": 1, "max_children": 2, "sibling_turns": 1, "own_turns": 1, "chain_max": 2, "turn_steps": 4,
-            "tree_checks": 2, "keep_going_max": 1, "watch_s": 10, "stale_s": 3600}}))
+            "keep_going_max": 1, "watch_s": 10, "stale_s": 3600}}))
         try:
             phi.project_conf(home)
-            self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.OTHERS, phi.OWN, phi.CHAIN_MAX, phi.TURN_STEPS,
-                              phi.TREE_CHECKS), (1, 2, 1, 1, 2, 4, 2))
+            self.assertEqual((phi.MAX_DEPTH, phi.MAX_CHILDREN, phi.OTHERS, phi.OWN, phi.CHAIN_MAX, phi.TURN_STEPS),
+                             (1, 2, 1, 1, 2, 4))
             self.assertEqual((plans.KEEP_GOING_MAX, puppeteer.WATCH_S, puppeteer.STALE_S), (1, 10.0, 3600.0))
             write(os.path.join(home, "phi", "sessions", KID, "session.json"),
                   json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}, "task": "t"}))
@@ -1382,9 +1375,7 @@ class Rules(unittest.TestCase):
         `initialUserMessage` strings, and its plain stdout, are capped at 10,000 characters", and over the limit
         "Claude Code saves the output to a file in the session directory. It replaces the output with the file path
         and a preview of up to the first 2,000 characters." So p4-phi keeps no ceiling beside a prompt and no page
-        for what would pass one: every piece passes whole. What the app's cut lacks, by the same section, "Claude
-        Code doesn't ask Claude to read the file, so keep anything Claude must always see within the cap": the
-        lines that ask the session to act lead, and one line asks for the file only when they pass the preview."""
+        for what would pass one: every piece passes whole, and the lines that ask the session to act lead."""
         self.assertNotIn("prompt_chars", phi.SETTINGS)
         self.assertEqual((phi.APP_CAP, phi.APP_PREVIEW), (APP_CAP, 2000))
         parts = ["first piece " + "a" * 1500, "second piece " + "b" * 3000, "act: third piece " + "c" * 900,
@@ -1397,36 +1388,16 @@ class Rules(unittest.TestCase):
         self.assertEqual(phi.acting_first(["x", "", "y"]), "x\n\ny")
         long_acts = ["act one " + "e" * 1200, "act two " + "f" * 1200]
         text = phi.acting_first(parts + long_acts, long_acts)
-        self.assertTrue(text.startswith(phi.READ_ALL + "\n\n" + long_acts[0]),
-                        "the acting lines alone pass the preview: the line that asks for the app's file leads them")
-        short = phi.acting_first(long_acts + ["rest"], long_acts)
-        self.assertLessEqual(len(short), APP_CAP)
-        self.assertNotIn(phi.READ_ALL, short, "under the cap the app shows all of it")
+        self.assertTrue(text.startswith("\n\n".join(long_acts)), "the acting lines lead, and no line is added")
+        self.assertEqual(len(text), len("\n\n".join(parts + long_acts)), "every piece whole")
         self.t.say(TOP, TASK)
         for k in range(40):
             relay.warn(self.t.p4, TOP, f"note:{k}", f"warning {k:02d} of forty: " + "a sibling changed the layout. " * 10)
         ctx = context(self.t.say(TOP, "what now?"))
         self.assertGreater(len(ctx), APP_CAP)
-        self.assertTrue(ctx.startswith(phi.READ_ALL + "\n\n" + relay.STOP_HEAD + "(1) warning 00 of forty"), ctx[:300])
+        self.assertTrue(ctx.startswith(relay.STOP_HEAD + "(1) warning 00 of forty"), ctx[:300])
         self.assertIn("(40) warning 39 of forty", ctx, "every warning whole")
         self.assertNotIn("did not fit", ctx)
-
-    def test_the_split_line_is_said_once_and_not_in_plan_mode_or_beside_a_report(self):
-        """A turn is kept only at Stop, and hooks.md, "UserPromptSubmit", has the hooks run on "A background subagent
-        reporting back to the session that started it", so until 0.11.146 a worker was told to plan its split again
-        beside each report that came before its first turn ended, and was told so in plan mode, where it starts
-        nothing that writes."""
-        line = "phi (p4-phi): this is this session's first message"
-        self.t.say(TOP, TASK)
-        body = {"hook_event_name": "UserPromptSubmit", "prompt": HANDED}
-        planning = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "plan"}))
-        self.assertNotIn(line, planning, "a session in plan mode starts nothing that writes")
-        first = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "default"}))
-        self.assertIn(line, first, "out of plan mode before its first turn ended: said")
-        report = context(self.t.say(KID, "<task-notification>done</task-notification>"))
-        self.assertNotIn(line, report, "an event's prompt carries no such line")
-        again = context(self.t.hook("user-prompt-submit", KID, {**body, "permission_mode": "default"}))
-        self.assertNotIn(line, again, "said once")
 
     def test_a_fresh_childs_background_comes_with_its_first_message_and_its_start_hands_no_rule(self):
         self.t.say(TOP, TASK)
@@ -1437,10 +1408,9 @@ class Rules(unittest.TestCase):
         self.assertIn("background for this session", first)
         self.assertLessEqual(len(first), APP_CAP)
 
-    def test_the_start_and_first_message_text_past_9500_characters_passes_whole_act_lines_first(self):
+    def test_the_start_and_first_message_text_past_7500_characters_passes_whole(self):
         """ezexe/p4#243 D9: p4-phi cuts no text of its own at a session's start or first message; past 10,000
-        characters the app's own overflow file takes it, so the lines that ask the session to act come first, inside
-        the app's preview, and the rest follows whole."""
+        characters the app's own overflow file takes it."""
         t = self.t
         write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"background_chars": 12000}))
         t.say(TOP, TASK)
@@ -1450,19 +1420,17 @@ class Rules(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
         t.stop(TOP, TASK, report="Half done: " + "the flush writes the ports table. " * 40)
         first = context(t.say(KID, HANDED))
-        self.assertGreater(len(first), 9500)
-        self.assertIn("Each turn's report is kept either way", first, "the background's last line, whole")
+        self.assertGreater(len(first), 7500)
+        self.assertIn("The page this comes from: ", first, "the background's last line, whole")
         self.assertNotIn("did not fit", first)
-        self.assertLess(first.index("phi (p4-phi): this is this session's first message"),
-                        first.index("background for this session"), "the act line leads, inside the app's preview")
         later = context(t.say(KID, "go on"))
         self.assertNotIn("did not fit", later, "a later prompt has no ceiling of p4-phi's own either")
         calls = [("Edit", {"file_path": f"src/export/flush_part_{k}.py"}, "ok") for k in range(12)]
         for n in range(3):                                          # its own turns, which a clear's start hands whole
             t.stop(KID, HANDED, calls, "Ported: " + "the flush writes the ports table. " * 12, uuid=f"k{n}")
         start = context(t.hook(START, KID, {"hook_event_name": "SessionStart", "source": "clear"}, P4_PHI_BOOK="1"))
-        self.assertGreater(len(start), 9500)
-        self.assertIn("Each turn's report is kept either way", start, "the background's last line, whole")
+        self.assertGreater(len(start), 7500)
+        self.assertIn("The page this comes from: ", start, "the background's last line, whole")
         self.assertNotIn("act-don't-wait", start, "no rule is handed at a start")
 
     def test_an_orchestrators_long_command_runs_as_sent(self):

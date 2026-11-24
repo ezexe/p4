@@ -1294,7 +1294,7 @@ def prompter(home, s, req, read, base):
     if parent:
         lines += checkout_lines(base)
     tests = test_files(base, paths)
-    lines += [phi.RESEARCH, "", phi.DECIDE, ""]
+    lines += [phi.DECIDE, ""]
     if tests:                                       # the tests the change touches, and no whole suite
         lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
                   "Done looks like: the change made, those test files passing, committed and reported.",

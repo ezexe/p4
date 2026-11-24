@@ -144,10 +144,10 @@ class P4Conf(unittest.TestCase):
             self.assertNotIn(name, err.getvalue().split("kept as they are:")[-1], name)
 
     def test_a_store_gains_the_tree_caps_a_project_sets(self):
-        """ezexe/p4#125: the ten caps of the session tree are phi keys of p4.json, written into a store that lacks
+        """ezexe/p4#125: the nine caps of the session tree are phi keys of p4.json, written into a store that lacks
         them with the values the code had, and a value set by hand stays."""
         caps = {"max_depth": 3, "max_children": 8, "sibling_turns": 5, "own_turns": 3, "chain_max": 8,
-                "turn_steps": 12, "tree_checks": 6, "keep_going_max": 2, "watch_s": 5.0, "stale_s": 86400.0}
+                "turn_steps": 12, "keep_going_max": 2, "watch_s": 5.0, "stale_s": 86400.0}
         d = json.loads(json.dumps(p4conf.DEFAULTS))
         for k in caps:
             d["phi"].pop(k)
@@ -166,12 +166,13 @@ class P4Conf(unittest.TestCase):
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
                 11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63", 15: "95656cb9ae6e2f7f", 16: "b5d9965d5d399131",
-                17: "6a45398a0838bc56", 18: "90cd6fc0182885a7"}
+                17: "6a45398a0838bc56", 18: "90cd6fc0182885a7", 19: "84674b30334aba51"}
         # append only: one more for each GEN. 11 came with a key of the keeper, 12 with the plans folder's move,
         # 13 with the default phi.plan_mode, and 14 with the default phi.goal_review
         # and 15 with the default phi.new_issues, and 16 with the removal of the group recall, and 17 with the
-        # defaults of p4.json held by the plugin that reads them: this file's are the `phi` section's, and 18 with the
-        # removal of the default phi.act_dont_wait
+        # defaults of p4.json held by the plugin that reads them: this file's are the `phi` section's, 18 with the
+        # removal of the default phi.act_dont_wait, and 19 with the removal of the defaults phi.top_orchestrates,
+        # phi.levels and phi.tree_checks
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -336,10 +337,10 @@ class SettingsVariables(unittest.TestCase):
             with mock.patch.dict(os.environ, {"P4_PHI_MAX_DEPTH": text}), contextlib.redirect_stderr(err):
                 self.assertEqual(p4conf.load(p4)["phi"]["max_depth"], want, f"P4_PHI_MAX_DEPTH={text!r}")
             self.assertEqual(bool(err.getvalue()), want == 5 and text != "", err.getvalue())
-        with mock.patch.dict(os.environ, {"P4_PHI_LEVELS": "0", "P4_PHI_WATCH_SECONDS": "10",
+        with mock.patch.dict(os.environ, {"P4_PHI_GOAL_REVIEW": "0", "P4_PHI_WATCH_SECONDS": "10",
                                           "P4_PHI_TRACK": "1", "P4_PHI_ISSUES": "yes"}):
             got = p4conf.load(p4, warn=False)
-        self.assertIs(got["phi"]["levels"], False)
+        self.assertIs(got["phi"]["goal_review"], False)
         self.assertEqual(got["phi"]["watch_s"], 10)
         self.assertIs(got["phi"]["track"], True)
         self.assertIs(got["phi"]["issues"], True, "yes is no bool: the default")
@@ -379,7 +380,7 @@ class SettingsVariables(unittest.TestCase):
         from unittest import mock
         p4 = self.store({})
         bad = {"P4_PHI_CHILD_LEVELS": "[1]", "P4_PHI_CLEAR_AT": "true",
-               "P4_PHI_WATCH_SECONDS": '"high"', "P4_PHI_LEVELS": "loud",
+               "P4_PHI_WATCH_SECONDS": '"high"', "P4_PHI_GOAL_REVIEW": "loud",
                "P4_PHI_TRACK": "all", "P4_PHI_MAX_DEPTH": "[" * 20000}
         plain = json.dumps(p4conf.load(p4, write=False, env=False), sort_keys=True)
         for name, text in bad.items():

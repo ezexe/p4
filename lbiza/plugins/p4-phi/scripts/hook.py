@@ -279,11 +279,11 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "mcp__ccd_session_mgmt__archive_session": "self-archive",
              "SendMessage": "go-guard", "mcp__ccd_session_mgmt__send_message": "go-guard",
              "Bash": ("cards-guard", "issue-guard", "store-guard", "force-guard", "branch-guard", "restart-check",
-                      "nudge", "puppeteer-tool"),
+                      "puppeteer-tool"),
              "PowerShell": ("cards-guard", "issue-guard", "store-guard", "force-guard", "branch-guard",
-                            "restart-check", "nudge", "puppeteer-tool"),
-             "Edit": ("path-guard", "nudge", "puppeteer-tool"), "Write": ("path-guard", "nudge", "puppeteer-tool"),
-             "NotebookEdit": ("path-guard", "nudge", "puppeteer-tool")}
+                            "restart-check", "puppeteer-tool"),
+             "Edit": ("path-guard", "puppeteer-tool"), "Write": ("path-guard", "puppeteer-tool"),
+             "NotebookEdit": ("path-guard", "puppeteer-tool")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",
               "Edit": "memory-gap", "TaskStop": "task-stop", "EnterPlanMode": "plan-mode",
               "ExitPlanMode": "plan-mode"}
