@@ -59,6 +59,12 @@ No worker lands this.
 """
 
 
+TOP = ("# Top\n\n## Context\n\nNo planner.\n\n"
+       "## 1. Alpha\n\n- **Files:** `a.py`\n- **Depends on:** none\n- **Done when:** ALPHA-DONE\n\n"
+       "```md\n## inside the fence\n```\n\n"
+       "## 2. Beta\n\n- **Files:** `b.py`\n- **Depends on:** 1\n- **Done when:** BETA-DONE\n")
+
+
 class Sections(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -69,6 +75,19 @@ class Sections(unittest.TestCase):
 
     def tearDown(self):
         self._tmp.cleanup()
+
+    def test_a_planners_brief_holds_its_own_section_and_the_lines_that_route_it_to_an_interactive_planner(self):
+        import plans
+        title, found = sections.parse(TOP)
+        brief = sections.plan_brief(title, found[0])
+        self.assertIn("ALPHA-DONE", brief)
+        for other in ("BETA-DONE", "b.py", "Beta"):
+            self.assertNotIn(other, brief)
+        self.assertEqual(plans.worker_mode_for(brief)[0], "interactive")
+        self.assertTrue(plans.is_planner(title, brief))
+        self.assertEqual(sections.plan_name(title, found[1]), "Top, section 2: Beta")
+        self.assertIn("```md\n## inside the fence\n```", found[0]["text"], "the fence stays in the text, whole")
+        self.assertEqual([s["n"] for s in found], ["1", "2"], "a heading inside a fence is no section")
 
     def test_a_section_is_a_heading_outside_a_fence_that_names_files(self):
         title, found = sections.parse(PLAN, self.base)

@@ -97,7 +97,7 @@ def parse(text, base=""):
         else:                                      # the first number no heading opens with and no section took
             num = next(str(i) for i in range(1, len(marks) + 2) if str(i) not in taken)
             taken.add(num)
-        out.append({"n": num, "head": m.group(1), "files": files, "said": said,
+        out.append({"n": num, "head": m.group(1), "text": raw[m.end():end].strip(), "files": files, "said": said,
                     "after": re.findall(r"\d+", after.group(1)) if after else [],
                     # `Checks: none` names no check, as `Files: none` names no file
                     "checks": checks.group(1).rstrip(".") if checks and not starts.NO_FILES.match(checks.group(1))
@@ -299,6 +299,29 @@ def team(group):
 
 def name(title, run):
     return f"{title}: section{'s' if len(run) > 1 else ''} " + ", ".join(s["n"] for s in run)
+
+
+def plan_name(title, s):
+    """The title of a section's own plan: the top plan's title, the section's number and its heading."""
+    return f"{title}, section {s['n']}: " + re.sub(r"^\s*\d+[.):]?\s*", "", s["head"])
+
+
+def plan_brief(title, s):
+    """The brief of the team planner of one section: the lines plans.PLANNER and plans.APPROVES route to an
+    interactive planner, the section's own text and nothing of any other section."""
+    task = f"Plan section {s['n']} of the plan {title}: " + re.sub(r"^\s*\d+[.):]?\s*", "", s["head"])
+    return "\n".join([
+        f"# {task}", "", f"Task: {task}.", "", "## The task", "",
+        "This session starts in plan mode.", "ezexe approves the plan with ExitPlanMode.", "",
+        "You are the team planner of one section of a top plan, and you see only this section. Write it as a "
+        "whole plan of its own by the skill plan-planner, read it in rounds with your three teammates fences, "
+        "sources and checks, and put it to ezexe with ExitPlanMode.", "",
+        f"The plan's title is: {plan_name(title, s)}", "", "The brief, from the orchestrator's top plan:", "",
+        s["text"], "",
+        "Write your report, with a line `Plan file: <the plan file's full path>` and its rounds, before you call "
+        "ExitPlanMode.",
+        "Done looks like: the section's plan is written, read in rounds by the team, and put to ezexe with "
+        "ExitPlanMode."])
 
 
 def brief(path, title, run, base="", where=None):
