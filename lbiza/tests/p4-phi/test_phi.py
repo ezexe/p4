@@ -2755,6 +2755,18 @@ class TerminalWorker(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(self.node())), files)
         self.assertEqual({f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}, before)
 
+    def test_land_of_a_plan_whose_every_run_is_landed_prints_the_audit_step_and_the_close(self):
+        with open(self.plan, "w", encoding="utf-8") as f:
+            f.write(WORKER_PLAN.replace("- **Checks:**", "- **Evidence:** abc1234, written\n- **Checks:**")
+                    .replace("- **Depends on:** 1", "- **Evidence:** abc1234, written\n- **Depends on:** 1"))
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        for word in ("`code-review`", "`p4-phi:check`", "`-p` worker", "plan close", "--checkout"):
+            self.assertIn(word, ran.stdout, word)
+        self.assertNotIn("no section of that plan is left", ran.stderr)
+        self.assertFalse(os.path.isdir(os.path.join(self.home, "phi", "tree")), "no worker is started")
+
     def test_land_claims_a_worker_node_under_the_planner_and_leaves_names_it(self):
         self.mode("local_plan0001", "auto")
         self.assertEqual(self.run_phi("--land").returncode, 0)
@@ -2848,6 +2860,60 @@ class TerminalWorker(unittest.TestCase):
         now[0] = 0.0
         self.assertEqual(coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
                                               sleep=lambda s: now.__setitem__(0, now[0] + s)), ("long", 30))
+
+
+class PlanClose(unittest.TestCase):
+    """`phi.py plan close <plan> --checkout <repo>`: the gate, run with no store."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-close-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+
+        def git(*a):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.repo,
+                                  capture_output=True, text=True, check=True).stdout.strip()
+        git("init", "-q", ".")
+        write(os.path.join(self.repo, "a.txt"), "1\n")
+        git("add", "a.txt")
+        git("commit", "-q", "-m", "one")
+        self.base_sha = git("rev-parse", "HEAD")
+        write(os.path.join(self.repo, "a.txt"), "2\n")
+        git("commit", "-q", "-am", "two")
+        self.head = git("rev-parse", "HEAD")
+        self.folder = os.path.join(self.base, "plan-planner")
+        os.makedirs(self.folder)
+        self.path = os.path.join(self.folder, "move.md")
+
+    def plan(self, finding):
+        write(self.path, "# The move\n\nRead: no\n\n## 1. The writer\n\n**Evidence:** " + self.head[:7]
+              + ", a.txt\n\n- **Files:** `a.txt`\n\n## Audit\n\nAudited: 2026-11-24: " + self.base_sha[:7] + ".."
+              + self.head[:7] + ", code-review and p4-phi:check\n\n" + finding + "\n")
+
+    def close(self):
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "plan", "close",
+                               self.path, "--checkout", self.repo], capture_output=True, text=True, timeout=60)
+
+    def test_plan_close_with_an_open_finding_exits_2_and_moves_nothing(self):
+        self.plan("- Finding: a leak in the writer: open")
+        ran = self.close()
+        self.assertEqual(ran.returncode, 2, ran.stdout)
+        self.assertIn("open", ran.stderr)
+        self.assertTrue(os.path.isfile(self.path))
+        self.assertFalse(os.path.isdir(os.path.join(self.folder, "complete")))
+
+    def test_plan_close_past_the_gate_writes_the_status_line_and_moves_the_plan(self):
+        self.plan("- Finding: none")
+        ran = self.close()
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertFalse(os.path.exists(self.path))
+        (name,) = os.listdir(os.path.join(self.folder, "complete"))
+        with open(os.path.join(self.folder, "complete", name), encoding="utf-8") as f:
+            self.assertTrue(f.read().split("\n")[1].startswith("STATUS: COMPLETED "))
 
 
 class PoolState(unittest.TestCase):

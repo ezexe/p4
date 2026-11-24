@@ -58,6 +58,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import node as nd  # noqa: E402  the content words two texts share
 import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
+import planclose  # noqa: E402  the gate a plan closes through into plan-planner/complete/, and the guard of every other way
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
@@ -3441,6 +3442,13 @@ def _deny(why, key):
                                    "permissionDecisionReason": why}}
 
 
+def h_plan_guard(payload):
+    """PreToolUse on a shell call and on Edit, Write and NotebookEdit: a way into `plan-planner/complete/` other than
+    `phi.py plan close` is refused before it runs (planclose.guard has the arms)."""
+    why = planclose.guard(payload.get("tool_name"), payload.get("tool_input"))
+    return _deny(why, "plan") if why else None
+
+
 def h_path_guard(payload):
     """PreToolUse on Edit, Write and NotebookEdit: an edit outside the paths a started session holds is refused
     before it runs, as is an edit in a repository where a session this one started holds paths and still runs, and
@@ -3959,6 +3967,7 @@ HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_chec
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 HOOKS["path-guard"] = ROUTED["path-guard"] = ("PreToolUse", h_path_guard)
+HOOKS["plan-guard"] = ROUTED["plan-guard"] = ("PreToolUse", h_plan_guard)
 HOOKS["path-seen"] = ROUTED["path-seen"] = ("PostToolUse", h_path_seen)
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 HOOKS["force-guard"] = ROUTED["force-guard"] = ("PreToolUse", h_force_guard)
@@ -4185,6 +4194,53 @@ def commit_paths(checkout, message, paths, tries=COMMIT_TRIES, wait=COMMIT_WAIT)
     return 0, [short.strip(), *shown.strip().splitlines()]
 
 
+def audit_step(plan, checkout):
+    """What `coworkers --land` prints for a plan whose every run is landed: the audit, then the close."""
+    plan = plan.replace("\\", "/")
+    return "\n".join([
+        f"phi: every section of {plan} is landed; the plan is audited before it closes:",
+        "1. Run the `code-review` skill on the plan's merged range, from the first section's base to the head that "
+        "holds every section's Evidence commit.",
+        "2. Run one `p4-phi:check` that has not seen this conversation, on the same range.",
+        "3. Land each fix the audit confirms as a `-p` worker, one commit for each fix, with its check run; answer "
+        "a finding that is no fault in the plan with its reason.",
+        f"4. Write the `## Audit` of the plan (`Audited: <date>: <base>..<head>, code-review and p4-phi:check`, "
+        "then a `- Finding:` line for each finding, or `- Finding: none`), then close it: "
+        f"`{commands_plan_close(plan, checkout)}`"])
+
+
+def commands_plan_close(plan, checkout):
+    return f"{commands()} plan close {plan} --checkout {checkout}"
+
+
+def plan_main(argv):
+    """`phi.py plan close <plan> --checkout <repo>`: planclose.close, which needs no store. It prints what stops the
+    close and exits 2, else the path the plan moved to."""
+    import argparse
+    ap = argparse.ArgumentParser(prog="phi.py plan")
+    sub = ap.add_subparsers(dest="act", required=True)
+    c = sub.add_parser("close")
+    c.add_argument("plan", help="the plan file, which closes into complete/ past the gate")
+    c.add_argument("--checkout", default="", help="the repository the plan's change was merged into, the folder "
+                                                  "this is run from when left out")
+    a = ap.parse_args(argv)
+    path = os.path.abspath(a.plan)
+    if not os.path.isfile(path):
+        print(f"phi: no plan file at {path}", file=sys.stderr)
+        return 2
+    checkout = os.path.abspath(a.checkout or os.getcwd())
+    try:
+        dest = planclose.close(path, checkout)
+    except planclose.Refused as e:
+        print(f"phi: the plan does not close, {len(e.reasons)} thing{'s' if len(e.reasons) != 1 else ''} stop it:",
+              file=sys.stderr)
+        for r in e.reasons:
+            print(f"- {r}", file=sys.stderr)
+        return 2
+    print(f"phi: the plan is closed: {dest.replace(chr(92), '/')}")
+    return 0
+
+
 def commit_main(argv):
     """`phi.py commit -m <message> [--checkout <dir>] -- <path> ...`: commit_paths, which needs no store."""
     import argparse
@@ -4218,6 +4274,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["commit"]:                     # a worker runs with the p4 plugins off and has no session record
         return commit_main(argv[1:])
+    if argv[:1] == ["plan"]:                       # the gate of a plan's close, which needs no store either
+        return plan_main(argv[1:])
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     if argv[:1] == ["rules"]:                      # the hooks module's own, which needs no store
@@ -4570,6 +4628,9 @@ def main(argv=None):
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
+                if runs and not [r for r in runs if r["state"] != "landed"]:
+                    print(audit_step(plan, checkout))
+                    return 0
                 if not [r for r in runs if r["state"] != "landed"]:
                     print("phi: no section of that plan is left to land: each names no files or holds its "
                           "`Evidence:`", file=sys.stderr)
