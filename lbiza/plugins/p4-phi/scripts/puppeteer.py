@@ -549,14 +549,7 @@ def build(home, top, net=False):
             elif rec["archived"]:
                 reconcile.append(f"p4-phi lists \"{title}\" `{sid}` as live, and the app has archived it.")
         held = s.get("spawnedFrom") if isinstance(s.get("spawnedFrom"), dict) else {}
-        if rec and depth and rec["parent"] and rec["parent"] != parent and held.get("source") == "requested":
-            # started for another session's start request: the app nests it under its starter and no tool moves it
-            reconcile.append(f"`{rec['parent']}` started \"{title}\" `{sid}` for a start request of `{parent}`, an "
-                             f"exception: p4-phi holds it under `{parent}`, and the app "
-                             + ("shows it at top level." if rec.get("detached") else
-                                f"nests it under `{rec['parent']}` until `mcp__ccd_session_mgmt__detach_session` "
-                                f"with `{sid}` moves it to top level."))
-        elif rec and depth and rec["parent"] and rec["parent"] != parent \
+        if rec and depth and rec["parent"] and rec["parent"] != parent \
                 and held.get("source") not in ("detached", "reparented"):
             reconcile.append(f"the app shows \"{title}\" `{sid}` started by `{rec['parent']}`, and p4-phi holds it "
                              f"under `{parent}`.")
@@ -1302,7 +1295,7 @@ def prompter(home, s, req, read, base):
         lines += ["Done looks like: the change made, its regression test passing, committed and reported.",
                   "Report when done."]
     if not parent:
-        lines += ["", f"{phi.NEW_TOP_BRIEF} {phi.new_top_first_act()}"]
+        lines += ["", starts.ORCHESTRATOR_BRIEF]
     context = "fresh"
     did = "drf-" + hashlib.sha1(f"{sid}\n{req}\n".encode("utf-8", "replace")).hexdigest()[:10]
     lines += ["", f"phi draft {did} for {parent or 'root'}."]

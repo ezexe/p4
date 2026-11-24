@@ -328,8 +328,8 @@ PAIR = (
     "work, as the address book names it, never through the puppeteer.{asks}")
 PAIR_OVER = ("This session has left the control of its puppeteer: \"{title}\" `{pid}` no longer controls it. This "
              "session starts its own new orchestrators.")
-ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so where a line here says to start a new "
-       "orchestrator, start none: write `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, "
+ASK = ("phi (p4-phi): this session is controlled by a puppeteer, so it starts no new "
+       "orchestrator: write `{cmd} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, "
        "the brief holding a line `Files: <paths>`. Its puppeteer \"{title}\" starts it or declines it with "
        "one line to ezexe.")
 
@@ -1044,8 +1044,8 @@ def request_call(r):
     if len(bg) < starts.BACKGROUND_MIN:
         bg = starts.background_of(r["store"], r["requester"], bg)
     brief = r["brief"]
-    if not PHI.NEW_TOP.search(brief):
-        brief += "\n\n" + PHI.NEW_TOP_BRIEF + " " + PHI.new_top_first_act()
+    if not starts.ORCHESTRATOR.search(brief):
+        brief += "\n\n" + starts.ORCHESTRATOR_BRIEF
     return plans.with_level({"initiation": "user_asked", "title": r["title"], "context": "fresh",
                              "use_worktree": starts.use_worktree(brief), "cwd": project, "background": bg,
                              "wake_when_done": True,

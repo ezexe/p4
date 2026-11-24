@@ -197,7 +197,7 @@ class Linear(Base):
         t.stop(TOP, RETRY, report="Started a session for it.", uuid="u-retry")
         other = context(t.say(TOP, "Write a changelog generator for the billing dashboard's release notes"))
         self.assertIn("so it is a new orchestrator", other)
-        self.assertIn(phi.NEW_TOP_BRIEF, call_in(other)["prompt"])
+        self.assertIn(starts.ORCHESTRATOR_BRIEF, call_in(other)["prompt"])
         self.assertIs(call_in(other)["use_worktree"], False, "a new orchestrator lands in this checkout")
         self.assertNotIn(puppeteer.checkout_lines()[0], call_in(other)["prompt"], "a new orchestrator's brief has no worker's lines")
 
@@ -427,6 +427,7 @@ class Linear(Base):
         `pioneer` prints the same verdict again."""
         t = self.t
         t.record(TOP2, title="the docs top")
+        t.record(KID, TOP2, title="the flush port")     # the running writer is another orchestrator's
         t.say(TOP, TASK)
         t.say(TOP2, "Write the docs for the billing dashboard")
         t.say(KID, handed("Port `src/export/flush.py` to the new writer."))     # in a turn: a running writer

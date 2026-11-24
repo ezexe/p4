@@ -142,7 +142,10 @@ def stopped(s):
 # guard, in phi.py, is what holds that. A start tool's `use_worktree` is "\"fresh\" only (rejected with \"fork\")", so
 # a start drafted for a writer is always `fresh`.
 
-NEW_TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)   # a new orchestrator's brief line
+# A new orchestrator's brief line: the kind `top` and the skipped `Files:` partition are read from it.
+ORCHESTRATOR = re.compile(r"\b(?:this|it) (?:session )?is an orchestrator under the session that started it\b", re.I)
+ORCHESTRATOR_BRIEF = ("This session is an orchestrator under the session that started it: it stays there, "
+                      "orchestrates its own topic, starts each worker in the Terminal panel, and reports up.")
 
 
 def writes(brief, base=""):

@@ -36,6 +36,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
 import phi  # noqa: E402
+import starts  # noqa: E402
 import relay  # noqa: E402
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
@@ -1006,21 +1007,16 @@ class NewTask(unittest.TestCase):
             self.assertNotIn("about something else", said, words)
             self.assertNotIn("stay with the task", said, words)
 
-    def test_a_top_level_sessions_new_topic_is_a_new_top_level_session_detached_to_top_level(self):
+    def test_an_orchestrators_brief_keeps_it_attached_under_the_session_that_started_it(self):
         self.say(TOP, TASK)
         told = self.say(KID, "Task:\nPick the fence colour. ezexe's words: \"the fence colour?\" "
-                        + phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act())
-        self.assertIn("p4-phi detached it to top level at this first message", told)
-        self.assertIn("call `mcp__ccd_session_mgmt__detach_session` with `\"self\"`", told)
-        self.assertNotIn("detached it to top level", self.say(KID, "and again"), "said at the first message only")
+                        + starts.ORCHESTRATOR_BRIEF)
+        self.assertNotIn("detach", told, "nothing detaches it, in the app or in p4-phi")
         s = phi.load_session(self.t.p4, KID)
-        self.assertEqual(phi.spawned_from(s), "", "detached at its first hook")
-        self.assertEqual(s["spawnedFrom"]["source"], "detached")
-        self.assertEqual(s["spawnedFrom"]["from"], TOP)
+        self.assertEqual(phi.spawned_from(s), TOP, "it stays under its starter")
         self.say(KID, "carry on")
-        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "the app's record does not undo it")
-        self.assertIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)),
-                      "orchestrators are siblings")
+        self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), TOP)
+        self.assertNotIn(KID, relay._siblings(self.t.p4, phi.load_session(self.t.p4, TOP)))
         self.t.record(KID2, TOP, "a plain child")
         self.say(KID2, "Task:\nWrite the docs; this is not a new top")
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID2)), TOP, "an unmarked brief stays a child")
@@ -1033,7 +1029,8 @@ class NewTask(unittest.TestCase):
         import plans
         self.say(TOP, TASK)
         stale = phi.load_session(self.t.p4, KID) or phi.ensure_session(self.t.p4, KID)
-        self.say(KID, "Task:\nPick the fence colour, archive when done. " + phi.NEW_TOP_BRIEF)
+        self.say(KID, "Task:\nPick the fence colour, archive when done.")
+        self.assertEqual(self.t.cli(TOP, "detach", KID).returncode, 0)    # by hand: nothing else detaches a session
         self.assertEqual(phi.load_session(self.t.p4, KID)["spawnedFrom"]["from"], TOP)
         phi.save_session(self.t.p4, dict(stale, spawnedFrom={"sessionId": TOP, "source": "record"}))
         self.assertEqual(phi.spawned_from(phi.load_session(self.t.p4, KID)), "", "an older copy never undoes a detach")
@@ -1047,25 +1044,6 @@ class NewTask(unittest.TestCase):
         self.assertFalse(phi.load_notes(self.t.p4, TOP), "no replaces: note on the former parent session")
         self.assertNotIn(KID, json.dumps(phi.load_session(self.t.p4, TOP).get("staleChildren") or []))
         self.assertNotIn("counts them as archived", self.say(TOP, "carry on"))
-
-    def test_the_detach_notice_reaches_a_new_orchestrator_whose_brief_names_the_plugin_at_a_long_path(self):
-        """The lines beside a prompt repeat the plugin's path, and a notice that asks the session to act now leads
-        them. A new orchestrator's brief names phi.py where a landing clone keeps the plugin, 106 characters deep, so
-        its first message gets the new-task instruction and a start draft, and the detach notice reaches it whole,
-        inside the 2,000 characters the app shows of a text past its cap."""
-        land = "E:/projects/p4-phi/.claude/p4/temportal/tmp/83e32f0d-9d33-427a-93fc-f0c8db9acc23/land/lbiza/plugins/p4-phi"
-        script = os.path.join(SRC, "phi.py").replace("\\", "/")
-        brief = phi.NEW_TOP_BRIEF + " " + phi.new_top_first_act().replace(script, land + "/scripts/phi.py")
-        self.assertIn(land, brief)
-        self.say(TOP, TASK)
-        self.say(TOP, "also, the fence colour?")
-        told = self.say(KID, "Task:\nPick the fence colour and update the fence. ezexe's words: \"the fence colour?\" "
-                        + brief)                         # a work word of the brief's own, not of the plugin's path
-        self.assertNotIn("did not fit", told, "no piece is held: the app's own cap and file take a long text")
-        notice = ("p4-phi detached it to top level at this first message. Now call "
-                  "`mcp__ccd_session_mgmt__detach_session` with `\"self\"` before anything else")
-        self.assertIn(notice, told)
-        self.assertLessEqual(told.index(notice) + len(notice), phi.APP_PREVIEW, "inside the app's preview")
 
     def test_the_harness_speaking_gets_no_line(self):
         self.t.forget(KID)
@@ -3085,7 +3063,7 @@ class Partition(unittest.TestCase):
     def test_a_readers_start_and_a_new_orchestrators_are_not_read(self):
         reader = "Check what the exporter's flush does and report it.\nFiles: none"
         self.assertFalse(self.deny(self.start(KID2, reader)))
-        self.assertFalse(self.deny(self.start(GRAND, phi.NEW_TOP_BRIEF + "\nFiles: a.py")))
+        self.assertFalse(self.deny(self.start(GRAND, starts.ORCHESTRATOR_BRIEF + "\nFiles: a.py")))
 
     def test_the_same_start_after_the_sibling_is_archived_is_not_denied(self):
         self.assertTrue(self.deny(self.start(KID2, self.WRITE + "a.py")))

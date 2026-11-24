@@ -33,6 +33,7 @@ import os
 import re
 
 import relay
+import starts
 
 STEP_RE = re.compile(r"\bsteps?\s+(\d+(?:\.\d+)*)\b", re.I)
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
@@ -602,11 +603,10 @@ ROLES = {"static": "integrator", "build": "writer", "design": "writer", "review"
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 DESIGNS = re.compile(r"^\W*(?:re-?)?(?:design|architect|specif|spec\b|propos|investigat|decid|analy[sz]|research|"
                      r"plan\b)\w*", re.I)
-# a planner's brief says so on a line of its own, as a new orchestrator's does for TOP: the session starts in plan
+# a planner's brief says so on a line of its own, as a new orchestrator's does for starts.ORCHESTRATOR: the session starts in plan
 # mode, where it holds and writes the plan
 PLANNER = re.compile(r"(?im)^[ \t>*-]*(?:this session|it) starts in plan mode\b")
 REVIEWS = re.compile(r"^\W*(?:re-?)?(?:review|audit|evaluat|assess|verif|cross-check|check|judg|grad)\w*", re.I)
-TOP = re.compile(r"\b(?:this|it) (?:session )?is a new top session\b", re.I)    # starts.NEW_TOP, a new orchestrator
 CODE = re.compile(r"\.(?:py|js|jsx|ts|tsx|rs|go|c|h|cc|cpp|cs|java|kt|rb|sh|ps1|sql|toml|ya?ml)\b(?!\.)"
                   r"|\b(?:scripts?|src|hooks?|lib)/|\b(?:hook|script|function|module|class|api|test suite|"
                   r"behaviou?r)s?\b|\b(?:fix|implement|build|refactor|port|migrat)\w*\b", re.I)
@@ -647,7 +647,7 @@ def child_kind(text):
     designs or decides, 'static' for docs pages, a rename, a version bump or other mechanical work that names no
     code, else 'build'."""
     text = str(text or "")
-    if TOP.search(text):
+    if starts.ORCHESTRATOR.search(text):
         return "top"
     if PLANNER.search(text) or (PLANNING.search(text) and not PLAN_CODE.search(text)):
         return "plan"
@@ -692,7 +692,7 @@ def child_level(text, brief=""):
     """{"model", "effort", "kind"} a worker is started with for a step or a brief: its kind's entry of
     CHILD_LEVELS, with what the brief itself names laid over it, and the effort held to PARENT_EFFORT. `model` is
     'inherit' for the parent session's own."""
-    kind = "top" if TOP.search(str(brief or "")) else child_kind(text if str(text or "").strip() else brief)
+    kind = "top" if starts.ORCHESTRATOR.search(str(brief or "")) else child_kind(text if str(text or "").strip() else brief)
     out = {**CHILD_LEVELS.get(kind, CHILD_LEVELS_DEFAULT[kind]), "kind": kind}
     said = said_level(brief or text)
     if said:

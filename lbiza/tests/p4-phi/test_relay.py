@@ -25,6 +25,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
 sys.path.insert(0, SRC)
 import pathfilter  # noqa: E402
 import relay  # noqa: E402
+import starts  # noqa: E402
 from test_phi import CLI, GRAND, KID, KID2, START, TOP, Tree, context, write  # noqa: E402
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # tests/, which holds inproc.py
 import inproc  # noqa: E402
@@ -1375,7 +1376,7 @@ class ForkOrFresh(ThreeSessions):
                                      initiation="own_initiative")["permissionDecision"],
                          "ask", "a suggested task card starts the same call")
         for reads in ("Check the layout of `lib` and report.\nFiles: none",
-                      "Build the importer's nightly run and commit it. " + phi.NEW_TOP_BRIEF):
+                      "Build the importer's nightly run and commit it. " + starts.ORCHESTRATOR_BRIEF):
             self.assertEqual(relay.advise_start(t.p4, TOP, {"prompt": reads}, 3 * 1024 * 1024)[0], "fresh", reads[:40])
         self.assertIsNone(self.advise(TOP, "fresh", "Write the docs", 3 * 1024 * 1024),
                           "a brief that names no worktree and no scope is asked nothing")

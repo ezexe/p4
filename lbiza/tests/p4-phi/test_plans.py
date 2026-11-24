@@ -924,6 +924,7 @@ class Levels(unittest.TestCase):
     def test_a_long_foreground_command_runs_as_sent_with_no_line(self):
         """tools-reference.md, "Foreground commands that move to the background": the app moves a foreground command
         to the background at its timeout, so p4-phi rewrites no call and hands no line beside it."""
+        self.t.forget(A)                           # a session that started one is a puppeteer: this one started none
         for host in (TOP, A):
             for tool in ("Bash", "PowerShell"):
                 self.assertEqual(self.pre(host, dict(self.LONG), tool=tool), {}, (host, tool))
@@ -932,6 +933,7 @@ class Levels(unittest.TestCase):
         """restart-check reads `run_in_background`: a second background start of a command the Stop input listed as
         still running is refused once, and the shell gate lets every background start through to it."""
         from test_phi import STOP, transcript
+        self.t.forget(A)
         path = transcript(os.path.join(self.t.tmp, TOP + "rs.jsonl"), "Build the exporter", (), "Running.", "rs")
         r = self.t.hook(STOP, TOP, {"hook_event_name": "Stop", "transcript_path": path,
                                     "last_assistant_message": "Running.",
@@ -1247,7 +1249,7 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(C, (relay._read_json(relay.anchor_path(t.p4, TOP)).get("nodes") or {}))
         line = context(t.say(TOP, "what next"))
         self.assertIn("the archive tool asks ezexe on the app's approval card", line)
-        self.assertNotIn("archive_session", line, "no archive call is handed out")
+        self.assertNotIn("archive each with `", line, "no archive call is handed out")
         self.assertIn(C, line.split("finished, their outcome kept")[1])
         self.assertNotIn("finished, their outcome kept", context(t.say(TOP, "and then")), "said once")
 

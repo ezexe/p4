@@ -494,10 +494,6 @@ def own_store(rec, sid, project=""):
     return own if s.get("sessionId") and not spawned_from(s) else ""
 
 
-def same_store(a, b):
-    return bool(a and b) and os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
-
-
 class Me:
     """The session a hook or a command is running for: its sessionId, its CLI session, the app's record, its home."""
 
@@ -1337,18 +1333,9 @@ def apply_caps(d):
         setattr(mods[mod], name, type(default)(v) if ok else default)
 
 
-NEW_TOP = starts.NEW_TOP       # a new orchestrator's brief line, which starts.use_worktree reads too
-NEW_TOP_BRIEF = "This session is a new top session, orchestrating its own topic."
 RESTATE = ("the task restated as your own instruction to the session that receives it: what it is to do and why, "
            "from its side, a line `Files: <paths>` and what done looks like, with no message quoted and nothing "
            "of who asked or how the request travelled")
-
-
-def new_top_first_act():
-    """What a new orchestrator does first: detach to top level from its parent session in the app, then in
-    p4-phi."""
-    return (f"Its first act: `mcp__ccd_session_mgmt__detach_session` with `\"self\"`, so the app stops nesting it and "
-            f"its reports stop going to its parent session, then `{commands()} detach`.")
 
 
 def depth_of(home, s):
@@ -1966,24 +1953,15 @@ def h_user_prompt_submit(payload):
     me = started_by(Me(payload), payload)
     if not me.home or not me.id:
         return None
-    if me.store and not same_store(me.store, me.home) and NEW_TOP.search(str(payload.get("prompt") or "")) \
-            and not load_session(me.home, me.id).get("sessionId"):
-        me.home = me.store                         # a new orchestrator from another environment's session
-        RAN["own_store"] = True
     configure(me.home)
     s = ensure_session(me.home, me.id, me.rec, me.cli, hint=me.hint)
     ran_for(s, me)
-    detached_now = False
-    if spawned_from(s) and NEW_TOP.search(str(payload.get("prompt") or "")) and not load_turns(me.home, s["sessionId"]):
-        reparent(me.home, s["sessionId"], "", "detached")     # its brief marks it a new orchestrator
-        s = load_session(me.home, s["sessionId"])
-        RAN["new_top"] = True
-        detached_now = True
     rid, asker = starts.requester_of(me.home, payload.get("prompt")) if not load_turns(me.home, s["sessionId"]) \
         else ("", "")
     if rid:                                        # a start request's child: the asking session's, not the caller's
-        if not detached_now and asker != s["sessionId"] and spawned_from(s) != asker:
-            try:
+        if asker != s["sessionId"] and spawned_from(s) != asker \
+                and not starts.ORCHESTRATOR.search(str(payload.get("prompt") or "")):   # an orchestrator stays
+            try:                                   # under the session that started it
                 reparent(me.home, s["sessionId"], asker, "requested")
                 RAN["requested_by"] = asker
             except ValueError:
@@ -2090,12 +2068,6 @@ def h_user_prompt_submit(payload):
     if usage:                                      # a puppeteer watches its worker's and coworkers' context
         RAN["usage"] = True
         parts.insert(0, notice(usage))
-    if detached_now:
-        parts.insert(0, notice("phi (p4-phi): this session's brief marks it a new orchestrator, so p4-phi detached it "
-                        "to top level at this first message. Now call `mcp__ccd_session_mgmt__detach_session` with "
-                        "`\"self\"` before anything else, so the app stops nesting it under its parent session and its "
-                        "reports stop going there; it orchestrates its own topic, and the other orchestrators are "
-                        "its siblings."))
     # ezexe's own message: a handed-over task is none, and to a puppeteer, neither is one the app marks as another
     # session's; an orchestrator's routing still reads the work another session hands it
     ezexes = req if req and not handed_over(payload.get("prompt")) else ""
@@ -2819,7 +2791,7 @@ def h_start_advice(payload):
     base = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
     here = str(inp.get("target") or "local") == "local" and not any(inp.get(k) for k in relay.ELSEWHERE)
     brief = str(inp.get("prompt") or "")
-    if brief and here and not NEW_TOP.search(brief) and starts.writes(brief, base):
+    if brief and here and not starts.ORCHESTRATOR.search(brief) and starts.writes(brief, base):
         files = starts.files_of(brief, base)
         if not files:
             RAN["partition"] = "no files"
@@ -2848,7 +2820,7 @@ def h_start_advice(payload):
             RAN["before_start"] = True
             return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                            "permissionDecisionReason": why}}
-    if brief and NEW_TOP.search(brief):
+    if brief and starts.ORCHESTRATOR.search(brief):
         mine = load_session(me.home, me.id)
         pid = controls.puppeteer_of(mine, me.store)[0]
         if pid:                                    # a session another session started: its puppeteer starts it

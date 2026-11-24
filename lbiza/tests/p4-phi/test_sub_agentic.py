@@ -21,6 +21,7 @@ AGENTS = PLUGIN / "agents"
 sys.path.insert(0, str(PLUGIN / "scripts"))
 import phi  # noqa: E402
 import plans  # noqa: E402
+import starts  # noqa: E402
 
 # Each role of the table, the agent the plugin ships for it, its model alias and effort, and the kinds of step whose
 # start carries that role.
@@ -97,7 +98,7 @@ class HandOuts(unittest.TestCase):
             self.assertEqual(plans.child_level(step)["kind"], kind, step)
 
     def test_a_new_top_sessions_start_carries_no_model_and_no_effort(self):
-        brief = "This session is a new top session, orchestrating its own topic.\nFiles: none"
+        brief = starts.ORCHESTRATOR_BRIEF + "\nFiles: none"
         call = plans.with_level({"initiation": "user_asked", "context": "fresh", "title": "Fix the store",
                                  "prompt": brief})
         self.assertNotIn("model", call)

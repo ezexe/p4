@@ -428,7 +428,7 @@ class Supervisor(unittest.TestCase):
         ctx = context(t.say(TOP2, "Also, what about a new exporter for the moon format?", proj=self.other,
                             P4_PHI_BOOK="1"))
         self.assertIn("This session is controlled by a puppeteer", ctx)
-        new_top = BRIEF + "\n" + phi.NEW_TOP_BRIEF
+        new_top = BRIEF + "\n" + starts.ORCHESTRATOR_BRIEF
         r = t.hook("start-advice", TOP2, {"hook_event_name": "PreToolUse", "tool_name": START,
                                           "tool_input": {"initiation": "user_asked", "title": "the retry",
                                                          "prompt": new_top}}, proj=self.other)
@@ -456,7 +456,7 @@ class Supervisor(unittest.TestCase):
         call = json.loads(ctx.split("`mcp__ccd_session__start_session` with ", 1)[1].split("\n", 1)[0])
         self.assertEqual(os.path.normcase(os.path.normpath(call["cwd"])),
                          os.path.normcase(os.path.normpath(t.proj)), "in the project of the store that holds the request")
-        self.assertIn(phi.NEW_TOP_BRIEF, call["prompt"])
+        self.assertIn(starts.ORCHESTRATOR_BRIEF, call["prompt"])
         self.assertIn(f"for {TOP2}.", call["prompt"])
         self.assertIs(call["use_worktree"], False, "a new orchestrator lands in its project's own checkout")
         self.assertIn("## Requests to this puppeteer", read(os.path.join(t.dir(PUP), "board.md")))
@@ -464,8 +464,11 @@ class Supervisor(unittest.TestCase):
         # it starts it: the new session arrives in the store of the session that filed the request, an
         # orchestrator, and is taken under control
         t.record(NEW, started_by=PUP, title="the retry")
-        t.say(NEW, "Task:\n" + call["prompt"])
+        told = context(t.say(NEW, "Task:\n" + call["prompt"]))
         self.assertEqual(starts.open_rows(t.p4), [], "the request is started")
+        self.assertEqual(t.started_by(NEW)[0], PUP, "nothing detaches it: it stays under its starter")
+        self.assertIn(f"\"the retry\" `{NEW}`", t.cli(PUP, "controls").stdout, "and its puppeteer controls it")
+        self.assertIn("This session is controlled by a puppeteer", told)
 
     def test_a_controlled_sessions_refused_start_says_this_session_is_controlled_by_a_supervisor_session(self):
         """Run through `recall-hook.sh lookup-check`, which runs what the hooks module runs for a checked call."""
@@ -475,7 +478,7 @@ class Supervisor(unittest.TestCase):
         t.say(TOP, "carry on")
         body = {"session_id": CLI[TOP], "cwd": t.proj, "hook_event_name": "PreToolUse", "tool_name": START,
                 "tool_input": {"initiation": "user_asked", "title": "the retry",
-                               "prompt": BRIEF + "\n" + phi.NEW_TOP_BRIEF}, "tool_use_id": "toolu_start01"}
+                               "prompt": BRIEF + "\n" + starts.ORCHESTRATOR_BRIEF}, "tool_use_id": "toolu_start01"}
         r = inproc.run(["sh", os.path.join(os.path.dirname(SRC), "hooks", "recall-hook.sh"), "lookup-check"],
                        input=json.dumps(body), capture_output=True, text=True, timeout=60, env=t.env(TOP))
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -799,7 +802,7 @@ class TreeAndClicks(unittest.TestCase):
         """ezexe/p4#229: the app nests a started session under the session that called the start tool, and no tool
         moves it after. A session whose first message carries the marker of a request another session filed, and no
         line that makes it an orchestrator, is held under the session that filed the request, and the ledger of that
-        session's tree names it as started for another, with the call that detaches it."""
+        session's tree says where the app shows it. Nothing detaches it."""
         t = self.t
         rid, _ = starts.add(t.p4, KID, "the flush port", self.FLUSH, to=PUP)
         prompt = self.FLUSH + "\n\n" + starts.marker(rid, KID)
@@ -809,14 +812,8 @@ class TreeAndClicks(unittest.TestCase):
         self.assertEqual(t.started_by(NEW), (KID, "requested"))
         self.assertEqual(starts.state(t.p4)[rid]["started"], NEW)
         ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
-        self.assertIn(f"`{TOP}` started \"the flush port\" `{NEW}` for a start request of `{KID}`, an exception",
-                      ledger)
-        self.assertIn(f"`mcp__ccd_session_mgmt__detach_session` with `{NEW}` moves it to top level", ledger)
-        app = os.path.join(t.app, NEW + ".json")
-        write(app, json.dumps({**json.loads(read(app)), "lineageDetached": True}))     # detached to top level
-        ledger = t.cli(TOP, "ledger").stdout.split("## Reconcile")[1].split("\n## ")[0]
-        self.assertIn(f"for a start request of `{KID}`, an exception: p4-phi holds it under `{KID}`, and the app "
-                      f"shows it at top level.", ledger)
+        self.assertIn(f"the app shows \"the flush port\" `{NEW}` started by `{TOP}`, and p4-phi holds it under "
+                      f"`{KID}`.", ledger)
         self.assertNotIn("detach_session", ledger)
 
 
