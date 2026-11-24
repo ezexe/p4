@@ -703,7 +703,9 @@ def said_level(brief):
 # the planning verbs of PLANNING anywhere in a title or a task line, not only at its start: "README line: write the
 # plan" and "The verifier's plan, drafted" are a planner's as "Plan the move" is
 PLANNING_ANY = re.compile(r"\b(?:enter\s+plan\s+mode\b|(?:research|write|draft|loop|revise|refine|put|present|submit"
-                          r"|make)\s+" + PLAN_OBJECT + r"|plan\s+(?:the|a|an|how|for|of)\b)", re.I)
+                          r"|make)\s+" + PLAN_OBJECT + r"(?!\s+file\b)"
+                          r"|(?:^|\b(?:to|and|then|please|will|should|must|can|we|you|let's|also)\s+)"
+                          r"plan\s+(?:the|a|an|how|for|of)\b)", re.I)
 
 
 def is_planner(title, task=""):

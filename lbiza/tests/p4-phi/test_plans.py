@@ -1127,6 +1127,15 @@ class ParentEffort(unittest.TestCase):
                          "a session with no record yet gets none made")
 
 
+class IsPlanner(unittest.TestCase):
+    def test_landing_and_code_lines_are_no_planners_and_planning_lines_are(self):
+        for line in ("Land section 2 of the plan the user approved", "Land the plan for the ports move",
+                     "Review the plan of the release", "Make the plan file executable"):
+            self.assertFalse(plans.is_planner(line), line)
+        for line in ("Plan the move", "write the plan", "draft a plan for X"):
+            self.assertTrue(plans.is_planner(line), line)
+
+
 class TopOrchestrates(unittest.TestCase):
     """An orchestrator keeps itself free for orchestration. A child whose brief says "report when done" leaves
     its outcome on its parent as a replaces: note and counts as archived, and the parent's line offers it to ezexe
