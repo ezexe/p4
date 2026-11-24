@@ -271,7 +271,9 @@ Agent teams run in the terminal `claude` command and not in the desktop app, so 
 The skill's section "A team in a terminal session" gives the start file the session writes, the one line it types and their conditions: the project's root as the folder, the starting session's own permission mode, and two screens that are ezexe's to answer once.
 The start file clears the variables a desktop session's shell hands down, as a terminal worker's start script does, so the lead is a session of its own in p4-phi's records.
 The skill `sub-agentic` holds the team as a role, and its rule 12 says when one `p4-phi:check` stays the reader and that the rounds of a plan's read are a team's.
-A plan is read by groups of its sections, by the planner's own agent team: the planner is a terminal worker that `phi.py draft --start <draft id>` starts in plan mode, for a draft whose brief says its session starts in plan mode, with the team variable set, in the checkout with no worktree, and it forms its three reading teammates in its own session. `phi.py coworkers <plan file>` puts the plan's runs into groups of five fences and prints them, for the planner to write its Distribution.
+A plan is read by groups of its sections, by the planner's own agent team where `worker_mode` is `interactive`: the planner is a terminal worker that `phi.py draft --start <draft id>` starts in plan mode, for a draft whose brief says its session starts in plan mode, with the team variable set, in the checkout with no worktree, and it forms its three reading teammates in its own session.
+Where `worker_mode` is `print`, the default, the planner is headless: it runs as `claude -p` in `bypassPermissions`, writes the plan into the plan-planner file `draft --start` names, reads it in rounds with three read-only subagents named fences, sources and checks, since agent teams do not form under `-p`, edits nothing else, calls no `ExitPlanMode`, writes its report and ends, and the starting session puts the plan to ezexe and lands it with `phi.py coworkers "<plan>" --checkout "<checkout>" --land` on approval.
+See more: https://code.claude.com/docs/en/agent-teams.md `phi.py coworkers <plan file>` puts the plan's runs into groups of five fences and prints them, for the planner to write its Distribution.
 A terminal worker starts with p4-phi and p4-temportal off, and a planner with p4-temportal on for the skill `plan-planner`, by the settings file the command writes into its node, which also lists in `claudeMdExcludes` each `CLAUDE.local.md` above the checkout that imports the store, since Claude Code otherwise asks about that external import and starts nothing: p4 hands it nothing at its start, the first lead started this way ran with two of the three plugins off and got no store, and what Claude Code itself loads in it was not seen. Once ezexe approved the plan its sections are landed by a terminal worker, which `phi.py coworkers <plan file> --land` gives a node and writes a start file and a brief into, and prints the terminal call of. The worker starts in `bypassPermissions` mode whatever its starter's mode and runs in the checkout with no worktree, no team and no `--add-dir`, reaching its node's files by their whole paths, its first prompt is its `/goal`, it commits in the one checkout only by `phi.py commit -m <message> -- <path> ...`, which takes just the paths it is given by `git commit --only` and waits for git's `index.lock`, and it writes one report file in its node, which `--wait --report <file>` waits for, written after the wait began. A second start of one name writes nothing and names the node. A section that holds its `Evidence:` is left out.
 The same teammates read every round of their group, so a later round reads only what the mends changed.
 See more: https://code.claude.com/docs/en/worktrees.md
@@ -281,7 +283,7 @@ The start file's last line names the lead's model and effort, Sonnet at medium, 
 A terminal session has no record in the store, so `phi.py spend <name>` reads it by the transcripts of the session id its node keeps.
 The read of one plan on 2026-11-23 by three Sonnet teammates and one page subagent, one round, took 140 API calls, 18,613,450 tokens in, 17,759,246 of them read from the cache, and 125,587 tokens out.
 See more: https://code.claude.com/docs/en/costs.md
-p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file.
+p4-phi writes `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` into no settings file, since every session of the project reads that file, and the start files of `print` workers no longer set it either, since `-p` spawns no teammate.
 
 ## The readings of an unclear message
 
@@ -485,9 +487,14 @@ Every key is optional, and the file need not exist.
 | `wait_s` | 2.0 |
 | `goal` | `false` |
 | `worker_profile` | `p4-workers` |
+| `worker_mode` | `print` |
 
 `puppeteer` set to `false` gives an orchestrator no watcher and no start draft on ezexe's message.
 `worker_profile` names the Anthropic profile that the start file of a terminal worker sets as `ANTHROPIC_PROFILE` in its tab, only where that profile's credentials file is there, so the worker's usage is billed to the Claude Console profile ezexe signed in once with `ant auth login --profile <name>`; no key is made, stored or named, and an empty string turns the line off. `phi.py worker_profile <name>` and `phi.py worker_profile off` write it, and `phi.py worker_profile` alone prints how it stands.
+`worker_mode` is `print` or `interactive`: `print` starts every terminal worker as `claude -p ... --permission-mode bypassPermissions --output-format stream-json --verbose`, its output teed to `log-<name>.jsonl` in its node, with a `--session-id` kept in its `node.json` and a `resume-<name>` file that continues it with `--resume`, since the worker sign-in's Console credit covers `claude -p` and not interactive Claude Code (measured 2026-11-24); `interactive` keeps the interactive tab, and a planner there keeps plan mode, its team of three and `ExitPlanMode`.
+`worker_mode` combines freely with `worker_profile`: `p4-workers` bills the Console profile, and `off` uses the user's own stored claude.ai login.
+`phi.py worker_mode` alone prints how it stands, and `phi.py worker_mode print` or `phi.py worker_mode interactive` writes it.
+See more: https://code.claude.com/docs/en/headless.md
 `goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition.
 `phi.py goal on` and `phi.py goal off` write the key and print how it stands, since a session writes nothing under `.claude` with its own tools.
 Where no prompt hook saw a worker's brief, as when the plugin was loaded after the session's first message, the line is kept at the first Stop the plugin sees, where the task is.
