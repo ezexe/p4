@@ -628,7 +628,8 @@ def _bring_in(plan, home):
     is left alone and (plan, "") comes back."""
     folder = os.path.abspath(p4conf.sub(os.path.abspath(home), "plans"))
     src = os.path.abspath(plan)
-    if os.path.normcase(os.path.dirname(src)) == os.path.normcase(folder):
+    inside = os.path.normcase(folder).rstrip("\\/") + os.sep
+    if (os.path.normcase(src) + os.sep).startswith(inside):          # anywhere under the plans folder
         return plan, ""
     dest = os.path.join(folder, os.path.basename(src))
     if os.path.isfile(dest):

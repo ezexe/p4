@@ -981,6 +981,20 @@ class SectionPlanners(unittest.TestCase):
         again = coworker.collect(self.path, "E:/repo", self.home)[0]       # the same text there is the copy
         self.assertEqual((again["plan"], again["moved_from"]), (copy, other))
 
+    def test_collect_leaves_a_plan_anywhere_under_the_plans_folder_where_it_is(self):
+        folder = coworker.p4conf.sub(self.home, "plans")
+        report = self.start()[0]["report"]
+        for sub in ("todo", "unplanned", "complete"):
+            there = os.path.join(folder, sub, f"in-{sub}.md").replace("\\", "/")
+            os.makedirs(os.path.dirname(there), exist_ok=True)
+            with open(there, "w", encoding="utf-8") as f:
+                f.write("# T\n\nRead: here\n")
+            with open(report, "w", encoding="utf-8") as f:
+                f.write(f"- Plan file: `{there}`\n")
+            got = coworker.collect(self.path, "E:/repo", self.home)[0]
+            self.assertEqual((got["plan"], got["moved_from"]), (there, ""), sub)
+            self.assertFalse(os.path.exists(os.path.join(folder, f"in-{sub}.md")), sub)
+
     def test_collect_never_overwrites_a_different_file_of_that_name(self):
         other = os.path.join(self.base, "elsewhere", "linked-horizon.md").replace("\\", "/")
         os.makedirs(os.path.dirname(other))
