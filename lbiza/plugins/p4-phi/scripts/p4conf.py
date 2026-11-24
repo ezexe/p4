@@ -38,7 +38,6 @@ DEFAULTS = {
     "phi": {                             # p4-phi's session tree
         "home": None,                    # the git remote of a store whose session tree this project shares
         "track": False,                  # true: the session tree in phi/ is committed; false: git ignores it
-        "act_dont_wait": True,           # false: p4-phi's act-don't-wait rule is left out in this project
         "top_orchestrates": True,        # false: an orchestrator works its task list itself, no worker unless asked
         "levels": True,                  # false: no delegation rule
         "plan_mode": True,               # false: p4-phi's plan rule, which hands plan mode, is left out
@@ -140,8 +139,9 @@ WRITTEN = "_written"
 # 15 came with the default `phi.new_issues` and with the general part of CARD_SET, whose rules an installed copy of
 # 14 leaves to the copy that wrote them. 16 came with the removal of the group `recall`, which a store that still
 # holds it keeps, since READ_WHEN_SET names it. 17 came with the defaults of p4.json held by the plugin that reads
-# them, each in a file of its own.
-GEN = 17
+# them, each in a file of its own. 18 came with the removal of the key `phi.act_dont_wait`, which a store that still
+# holds it keeps unread.
+GEN = 18
 
 
 def _leaves(d, prefix=""):

@@ -1255,14 +1255,13 @@ STARTUP = re.compile(r"\b(?:standing rules?|start-?up rules?|rules? from (?:the 
                      r"at (?:its|their|session|the session's) start(?:-?up)?\b|session start)", re.I)
 RULE_LINE = re.compile(r"^\s*[-*]\s*(?:built-in,\s*)?([a-z0-9][a-z0-9']*(?:-[a-z0-9']+)*):\s")
 BUILT_IN_LINE = re.compile(r"^\s*[-*]\s*built-in,\s*[a-z0-9'-]+:\s")
-BUILT_INS = ()                # phi.py sets it to the names of the rules it carries itself
 MEMORY_RULES = None           # phi.py sets it to phi.memory_rules: the store's feedback and user memories by name
 
 
 def rule_names(home=""):
-    """The names of the rules a session starts with: p4-phi's built-in ones, and the store's feedback and user
-    memories, read from the memory folder, so the list stays true as memories change."""
-    names = set(BUILT_INS)
+    """The names of the rules a session starts with: the store's feedback and user memories, read from the memory
+    folder, so the list stays true as memories change."""
+    names = set()
     if home and MEMORY_RULES:
         names.update(name for name, _ in MEMORY_RULES(home))
     return {n.lower() for n in names if n}

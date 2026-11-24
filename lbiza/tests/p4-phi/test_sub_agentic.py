@@ -134,7 +134,6 @@ class HandOuts(unittest.TestCase):
     def test_a_search_goes_to_the_finder_whose_file_names_its_model(self):
         self.assertEqual(plans.LEVEL_WHERE["read"], plans.EXPLORE)
         self.assertIn("`p4-phi:finder`", plans.EXPLORE)
-        self.assertIn("goes to " + plans.EXPLORE, phi.LEVELS)
 
 
 if __name__ == "__main__":

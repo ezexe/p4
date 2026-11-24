@@ -136,13 +136,13 @@ class Tree:
                           timeout=60, clock=clock)
 
     def rules(self, host, proj=None, **more):
-        """What `phi.py rules` prints for the plugin's hooks module: the text of the system prompt's section that
-        holds the rules built into p4-phi, '' where a setting turns them off."""
+        """What `phi.py rules` prints for the plugin's hooks module: the one JSON line, with the tools the session's
+        model is not offered."""
         r = inproc.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "rules"],
                        capture_output=True, text=True, env=self.env(host, proj, **more), cwd=proj or self.proj,
                        timeout=60)
         assert r.returncode == 0 and r.stdout.count("\n") == 1, (r.returncode, r.stdout, r.stderr)
-        return json.loads(r.stdout)["rules"]
+        return json.loads(r.stdout)
 
     def stop(self, host, prompt, calls=(), report="done", uuid="u0", **kw):
         t = transcript(os.path.join(self.tmp, host + uuid + ".jsonl"), prompt, calls, report, uuid)
@@ -574,21 +574,19 @@ class Sessions(unittest.TestCase):
         self.assertTrue(self.t.session(KID)["task"].startswith(BRIEF))
         self.assertFalse(os.path.exists(os.path.join(work, ".claude")))
 
-    def test_no_store_anywhere_gives_the_built_in_rules_and_writes_nothing(self):
+    def test_no_store_anywhere_hands_nothing_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as tmp:
             t = Tree(tmp, store=False)
             t.record(TOP)
             r = t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""), "a start hands nothing with no store")
-            self.assertEqual(t.rules(TOP), phi.builtin_text(), "the built-in rules, as the system prompt's section")
             r = t.say(TOP, TASK)
             self.assertEqual((r.returncode, r.stdout.strip()), (0, ""))
             self.assertFalse(os.path.exists(os.path.join(t.proj, ".claude")), "nothing written")
 
-    def test_the_first_session_of_a_store_hears_the_built_in_rules_alone(self):
+    def test_the_first_session_of_a_store_is_handed_nothing(self):
         r = self.t.hook(START, TOP, {"hook_event_name": "SessionStart", "source": "startup"})
         self.assertEqual((r.returncode, context(r)), (0, ""), "no memories and no background: nothing is handed")
-        self.assertEqual(self.t.rules(TOP), phi.builtin_text(), "the built-in rules are its system prompt's section")
         self.assertEqual(self.t.say(TOP, TASK).stdout.strip(), "")
         self.assertEqual(self.t.session(TOP)["task"], TASK)
 
@@ -1312,25 +1310,15 @@ class Rules(unittest.TestCase):
 
     def test_each_memory_reaches_a_session_once(self):
         """ezexe/p4#130: a memory's line in the index is the one form a session is handed at its start, so p4-phi
-        sets the built-in rules whole in the system prompt and hands no line of a feedback or user memory, there or
-        at a start, a clear or a compaction."""
+        hands no line of a feedback or user memory at a start, a clear or a compaction, and live_rules alone hands
+        one that changed."""
         for host in (TOP, KID):
-            section = self.t.rules(host)
-            self.assertIn("- " + phi.BUILT_IN, section, host)
             for source in ("startup", "clear", "compact"):
                 text = self.start(host, source)
-                self.assertNotIn(phi.BUILT_IN, text, (host, source))
                 for word in ("tabs-not-spaces", "Indent with tabs", "long-rule", "Run the ports check", "out/Narwhal"):
-                    self.assertNotIn(word, text + section, (host, source))
+                    self.assertNotIn(word, text, (host, source))
                 self.assertLessEqual(len(text), APP_CAP)
 
-
-    def test_no_start_hands_the_rules_since_the_system_prompt_holds_them(self):
-        """The system prompt goes with every request, a resumed conversation keeps its own and a compaction sends it
-        anew, so no source of a SessionStart hands the rules."""
-        for source in ("startup", "resume", "clear", "compact", "fork"):
-            self.assertNotIn("act-don't-wait", self.start(TOP, source), source)
-        self.assertIn("act-don't-wait", self.t.rules(TOP))
 
     def test_no_ceiling_or_page_of_p4_phis_own_and_the_acting_lines_lead_past_the_apps_cap(self):
         """Audit candidate 10. hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and
@@ -1510,26 +1498,10 @@ class Rules(unittest.TestCase):
         self.assertLess(text.index("background for this session"), book, "the background before the address book")
         self.assertNotIn("built-in, ", text, "no rule is handed at a start")
 
-    def test_off_is_silence_and_no_memories_is_the_built_in_rules_alone(self):
-        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
-        self.assertEqual(self.t.rules(TOP), "")
-        self.assertEqual(self.t.rules(TOP, P4_PHI_RULES="1"), phi.builtin_text(), "the variable comes ahead of it")
-        os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
-        self.assertEqual(self.t.rules(TOP, P4_PHI_RULES="0"), "")
-        self.assertEqual(self.t.rules(TOP, P4_PHI="0"), "", "the plugin turned off sets no section")
-        for f in os.listdir(os.path.join(self.t.p4, "temportal", "memory")):
-            os.remove(os.path.join(self.t.p4, "temportal", "memory", f))
-        self.assertEqual(self.t.rules(TOP), phi.builtin_text(), "act-don't-wait holds in a project with no memories")
-        self.assertEqual(self.start(TOP), "", "and a start hands no rule")
-
     def test_many_memories_leave_the_start_text_as_it_is(self):
-        """However many memories the store holds, the system prompt's section carries the built-in rules whole and
-        none of them, and no start hands one."""
+        """However many memories the store holds, no start hands one."""
         for k in range(400):
             memory(self.t.p4, f"a-rather-long-memory-name-number-{k:03d}", "feedback", f"Rule {k} of the many.")
-        section = self.t.rules(KID)
-        self.assertIn("- " + phi.BUILT_IN, section)
-        self.assertNotIn("a-rather-long-memory-name", section)
         for source in ("startup", "clear", "compact"):
             self.assertNotIn("a-rather-long-memory-name", self.start(KID, source), source)
         self.assertFalse(os.path.exists(os.path.join(self.t.p4, "phi", "rules.md")), "no page copies them")
@@ -1550,139 +1522,35 @@ class Rules(unittest.TestCase):
         self.assertIn("index.lock", told)
         self.assertNotIn("the session tree's first commit in", self.start(TOP), "said once")
 
-    def test_a_fork_gets_the_built_in_rules_alone(self):
-        """A fork's inherited conversation already holds the store's feedback and user memories, and so does every
-        other session's start, so the system prompt's section is the built-in rules alone, in the words for a
-        session another session started."""
-        self.assertEqual(self.t.rules(KID), phi.builtin_text(started=True))
-
-    def test_a_session_ezexe_is_at_is_handed_plan_mode_and_one_another_session_started_is_kept_out_of_it(self):
-        """A plan is Claude Code's own to write: tools-reference.md has `EnterPlanMode` "Switches to plan mode to
-        design an approach before coding" and `ExitPlanMode` "Presents a plan for approval and exits plan mode", and
-        commands.md has `/plan` "Enter plan mode directly from the prompt". A session ezexe is at is handed those by
-        the plan rule. In a session another session started no person answers that approval, so its rule keeps it out
-        of plan mode: it plans with the built-in `Plan` subagent, which by sub-agents.md is "A research agent" with
-        read-only tools, and its starter's message is the approval."""
-        top, kid = self.t.rules(TOP), self.t.rules(KID)
-        self.assertIn(phi.PLAN_AT, top)
-        self.assertNotIn(phi.PLAN_STARTED, top)
-        self.assertIn(phi.PLAN_STARTED, kid)
-        self.assertNotIn(phi.PLAN_AT, kid)
-        for rule in (phi.PLAN_AT, phi.PLAN_STARTED):
-            self.assertTrue(rule.startswith("built-in, plan-mode: "))
-            self.assertIn(phi.PLAN_OPEN, rule, "one wording of which change is one whose approach is open")
-        self.assertEqual(top.count("built-in, plan-mode: "), 1)
-        self.assertEqual(kid.count("built-in, plan-mode: "), 1)
-        self.assertIn("plan-mode", phi.plans.BUILT_INS)
-
-    def test_the_plan_rule_reads_the_plans_folder_from_the_keeper_and_spells_none_itself(self):
-        """The folder plan mode writes into is the one p4conf.PLANS names, where the settings keeper points
-        `plansDirectory`. The rule takes it from there, so a folder that moves is named right with no edit here."""
-        import p4conf
-        self.assertEqual(phi.PLANS_DIR, p4conf.PLANS)
-        self.assertIn(f"points at `{p4conf.PLANS}` in the project's store", phi.PLAN_AT)
-        with open(os.path.join(SRC, "phi.py"), encoding="utf-8") as f:
-            source = f.read()
-        self.assertNotIn(p4conf.PLANS, source, "phi.py spells the folder nowhere")
-        self.assertNotIn(p4conf.PLANS, phi.PLAN_STARTED, "a started session's plan goes by message and names no file")
-
-    def test_the_plan_rule_has_a_switch_of_its_own(self):
-        """`phi.plan_mode: false` in the project's p4.json leaves the plan rule out, for a session ezexe is at and for
-        one another session started, and the other two rules stay. A project whose sessions enter plan mode only
-        when asked sets it and keeps the act-don't-wait rule."""
-        self.assertIn(phi.PLAN_AT, self.t.rules(TOP))
+    def test_the_plan_tool_has_a_switch_of_its_own(self):
+        """`phi.plan_mode: false` in the project's p4.json withholds `EnterPlanMode` from no session, and a project
+        whose sessions enter plan mode only when asked sets it."""
+        self.assertEqual(self.t.rules(KID)["withholds"], [phi.PLAN_TOOL])
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": False}}))
         for host in (TOP, KID):
-            got = self.t.rules(host)
-            self.assertNotIn("built-in, plan-mode", got, host)
-            self.assertIn(phi.BUILT_IN, got, host)
-            self.assertIn(phi.LEVELS, got, host)
-        try:
-            phi.project_conf(self.t.p4)
-            self.assertEqual(phi.built_in(), [phi.BUILT_IN, phi.LEVELS])
-            self.assertEqual(phi.built_in(started=True), [phi.BUILT_IN, phi.LEVELS])
-            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": True}}))
-            phi.project_conf(self.t.p4)
-            self.assertEqual(phi.built_in(), [phi.BUILT_IN, phi.PLAN_AT, phi.LEVELS])
-            self.assertEqual(phi.built_in(started=True), [phi.BUILT_IN, phi.PLAN_STARTED, phi.LEVELS])
-        finally:
-            phi.project_conf("")
+            self.assertEqual(self.t.rules(host)["withholds"], [], host)
         import p4conf
         self.assertIs(p4conf.DEFAULTS["phi"]["plan_mode"], True)
         self.assertEqual(p4conf.env_name("phi.plan_mode"), "P4_PHI_PLAN_MODE")
 
-    def test_a_started_sessions_model_is_not_offered_the_tool_its_plan_rule_keeps_it_from(self):
-        """`phi.py rules` answers the hooks module with the rules' text and with the tools the session's model is not
-        offered: `EnterPlanMode` for a session another session started, none for a session ezexe is at, and none
-        where the project leaves the plan rule out."""
-        def answer(host):
-            r = self.t.cli(host, "rules")
-            self.assertEqual(r.returncode, 0, r.stderr)
-            return json.loads(r.stdout.strip().splitlines()[-1])
-        self.assertEqual(answer(KID)["withholds"], [phi.PLAN_TOOL])
-        self.assertEqual(answer(TOP)["withholds"], [])
-        self.assertEqual(answer(KID)["rules"], self.t.rules(KID), "beside the text, which is as it was")
+    def test_a_started_sessions_model_is_not_offered_the_plan_tool_and_no_text_goes_with_it(self):
+        """`phi.py rules` answers the hooks module with the tools the session's model is not offered and no text:
+        `EnterPlanMode` for a session another session started, none for a session ezexe is at, and none where the
+        project turns the plan tool's withholding off. Neither phi.json `rules` nor P4_PHI_RULES reaches it, and
+        P4_PHI=0 withholds nothing."""
+        self.assertEqual(self.t.rules(KID), {"withholds": [phi.PLAN_TOOL]})
+        self.assertEqual(self.t.rules(TOP), {"withholds": []})
+        write(os.path.join(self.t.p4, "phi", "phi.json"), json.dumps({"rules": False}))
+        self.assertEqual(self.t.rules(KID), {"withholds": [phi.PLAN_TOOL]}, "phi.json `rules` gates the memory lines")
+        os.remove(os.path.join(self.t.p4, "phi", "phi.json"))
+        self.assertEqual(self.t.rules(KID, P4_PHI_RULES="0"), {"withholds": [phi.PLAN_TOOL]})
+        self.assertEqual(self.t.rules(KID, P4_PHI="0"), {"withholds": []})
         write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"plan_mode": False}}))
-        self.assertEqual(answer(KID)["withholds"], [], "no plan rule, so nothing is withheld by it")
-        self.assertEqual(phi.withheld_tools(""), [])
+        self.assertEqual(self.t.rules(KID), {"withholds": []}, "the plan switch is off, so nothing is withheld")
 
-    def test_act_dont_wait_yields_to_a_projects_go_ahead(self):
-        """A project rule that waits for ezexe's go makes that go ezexe's; p4.json can turn it off."""
-        self.assertIn("act-don't-wait", self.t.rules(TOP))
-        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"act_dont_wait": False}}))
-        got = self.t.rules(TOP)
-        self.assertNotIn("act-don't-wait", got)
-        self.assertIn(phi.PLAN_AT, got, "the plan rule has a switch of its own and stays")
-        self.assertIn(phi.PLAN_STARTED, self.t.rules(KID))
-        self.assertIn("built-in, levels", got, "the other built-in rule still comes")
-        try:
-            phi.project_conf(self.t.p4)
-            self.assertNotIn("act-don't-wait", phi.builtin_text())
-            self.assertIn("built-in, levels", phi.builtin_text(), "the other built-in rule stands on its own")
-            off = {"act_dont_wait": False, "plan_mode": False, "levels": False}
-            write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": off}))
-            phi.project_conf(self.t.p4)
-            self.assertEqual(phi.builtin_text(), "")
-            self.assertEqual(self.t.rules(TOP), "", "every rule off: the system prompt gets no section")
-        finally:
-            phi.project_conf("")
-
-    def test_the_levels_rule_is_given_with_no_configuration_and_p4_json_turns_it_off(self):
-        """On in every project, a store or none; only p4.json's phi.levels: false leaves it out."""
-        got = self.t.rules(TOP)
-        self.assertIn("built-in, levels", got)
-        self.assertIn("built-in, levels", phi.builtin_text())
-        with tempfile.TemporaryDirectory() as tmp:
-            bare = Tree(tmp, store=False)
-            bare.record(TOP)
-            self.assertIn("built-in, levels", bare.rules(TOP), "a project with no store")
-        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
-        off = self.t.rules(KID)
-        self.assertNotIn("built-in, levels", off)
-        self.assertIn("act-don't-wait", off)
-
-    def test_the_round_for_what_a_subagent_wrote_reaches_a_session_and_the_skill_holds_it_as_its_own_rule(self):
-        """The built-in rule levels hands a session the round a subagent's writing goes through before it counts,
-        phi.ROUND: a read by a reader that has not seen it, the findings back to the same agent with SendMessage, and
-        no third read. best-practices.md, "Give Claude a check to run": "A reviewer that's asked to find problems
-        will always find something." The skill sub-agentic holds the round as its rule 11, where every agent, skill,
-        tool and flag the rule's sentence names is named too, and the agent it names is one the plugin ships. A
-        project that turns the delegation rule off is handed neither."""
-        self.assertIn(phi.ROUND, self.t.rules(TOP), "the round is in a session's system prompt")
-        named = re.findall(r"`([^`]+)`", phi.ROUND)
-        self.assertTrue(named)
-        with open(os.path.join(ROOT, "skills", "sub-agentic", "SKILL.md"), encoding="utf-8") as f:
-            rule = [line for line in f if line.startswith("11. ")]
-        self.assertEqual(len(rule), 1, "the skill's rule on the round")
-        for name in named:
-            self.assertIn(f"`{name}`", rule[0], name)
-        for agent in (n.split(":", 1)[1] for n in named if n.startswith("p4-phi:")):
-            self.assertTrue(os.path.isfile(os.path.join(ROOT, "agents", agent + ".md")), agent)
-        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"levels": False}}))
-        self.assertNotIn(phi.ROUND, self.t.rules(TOP))
-
-    def test_the_levels_rule_is_in_a_sessions_system_prompt(self):
-        self.assertIn(phi.LEVELS, self.t.rules(TOP))
+    def test_withheld_tools_is_decided_by_who_started_the_session(self):
+        self.assertEqual(phi.withheld_tools(True), [phi.PLAN_TOOL])
+        self.assertEqual(phi.withheld_tools(False), [])
 
     def test_the_plugin_ships_no_search_agent_of_its_own(self):
         self.assertFalse(os.path.exists(os.path.join(ROOT, "agents", "sweep.md")), "the plugin's own copy is gone")
@@ -2087,14 +1955,12 @@ class NoWriteUnderClaude(unittest.TestCase):
             for source in ("compact", "clear"):
                 said[host, source] = self.run_hook(START, host, {"hook_event_name": "SessionStart", "source": source})
         said[self.WORKER, "wrap_up"] = self.wrap_up(self.WORKER)
-        said[TOP, "rules"] = self.t.rules(TOP)           # the system prompt's section, which holds the built-in rules
         for key, text in said.items():
             self.assertEqual(writes_under_claude(text), [], key)
         page = self.pad(self.WORKER) + "/state.md"
         self.assertIn(page, said[self.WORKER, "first"], "a standing worker keeps its state page in its scratchpad")
         self.assertIn(page, said[self.WORKER, "clear"].split("\n", 1)[0], "and is handed it first after a clear")
         self.assertIn(page, said[self.WORKER, "wrap_up"], "and brings it up to date there before it clears")
-        self.assertIn("decisions.md in the scratchpad directory the app names", said[TOP, "rules"])
         for source in ("compact", "clear"):              # the scan has the address book
             self.assertIn("address book", said[TOP, source], source)
 

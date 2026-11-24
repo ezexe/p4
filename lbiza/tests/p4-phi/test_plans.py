@@ -2826,8 +2826,8 @@ class OwnLines(unittest.TestCase):
             memory(home, "tree-records-stay", "feedback", "Keep them.")
             memory(home, "records", "user", "One.")
             memory(home, "a-project-note", "project", "Not a rule.")
-            self.assertEqual(plans.rule_names(home) - set(plans.BUILT_INS), {"tree-records-stay", "records"})
-            self.assertIn("act-don't-wait", plans.rule_names(), "the built-in ones are p4-phi's own")
+            self.assertEqual(plans.rule_names(home), {"tree-records-stay", "records"})
+            self.assertEqual(plans.rule_names(), set(), "with no store there are no names")
             steps = [{"addr": "6.4", "content": "Read phi session records for this session tree check",
                       "status": "pending"}]
             recited = ("I hold tree-records-stay, so the tree records are kept.\n"

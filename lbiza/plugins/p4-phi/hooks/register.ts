@@ -23,7 +23,6 @@ import { atom, read, update } from 'claude-code'
 import type {
   AgentSpawnInput,
   EngineInterface,
-  PromptComposeResult,
   PromptOrigin,
   Register,
   RenderElement,
@@ -51,10 +50,6 @@ const MOST_WAIT_MS = 600_000
 
 // The most of a report that is sent to a starter: what phi.py keeps of one, its REPORT_CHARS.
 const REPORT_CHARS = 4_000
-
-// The id of the system prompt's section that holds the rules built into p4-phi. A plugin's own section is named
-// `<plugin>:<name>`, by the types of `prompt.compose`.
-const RULES_SECTION = 'p4-phi:rules'
 
 // A project's store, marked by its p4.json, and under it where hook.py keeps a launch's text for its subagent's
 // start: hook.pending_dir in python, `start-<session>` under the store's phi/served folder. A file
@@ -266,7 +261,6 @@ type Answer = {
   path?: string
   app_tools?: boolean
   app_sections?: boolean
-  rules?: string
   withholds?: unknown
   dir?: string
   starter?: string
@@ -983,23 +977,16 @@ function record($: EngineInterface, context: SessionContextUsage, limits: readon
   writing = writing.then(() => writeUsage($, context, limits))
 }
 
-// The system prompt as composed beneath, with the rules built into p4-phi as its last section, on the session's
-// side of the cache boundary since a project's settings choose the rules. Python holds the rules' words and reads
-// the settings that turn one off, so it is asked for the text at each render: a system prompt is rendered for a
-// conversation's first request and after a compaction, not at every turn. With no text, as where a setting turns
-// the rules off or no python runs, the prompt is left as composed.
-// What python last answered to `rules`, asked once at a time: the render of a system prompt and an offer of
-// PLAN_TOOL that come together start one process, and a later render asks anew, since a setting may have changed.
-let rulesAsked: Promise<Answer | undefined> | undefined
+// What python last answered to `rules`, the tools this session's model is not offered, asked once at a time: offers
+// of PLAN_TOOL that come together start one process.
+let rulesAsked: Promise<void> | undefined
 let withheld: readonly string[] | undefined
 
-function askRules($: EngineInterface): Promise<Answer | undefined> {
+function askRules($: EngineInterface): Promise<void> {
   rulesAsked ??= ask($, ['rules'], LOOK_MS)
     .then(answer => {
       const named: unknown = answer?.withholds
       withheld = Array.isArray(named) ? named.filter((tool): tool is string => typeof tool === 'string') : []
-
-      return answer
     })
     .finally(() => {
       rulesAsked = undefined
@@ -1019,22 +1006,6 @@ async function isWithheld($: EngineInterface, tool: string): Promise<boolean> {
     return (withheld ?? []).includes(tool)
   } catch {
     return false
-  }
-}
-
-async function withRules($: EngineInterface, composed: PromptComposeResult): Promise<PromptComposeResult> {
-  try {
-    switches ??= readSwitches($)
-    if ((await switches).isPhiOff) return composed
-    const text = ((await askRules($))?.rules ?? '').trim()
-    if (text === '') return composed
-    const others = composed.sections.filter(section => section.id !== RULES_SECTION)
-
-    return { sections: [...others, { id: RULES_SECTION, text, scope: 'session' }] }
-  } catch (error) {
-    note($, `the rules were not set in the system prompt: ${String((error as Error)?.message ?? error).slice(0, 200)}`)
-
-    return composed
   }
 }
 
@@ -1897,10 +1868,6 @@ export const register: Register = on => {
 
     return next(e)
   }).catch(($, e, next) => next(e))
-
-  // Claude Code raises this when it renders a system prompt. A hook that fails here is skipped, and the prompt goes
-  // out as composed beneath.
-  on('prompt.compose', async ($, e, next) => withRules($, await next(e))).catch(($, e, next) => next(e))
 
   // An agent is about to start. The event carries the id of the Agent call that launches it, and `next(e)` answers
   // the id the subagent runs under, which a SubagentStart command hook's input holds with no word of the call. The

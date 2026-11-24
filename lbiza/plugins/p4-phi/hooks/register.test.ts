@@ -53,9 +53,7 @@ type Machine = {
   files?: Record<string, string>
   pythons?: Record<string, string>
   look?: (args: readonly string[]) => Answer | Promise<Answer>
-  // What `phi.py rules` prints as the system prompt's section: none where a setting turns the rules off.
-  rules?: string
-  // The tools python says this session's model is not offered, beside the rules' text.
+  // The tools python says this session's model is not offered, as `phi.py rules` prints them.
   withholds?: readonly string[]
   // What a write waits on before it lands, as a slow disk does.
   write?: (path: string) => Promise<void>
@@ -345,7 +343,7 @@ function machine(on: On, has: Machine): Seen {
       seen.calls.push({ argv: e.argv, env: e.init?.env })
       if (args[0] === 'rules') {
         seen.asked.push([...args])
-        stdout = `${JSON.stringify({ rules: has.rules ?? '', withholds: has.withholds ?? [] })}\n`
+        stdout = `${JSON.stringify({ withholds: has.withholds ?? [] })}\n`
       } else if (args[0] === 'goal' && args[1] !== 'ask') {
         seen.asked.push([...args])
         stdout = `${JSON.stringify({ set: true })}\n`
@@ -1271,83 +1269,6 @@ test('while the goal command has not answered each look says so, and there is no
   await clock.advance(5_000)
   expect(seen.looks.length).toBeGreaterThan(before)
   expect(seen.looks.at(-1)?.includes('--goal-flying')).toBe(false)
-})
-
-// The rules built into p4-phi as `phi.py rules` prints them, under the head phi.builtin_text gives them.
-const RULES =
-  'phi (p4-phi): the rules built into p4-phi, for every session:\n' +
-  "- built-in, act-don't-wait: A question that the code can answer is researched and decided by this session.\n" +
-  '- built-in, levels: work is delegated to where Claude Code runs it best.'
-// A system prompt as Claude Code composes it: its opening on the shared side, and a session's own sections after.
-const COMPOSED = {
-  sections: [
-    { id: 'intro', text: 'You are Claude Code.', scope: 'shared' },
-    { id: 'memory', text: 'The memory index of this project.', scope: 'session' },
-  ],
-} as const
-const RENDER = {
-  model: 'claude-fable-5-2',
-  promptModel: 'claude-fable-5-2',
-  surfaces: ['desktop'],
-  tools: ['Bash', 'Agent'],
-  outputStyle: null,
-  traits: [],
-} as const
-
-test('the rules built into p4-phi are the last section of the system prompt, on the session side', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  const seen = machine(on, { rules: RULES })
-  on('prompt.compose', () => COMPOSED)
-
-  const composed = await $.prompt.compose(RENDER)
-
-  expect(composed.sections).toEqual([...COMPOSED.sections, { id: 'p4-phi:rules', text: RULES, scope: 'session' }])
-  // Python holds the words and reads the settings, asked as a look is: for this session, in its project.
-  expect(seen.asked).toEqual([['rules']])
-  expect(seen.calls[0]?.argv.slice(0, 4)).toEqual([KEPT, '-I', '-X', 'utf8'])
-  expect(seen.calls[0]?.env).toEqual({ CLAUDE_CODE_SESSION_ID: 'cli-0001', CLAUDE_PROJECT_DIR: '/work/project' })
-  expect(seen.looks).toEqual([])
-})
-
-test('a prompt rendered again holds the section once, with the words of that render', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  machine(on, { rules: RULES })
-  // A render beneath that already holds the section, as a plugin above another copy of this one would see it.
-  const held = { id: 'p4-phi:rules', text: 'the rules as they read before', scope: 'session' } as const
-  on('prompt.compose', () => ({ sections: [COMPOSED.sections[0], held, COMPOSED.sections[1]] }))
-
-  const composed = await $.prompt.compose(RENDER)
-
-  expect(composed.sections).toEqual([...COMPOSED.sections, { id: 'p4-phi:rules', text: RULES, scope: 'session' }])
-})
-
-test('where a setting turns the rules off the system prompt is left as composed', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
-  // `phi.py rules` prints no text where phi.json, p4.json or P4_PHI_RULES turns the rules off.
-  const seen = machine(on, { rules: '' })
-  on('prompt.compose', () => COMPOSED)
-
-  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
-  expect(seen.asked).toEqual([['rules']])
-})
-
-test('P4_PHI=0 sets no section, and python is not asked', async ($, on) => {
-  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
-  const seen = machine(on, { rules: RULES })
-  on('prompt.compose', () => COMPOSED)
-
-  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
-  expect(seen.calls).toEqual([])
-})
-
-test('with no python the system prompt goes out as composed', async ($, on) => {
-  mock.env(on, {})
-  const seen = machine(on, { files: {}, pythons: {}, rules: RULES })
-  on('prompt.compose', () => COMPOSED)
-
-  expect(await $.prompt.compose(RENDER)).toEqual(COMPOSED)
-  expect(seen.asked).toEqual([])
-  expect(seen.logged).toEqual(['no working python found, so no look runs'])
 })
 
 // A project with a store: hook.py keeps a launch's text under the store's phi/served folder, in `start-<session>`.
@@ -3075,13 +2996,13 @@ function beneathOffers(on: On): string[] {
 test("the model of a session another session started is not offered the plan tool, and the tool's other events go down", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const came = beneathOffers(on)
-  const seen = machine(on, { rules: RULES, withholds: [PLAN_TOOL] })
+  const seen = machine(on, { withholds: [PLAN_TOOL] })
 
   const first = await offerOf($, PLAN_TOOL)
   if (first === NO_OFFER) return
   expect(first).toEqual({ isOffered: false })
   expect(came).toEqual([])
-  // python is asked once, and its answer serves the next offer and the render of the system prompt's section
+  // python is asked once, and its answer serves the next offer
   expect(await offerOf($, PLAN_TOOL)).toEqual({ isOffered: false })
   expect(seen.asked).toEqual([['rules']])
 
@@ -3096,7 +3017,7 @@ test("the model of a session another session started is not offered the plan too
 test('a session ezexe is at is offered the plan tool, and so is every session where python gives no answer', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const came = beneathOffers(on)
-  machine(on, { rules: RULES, withholds: [] })
+  machine(on, { withholds: [] })
 
   const first = await offerOf($, PLAN_TOOL)
   if (first === NO_OFFER) return
@@ -3107,10 +3028,22 @@ test('a session ezexe is at is offered the plan tool, and so is every session wh
 test('with no python to ask, the plan tool is offered as the engine says', async ($, on) => {
   mock.env(on, {})
   const came = beneathOffers(on)
-  machine(on, { files: {}, pythons: {}, rules: RULES, withholds: [PLAN_TOOL] })
+  machine(on, { files: {}, pythons: {}, withholds: [PLAN_TOOL] })
 
   const first = await offerOf($, PLAN_TOOL)
   if (first === NO_OFFER) return
   expect(first).toEqual({ isOffered: true })
   expect(came).toEqual([`tool.offer ${PLAN_TOOL}`])
+})
+
+test('P4_PHI=0 withholds no tool, and python is not asked', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA, P4_PHI: '0' })
+  const came = beneathOffers(on)
+  const seen = machine(on, { withholds: [PLAN_TOOL] })
+
+  const first = await offerOf($, PLAN_TOOL)
+  if (first === NO_OFFER) return
+  expect(first).toEqual({ isOffered: true })
+  expect(came).toEqual([`tool.offer ${PLAN_TOOL}`])
+  expect(seen.calls).toEqual([])
 })

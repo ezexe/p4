@@ -534,8 +534,8 @@ class ZeroConfiguration(unittest.TestCase):
         self.assertFalse(os.path.exists(p4conf.sub(p4, "store")), "with no phi/store")
         self.assertFalse(os.path.exists(p4conf.sub(p4, "models")), "and no phi/models")
         conf = p4conf.load(p4, write=False)["phi"]
-        self.assertEqual((conf["levels"], conf["act_dont_wait"], conf["top_orchestrates"], conf["home"]),
-                         (True, True, True, None), "p4.json is written with the working defaults")
+        self.assertEqual((conf["levels"], conf["top_orchestrates"], conf["home"]),
+                         (True, True, None), "p4.json is written with the working defaults")
         self.env["P4_PHI_WATCH"] = "0"       # only so this test leaves no watcher behind in its temporary folder
         start, said, pre, plain, stop = self.handlers()
         self.assertNotIn("built-in, ", json.dumps(start), "a start hands no rule")

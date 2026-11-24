@@ -282,24 +282,6 @@ class Covers(unittest.TestCase):
         agent = graders_of("Agent")
         self.assertTrue(agent)
         self.assertTrue(any(re.search(g["input_match"], f'"subagent_type":"{name}:check"') for _, g in agent), agent)
-        self.assertIn("`p4-phi:check`", phi.LEVELS)
-
-    def test_the_rules_case_reads_the_words_after_each_built_in_rules_opening_from_the_reply(self):
-        """The rules are a section of the system prompt, which no trace holds, so the case asks the session to quote
-        the words that follow each rule's opening and grades its reply. A session with no plugin has neither."""
-        held = phi.builtin_text()
-        case = {c["name"]: c for c in cases()}["holds-the-rules-in-its-system-prompt"]
-        graders = list(case["graders"].values())
-        self.assertEqual(len(graders), 2, graders)
-        for opening in ("built-in, act-don't-wait: ", "built-in, levels: "):
-            self.assertIn(opening.strip(), case["body"], "the prompt names the opening")
-            follows = [g["pattern"] for g in graders if held.split(opening, 1)[1].startswith(g["pattern"])]
-            self.assertEqual(len(follows), 1, (opening, graders))
-            self.assertNotIn(follows[0], case["body"], "the prompt gives none of the words it asks for")
-        for g in graders:
-            self.assertEqual((g["type"], g.get("target", "last_message")), ("regex", "last_message"), g)
-        self.assertEqual([g for c in cases() for g in c["graders"].values() if g.get("target") == "trace"], [],
-                         "no case reads a hook's output for the rules")
 
 
 class Kept(unittest.TestCase):

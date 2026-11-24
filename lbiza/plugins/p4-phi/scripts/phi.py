@@ -16,8 +16,8 @@ read first and the record corrects it. `detach` and `reparent` rewrite it in ses
 The hooks, each in its h_ function:
 - SessionStart gives the start background to a fork, after a clear, with the session's own turns and the address
   book whole, and to a session no app runs. After a compaction the summary keeps the conversation, so it gives the
-  address book's changed entries with the path of book.md. It hands no rule: the rules built into p4-phi are a
-  section of the system prompt, which the plugin's hooks module sets from `phi.py rules`, as rules_section says.
+  address book's changed entries with the path of book.md. It hands no rule, and p4-phi adds no section to
+  the system prompt: `phi.py rules` answers the hooks module which tools the session is not offered.
 - UserPromptSubmit keeps the first request as the task and gives the start background with the first message when
   the start did not, then the reports of the workers that finished a turn since the last look, the address book's
   changes and what the sessions beside it changed. A start and every message pass whole, the lines that ask
@@ -37,10 +37,10 @@ asks for, and `goal set` is the hooks module's word that the goal command set it
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
 off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
-section of p4.json: `act_dont_wait`, `plan_mode`, `levels`, `top_orchestrates` and `child_levels`, read from the
+section of p4.json: `plan_mode`, `levels`, `top_orchestrates` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree, and `puppeteer_section`, which
 controls.py reads. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
-message and P4_PHI_RULES=0 the rules. P4_PHI_WAIT sets how long a first message waits for the app's
+message and P4_PHI_RULES=0 the memory lines. P4_PHI_WAIT sets how long a first message waits for the app's
 record, and P4_PHI_APP_SESSIONS the folder of the app's records.
 """
 
@@ -1333,194 +1333,13 @@ def now_exact():
 
 MAX_DEPTH = 3                 # a session this deep in the tree starts no session of its own
 MAX_CHILDREN = 8              # nor one that has this many live children already
-# The act-don't-wait rule. How a question to ezexe is laid out is the app's own text, so the rule names the tools and
-# holds no sentence on it:
-# - tools-reference.md, "AskUserQuestion tool behavior": "Claude uses `AskUserQuestion` to ask you multiple-choice
-#   questions when it needs a decision or a clarification."
-# - the desktop app's turn-end tool, `mcp__ccd_turn__wrap_up`, whose own text puts a decision that waits on ezexe as
-#   one question with buttons, the pick first.
-# - headless.md, "Turn off permission prompts in unattended runs": "Claude Code removes the tools that need an answer
-#   from a person, such as `AskUserQuestion`, so Claude can't call them." A `claude -p` run and an eval run have
-#   neither tool, and what leaves such a run is its reply, "the text result in the `result` field" of the same page,
-#   so the rule names the reply for a session that has neither.
-# Every other sentence stays. Some are what that text lacks: the decisions file, the session tree as what settles a
-# next step, the push of green issue-closing commits, a child's question to its parent session, and the go a
-# project's rules ask for. The rule asks a worker for no line to its starter at a turn's end: the plugin's hooks
-# module sends the starter the turn's report with `$.session.send`, which by plugins/mods/api.md "makes the same
-# delivery the SendMessage tool makes", ezexe/p4#157. The rest only the desktop app's text states, and no docs page
-# does for a session in its default style, so a session outside the app would lose it: that a question research can
-# settle is not asked, and that only a matter of ezexe's authority is. output-styles.md states the like for the
-# Proactive style alone, "It makes reasonable assumptions about routine decisions rather than stopping to ask", and
-# that style is ezexe's to choose.
 DECISIONS = "its decisions file, the one its brief names or decisions.md in the scratchpad directory the app names"
 DECIDE = ("A question that the code, the history, the issues or the current outside documentation can answer is "
           f"researched and decided by this session, which logs the decision with its source in {DECISIONS}; a "
           "question reaches ezexe only once those cannot settle it.")
-BUILT_IN = ("built-in, act-don't-wait: " + DECIDE + " A next step that the task, the parent's task list and notes, "
-            "siblings' work and the project's rules can settle is decided and done, with one line saying what was "
-            "chosen and why. "
-            "Only a matter of ezexe's authority goes to ezexe, by the app's own `mcp__ccd_turn__wrap_up` or "
-            "`AskUserQuestion`, or in the reply of a session that has neither tool: permissions or security "
-            "settings, credentials, spending, and actions that cannot be "
-            "undone or publish outward, but for the push of green issue-closing commits, which p4-phi orders at "
-            "once. A step only a turn of ezexe's can make is that one question with its button, never a sentence "
-            "about ezexe's next message. ezexe is asked to type no command this session can run, and a setting "
-            "ezexe settled is written into its file in that turn and read back, by `phi.py conf` for a key of "
-            "p4.json. A started session's turn note goes on to ezexe only where ezexe must act on it or it changes "
-            "what ezexe knows, and a message goes to a session only for what that session needs. A child asks its "
-            "parent session with SendMessage, and never ends its turn waiting on a question the session tree can "
-            "settle. "
-            "Where the project's rules ask for ezexe's go before a kind of step, such as a plan's edits, that go is "
-            "ezexe's to give, by a button: wait for it on those steps, and act on the rest.")
-ACT_DONT_WAIT = True          # p4.json phi.act_dont_wait: false leaves this built-in rule out of a project
-# The delegation rule. Each mechanism it names is Claude Code's own, as the docs say:
-# - sub-agents.md, "Run subagents in foreground or background": "Foreground subagents block the main conversation
-#   until complete." and "Background subagents run concurrently while you continue working."; in its frontmatter
-#   table, `background`: "Set to `true` to keep this subagent in the background even when Claude asks to wait for it."
-# - The rule says nothing of waiting, sleeping or polling: the Agent tool's and the shell tools' own descriptions
-#   tell a session that a background subagent or command notifies it when it ends, and sub-agents.md says "A
-#   background subagent's results reach Claude as a completion notification in a later turn."
-# - sub-agents.md, "Built-in subagents", Explore: its model is "the parent conversation's model", so it ran small only
-#   while each call named `haiku`. "The `model` field in the subagent's definition" is second in the page's model
-#   order, so agents/finder.md, the skill sub-agentic's evidence finder, carries `model: haiku` and `effort: low`,
-#   and agents/writer.md and agents/integrator.md carry that table's writer and integrator: the right model runs
-#   with nothing a call or a project has to name.
-# - code-review-local.md: "`/code-review` is a bundled skill", "Claude can start `/code-review` on its own, without
-#   you typing the command", "In a terminal session, the review runs as a background subagent with its own context
-#   window", and "without `--fix`, the review's instructions ask Claude for a report only." The page calls that run
-#   "a forked subagent", of which skills.md, "Run skills in a subagent", says "The subagent doesn't see your
-#   conversation history". So a code change is reviewed by that skill. Its target "can be a pull request number, a
-#   branch name, a file path, or a Git revision range", so a result that is no code change has none, and the page's
-#   route past the skill is "Build your own reviewer: write a reviewer subagent or a review skill": that is
-#   agents/check.md.
-# - plugins/components.md, "Agents": "The name form is `<plugin>:<name>`", so agents/check.md is `p4-phi:check`.
-# - tools-reference.md, "Background commands": "Claude can set `run_in_background: true` to start the command as a
-#   background task and continue working while it runs." interactive-mode.md, "How backgrounding works": "Output is
-#   written to a file and Claude can retrieve it using the Read tool". So a long command needs no agent to run it.
-# - tools-reference.md, "Foreground commands that move to the background": "When a foreground command reaches its
-#   timeout without finishing, Claude Code moves it to the background instead of stopping it, unless the command
-#   starts with `sleep`." The default is `BASH_DEFAULT_TIMEOUT_MS`, "two minutes out of the box".
-REVIEW = ("the bundled skill `code-review`, run with the Skill tool on that change's commits or paths and without "
-          "`--fix`, so it reports and changes no file")
-# workflows.md, "Cost": "Claude Code picks each workflow agent's model in the same order it uses for subagents. A
-# model the script names for a stage counts as the per-invocation model in that order. When nothing else assigns one,
-# the agent runs on your session's model." No line of that page gives a workflow agent an effort of its own, but the
-# workflow-authoring reference Claude Code 2.1.330 ships gives `agent(prompt, opts)` the options `model?` and
-# `effort?`, where "opts.effort overrides the reasoning effort", so the skill sub-agentic's `agent(prompt, {model,
-# effort})` is a call the runtime takes.
-WORKFLOW = ("A Workflow script names a `model` and an `effort` for each stage, `agent(prompt, {model, effort})`, by "
-            "the role the skill `p4-phi:sub-agentic` gives it, since by the workflows page of the Claude Code docs \"A "
-            "model the script names for a stage counts as the per-invocation model\" and an agent with none \"runs "
-            "on your session's model\".")
-# The round a subagent's writing goes through before it counts, which the skill sub-agentic holds as its rule 11:
-# - best-practices.md, in the table of habits to drop: "A fresh reviewer does help, because it hasn't seen your
-#   reasoning, which is a different thing from delegating." And "Give Claude a check to run": "A reviewer that's
-#   asked to find problems will always find something. If you fix every finding, you end up with extra abstraction
-#   layers and tests for cases that can't happen." So a finding may be answered, and the rounds are capped.
-# - building-effective-agents, the evaluator-optimizer: "one LLM call generates a response while another provides
-#   evaluation and feedback in a loop", with "stopping conditions" such as "a maximum number of iterations".
-# - The Agent tool's own text: "Use SendMessage with the agent's ID or name to continue a previously spawned agent
-#   with its context intact". So the findings go back to the agent that wrote, which knows why it wrote so.
-# - A subagent cannot loop by itself: sub-agents.md, "Available tools", takes `ScheduleWakeup` from every subagent.
-# Seen on 2026-11-22 in a scripted run of Claude Code 2.1.328: a session sent each of two reviewing subagents a
-# message by its id, the tool answered "Resuming agent", and each read the commit against its own findings.
-# A session's goal has the same round for its own change, in plans.REVIEW_PART.
-ROUND = ("What a subagent wrote is read before it counts as done, by `p4-phi:check` or, for a code change, by the "
-         "skill `code-review` without `--fix`, and what the read finds goes back to the same agent with "
-         "`SendMessage`, which continues it with what it knows. A finding is mended or answered with the reason it "
-         "is no fault, one second read follows a mend, and there is no third.")
-LEVELS = ("built-in, levels: work is delegated to where Claude Code runs it best, so this session's own turn is "
-          "never held by it. Before an Agent call, a fork, a Workflow call or a session start, the skill "
-          "`p4-phi:sub-agentic` decides whether to delegate at all, how many agents, and each one's type, `model` "
-          "and `effort` by its role, and the reply's first line says that shape ahead of the call. "
-          "A search or a read across more than a couple of files goes to " + plans.EXPLORE + "; "
-          "a command expected to run long, such as a test file, a test suite or a build, goes to " + plans.BACKGROUND
-          + "; a review of a code change that should not lean on this session's own view goes to " + REVIEW + "; "
-          "such a read of a result that is no code change goes to the subagent `p4-phi:check`, on `sonnet` at "
-          "`medium` effort as its file says; one question whose step asks in its own words for several sides at "
-          "once, where the readers must challenge each other, goes to " + plans.TEAM + ", and every other review "
-          "or read stays with `code-review` or `p4-phi:check` as said; a subagent that writes new content or "
-          "changes behaviour is "
-          "`p4-phi:writer`, on `opus` at `medium`, and one that lands written work or verified findings is "
-          "`p4-phi:integrator`, on `sonnet` at `medium`. " + ROUND + " "
-          "A worker is started with the `model` and the `effort` of its step's "
-          "role, as the advice that hands out each start call names them; an effort above this session's own is "
-          "not accepted. " + WORKFLOW + " After a run, the report says the agents launched and finished and what "
-          "they spent.")
-# The plan rule. A plan is Claude Code's own to write and ezexe's to approve, and p4-phi builds no plan of its own:
-# - tools-reference.md: `EnterPlanMode` "Switches to plan mode to design an approach before coding", with no
-#   permission required, and `ExitPlanMode` "Presents a plan for approval and exits plan mode", with one required.
-# - commands.md: "`/plan` switches into plan mode before a large change", and `/plan [description]` is "Enter plan
-#   mode directly from the prompt."
-# - common-workflows.md, "Plan before editing": "For changes you want to review before they touch disk, switch to
-#   plan mode. Claude reads files and proposes a plan but makes no edits until you approve."
-# - permission-modes.md, "Analyze before you edit with plan mode": "Approving a plan exits plan mode and switches the
-#   session to the permission mode each approve option describes".
-# - The tool's own text names when: a task that "can be solved in several different ways", one that "requires
-#   choosing between patterns or technologies", one that "will likely touch more than 2-3 files", and "If you would
-#   use AskUserQuestion to clarify the approach, use EnterPlanMode instead". PLAN_OPEN says those three in the
-#   rule's words. The same text skips it for "Tasks where the user has given very specific, detailed instructions".
-# - The plan file is plan mode's: `ExitPlanMode` "will read the plan from the file you wrote", and p4's settings
-#   keeper points `plansDirectory` at the store's folder p4conf.PLANS, which the rule names from there and never
-#   spells by itself. How a plan is shaped and where it moves once it is done is p4-temportal's skill `plan-planner`.
-# What that text lacks is the session another session started. It says "Use this tool proactively", and there no
-# person answers the approval: docs/plugin-development.html, "Plan mode for a worker", has the card seen in the
-# desktop app, answered by ezexe alone. So such a session is told to enter no plan mode. sub-agents.md, "Built-in
-# subagents", Plan: "A research agent used during plan mode to gather context before presenting a plan", with
-# read-only tools, so it raises no card, and the session's starter approves by a message, which the sentences of
-# GOAL_STARTER already count toward a condition. An allow at `classic.PermissionRequest` settles `ExitPlanMode` with
-# no person, seen in the desktop app on Claude Code 2.1.326, and p4-phi builds nothing on it: that would be a part
-# of the set of what it settles with no approval card, which is ezexe's to say yes to.
-# The rule has a switch of its own, `phi.plan_mode`, as each built-in rule has: a project whose sessions enter plan
-# mode only when asked, as an output style can say, leaves this rule out and keeps the act-don't-wait rule.
 PLANS_DIR = p4conf.PLANS            # from the store's root, as the keeper has it: no line names a place under the app's own folder
-PLAN_OPEN = ("a change that could be made in more than one way, that decides a structure, or that reaches past two "
-             "or three files")
-PLAN_AT = ("built-in, plan-mode: a change whose approach is open is planned before it is edited, and the plan is "
-           "Claude Code's own to write and ezexe's to approve. Where a message asks for " + PLAN_OPEN + ", and this "
-           "session has the tool `EnterPlanMode`, call it before any edit: it is the mode ezexe enters with `/plan`. "
-           "The plan goes into the file plan mode names, whose folder p4's settings keeper points at `"
-           + PLANS_DIR + "` in the project's store, shaped as the skill `plan-planner` of the plugin p4-temportal "
-           "says where that plugin is installed. The plan is written whole and then read as that skill says: "
-           "no session started this one, so none starts a team's lead for it, and one `p4-phi:check` that has "
-           "not seen the writing reads the plan, what it finds is mended or answered, and one more "
-           "`p4-phi:check` reads the mends, with no read after that. Until ezexe approves the whole plan, no "
-           "session that writes is started and no file but the plan is edited. Put the finished plan to ezexe "
-           "with `ExitPlanMode`, whose approval "
-           "card ezexe answers by a button: that approval is ezexe's go for the plan's edits, and no other question "
-           "asks for it. Once it is approved, its sections go to workers by the start calls `phi.py sections "
-           "<the plan file>` prints, one for each run of sections. A change the message spells "
-           "out, or one a sentence "
-           "describes, is made with no plan, and no plan is written into a file elsewhere.")
-PLAN_STARTED = ("built-in, plan-mode: a change whose approach is open is planned before it is edited. Another "
-                "session started this one, and no person answers a plan's approval here, so this session calls "
-                "neither `EnterPlanMode` nor `ExitPlanMode`, unless a message of ezexe's own in this conversation "
-                "asks for plan mode or this session was started in plan mode, as a planner is: it then writes its "
-                "plan file there whole, asks the session that started it in one SendMessage for the coworkers of "
-                "its plan, each the lead of an agent team for one group of its sections, as the skill "
-                "`plan-planner` of the plugin p4-temportal words that ask, has each group read in rounds, mending "
-                "what held after each, until a round of the group has nothing to mend or its held findings are "
-                "more than the round before, and ends its turn with "
-                "`ExitPlanMode`, whose approval card ezexe answers in this "
-                "session. Once that returns approved, it has a terminal worker land its sections, which "
-                "`phi.py coworkers \"<its plan file>\" --land` writes the start file, the brief and the report's name "
-                "of into the worker's node, and prints the terminal call that starts, from a session in auto or "
-                "bypass mode: it makes that call, and reads the report file the worker writes, which `phi.py "
-                "coworkers \"<its plan file>\" --wait --report <that file>` waits for, in place of an answer by "
-                "message. Where that command says it starts none, it runs `phi.py sections \"<its plan "
-                "file>\"` and starts one `p4-phi:integrator` subagent for each run, "
-                "never a session, in a git worktree it makes from `origin/main`, and sends the session that "
-                "started it one message naming each branch, its commits "
-                "and its check results, which ends its work: it awaits no reply, sets no wait for one and stops "
-                "each background task it started. It pushes nothing, merges nothing and raises no version, unless its "
-                "brief says it builds nothing. Where its task asks for " + PLAN_OPEN + ", and its brief does not "
-                "settle how, it has the built-in `Plan` subagent design the change, which only reads and raises no approval "
-                "card, sends that plan to the session that started it in one SendMessage, and takes that session's "
-                "message as the approval. A change the brief spells out, or one a sentence describes, is made with "
-                "no plan.")
-plans.BUILT_INS = tuple(x.split(": ", 1)[0].replace("built-in, ", "") for x in (BUILT_IN, PLAN_AT, LEVELS))   # plans.py's names
 LEVELS_ON = True              # p4.json phi.levels: false leaves the delegation rule and its checks out
-PLAN_MODE = True              # p4.json phi.plan_mode: false leaves the plan rule out of a project
+PLAN_MODE = True              # p4.json phi.plan_mode: false withholds no plan tool from a started session
 GOAL_REVIEW = True            # p4.json phi.goal_review: false leaves the review of the change out of a worker's goal
 TOP_ORCHESTRATES = True       # p4.json phi.top_orchestrates: false keeps an orchestrator's work in it
 UPKEEP = False                # p4.json phi.upkeep: true has a session that started others keep them by itself
@@ -1529,14 +1348,13 @@ UPKEEP = False                # p4.json phi.upkeep: true has a session that star
 def project_conf(store):
     """The project's own keys of p4.json's `phi` section, read from the store where the session runs, not from a
     shared store, each with its P4_* variable ahead of it, by p4conf.load."""
-    global ACT_DONT_WAIT, TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, GOAL_REVIEW, UPKEEP
+    global TOP_ORCHESTRATES, LEVELS_ON, PLAN_MODE, GOAL_REVIEW, UPKEEP
     try:
         d = p4conf.section(store, "phi", write=False) if store else {}
     except Exception:  # noqa: BLE001
         d = {}
     if not isinstance(d, dict):                    # a `phi` that is no section sets every key back to its default
         d = {}
-    ACT_DONT_WAIT = d.get("act_dont_wait") is not False
     TOP_ORCHESTRATES = d.get("top_orchestrates") is not False
     LEVELS_ON = d.get("levels") is not False
     PLAN_MODE = d.get("plan_mode") is not False
@@ -1894,70 +1712,31 @@ def fair_cut(texts, room):
     return [out[k] for k in range(len(texts))]
 
 
-def builtin_text(started=False):
-    """The rules p4-phi carries itself, so they hold in every project, with memories or none, a store or none; ''
-    where the project's p4.json turns each off. `started` says the session was started by another session, which
-    the plan rule reads."""
-    own = built_in(started)
-    if not own:
-        return ""
-    head = "a rule built into p4-phi" if len(own) == 1 else "the rules built into p4-phi"
-    return f"phi (p4-phi): {head}, for every session:\n" + "\n".join("- " + x for x in own)
-
-
-def built_in(started=False):
-    """The built-in rules that are on, each as its line. The plan rule is in the words for a session ezexe is at or,
-    with `started`, in the words for a session another session started."""
-    return (([BUILT_IN] if ACT_DONT_WAIT else []) + ([PLAN_STARTED if started else PLAN_AT] if PLAN_MODE else [])
-            + ([LEVELS] if LEVELS_ON else []))
-
-
-def rules_section():
-    """The text of the section the plugin's hooks module adds to the system prompt at `prompt.compose`: the rules
-    built into p4-phi, whole, for the session this process runs for. plugins/mods/reference.md, "Prompts and what
-    Claude reads": `prompt.compose` fires when "Claude Code renders a system prompt" and a hook answers "`{ sections
-    }`, a list of `{ id, text, scope }` in the order they're sent". The system prompt goes with every request and is
-    sent anew after a compaction, so no hook hands the rules at a start, a clear or a compaction.
-    '' where a setting turns the rules off: P4_PHI=0, P4_PHI_RULES=0, `rules: false` in the store's phi.json, or
-    `phi.act_dont_wait`, `phi.plan_mode` and `phi.levels` all false in the project's p4.json, which Me reads from the session's own
-    store. A project with no store has no phi.json and gets the rules, as every session does.
-    The store's feedback and user memories are no part of it: memory.md, "Auto memory", says the app loads the first
-    200 lines of MEMORY.md at the start of every conversation, and CLAUDE.md is read again after a compaction, so
-    live_rules hands a line only for a memory that changes after the start."""
-    if os.environ.get("P4_PHI") == "0":
-        return ""
-    me = Me()
-    if me.home and os.path.isdir(me.home):
-        configure(me.home)                         # phi.json's `rules`, and P4_PHI_RULES ahead of it
-    elif os.environ.get("P4_PHI_RULES") in ("0", "1"):
-        globals()["RULES"] = os.environ["P4_PHI_RULES"] == "1"
-    if not RULES:
-        return ""
-    above = spawned_from(me.rec)                   # the app's record says so with a store or none
-    if not above and me.home and me.id:
-        above = spawned_from(load_session(me.home, me.id))
-    return builtin_text(started=bool(above))
-
-
 PLAN_TOOL = "EnterPlanMode"
 
 
-def withheld_tools(text):
-    """The tools the model of a session is not offered, for the rules' text the session is handed: `EnterPlanMode`
-    where the text holds the plan rule in the words for a session another session started. That rule keeps such a
-    session out of plan mode in a sentence, and where Claude Code has the event `tool.offer`, from 2.1.328 on, the
-    hooks module answers it for this tool, so the model is not shown what it is told not to call. `ExitPlanMode`
-    stays offered, so the session still plans where ezexe enters plan mode there with `/plan`."""
-    return [PLAN_TOOL] if PLAN_STARTED in str(text or "") else []
+def withheld_tools(started):
+    """The tools the model of a session is not offered: `EnterPlanMode` where another session started this one and
+    `phi.plan_mode` is on, since no person answers a plan's approval there. Where Claude Code has the event
+    `tool.offer`, from 2.1.328 on, the hooks module answers it for this tool, so the model is not shown what it
+    cannot use. `ExitPlanMode` stays offered, so the session still plans where ezexe enters plan mode there with
+    `/plan`."""
+    return [PLAN_TOOL] if started and PLAN_MODE else []
 
 
 def rules_main():
-    """`phi.py rules`: one JSON line for the hooks module, `{"rules": <the section's text>, "withholds": <the tools
-    the session's model is not offered>}`. A failure prints nothing, so the module adds no section and withholds
-    nothing, and leaves its line in the session's log."""
+    """`phi.py rules`: one JSON line for the hooks module, `{"withholds": <the tools the session's model is not
+    offered>}`. A failure prints nothing, so the module withholds nothing, and leaves its line in the session's
+    log. The command keeps its name, since the hooks module of a session started before an update asks for it."""
     try:
-        text = rules_section()
-        sys.stdout.write(json.dumps({"rules": text, "withholds": withheld_tools(text)}) + "\n")
+        withholds = []
+        if os.environ.get("P4_PHI") != "0":
+            me = Me()                                  # reads the project's p4.json, so `phi.plan_mode` is set
+            above = spawned_from(me.rec)               # the app's record says so with a store or none
+            if not above and me.home and me.id:
+                above = spawned_from(load_session(me.home, me.id))
+            withholds = withheld_tools(bool(above))
+        sys.stdout.write(json.dumps({"withholds": withholds}) + chr(10))
     except Exception as e:  # noqa: BLE001
         log_failure("rules", {}, e)
     return 0
@@ -2583,8 +2362,7 @@ def share_notice(payload):
 def h_session_start(payload):
     me = Me(payload)
     if not me.home or not me.id:
-        # a project with no .claude/p4 yet has nothing to hand: the rules p4-phi carries itself are in its system
-        # prompt, as rules_section says
+        # a project with no .claude/p4 yet has nothing to hand
         RAN["start"] = "no store"
         return share_notice(payload) or None       # read from the main checkout's store, which needs none here
     relay.track(me.home, first_only=True)  # the session tree, committed on its own the first time
