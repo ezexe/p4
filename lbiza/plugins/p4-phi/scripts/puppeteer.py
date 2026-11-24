@@ -46,7 +46,6 @@ watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps a look from reading GitHub, 
 the folder of the app's session records.
 """
 
-import glob
 import hashlib
 import itertools
 import json
