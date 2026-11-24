@@ -122,14 +122,26 @@ def planner_task(title, plan_file=""):
 PROFILE = re.compile(r"[A-Za-z0-9_-]+")
 
 
-def profile_lines(profile, windows):
+NO_PROFILE = "ant-none"          # an empty folder in a worker's node: ANTHROPIC_CONFIG_DIR there, so no ant profile applies
+
+
+def profile_lines(profile, windows, folder=""):
     """The one line of a start file that names the Anthropic profile `profile` for that tab alone, where the
     profile's credentials file is there: `credentials/<profile>.json` in `ANTHROPIC_CONFIG_DIR`, whose default is
     `%APPDATA%\\Anthropic` on Windows and, elsewhere, `${XDG_CONFIG_HOME:-$HOME/.config}/anthropic`, an assumption of
-    this file. No key is named: a profile `ant auth login` wrote is a sign-in with none. [] where `profile` is
-    empty; ValueError where it holds a character outside letters, digits, `_` and `-`."""
+    this file. No key is named: a profile `ant auth login` wrote is a sign-in with none. Where `profile` is empty and
+    `folder` is given, the line instead makes `<folder>/ant-none` and points ANTHROPIC_CONFIG_DIR at it for that tab,
+    since Claude Code ranks the active `ant` profile above the stored claude.ai login, and an empty config folder has
+    no profile apply, so the worker signs in with the user's own login. [] where both are empty; ValueError where
+    `profile` holds a character outside letters, digits, `_` and `-`."""
     if not profile:
-        return []
+        if not folder:
+            return []
+        sep = "\\" if windows else "/"
+        none = folder.replace("\\", "/").replace("/", sep).rstrip(sep) + sep + NO_PROFILE
+        if windows:
+            return [f"New-Item -ItemType Directory -Force -Path '{none}' | Out-Null; $env:ANTHROPIC_CONFIG_DIR = '{none}'"]
+        return [f"mkdir -p '{none}' && export ANTHROPIC_CONFIG_DIR='{none}'"]
     if not PROFILE.fullmatch(profile):
         raise ValueError(f"a worker profile's name holds letters, digits, _ and - only: {profile}")
     if windows:
@@ -150,7 +162,7 @@ def script(name, checkout, mode, said, folder, windows=None, team=True, extra=()
     reads it, follow. A quote in the prompt `said` is refused as one in a path is, since the prompt stands between
     quotes."""
     windows = upkeep.WINDOWS if windows is None else windows
-    named = profile_lines(profile, windows)
+    named = profile_lines(profile, windows, folder)
     sep = "\\" if windows else "/"
     here, at = checkout.replace("\\", "/").replace("/", sep), folder.replace("\\", "/").replace("/", sep)
     for path in (here, at, said):

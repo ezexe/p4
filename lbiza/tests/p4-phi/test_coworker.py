@@ -85,8 +85,9 @@ class Coworker(unittest.TestCase):
                                 self.home, windows=False, team=True, mode="plan", headless=False,
                                 prompt=coworker.planner_task("the move"))
         self.assertEqual(found["file"], "start-tw-plan-0001.sh")
-        self.assertEqual(found["lines"][1:3], ["export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "cd '/repo'"])
-        run = found["lines"][3]
+        self.assertIn("ANTHROPIC_CONFIG_DIR", found["lines"][1], "profile off: an empty ant config folder")
+        self.assertEqual(found["lines"][2:4], ["export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", "cd '/repo'"])
+        run = found["lines"][4]
         self.assertIn("--permission-mode plan ", run)
         self.assertNotIn("/goal", run, "a planner's turn ends on ExitPlanMode, not on a goal")
         self.assertNotIn(" -p ", run)
@@ -298,7 +299,7 @@ class Coworker(unittest.TestCase):
         self.assertEqual(name, coworker.worker_name(self.path, ["1"]))
         self.assertEqual(second["name"], name.replace("-m-1-", "-m-2-"))
         self.assertEqual(one["file"], f"start-{name}.ps1")
-        self.assertEqual(len(one["lines"]), 3, "no team variable")
+        self.assertEqual(len(one["lines"]), 4, "the clearing line, the empty ant config folder, the folder, the run: no team variable")
         self.assertNotIn(coworker.TEAMS, "\n".join(one["lines"]))
         run = one["lines"][-1]
         for word in ("--worktree", "--add-dir"):
@@ -365,6 +366,27 @@ class Coworker(unittest.TestCase):
             for bad in ("p4 workers", "p4;workers", "p4/workers", "a'b"):
                 with self.assertRaises(ValueError):
                     coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=windows, profile=bad)
+
+    def test_a_worker_with_profile_off_gets_an_empty_ant_config_folder(self):
+        win = coworker.script("tw-a", "E:/repo", "", "the prompt", "E:/n/phi", windows=True, team=False, profile="")[1]
+        line = [x for x in win if "ANTHROPIC_CONFIG_DIR" in x]
+        self.assertEqual(len(line), 1)
+        self.assertIn("'E:\\n\\phi\\ant-none'", line[0])
+        self.assertIn("$env:ANTHROPIC_CONFIG_DIR = 'E:\\n\\phi\\ant-none'", line[0])
+        sh = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=False, team=False, profile="")[1]
+        self.assertIn("mkdir -p '/n/phi/ant-none' && export ANTHROPIC_CONFIG_DIR='/n/phi/ant-none'", sh)
+        for lines in (win, sh):
+            self.assertFalse([x for x in lines if "ANTHROPIC_PROFILE" in x])
+        on = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=False, team=False,
+                             profile="p4-workers")[1]
+        self.assertFalse([x for x in on if "ant-none" in x], "a profile that is set does not get the empty folder")
+        self.assertIn("ANTHROPIC_PROFILE=p4-workers", on[1])
+        for windows in (True, False):
+            self.assertEqual(coworker.profile_lines("", windows), [])
+        for resume in (False, True):
+            f = coworker.script("tw-a", "/repo", "", "the prompt", "/n/phi", windows=False, headless=False,
+                                session="s-1", resume=resume, profile="")
+            self.assertTrue(any("ant-none" in x for x in f[1]), "start and resume files both hold the line")
 
     def test_a_worker_and_a_landing_pass_the_profile_to_their_start_file(self):
         one = coworker.worker("tw-p-0001", "Do it.", "It is done", "E:/repo", self.home, PLANNER, self.home,
