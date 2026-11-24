@@ -448,7 +448,9 @@ class Paths(unittest.TestCase):
             self.assertEqual(relay.repo_of(p), "", p)
 
 
-class ThreeSessions(unittest.TestCase):
+class _ThreeSessionsBase(unittest.TestCase):
+    """The fixture of three sessions in one repository, and the helpers its tests share; it holds no test."""
+
     def setUp(self):
         if not shutil.which("git"):
             self.skipTest("no git")
@@ -481,6 +483,67 @@ class ThreeSessions(unittest.TestCase):
         self.assertEqual(self.t.stop(host, "edit it", [("Edit", {"file_path": path}, "ok")], uuid=uuid).returncode, 0)
         return path
 
+    OLD_RUN = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
+               "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
+               "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push that "
+               "repository's main, without asking ezexe, "
+               "and say in one line what was pushed. A force-push, a history rewrite or a deletion still waits on "
+               "ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question whose first button is that go.")
+
+    def workflow(self, name, text):
+        write(os.path.join(self.work, ".github", "workflows", name), text)
+
+    def _tracked_store(self, uuid):
+        t = self.t
+        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
+                                       "-m", "store")):
+            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
+        self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid=uuid).returncode, 0)
+        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
+        gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
+                            text=True).stdout.strip()
+        return gd
+
+    def _subjects(self):
+        return subprocess.run(["git", "-C", self.t.p4, "log", "--format=%s"], capture_output=True,
+                              text=True).stdout.splitlines()
+
+    def worktree_worker(self, name="the-flush"):
+        """GRAND as a worker the app started in a git worktree of its own, and that worktree's folder."""
+        own = os.path.join(self.work, ".claude", "worktrees", name).replace("\\", "/")
+        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/" + name, own],
+                       check=True, capture_output=True)
+        self.t.record(GRAND, TOP, title="the flush worker", cwd=own)
+        self.assertEqual(self.t.say(GRAND, "Task:\nPort the flush in lib.").returncode, 0)
+        return own
+
+    def holders(self, host, text):
+        """Whom the address book gives a message of `host`'s to, as ids."""
+        import book
+        import phi
+        from unittest import mock
+        with mock.patch.dict(os.environ, self.t.env(host)), mock.patch.dict(phi.RECORDS, clear=True):
+            return [e["id"] for e, _ in book.holders(self.t.p4, self.t.session(host), text)]
+
+    def plan(self, host, inp):
+        """An update_plan call of `host`'s, through the plan hook."""
+        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
+                                       "tool_input": inp, "tool_response": "Plan updated."})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def finish_under_a_step(self, uuid="a1"):
+        """A, the child for the parent's step on the layout, finished: its work shown done and committed."""
+        t = self.t
+        self.plan(TOP, {"items": [{"content": "Move the layout of the store into recall", "status": "in_progress"},
+                                  {"content": "Fold recall into the plugin", "status": "pending"}]})
+        self.plan(A, {"items": [{"content": "Rename the folders", "status": "completed"},
+                                {"content": "Commit the move", "status": "completed"}]})
+        self.assertEqual(relay._session(t.p4, A).get("rootStep"), "1", "its parent step, by its brief's words")
+        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
+        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid=uuid).returncode, 0)
+
+
+class ThreeSessions(_ThreeSessionsBase):
     def test_a_child_with_no_issue_record_gets_no_push_line_for_its_closing_commit(self):
         """ezexe/p4#232: a worker with no issue record that commits `Closes #5` has run no regression test p4-phi
         saw, so its orchestrator gets no push line for it: the worker reports the commit and its orchestrator
@@ -510,16 +573,6 @@ class ThreeSessions(unittest.TestCase):
         self.assertIn("so no session runs it again for that hash", line)
         self.assertIn("Once it passes, push that repository's main", line)
         self.assertNotIn("its suites pass", line, "no count, no commit and no record left to each reader")
-
-    OLD_RUN = ("Run the full suite once, on the commit being pushed, in this session, as one background command, "
-               "and keep its verdict under that commit's hash with `phi.py note \"suite green at <hash>\" --source "
-               "\"<the command>\"`, so no session runs it again for that hash. Once it passes, push that "
-               "repository's main, without asking ezexe, "
-               "and say in one line what was pushed. A force-push, a history rewrite or a deletion still waits on "
-               "ezexe's go, asked as a `mcp__ccd_turn__wrap_up` question whose first button is that go.")
-
-    def workflow(self, name, text):
-        write(os.path.join(self.work, ".github", "workflows", name), text)
 
     def test_a_repository_whose_workflow_runs_on_push_gets_the_workflow_line_and_no_full_local_run(self):
         """Where a workflow of the repository runs its tests on every push to the default branch, the push line has
@@ -724,21 +777,6 @@ class ThreeSessions(unittest.TestCase):
         ctx = context(t.say(B, "second"))
         self.assertIn("eee555", ctx)
         self.assertNotIn("ddd444", ctx)
-
-    def _tracked_store(self, uuid):
-        t = self.t
-        for args in (("init", "-q"), ("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty",
-                                       "-m", "store")):
-            subprocess.run(["git", "-C", t.p4, *args], check=True, capture_output=True)
-        self.assertEqual(t.stop(TOP, "plan it", report="Planned.", uuid=uuid).returncode, 0)
-        write(os.path.join(t.p4, "p4.json"), json.dumps({"phi": {"track": True}}))
-        gd = subprocess.run(["git", "-C", t.p4, "rev-parse", "--absolute-git-dir"], capture_output=True,
-                            text=True).stdout.strip()
-        return gd
-
-    def _subjects(self):
-        return subprocess.run(["git", "-C", self.t.p4, "log", "--format=%s"], capture_output=True,
-                              text=True).stdout.splitlines()
 
     def test_a_hook_leaves_the_first_commit_to_a_process_of_its_own(self):
         """Inside a hook the tree's first commit is not waited on: the hook starts it in a process of its own and
@@ -1044,23 +1082,6 @@ class ThreeSessions(unittest.TestCase):
         there = root if os.name == "nt" else "/projects/x"          # a folder this machine takes as absolute
         self.assertEqual(pathfilter.project_of(there + "/.claude/p4"), there)
 
-    def worktree_worker(self, name="the-flush"):
-        """GRAND as a worker the app started in a git worktree of its own, and that worktree's folder."""
-        own = os.path.join(self.work, ".claude", "worktrees", name).replace("\\", "/")
-        subprocess.run(["git", "-C", self.work, "worktree", "add", "-q", "-b", "claude/" + name, own],
-                       check=True, capture_output=True)
-        self.t.record(GRAND, TOP, title="the flush worker", cwd=own)
-        self.assertEqual(self.t.say(GRAND, "Task:\nPort the flush in lib.").returncode, 0)
-        return own
-
-    def holders(self, host, text):
-        """Whom the address book gives a message of `host`'s to, as ids."""
-        import book
-        import phi
-        from unittest import mock
-        with mock.patch.dict(os.environ, self.t.env(host)), mock.patch.dict(phi.RECORDS, clear=True):
-            return [e["id"] for e, _ in book.holders(self.t.p4, self.t.session(host), text)]
-
     def test_owned_paths_are_kept_for_the_address_book_and_a_path_a_running_sibling_holds_is_refused(self):
         """`phi.py shard` keeps a session's owned paths, which the address book lists and routes by, and refuses a
         path a running sibling holds, with the return value 2; no sibling is told of an overlap."""
@@ -1165,23 +1186,6 @@ class ThreeSessions(unittest.TestCase):
         self.assertNotIn("phi (p4-phi): what", ctx)
         self.assertNotIn("stop before", ctx)
 
-    def plan(self, host, inp):
-        """An update_plan call of `host`'s, through the plan hook."""
-        r = self.t.hook("plan", host, {"hook_event_name": "PostToolUse", "tool_name": "mcp__ccd_turn__update_plan",
-                                       "tool_input": inp, "tool_response": "Plan updated."})
-        self.assertEqual(r.returncode, 0, r.stderr)
-
-    def finish_under_a_step(self, uuid="a1"):
-        """A, the child for the parent's step on the layout, finished: its work shown done and committed."""
-        t = self.t
-        self.plan(TOP, {"items": [{"content": "Move the layout of the store into recall", "status": "in_progress"},
-                                  {"content": "Fold recall into the plugin", "status": "pending"}]})
-        self.plan(A, {"items": [{"content": "Rename the folders", "status": "completed"},
-                                {"content": "Commit the move", "status": "completed"}]})
-        self.assertEqual(relay._session(t.p4, A).get("rootStep"), "1", "its parent step, by its brief's words")
-        self.assertEqual(t.cli(A, "done", "test_layout.py: 3 tests OK").returncode, 0)
-        self.assertEqual(t.stop(A, "move the layout", report="Moved the layout into lib.", uuid=uuid).returncode, 0)
-
     def test_a_child_a_sibling_supersedes_is_listed_as_ready_to_archive(self):
         """A finished child whose work a sibling's newer note supersedes, by its words on the child's parent step, is
         counted as archived and listed on ready-to-archive.md."""
@@ -1266,7 +1270,8 @@ class ThreeSessions(unittest.TestCase):
                                      f"importer's nightly quota", t.proj)
             self.assertTrue(mine["within"], "a path in its own scope is within its topic")
 
-class ForkOrFresh(ThreeSessions):
+
+class ForkOrFresh(_ThreeSessionsBase):
     """The advice on start_session, a fork's pinned agenda, and a fresh child's slice of the parent's anchor."""
 
     def advise(self, host, context_, prompt, size, **more):
