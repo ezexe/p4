@@ -89,6 +89,9 @@ WORKER_PAIRS = {"print": "p4-workers", "interactive": ""}   # the profile a mode
 POOL_LOW = 0.9                     # a pool is low at or over this share of its window (Max) or its budget (API credit)
 CREDIT_REFUSED = re.compile(r"credit balance (?:is )?too low", re.I)   # the API's refusal of a p4-workers run, 2026-11-24
 REFUSAL_HOURS = 24                 # a credit refusal keeps the API pool low this long, then one print worker tries it again
+WORKER_SLOTS = {"api": 4, "max": 2}   # phi.json `worker_slots`: how many terminal workers each pool runs at once
+RUNNING_HOURS = 2                  # a start row with no outcome, report or final result is running for this long
+LAND_COST = 0.4                    # USD a landing worker is taken to cost where no outcome row says better
 POOL_ROWS = 20                     # pool_state reads the logs of this many latest start rows, never the whole ledger
 APP_TOOLS = True                 # phi.json `app_tools`: false keeps the hooks module from asking the app's own tools for sessions
 # hooks.md, "JSON output": "A hook's `additionalContext`, `systemMessage`, and `initialUserMessage` strings, and its
@@ -2797,6 +2800,163 @@ def pools_line(p):
             f"Max plan {'low' if m['low'] else 'ok'} ({m['why'] or used})")
 
 
+def pool_of(row):
+    """The pool a start row or a settings dict bills: `api` where it names a profile, `max` where its profile is
+    off."""
+    return "api" if row.get("profile") else "max"
+
+
+def running_workers(home, now=None):
+    """The start rows of worker-starts.jsonl whose worker still runs: no outcome row, no report file, no final
+    `result` row in its log, and started less than RUNNING_HOURS ago."""
+    import coworker
+    now = time.time() if now is None else now
+    rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl")) if home else []
+    ended = {r.get("name") for r in rows_ if r.get("event") == "outcome"}
+    out = {}
+    for r in rows_:
+        if r.get("event") != "start" or r.get("name") in ended:
+            continue
+        try:
+            at = time.mktime(time.strptime(str(r.get("time")), "%Y-%m-%dT%H:%M:%S"))
+        except ValueError:
+            continue
+        out.pop(r.get("name"), None)
+        if now - at > RUNNING_HOURS * 3600 or (r.get("report") and os.path.exists(r["report"])):
+            continue
+        if coworker.last_result(log_of_row(home, r), final=True):
+            continue
+        out[r.get("name")] = r
+    return list(out.values())
+
+
+def pool_slots(home, now=None):
+    """The free slots of each pool, as {"api", "max", "size", "running", "pools", "why"}: `worker_slots` of
+    phi.json, else WORKER_SLOTS, less the workers running on it; a low pool has none. Where phi.json sets
+    `worker_api_budget_usd`, the API credit has no more slots than what is left of it buys, at the mean cost of this
+    store's landing workers."""
+    conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
+    said = conf.get("worker_slots") if isinstance(conf.get("worker_slots"), dict) else {}
+    size = {k: (said[k] if isinstance(said.get(k), int) and not isinstance(said.get(k), bool) and said[k] >= 0
+                else v) for k, v in WORKER_SLOTS.items()}
+    pools = pool_state(home, now)
+    running = {"api": 0, "max": 0}
+    for r in running_workers(home, now):
+        running[pool_of(r)] += 1
+    free = {k: max(0, size[k] - running[k]) for k in size}
+    why = {"api": "", "max": ""}
+    for k in ("api", "max"):
+        if pools[k]["low"]:
+            free[k], why[k] = 0, pools[k]["why"]
+    budget = pools["api"]["budget"]
+    if budget and free["api"]:
+        rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
+        kinds = {r.get("name"): r.get("kind") for r in rows_ if r.get("event") == "start"}
+        costs = [r["total_cost_usd"] for r in rows_ if r.get("event") == "outcome"
+                 and kinds.get(r.get("name")) == "land" and isinstance(r.get("total_cost_usd"), (int, float))]
+        mean = sum(costs) / len(costs) if costs else LAND_COST
+        buys = int(max(0.0, budget - pools["api"]["spent_month"]) // max(mean, 0.01))
+        if buys < free["api"]:
+            free["api"], why["api"] = buys, f"what is left of {budget:g} USD buys {buys} more at {mean:.2f} each"
+    return {"api": free["api"], "max": free["max"], "size": size, "running": running, "pools": pools, "why": why}
+
+
+def slot_assigner(home, sid):
+    """A function of a piece of work's text and its section's `Runner:` (sections.runner_of) that returns the
+    settings its worker starts with, as worker_settings does with `pool` added, or None where no pool has a slot for
+    it, taking the slot it gives. Both pools fill at the same time: an `interactive` or `team` run takes a Max-plan
+    slot; a `print` run takes an API-credit slot while one is free, else a Max-plan slot, still as `-p` with its
+    profile off. A Runner that names its pool, a session's `workerProfile` and phi.json's `worker_profile` keep
+    their pool and wait for a slot of it. Where both pools are low there are no slots, and worker_settings' answer
+    stands, as it says. The function's `slots` is pool_slots' result it began from."""
+    slots = pool_slots(home)
+    free = {"api": slots["api"], "max": slots["max"]}
+    both_low = slots["pools"]["api"]["low"] and slots["pools"]["max"]["low"]
+
+    def pick(text, runner=None):
+        runner = runner or {}
+        st = worker_settings(home, sid, "")       # a section's words pick no mode: only a set mode or its Runner
+        if runner.get("mode") and st["mode_from"] == "the default":
+            st = {**st, "mode": runner["mode"], "mode_from": f"the section's Runner: {runner['said']}"}
+            if st["profile_from"].startswith(("the pair of", "the pools")):
+                st["profile"], st["profile_from"] = WORKER_PAIRS[st["mode"]], f"the pair of {st['mode']}"
+        if both_low:
+            return {**st, "pool": pool_of(st)}
+        fixed = not st["profile_from"].startswith(("the pair of", "the pools"))
+        if fixed:
+            pool = pool_of(st)
+        elif st["mode"] == "interactive":
+            pool = "max"
+        elif runner.get("pool"):
+            pool = runner["pool"]
+        else:
+            pool = "api" if free["api"] > 0 else "max"
+        if free[pool] <= 0:
+            return None
+        free[pool] -= 1
+        if not fixed:
+            profile = WORKER_PAIRS["print"] if pool == "api" and st["mode"] == "print" else ""
+            if st["mode"] == "print" and pool == "max" and not runner.get("pool"):
+                st = {**st, "profile": profile, "profile_from": "the slots: the API credit's are taken, so the "
+                                                                "Max plan, still as -p"}
+            elif runner.get("pool"):
+                st = {**st, "profile": profile, "profile_from": f"the section's Runner: {runner['said']}"}
+            else:
+                st = {**st, "profile": profile}
+        return {**st, "pool": pool}
+    pick.slots = slots
+    return pick
+
+
+def slots_line(slots):
+    """The one line a land prints for pool_slots' result."""
+    def one(k, label):
+        return (f"{label} {slots[k]} free of {slots['size'][k]} ({slots['running'][k]} running"
+                + (f"; {slots['why'][k]}" if slots["why"][k] else "") + ")")
+    return "slots: " + one("api", "API credit") + ", " + one("max", "Max plan")
+
+
+def tab_lines(name, checkout, typed):
+    """The calls that start a terminal worker in a tab the user sees, as one line: run_in_terminal adds its tab
+    "without opening the panel" and open_terminal_tab opens one "and show[s] the panel", so the tab is opened first
+    and the command typed into it by its tab_id. See more: the two terminal tools' own descriptions."""
+    return ("`mcp__terminal__open_terminal_tab` with " + json.dumps({"title": name, "cwd": checkout}, ensure_ascii=False)
+            + ", which shows the panel, then `mcp__terminal__run_in_terminal` with " + json.dumps(
+                {"tab_id": "<the tab_id it returned>", "command": typed}, ensure_ascii=False))
+
+
+def peak_at_once(home):
+    """The most terminal workers that ran at the same time, overall and per pool, from worker-starts.jsonl: each
+    from its start row to its outcome row, or to its log's last write where no outcome row came and the log holds a
+    final result."""
+    import coworker
+    rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
+    spans = {}
+    for r in rows_:
+        try:
+            at = time.mktime(time.strptime(str(r.get("time")), "%Y-%m-%dT%H:%M:%S"))
+        except ValueError:
+            continue
+        if r.get("event") == "start" and r.get("name") not in spans:
+            spans[r["name"]] = [at, None, pool_of(r), r]
+        elif r.get("event") == "outcome" and r.get("name") in spans and spans[r["name"]][1] is None:
+            spans[r["name"]][1] = at
+    marks = []
+    for a, b, pool, r in spans.values():
+        if b is None:
+            log = log_of_row(home, r)
+            if not (log and os.path.exists(log) and coworker.last_result(log, final=True)):
+                continue
+            b = os.path.getmtime(log)
+        marks += [(a, 1, pool), (max(a, b), -1, pool)]
+    now, peak = {"all": 0, "api": 0, "max": 0}, {"all": 0, "api": 0, "max": 0}
+    for _, d, pool in sorted(marks, key=lambda m: (m[0], m[1])):
+        for k in ("all", pool):
+            now[k] += d
+            peak[k] = max(peak[k], now[k])
+    return peak
+
+
 def worker_start(home, settings, name, starter, kind, log, report):
     """The row a start of a terminal worker appends, and the line it prints."""
     p = settings.get("pools")
@@ -2847,6 +3007,8 @@ def worker_balance(home):
         done = sum(1 for r in outs if r.get("how") == "done" and r.get("is_error") is not True)
         out.append(f"{mode}: {len(starts_)} starts, {done} done, {failed} failed, cost {sum(costs):.4f} total"
                    f" {sum(costs) / len(costs) if costs else 0:.4f} mean, turns {sum(turns) / len(turns) if turns else 0:.1f} mean")
+    peak = peak_at_once(home)
+    out.append(f"at once: {peak['all']} at most, {peak['api']} on the API credit, {peak['max']} on the Max plan")
     return "\n".join(out) + "\n" + pools_line(pool_state(home))
 
 
@@ -4088,6 +4250,10 @@ def main(argv=None):
         if name == "sections":
             p.add_argument("plan", help="the plan file ezexe approved, whose runs of sections are printed, each "
                                         "as the terminal call that starts the worker that lands it")
+            p.add_argument("--lint", action="store_true",
+                           help="only read the plan and print what its readers flag: two sections no `Depends on:` "
+                                "orders that write one file (fences), a file named that another section writes with "
+                                "no `Depends on:` to it (sources), and a section with no check (checks)")
         if name == "coworkers":
             p.add_argument("plan", nargs="?", default="",
                            help="the plan file whose groups of sections are printed, each with its coworker; "
@@ -4099,7 +4265,7 @@ def main(argv=None):
                                 "file, brief and settings file there with its report's name, and print the "
                                 "terminal call that starts each: for after the approval, from a session in auto or "
                                 "bypass mode")
-            p.add_argument("--report", default="", metavar="FILE",
+            p.add_argument("--report", nargs="+", default=[], metavar="FILE",
                            help="with --wait: wait for this terminal worker's report file instead of for coworkers")
             p.add_argument("--wait", nargs="*", default=None, metavar="NAME",
                            help="wait until no coworker wrote a line for a while, then name each one an error of "
@@ -4314,24 +4480,55 @@ def main(argv=None):
             for line in upkeep.set_on(store, a.act == "on"):
                 print(line)
             return 0
+        if a.cmd == "sections" and a.lint:         # the readers' checks of a plan written as pieces
+            try:
+                with open(a.plan, encoding="utf-8") as f:
+                    found = sections.lint(f.read())
+            except OSError as e:
+                print(f"phi: {e}", file=sys.stderr)
+                return 2
+            for lens, line in found:
+                print(f"{lens}: {line}")
+            if not found:
+                print("clean: every section stands alone, no two at once write one file, and each has its check")
+            return 1 if found else 0
         if a.cmd == "sections":                    # an approved plan's runs: what `coworkers --land` prints
-            a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, ""
+            a.cmd, a.checkout, a.land, a.wait, a.report = "coworkers", "", True, None, []
         if a.cmd == "coworkers":                   # a plan's groups, each as the coworker that reads and lands it
             import coworker
             if a.wait is not None and a.report:    # a terminal worker's one sign is its report file
-                report = os.path.abspath(a.report).replace("\\", "/")
-                tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
-                log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
-                how, waited = coworker.wait_report(report, me.home, tab, log=log)
-                worker_outcome(me.home, tab, how, coworker.last_result(log), log)
+                reports = [os.path.abspath(r).replace("\\", "/") for r in a.report]
+                if len(reports) == 1:
+                    report = reports[0]
+                    tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+                    log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
+                    how, waited = coworker.wait_report(report, me.home, tab, log=log)
+                else:                              # a wave: the first of its workers through ends the wait
+                    report, how, waited = coworker.wait_any(reports)
+                    report = report or reports[0]
+                    tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+                    log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
+                if how != "long":
+                    worker_outcome(me.home, tab, how, coworker.last_result(log), log)
+                elif len(reports) == 1:
+                    worker_outcome(me.home, tab, how, coworker.last_result(log), log)
                 if how == "ended":
                     r = coworker.last_result(log)
                     print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "
                           f"{r.get('subtype') or ''}{' error' if r.get('is_error') else ''}: "
                           f"{str(r.get('result') or '')[:400]} (its log {log}; continue it with its resume file)")
-                    return 0
-                print(f"done: {report} is there, after {waited} seconds" if how == "done" else
-                      f"long: {report} is not there after {waited} seconds: look at the terminal tab `{tab}`")
+                elif how == "done":
+                    print(f"done: {report} is there, after {waited} seconds")
+                else:
+                    print(f"long: {'no report of ' + str(len(reports)) + ' is' if len(reports) > 1 else report + ' is not'}"
+                          f" there after {waited} seconds: look at the terminal tab"
+                          f"{'s' if len(reports) > 1 else ' `' + tab + '`'}")
+                rest = [r for r in reports if (r != report or how == "long") and not os.path.exists(r)]
+                if len(reports) > 1 and how != "long":
+                    print("still running: " + " ".join(rest) if rest else "none still running")
+                if len(reports) > 1:
+                    print("land the plan again with `coworkers <plan> --checkout <checkout> --land` to start what this "
+                          "frees, then wait again on the reports still running")
                 return 0
             plan = os.path.abspath(a.plan) if a.plan else ""
             if a.wait is not None and not a.land:  # a round's wait on named coworkers, which only reads
@@ -4361,18 +4558,19 @@ def main(argv=None):
                 return 2
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
             mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
-            if a.land:                             # a terminal worker for each group not landed, in LAND_MODE
+            if a.land:                             # a terminal worker for each ready run, in LAND_MODE
                 # each terminal session is a node nested in the folder that holds this session's, found from its id
                 node_of = {"home": me.home, "starter": safe_id(me.id)}
+                # landing is headless work by the rule, so a section's own words, which may name modes, pick no
+                # mode: only a set mode or the section's Runner line does, and each run takes a slot of a pool
+                pick = slot_assigner(me.home, me.id)
                 try:
-                    found = coworker.land(plan, checkout, "", mode, claim=True,
-                                          # landing is headless work by the rule, so a section's own words, which
-                                          # may name modes, pick no mode: only a set mode does
-                                          settings=lambda text: worker_settings(me.home, me.id, ""), **node_of)
+                    found = coworker.land(plan, checkout, "", mode, claim=True, settings=pick, **node_of)
+                    runs = coworker.plan_runs(plan, checkout, me.home)
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
-                if not found:
+                if not [r for r in runs if r["state"] != "landed"]:
                     print("phi: no section of that plan is left to land: each names no files or holds its "
                           "`Evidence:`", file=sys.stderr)
                     return 2
@@ -4382,20 +4580,30 @@ def main(argv=None):
                     if one.get("started"):
                         print(f"phi: a session named `{one['name']}` was started already, from its node "
                               f"{one['started']}, so nothing is written for it", file=sys.stderr)
-                if not new:
-                    return 2
+                print(slots_line(pick.slots))
                 for one in new:
                     print(f"worker `{one['name']}`: sections {', '.join(one['sections'])}, its report "
                           f"{one['report']}")
                     print(f"  session {one['session']}"
                           + (f", its log {one['log']}" if one["settings"]["mode"] == "print" else ""))
-                    print("  " + worker_start(me.home, one["settings"], one["name"], safe_id(me.id), "land",
-                                              one.get("log") or "", one["report"]))
-                    print("`mcp__terminal__run_in_terminal` with " + json.dumps(
-                        {"title": one["name"], "cwd": checkout, "command": one["typed"]}, ensure_ascii=False))
+                    print(f"  pool {one['settings']['pool']}, " + worker_start(
+                        me.home, one["settings"], one["name"], safe_id(me.id), "land", one.get("log") or "",
+                        one["report"]))
+                    print(tab_lines(one["name"], checkout, one["typed"]))
                     print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
                           f"`{one['resume_typed']}`")
-                return 0
+                for one in found:
+                    if one.get("waits"):
+                        print(f"waits for a slot: `{one['name']}`, sections {', '.join(one['sections'])}")
+                for r in runs:
+                    if r["state"] == "waiting":
+                        print(f"waits on sections {', '.join(r['needs'])}: `{r['name']}`, sections "
+                              f"{', '.join(r['sections'])}")
+                going = [r["report"] for r in coworker.plan_runs(plan, checkout, me.home) if r["state"] == "running"]
+                if going:
+                    print(f"Then wait, as one background command: `{commands()} coworkers --wait --report "
+                          + " ".join(going) + "`; when it returns, land the plan again to start what it frees.")
+                return 0 if new else 2
             try:
                 found = coworker.drafts(plan, checkout)
             except ValueError as e:

@@ -1385,8 +1385,9 @@ def verdict_text(home, s, d):
         return head + "No session is started for it." + tail
     if d.get("parent"):
         return (head + f"Start it in the Terminal panel: run `{phi.commands()} draft --start {d['id']}`, which gives "
-                "the worker its node, writes its brief and start file there and prints one "
-                "`mcp__terminal__run_in_terminal` call; make that call, then wait for its report with the "
+                "the worker its node, writes its brief and start file there and prints the "
+                "`mcp__terminal__open_terminal_tab` call that shows its tab and the `mcp__terminal__run_in_terminal` "
+                "call that starts it there; make both, then wait for its report with the "
                 "`coworkers --wait --report` line it prints, as one background command." + tail)
     return (head + "Start it now: `mcp__ccd_session__start_session` with "
             + json.dumps(call_of(d), ensure_ascii=False) + ". It is an orchestrator under this session and stays "
@@ -1423,6 +1424,27 @@ def with_task(brief, task):
     return "\n".join(lines[:at] + ["## The task", "", task, ""] + lines[at:])
 
 
+def free_name(home, name):
+    """The name a drafted worker starts under: `name` where no node holds it, else the first `<name>-<k>` with none,
+    k from 2, where the worker that holds each earlier name is through, its report written or its log ended on a
+    final result, so a draft can be started again with a new task. ValueError where one still runs."""
+    import coworker
+    nodes = relay.nodes(home)
+    k = 1
+    while True:
+        at = name if k == 1 else f"{name}-{k}"
+        folder = nodes.get(at)
+        if not folder:
+            return at
+        folder = folder.replace("\\", "/")
+        through = (os.path.exists(f"{folder}/report-{at}.md")
+                   or coworker.last_result(f"{folder}/{coworker.LOG.format(at)}", final=True))
+        if not through:
+            raise ValueError(f"a session named `{at}` was started already, from its node {folder}, and still runs: "
+                             "wait for its report, or continue it with its resume file")
+        k += 1
+
+
 def start_draft(home, s, did, base, task=""):
     """`draft --start`: the terminal worker of a kept draft. It claims the worker's node in the store nested in this
     session's, writes its brief, settings and start file there, and returns the lines to print: the worker's name and
@@ -1438,9 +1460,11 @@ def start_draft(home, s, did, base, task=""):
         raise ValueError("an orchestrator's draft is started with the call the draft printed")
     text = task_text(task) if task else ""
     brief = with_task(d["brief"], text) if text else d["brief"]
-    name = coworker.draft_name(d["title"], d["id"])
-    planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
-    settings = phi.worker_settings(home, s["sessionId"], d["title"] + "\n" + d["brief"])
+    # the brief with the task in it is what routes: a planner's plan-mode lines can come from the task alone
+    planner = plans.is_planner(d["title"], text) or plans.child_kind(d["title"] + "\n" + brief) == "plan"
+    settings = phi.worker_settings(home, s["sessionId"], d["title"] + "\n" + brief)
+    level = plans.own_level("\n".join([str(d.get("words") or ""), d["brief"], text]))
+    name = free_name(home, coworker.draft_name(d["title"], d["id"]))
     headless = settings["mode"] == "print"
     plan_file = (os.path.join(home, *p4conf.PLANS.split("/"), f"{name}.md").replace("\\", "/")
                  if planner and headless else "")
@@ -1454,7 +1478,7 @@ def start_draft(home, s, did, base, task=""):
                           team=planner and not headless,
                           mode="plan" if planner and not headless else coworker.LAND_MODE,
                           prompt=coworker.planner_task(d["title"], plan_file) if planner else "",
-                          profile=settings["profile"], plan_file=plan_file, headless=headless)
+                          profile=settings["profile"], plan_file=plan_file, headless=headless, level=level)
     if one.get("started"):
         raise ValueError(f"a session named `{name}` was started already, from its node {one['started']}")
     coworker.write([one], base, home)
@@ -1464,8 +1488,9 @@ def start_draft(home, s, did, base, task=""):
            f"worker `{name}`: " + (f"`claude -p`, session {one['session']}, its report {one['report']}, its log "
                                   f"{one['log']}" if headless else
                                   f"session {one['session']}, its report {one['report']}"),
-           "`mcp__terminal__run_in_terminal` with " + json.dumps(
-               {"title": name, "cwd": checkout, "command": one["typed"]}, ensure_ascii=False),
+           *([f"model and effort: {', '.join(f'{k} {v}' for k, v in sorted(level.items()))}, from the draft's own "
+                "lines"] if level else []),
+           phi.tab_lines(name, checkout, one["typed"]),
            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
            f"{one['report']}`",
            f"Where it ends with no report, continue it in a Terminal-panel tab with `{one['resume_typed']}`"]

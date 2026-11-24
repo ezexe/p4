@@ -37,6 +37,7 @@ SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), 
                                     "plugins", "p4-phi", "scripts"))
 sys.path.insert(0, SRC)
 import coworker  # noqa: E402
+import plans  # noqa: E402
 import phi  # noqa: E402
 import relay  # noqa: E402
 import puppeteer  # noqa: E402
@@ -1003,6 +1004,84 @@ class Terminal(Base):
         with open(os.path.join(folder, "coworker-settings.json"), encoding="utf-8") as f:
             self.assertTrue(json.load(f)["enabledPlugins"]["p4-temportal@p4-marketplace"])
         return start, resume, r.stdout, name
+
+    def kept_draft(self, title, brief, did="drf-0abcdef012"):
+        t = self.t
+        t.say(TOP, TASK)
+        os.makedirs(os.path.join(t.dir(TOP), "drafts"), exist_ok=True)
+        write(os.path.join(t.dir(TOP), "drafts", did + ".json"), json.dumps({
+            "id": did, "title": title, "parent": TOP, "verdict": "start", "context": "fresh", "brief": brief,
+            "gate": []}))
+        return did
+
+    def start_file(self, name):
+        ext = "ps1" if os.name == "nt" else "sh"
+        with open(os.path.join(relay.nodes(self.t.p4)[name], f"start-{name}.{ext}"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_a_planner_whose_plan_mode_lines_come_from_its_task_routes_interactive(self):
+        """Seen on 0.11.176: the drafted brief alone routed, so the task's plan-mode lines were never read."""
+        t = self.t
+        did = self.kept_draft("README line", "Add one README line.\nFiles: README.md")
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "This session starts in plan mode.\nezexe approves the plan with ExitPlanMode.\n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("mode interactive (the piece of work)", r.stdout)
+        start = self.start_file(coworker.draft_name("README line", did))
+        self.assertIn("--permission-mode plan", start)
+        self.assertIn(coworker.TEAMS, start)
+
+    def test_a_planner_is_known_by_a_planning_verb_anywhere_in_its_title(self):
+        for title in ("README line: write the plan", "Count the lines, then draft a plan for the move",
+                      "Plan the ports table move"):
+            self.assertTrue(plans.is_planner(title), title)
+        for title in ("Fix the plan parser", "Count README lines", "Explain the plan file format"):
+            self.assertFalse(plans.is_planner(title), title)
+
+    def test_a_draft_started_again_after_its_worker_reported_starts_a_new_worker_and_a_running_one_is_refused(self):
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "Step one.\n")
+        self.assertEqual(t.cli(TOP, "draft", "--start", did, "--task", task).returncode, 0)
+        name = coworker.draft_name("Fix the ports table", did)
+        running = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(running.returncode, 2)
+        self.assertIn("still runs", running.stderr)
+        write(os.path.join(relay.nodes(t.p4)[name], f"report-{name}.md"), "done")
+        write(task, "Step two.\n")
+        again = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn(f"worker `{name}-2`", again.stdout)
+        relay.forget(t.p4)
+        self.assertIn("Step two.", self.start_file(f"{name}-2") + open(
+            os.path.join(relay.nodes(t.p4)[f"{name}-2"], f"brief-{name}-2.md"), encoding="utf-8").read())
+
+    def test_a_model_and_effort_line_of_the_draft_or_its_task_sets_the_workers_and_a_kind_line_does_not(self):
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py\nModel: claude-opus-5-5\n"
+                              "\nModel and effort: claude-opus-5-5 at medium effort, since this is a build that "
+                              "changes behaviour, a writer's, as the skill sub-agentic gives it.")
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "Step one.\nEffort: high\n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        start = self.start_file(coworker.draft_name("Fix the ports table", did))
+        self.assertIn("--model claude-opus-5-5", start)
+        self.assertIn("--effort high", start)
+        self.assertIn("model and effort: effort high, model claude-opus-5-5", r.stdout)
+        self.assertEqual(plans.own_level("Model and effort: claude-opus-5-5 at medium effort, since this is a "
+                                         "build, a writer's."), {}, "the kind's own line is no choice")
+
+    def test_a_start_opens_and_shows_the_workers_tab_before_it_types_the_command(self):
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        r = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        line = next(x for x in r.stdout.split("\n") if "mcp__terminal__open_terminal_tab" in x)
+        self.assertLess(line.index("open_terminal_tab"), line.index("run_in_terminal"))
+        self.assertIn('"tab_id": "<the tab_id it returned>"', line)
 
     def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
         start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})

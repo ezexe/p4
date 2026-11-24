@@ -638,5 +638,90 @@ class Coworker(unittest.TestCase):
             self.assertEqual(old.returncode, 2, f"{gone} is gone")
 
 
+WAVES = ("# Waves\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n\n"
+         "## 2. B\n\n- **Files:** `src/b.py`\n- **Depends on:** none\n- **Checks:** `t b`\n"
+         "- **Runner:** team\n- Model: claude-opus-5-5\n- Effort: high\n\n"
+         "## 3. C\n\n- **Files:** `src/c.py`\n- **Depends on:** 1\n- **Checks:** `t c`\n")
+
+
+class Waves(unittest.TestCase):
+    """coworker.land starts every run whose needs are met, and the next wave once a run before it reports."""
+
+    def setUp(self):
+        base = tempfile.TemporaryDirectory(prefix="p4-phi-waves-")
+        self.addCleanup(base.cleanup)
+        self.base = os.path.realpath(base.name)
+        self.path = os.path.join(self.base, "plan.md")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(WAVES)
+        self.home = os.path.join(self.base, "proj", ".claude", "p4")
+        os.makedirs(self.home)
+
+    def land(self, settings=None):
+        found = coworker.land(self.path, "E:/repo", WHO, "auto", self.home, PLANNER, claim=True, windows=False,
+                              settings=settings)
+        coworker.write([one for one in found if one.get("folder")], "E:/repo")
+        relay.forget(self.home)
+        return found
+
+    def states(self):
+        return {tuple(r["sections"]): r["state"] for r in coworker.plan_runs(self.path, "E:/repo", self.home)}
+
+    def test_the_first_wave_is_every_run_with_no_open_need_and_the_next_starts_when_its_need_reports(self):
+        self.assertEqual(self.states(), {("1",): "ready", ("2",): "ready", ("3",): "waiting"})
+        first = self.land()
+        self.assertEqual([one["sections"] for one in first if one.get("folder")], [["1"], ["2"]])
+        self.assertEqual(self.states(), {("1",): "running", ("2",): "running", ("3",): "waiting"})
+        again = self.land()
+        self.assertEqual([one.get("started") for one in again], [first[0]["folder"], first[1]["folder"]],
+                         "nothing new: the running runs are named, and 3 still waits")
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(self.states()[("1",)], "done")
+        self.assertEqual(self.states()[("3",)], "ready")
+        wave2 = [one for one in self.land() if one.get("folder")]
+        self.assertEqual([one["sections"] for one in wave2], [["3"]])
+        self.assertEqual(coworker.worker_name(self.path, ["3"]), wave2[0]["name"], "a run keeps its name")
+
+    def test_a_section_runner_gives_its_worker_its_team_and_its_own_model_and_effort(self):
+        seen = []
+
+        def settings(text, runner):
+            seen.append(runner)
+            mode = runner.get("mode") or "print"
+            return {"mode": mode, "profile": "" if mode == "interactive" else "p4-workers"}
+        found = {tuple(one["sections"]): one for one in self.land(settings)}
+        b = found[("2",)]
+        self.assertIn("--model claude-opus-5-5 --effort high", b["lines"][-1])
+        self.assertIn("export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", b["lines"])
+        self.assertNotIn(" -p ", b["lines"][-1])
+        self.assertIn("--model claude-sonnet-5-5", found[("1",)]["lines"][-1], "no Model line: the integrator's")
+        self.assertEqual([r.get("said") for r in seen], [None, "team"])
+
+    def test_a_run_no_pool_has_a_slot_for_waits_and_claims_no_node(self):
+        found = self.land(lambda text, runner: None if runner else {"mode": "print", "profile": "p4-workers"})
+        waits = [one for one in found if one.get("waits")]
+        self.assertEqual([one["sections"] for one in waits], [["2"]])
+        self.assertNotIn(waits[0]["name"], relay.nodes(self.home))
+        self.assertEqual(self.states()[("2",)], "ready", "it starts at the next land")
+
+    def test_a_waves_wait_returns_at_the_first_report_and_names_it(self):
+        reports = []
+        for name in ("tw-a", "tw-b"):
+            folder = os.path.join(self.base, name)
+            os.makedirs(folder)
+            reports.append(os.path.join(folder, f"report-{name}.md"))
+        now = [0.0]
+
+        def sleep(sec):
+            now[0] += sec
+            if now[0] >= 30:
+                with open(reports[1], "w", encoding="utf-8") as f:
+                    f.write("done")
+        self.assertEqual(coworker.wait_any(reports, clock=lambda: now[0], sleep=sleep), (reports[1], "done", 30))
+        self.assertEqual(coworker.wait_any([reports[0]], longest=20, clock=lambda: now[0],
+                                           sleep=lambda s: now.__setitem__(0, now[0] + s))[1:], ("long", 20))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
