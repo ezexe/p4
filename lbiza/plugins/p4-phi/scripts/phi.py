@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """phi.py: what linked sessions hand each other, kept on the app's own session tree.
 
-Each session has a folder phi/sessions/<sessionId>/ in the tree its store lives in, whose root store is that of its
-orchestrator's project, or the shared store that p4.json's `phi.home` names. A session another session started has
-it in a store of its own nested in its starter's, `.claude/p4` under it, with its phi/node.json; a top session, and
-one whose folder was made before nodes, has it in the root store, relay._dir. The folder holds session.json, the
+Each session has a folder in the tree its store lives in, whose root store is that of its orchestrator's project, or
+the shared store that p4.json's `phi.home` names. A session another session started has it as a node, phi/tree/<parent
+id>/<id>/ with its node.json; a top session, and one whose folder was made before nodes, has phi/sessions/<sessionId>/
+in the root store, relay._dir. The folder holds session.json, the
 app's fields for the session with its task; turns.jsonl, a line for each finished turn; notes.jsonl; reports.jsonl,
 the reports of its workers; log.jsonl, a line for each hook call; and session.md, the session as one page.
 The reports of orchestrators are in <home>/phi/reports.jsonl.
@@ -36,7 +36,7 @@ asks for, and `goal set` is the hooks module's word that the goal command set it
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
-off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
+on unless set false or P4_PHI_GOAL is 0, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `plan_mode` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the memory lines. P4_PHI_WAIT sets how long a first message waits for the app's
@@ -80,7 +80,7 @@ REPORTS = True
 TURNS = True
 BOOK = True
 RULES = True
-GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
+GOAL = True                      # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
 WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
 WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
 WORKER_MODES = ("print", "interactive")
@@ -213,7 +213,7 @@ def safe_id(sid):
 
 
 def session_dir(home, sid):
-    """A session's folder: in its node's store where it has one, else the flat folder of the root store."""
+    """A session's folder: its node's folder in phi/tree where it has one, else the flat folder of the root store."""
     return relay._dir(home, sid)
 
 
@@ -745,15 +745,14 @@ def ensure_session(home, sid, rec=None, cli="", depth=0, hint=""):
 
 
 def claim_node(home, sid, starter):
-    """The store of a session that `starter` started, claimed in the store that holds the starter's folder where
-    the session has neither a node nor a flat folder yet; a flat starter is in the root, so its child is the root's.
+    """The folder of a session that `starter` started, claimed in the tree under the starter's where the session
+    has neither a node nor a flat folder yet; a starter that is no node is the tree's top, so its child is at the top.
     A session whose flat folder is there, as one a hook that failed before ensure_session made, stays flat. The
     folder this process reads the app's answers from follows the session's, where it named the flat one."""
     if relay.nodes(home).get(sid) or os.path.isdir(relay.flat(home, sid)):
         return ""
     starter = safe_id(starter)
-    store = relay.nodes(home).get(starter) or home
-    made = relay.claim(home, store, sid, "session", starter)
+    made = relay.claim(home, sid, "session", starter)
     if made and APP_AT.get("folder") == relay.flat(home, sid):
         APP_AT["folder"] = session_dir(home, sid)
     return made
@@ -3755,7 +3754,7 @@ def reparent(home, sid, under, source="reparented"):
 
 
 def tree_text(home):
-    sessions = relay._sessions(home)               # the flat sessions and those of every node's store
+    sessions = relay._sessions(home)               # the flat sessions and those of every node's folder
     gone_ = {k for k, d in sessions.items() if d.get("archived") or relay.archived_in_app(d)}
     started = {}
     for s in sorted(sessions.values(), key=lambda s: s.get("createdAt", "")):
@@ -4212,9 +4211,8 @@ def main(argv=None):
             checkout = os.path.abspath(a.checkout or os.getcwd()).replace("\\", "/")
             mode = upkeep.mode_of(safe_id(me.id)) if me.id else ""
             if a.land:                             # a terminal worker for each group not landed, in LAND_MODE
-                # each terminal session is a node nested in the store that holds this session's folder
-                node_of = {"home": me.home, "starter": safe_id(me.id),
-                           "store": relay.nodes(me.home).get(safe_id(me.id)) or me.home}
+                # each terminal session is a node nested in the folder that holds this session's, found from its id
+                node_of = {"home": me.home, "starter": safe_id(me.id)}
                 try:
                     found = coworker.land(plan, checkout, "", mode, claim=True,
                                           # landing is headless work by the rule, so a section's own words, which

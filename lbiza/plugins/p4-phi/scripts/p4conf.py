@@ -57,7 +57,7 @@ DEFAULTS = {
         "keep_going_max": 2,             # turns the hooks module starts for upkeep in a row
         "watch_s": 5.0,                  # seconds between two looks of an orchestrator's watcher
         "stale_s": 86400.0,              # seconds a quiet session waits before it counts as stale
-        "upkeep": False,                 # true: a session that started others is handed their upkeep as acts that
+        "upkeep": True,                  # true: a session that started others is handed their upkeep as acts that
                                          # wait on nobody; `phi.py upkeep on` and `off` set it
     },
 }
@@ -138,8 +138,9 @@ WRITTEN = "_written"
 # holds it keeps, since READ_WHEN_SET names it. 17 came with the defaults of p4.json held by the plugin that reads
 # them, each in a file of its own. 18 came with the removal of the key `phi.act_dont_wait`, which a store that still
 # holds it keeps unread. 19 came with the removal of the keys `phi.top_orchestrates`, `phi.levels` and
-# `phi.tree_checks`, which a store that still holds them keeps unread.
-GEN = 19
+# `phi.tree_checks`, which a store that still holds them keeps unread. 20 came with the default `phi.upkeep` on, which a
+# parent and worker session tree needs.
+GEN = 20
 
 
 def _leaves(d, prefix=""):

@@ -243,6 +243,13 @@ def put_back():
     """After each test, put back what it left changed, and remove what it left in the temp folder."""
     environ, cwd, path, tempdir = dict(os.environ), os.getcwd(), list(sys.path), tempfile.tempdir
     had = set(os.listdir(TEMP))
+    # p4-phi's phi.project_conf copies a store's `phi.upkeep` into the UPKEEP of phi, controls and relay, which then
+    # holds whatever the last store a test read said; since upkeep is on by default (p4conf GEN 20) a test that reads
+    # the off path after one that read a fresh store saw it on. Each test starts from the modules' own value.
+    for name in ("phi", "controls", "relay"):
+        module = sys.modules.get(name)
+        if module is not None and hasattr(module, "UPKEEP") and of_a_plugin(module):
+            module.UPKEEP = False
     yield
     os.environ.clear()
     os.environ.update(environ)

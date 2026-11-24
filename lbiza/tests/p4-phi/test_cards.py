@@ -198,7 +198,7 @@ class TheSet(unittest.TestCase):
             me = phi.Me(payload)
             self.assertEqual(os.path.normcase(me.store), os.path.normcase(os.path.join(worktree, ".claude", "p4")))
             self.assertFalse(phi.cards_on(me))
-            self.assertFalse(p4conf.upkeep_on(me.store))
+            self.assertTrue(p4conf.upkeep_on(me.store), "upkeep is on by default, whatever the store says")
 
     def test_the_first_read_carries_the_yes_of_the_record_over_once(self):
         """A store whose keeper's record holds a yes for this store and set, as one kept before cards.json stood: the

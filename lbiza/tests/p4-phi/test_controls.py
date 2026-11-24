@@ -64,6 +64,8 @@ class Supervisor(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = t = Tree(self._tmp.name)
+        import p4conf
+        p4conf.set_key(t.p4, "phi.upkeep", False)              # these tests read the lines of a store with upkeep off
         self.other = os.path.join(t.tmp, "other")              # a second environment, with its own store
         self.store2 = os.path.join(self.other, ".claude", "p4")
         os.makedirs(self.store2)
@@ -1077,6 +1079,9 @@ class NativeCalls(unittest.TestCase):
         end: the app's own note for one it started, and nothing for one it did not start, with whether the sweep's
         schedule covers it. A session is named again once it works after a later report."""
         from unittest import mock
+        # controls.UPKEEP is the module's value as the last store read set it, and upkeep is on by default since
+        # GEN 20, so the off path this test reads first is pinned off here, whatever ran before it
+        self.enterContext(mock.patch.object(controls, "UPKEEP", False))
         s = {"sessionId": TOP, "controls": [{"sessionId": KID, "store": "x"}, {"sessionId": KID2, "store": "x"}]}
         got = self.watch(s, {KID: ("working", "09:00"), KID2: ("shown done", "08:00")})
         self.assertIn(f"\"The {KID} tree\", {controls.TOLD_BY_NOTHING} {controls.NOT_COVERED}", got,

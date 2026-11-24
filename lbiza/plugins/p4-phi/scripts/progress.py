@@ -186,7 +186,7 @@ def build(home, top, found=None):
             sources += [os.path.join(relay._dir(home, sid), name) for name in WATCHED]
     sources += [w["log"] for w in found]
     return {"top": top, "nodes": nodes, "sources": [p.replace("\\", "/") for p in sources[:SOURCES]],
-            "folders": [b.replace("\\", "/") for b in relay.session_bases(home) if os.path.isdir(b)]}
+            "folders": [b.replace("\\", "/") for b in relay.session_parents(home)]}
 
 
 def page(folder, text):

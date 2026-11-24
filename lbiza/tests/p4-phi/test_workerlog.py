@@ -50,6 +50,8 @@ RUNNING = [
 ]
 FINISHED = [
     {"type": "system", "subtype": "init", "session_id": "s-2", "model": "claude-sonnet-5-5"},
+    {"type": "assistant", "local_command_run": {"command": "goal"}, "session_id": "s-2",
+     "message": {"id": "m0", "content": [text("Goal set: land section 2")]}},
     assistant("m1", text("Landed."), tool_use("t1", "Bash", command="git status")),
     result_of("t1"),
     assistant("m2", text("Done: every fence is landed.")),
@@ -90,26 +92,31 @@ class Logs(unittest.TestCase):
         self.assertEqual((got["end"], got["cost"], got["num_turns"], got["error"], got["tool"]),
                          ("done", 0.1039, 6, "", None))
         self.assertEqual(got["text"], "Done: every fence is landed.")
+        self.assertEqual(got["goal"], "ended", "a `-p` log has no row that marks a goal met: its result row ends it")
 
     def test_a_credit_failed_worker_is_failed_and_its_error_is_the_results_text(self):
         got = workerlog.state(self.log("tw-bill", CREDIT))
         self.assertEqual((got["end"], got["error"]), ("failed", "Credit balance is too low"))
 
     def test_a_bom_a_stderr_line_and_a_cut_last_line_are_read_around(self):
-        path = self.log("tw-odd", FINISHED[:4], raw_before="﻿", raw_after='{"type": "result", "is_err')
+        path = self.log("tw-odd", FINISHED[:5], raw_before="﻿", raw_after='{"type": "result", "is_err')
         # a stderr line between two rows
         with open(path, "a", encoding="utf-8") as f:
             f.write("\nWARNING: a line of stderr\n")
         got = workerlog.state(path)
-        self.assertEqual((got["end"], got["turns"], got["text"]), ("running", 2, "Done: every fence is landed."))
+        self.assertEqual((got["end"], got["turns"], got["text"]), ("running", 3, "Done: every fence is landed."))
 
-    def test_the_goal_reads_achieved_and_cleared_from_a_row_that_opens_so(self):
+    def test_the_goal_is_set_while_running_ended_by_a_result_that_is_no_error_and_cleared_by_one_that_is(self):
         set_row = RUNNING[1]
-        done = {"type": "system", "subtype": "info", "text": "Goal achieved: the condition holds"}
-        self.assertEqual(workerlog.state(self.log("tw-g1", [set_row, done]))["goal"], "achieved")
-        cleared = assistant("m9", text("Goal cleared."))
-        self.assertEqual(workerlog.state(self.log("tw-g2", [set_row, cleared]))["goal"], "cleared")
-        self.assertEqual(workerlog.state(self.log("tw-g3", [RUNNING[2]]))["goal"], "")
+        self.assertEqual(workerlog.state(self.log("tw-g1", RUNNING))["goal"], "set")
+        ok = {"type": "result", "subtype": "success", "is_error": False, "result": "Done"}
+        bad = {"type": "result", "subtype": "error_during_execution", "is_error": True, "result": "Stopped"}
+        self.assertEqual(workerlog.state(self.log("tw-g2", [set_row, ok]))["goal"], "ended")
+        self.assertEqual(workerlog.state(self.log("tw-g3", [set_row, bad]))["goal"], "cleared")
+        self.assertEqual(workerlog.state(self.log("tw-g4", [RUNNING[2]]))["goal"], "")
+        self.assertEqual(workerlog.state(self.log("tw-g5", [RUNNING[2], ok]))["goal"], "", "no goal was set")
+        said = assistant("m9", text("Goal achieved: the words of a model are no mark"))
+        self.assertEqual(workerlog.state(self.log("tw-g6", [set_row, said]))["goal"], "set")
 
     def test_an_api_error_assistant_row_is_the_error_and_a_log_that_cannot_be_read_says_so(self):
         err = assistant("m1", text("Credit balance is too low"), isApiErrorMessage=True)
@@ -135,8 +142,7 @@ class Page(unittest.TestCase):
         os.makedirs(os.path.join(self.home, "phi"))
 
     def worker(self, name, rows, parent=TOP, brief="# Land section 2\n\nTask: land it.\n"):
-        store = relay.claim(self.home, self.home, name, "worker", parent, ["2"])
-        folder = os.path.join(store, "phi")
+        folder = relay.claim(self.home, name, "worker", parent, ["2"])
         if rows is not None:
             with open(os.path.join(folder, f"log-{name}.jsonl"), "w", encoding="utf-8", newline="\n") as f:
                 f.write("".join(json.dumps(r) + "\n" for r in rows))
@@ -171,6 +177,7 @@ class Page(unittest.TestCase):
         self.assertIn("running, turn 3, in `Bash` python -m pytest tests -q", page)
         self.assertIn("cost $0.1039, 6 turns", page)
         self.assertIn("goal set", page)
+        self.assertIn("goal ended", page)
         self.assertIn("> Running the checks now.", page)
         self.assertEqual(workerlog.render([]), "")
 

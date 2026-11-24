@@ -239,7 +239,8 @@ class Linear(Base):
         t.say(TOP, TASK)
         t.stop(TOP, TASK, report="planned")
         prompt = call_in(context(t.say(TOP, RETRY + ", in `lib/x.py`")))["prompt"]
-        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1)      # the folder as the Files line spells it
+        # the test line spells the folder on disk, as the Files: line does
+        at = re.search(r"Files: `([^`]+)/x\.py`", prompt).group(1)
         self.assertIn(f"Run these test files, and no whole suite: `{at}/test_x.py`, `{at}/test_y.py`.", prompt)
         self.assertIn("Done looks like: the change made, those test files passing, committed and reported.", prompt)
         self.assertNotIn("test_z.py", prompt)
@@ -525,6 +526,25 @@ class TermsAndGuides(Base):
         none = call_in(context(t.say(TOP, RETRY)))["prompt"]
         self.assertNotRegex(none, r"(?m)^Files: ")
         self.assertNotIn("decisions.md", none)
+
+    def test_a_briefs_paths_keep_their_spelling_on_disk_and_a_path_not_there_is_kept_as_given(self):
+        t = self.t
+        t.say(TOP, TASK)
+        real = os.path.join(t.tmp, "ReadMe.MD")
+        write(real, "x")
+        lower = real.lower().replace("\\", "/")
+        missing = os.path.join(t.tmp, "Not-There.md").lower().replace("\\", "/")
+        self.assertEqual(puppeteer.spelled(missing), missing)
+        if os.path.exists(lower):                    # a case-insensitive file system
+            got = puppeteer.spelled(lower)
+            self.assertTrue(got.endswith("/ReadMe.MD"), got)
+            self.assertEqual(got.lower(), lower.lower(), "the same path, no link followed")
+            d = puppeteer.prompter(t.p4, t.session(TOP), RETRY,
+                                   {"within": False, "routes": [], "paths": [lower, missing]}, t.proj)
+            self.assertIn(f"Files: `{got}`, `{missing}`", d["brief"])
+            self.assertEqual(d["paths"], [lower, missing], "the paths comparisons read are unchanged")
+        else:
+            self.skipTest("the file system is case-sensitive")
 
 class WatcherCaps(unittest.TestCase):
     def test_a_watcher_reads_its_caps_from_the_orchestrators_own_store_not_the_shared_one(self):
@@ -873,10 +893,58 @@ class Terminal(Base):
         self.assertIn("coworkers --wait --report ", r.stdout)
         node = relay.nodes(t.p4)[name]
         for f in (f"brief-{name}.md", "coworker-settings.json"):
-            self.assertTrue(os.path.isfile(os.path.join(node, "phi", f)), f)
+            self.assertTrue(os.path.isfile(os.path.join(node, f)), f)
         self.assertEqual(relay.node_record(t.p4, name)["kind"], "worker")
         again = t.cli(TOP, "draft", "--start", did)
         self.assertEqual(again.returncode, 2, "a worker is started once")
+
+    def test_a_draft_started_with_a_task_file_gives_the_worker_the_starters_task_and_its_done_line(self):
+        t = self.t
+        ctx, did = self.drafted()
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "Step one: run the exporter.\nDone looks like: the report holds X\n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", task)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("--task <file>", r.stdout)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        name = coworker.draft_name(title, did)
+        folder = relay.nodes(t.p4)[name]
+        with open(os.path.join(folder, f"brief-{name}.md"), encoding="utf-8") as f:
+            brief = f.read()
+        self.assertIn("## The task", brief)
+        self.assertIn("Step one: run the exporter.", brief)
+        self.assertEqual(brief.count("Done looks like:"), 1)
+        self.assertLess(brief.index("## The task"), brief.index("phi draft "))
+        ext = "ps1" if os.name == "nt" else "sh"
+        with open(os.path.join(folder, f"start-{name}.{ext}"), encoding="utf-8") as f:
+            self.assertIn("the report holds X", f.read())
+
+    def test_a_draft_started_without_a_task_file_says_how_to_give_one(self):
+        t = self.t
+        ctx, did = self.drafted()
+        r = t.cli(TOP, "draft", "--start", did)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("pass `--task <file>`", r.stdout)
+        title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
+        name = coworker.draft_name(title, did)
+        with open(os.path.join(relay.nodes(t.p4)[name], f"brief-{name}.md"), encoding="utf-8") as f:
+            self.assertNotIn("## The task", f.read())
+
+    def test_a_missing_or_empty_task_file_exits_2(self):
+        t = self.t
+        ctx, did = self.drafted()
+        r = t.cli(TOP, "draft", "--start", did, "--task", os.path.join(t.tmp, "none.md"))
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("phi:", r.stderr)
+        empty = os.path.join(t.tmp, "empty.md")
+        write(empty, "  \n")
+        r = t.cli(TOP, "draft", "--start", did, "--task", empty)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("phi:", r.stderr)
+        with self.assertRaises(ValueError):
+            big = os.path.join(t.tmp, "big.md")
+            write(big, "x" * (puppeteer.TASK_CHARS_MOST + 1))
+            puppeteer.task_text(big)
 
     def test_an_orchestrators_draft_is_refused_there_and_keeps_its_desktop_call(self):
         t = self.t
@@ -926,7 +994,7 @@ class Terminal(Base):
         r = t.cli(TOP, "draft", "--start", did)
         self.assertEqual(r.returncode, 0, r.stderr)
         name = coworker.draft_name("Plan the ports table move", did)
-        folder = os.path.join(relay.nodes(t.p4)[name], "phi")
+        folder = relay.nodes(t.p4)[name]
         ext = "ps1" if os.name == "nt" else "sh"
         with open(os.path.join(folder, f"start-{name}.{ext}"), encoding="utf-8") as f:
             start = f.read()
@@ -971,7 +1039,7 @@ class Terminal(Base):
         did = re.search(r"draft (drf-[0-9a-f]{10})", ctx).group(1)
         self.assertEqual(t.cli(TOP, "draft", "--start", did).returncode, 0)
         title = jload(os.path.join(t.dir(TOP), "drafts", did + ".json"))["title"]
-        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        folder = relay.nodes(t.p4)[coworker.draft_name(title, did)]
         name = [f for f in os.listdir(folder) if f.startswith("start-")][0]
         with open(os.path.join(folder, name), encoding="utf-8") as f:
             return f.read()
@@ -1097,7 +1165,7 @@ class WorkerSettings(Base):
         r = t.cli(host, "draft", "--start", did)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.out = r.stdout
-        folder = os.path.join(relay.nodes(t.p4)[coworker.draft_name(title, did)], "phi")
+        folder = relay.nodes(t.p4)[coworker.draft_name(title, did)]
         with open(os.path.join(folder, [f for f in os.listdir(folder) if f.startswith("start-")][0]),
                   encoding="utf-8") as f:
             return f.read()
@@ -1539,8 +1607,8 @@ class NodeStores(unittest.TestCase):
         self.home = os.path.join(self._tmp.name, "proj", ".claude", "p4")
         write(os.path.join(self.home, "phi", "sessions", TOP, "session.json"), json.dumps({"sessionId": TOP}))
         import relay
-        self.store = relay.claim(self.home, self.home, KID, "session", TOP)
-        self.kid = os.path.join(self.store, "phi", "sessions", KID)
+        self.store = relay.claim(self.home, KID, "session", TOP)
+        self.kid = self.store
         write(os.path.join(self.kid, "session.json"), json.dumps({"sessionId": KID, "spawnedFrom": {"sessionId": TOP}}))
 
     def test_the_signature_changes_when_a_nested_session_json_changes(self):

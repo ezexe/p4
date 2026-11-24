@@ -120,33 +120,21 @@ def _rows(path):
     return out
 
 
-# --- a node's store: the store each started session, terminal worker and reading team gets ------------------------
+# --- a node's folder: the folder each started session, terminal worker and reading team gets -----------------------
 #
-# ezexe/phi's docs/p4/nested-store.md:61-63: a child's store is `.claude/p4` under its parent's store, and nothing
-# makes a `p4` directly inside a `p4`. The i-th child is `.claude/p4` for i = 1 and `.claude/<i>/.claude/p4` for
-# i >= 2, so siblings sit at one depth and every store is a `p4` directly under a `.claude`. A store made before
-# that holds the i-th child at `.claude` i times and `p4` (old_store_of): the walk still reads it, and claim()
-# never takes a place either layout holds. The home every
-# function is handed stays the tree's root store; a node is found from its id, never from the folder a session runs
-# in, since a session started inside a nested store waits at Claude Code's trust question for every new folder.
+# ezexe, 2026-11-24: "drop expanding into '.claude/p4/.claude/p4/.....' write the nested tree directly into phi/". A
+# node is a folder of <root>/phi/tree, nested by parent: <root>/phi/tree/<ancestor ids...>/<id>, holding its
+# node.json and every file the node has: a session node's folder is its session folder (session.json, turns.jsonl,
+# drafts/), a worker's holds its brief, start, resume, settings, log and report. The home every function is handed
+# stays the tree's root store; a node is found from its id, never from the folder a session runs in, since a session
+# started inside a nested folder waits at Claude Code's trust question for every new folder.
 
-NODE = "node.json"               # <store>/phi/node.json: {id, kind, parent, sections, time} of a node's store
-NODE_PATH_MAX = 180              # the longest store path claim makes, so the files under it stay within Windows' 260
-_TREE = {}                       # by the root store: [the stores' paths under it], and {id: (path, node.json)}
-
-
-PLACE = re.compile(r"(?:[2-9]|[1-9]\d+)\Z")             # the folder `<i>` of the i-th child, i from 2, no leading zero
-
-
-def store_of(parent, i):
-    """The store of the i-th child, i from 1, of the store `parent`: `.claude/p4`, then `.claude/2/.claude/p4`,
-    `.claude/3/.claude/p4`, ..., all at one depth."""
-    return os.path.join(parent, ".claude", "p4") if i == 1 else os.path.join(parent, ".claude", str(i), ".claude", "p4")
-
-
-def old_store_of(parent, i):
-    """Where a store made before p4-phi 0.11.170 holds the i-th child: `.claude` i times and `p4`."""
-    return os.path.join(parent, *([".claude"] * i), "p4")
+NODE = "node.json"               # <node folder>/node.json: {id, kind, parent, place, sections, time} of a node
+NODE_PATH_MAX = 180              # the longest folder path claim makes, so the files under it stay within Windows' 260
+TREE = "tree"                    # <root>/phi/tree/<ancestor ids...>/<id>: a node's folder, nested by parent
+_TREE = {}                       # by the root store: [the folders it listed with their times], and {id: (rel, node.json)}
+_MIGRATING = set()               # the roots this process is migrating, so a read inside the migration does not start it
+_TMP = re.compile(r"\.tmp-\d+-[0-9a-f]{8}\Z")      # a folder a claim is still making
 
 
 def _key(home):
@@ -154,44 +142,35 @@ def _key(home):
 
 
 def _walk(home):
-    """[the stores under `home` as paths relative to it, the root as ""], {id: (relative path, node.json)}, and
-    [the `.claude` folders listed]. A `p4` under a `.claude` is a store only where it holds phi/node.json, so a
-    folder a claim is still making, or one of any other kind, is passed over."""
-    rels, held, listed, todo = [], {}, [], [""]
+    """{id: (the node's folder relative to `home`, node.json)} of every node under <home>/phi/tree, and [the folders
+    read, so the cache sees a claim]. Depth first: a folder with a node.json is a node, and one that holds only
+    folders is a container of the chain; a folder a claim is still making is passed over."""
+    held, listed = {}, []
+    root = os.path.join(home, "phi", TREE)
+    todo = [root] if os.path.isdir(root) else []
     while todo:
-        rel = todo.pop()
-        rels.append(rel)
-        at, kids, found, chain, first = os.path.join(home, rel) if rel else home, [], [], [], None
-        while True:
-            at = os.path.join(at, ".claude")
-            if not os.path.isdir(at):
-                break
-            listed.append(at)
-            if first is None:
-                first = at
-            k = len(chain) + 1                # the old layout: the k-th `.claude` of the chain holds child k
-            chain.append(at)
-            d = _read_json(os.path.join(at, "p4", "phi", NODE))
-            if str(d.get("id") or ""):
-                found.append((k, os.path.join(at, "p4"), d))
+        at = todo.pop()
+        listed.append(at)
         try:
-            names = [n for n in os.listdir(first) if PLACE.match(n)] if first else []
+            names = sorted(n for n in os.listdir(at) if os.path.isdir(os.path.join(at, n)) and not _TMP.search(n))
         except OSError:
-            names = []
+            continue
+        kids = []
         for n in names:
-            under = os.path.join(first, n, ".claude")
-            if os.path.isdir(under):
-                listed.append(under)
-                d = _read_json(os.path.join(under, "p4", "phi", NODE))
-                if str(d.get("id") or ""):
-                    found.append((int(n), os.path.join(under, "p4"), d))
-        for _, path, d in sorted(found, key=lambda t: t[0]):
-            kid, ident = os.path.relpath(path, home), str(d["id"])
-            kids.append(kid)
-            if ident not in held:             # an id that stands in two stores is read at the first
-                held[ident] = (kid, d)
-        todo.extend(reversed(kids))           # depth first, each store's children in their order
-    return rels, held, listed
+            sub = os.path.join(at, n)
+            d = _read_json(os.path.join(sub, NODE))
+            ident = str(d.get("id") or "")
+            if ident:
+                held.setdefault(ident, (os.path.relpath(sub, home), d))     # an id that stands twice is read at the first
+                kids.append(sub)
+                continue
+            try:
+                if all(os.path.isdir(os.path.join(sub, x)) for x in os.listdir(sub)):
+                    kids.append(sub)                     # a container: nothing but folders
+            except OSError:
+                pass
+        todo.extend(reversed(kids))
+    return held, listed
 
 
 def _stamp(path):
@@ -202,82 +181,99 @@ def _stamp(path):
 
 
 def _tree(home):
-    """The walk of `home`, kept while the times of <home>/phi and of every `.claude` folder it listed are unchanged:
-    a claim in any process makes and removes its lock file in <home>/phi and renames its store into a `.claude`
-    folder, and either changes that folder's time, so a node another process claimed is never missed."""
+    """The walk of `home`, kept while the times of <home>/phi, of <home>/.claude and of every folder of the tree it
+    listed are unchanged: a claim in any process makes and removes its lock file in <home>/phi and renames its folder
+    into one the walk listed, and either changes that folder's time, so a node another process claimed is never
+    missed. Where <home>/.claude holds an old nested store the walk is made after migrate_nested moved it in."""
     key = _key(home)
-    head = _stamp(os.path.join(home, "phi"))
+    old = os.path.join(home, ".claude")
+    head = (_stamp(os.path.join(home, "phi")), _stamp(old))
     held = _TREE.get(key)
     if held and held[0] == head and all(_stamp(d) == m for d, m in held[1]):
         return held[2]
+    if key not in _MIGRATING and os.path.isdir(old) and _old_stores(old):
+        migrate_nested(home)
+        head = (_stamp(os.path.join(home, "phi")), _stamp(old))
     walk = _walk(home)
-    _TREE[key] = (head, [(d, _stamp(d)) for d in walk[2]], walk[:2])
-    return walk[:2]
+    _TREE[key] = (head, [(d, _stamp(d)) for d in walk[1]], walk[0])
+    return walk[0]
 
 
 def forget(home):
-    """Drops what stores() and nodes() kept for `home`, so the next call walks the folders again."""
+    """Drops what nodes() kept for `home`, so the next call walks the folders again."""
     _TREE.pop(_key(home), None)
 
 
-def stores(home):
-    """Every store of the tree under the root store `home`, the root first and then depth first: from a store each
-    `.claude` chain under it is followed while the folder is there, and each `p4` on it that holds phi/node.json is
-    a store. Kept for the process while the folders it read are unchanged, and dropped where claim() adds one."""
-    if not home:
-        return []
-    return [os.path.join(home, rel) if rel else home for rel in _tree(home)[0]]
-
-
 def nodes(home):
-    """{id: store} of every node of the tree, from each store's phi/node.json."""
+    """{id: the node's folder} of every node of the tree: <home>/phi/tree/<ancestor ids...>/<id>."""
     if not home:
         return {}
-    return {k: os.path.join(home, rel) for k, (rel, _) in _tree(home)[1].items()}
+    return {k: os.path.join(home, rel) for k, (rel, _) in _tree(home).items()}
 
 
 def node_record(home, ident):
     """The node.json of `ident`'s node, {} where it has none."""
-    held = _tree(home)[1].get(str(ident or "")) if home else None
+    held = _tree(home).get(str(ident or "")) if home else None
     return dict(held[1]) if held else {}
 
 
 def node_time(home, ident):
     """When `ident`'s node was claimed: the time of its node.json, 0.0 where it has none."""
-    store = nodes(home).get(str(ident or "")) if home else ""
+    folder = nodes(home).get(str(ident or "")) if home else ""
     try:
-        return os.path.getmtime(os.path.join(store, "phi", NODE)) if store else 0.0
+        return os.path.getmtime(os.path.join(folder, NODE)) if folder else 0.0
     except OSError:
         return 0.0
 
 
+def tree_of(home, ident, parent):
+    """The folder a new node `ident` takes: <home>/phi/tree, then the ids of `parent` and each of its ancestors that
+    is a node, outermost first, then `ident`."""
+    chain, at, seen = [], str(parent or ""), set()
+    while at and at not in seen and nodes(home).get(at):
+        seen.add(at)
+        chain.append(_safe(at))
+        at = str(node_record(home, at).get("parent") or "")
+    return os.path.join(home, "phi", TREE, *reversed(chain), _safe(ident))
+
+
+def _empty_up(home, folder):
+    """Removes `folder` and each folder above it under <home>/phi/tree that is left empty."""
+    stop = os.path.abspath(os.path.join(home, "phi", TREE))
+    while folder and os.path.abspath(folder) != stop:
+        try:
+            os.rmdir(folder)
+        except OSError:
+            break
+        folder = os.path.dirname(folder)
+
+
 def unclaim(home, ident):
-    """Removes the node of `ident` where its store holds nothing but phi/node.json, as one claim() made in a call
-    that then failed, so its name is not stranded. True where it was removed."""
-    store = nodes(home).get(str(ident or "")) if home else ""
-    if not store or os.listdir(store) != ["phi"] or os.listdir(os.path.join(store, "phi")) != [NODE]:
+    """Removes the node of `ident` where its folder holds nothing but node.json, as one claim() made in a call that
+    then failed, so its name is not stranded, and each container that leaves empty. True where it was removed."""
+    folder = nodes(home).get(str(ident or "")) if home else ""
+    if not folder or os.listdir(folder) != [NODE]:
         return False
-    os.remove(os.path.join(store, "phi", NODE))
-    os.rmdir(os.path.join(store, "phi"))
-    os.rmdir(store)
+    os.remove(os.path.join(folder, NODE))
+    _empty_up(home, folder)
     forget(home)
     return True
 
 
-def claim(home, parent_store, ident, kind, parent, sections=(), session="", checkout=""):
-    """The store of the node `ident`, made once: kind is "session", "reader" or "worker", and `parent` the id of the
-    session that started it. Under a lock on <home>/phi/nodes.lock, the store nodes() holds for the id; else the
-    store is made whole under a temporary name beside the first free place store_of(parent_store, i), i from 1,
-    with phi/node.json in it, and renamed to `p4`, which fails where that folder is there and so gives one place to
-    one caller, which then tries the next i. So no store stands without its node.json, and a failed write leaves
-    no empty place: the temporary folder is removed and the error goes out. A lock given up after three seconds is
-    gone on without, so two claims for one id can make two stores: each then reads nodes() again and returns the
-    store it names, the first in the walk's order. "" where the store's path would pass NODE_PATH_MAX, and nothing
-    is made. `session` and `checkout` are kept in node.json where given."""
-    ident = str(ident or "")
-    if not home or not parent_store or not ident:
+def claim(home, ident, kind, parent, sections=(), session="", checkout=""):
+    """The folder of the node `ident`, made once: kind is "session", "reader" or "worker", and `parent` the id of the
+    session that started it. Under a lock on <home>/phi/nodes.lock, the folder nodes() holds for the id; else the
+    folder tree_of gives, made whole under a temporary name with its node.json in it and renamed into place, so no
+    folder stands without its node.json and a failed write leaves nothing: the temporary folder is removed and the
+    error goes out. node.json holds `place`, one more than the number of nodes whose node.json names the same
+    `parent`. A lock given up after three seconds is gone on without, so two claims for one id can make two
+    folders: each then reads nodes() again and returns the one it names. "" where the folder's path would pass
+    NODE_PATH_MAX, and nothing is made. `session` and `checkout` are kept in node.json where given."""
+    ident, parent = str(ident or ""), str(parent or "")
+    if not home or not ident:
         return ""
-    d = {"id": ident, "kind": kind, "parent": str(parent or ""), "sections": list(sections),
+    migrate_nested(home)                          # takes the same lock: before it, never inside
+    d = {"id": ident, "kind": kind, "parent": parent, "sections": list(sections),
          "time": time.strftime("%Y-%m-%d %H:%M")}
     if session:
         d["session"] = session
@@ -287,29 +283,26 @@ def claim(home, parent_store, ident, kind, parent, sections=(), session="", chec
         have = nodes(home).get(ident)
         if have:
             return have
-        i = 0
-        while True:
-            i += 1
-            store = store_of(parent_store, i)
-            if len(os.path.abspath(store)) > NODE_PATH_MAX:
-                return ""
-            if os.path.exists(store) or os.path.exists(old_store_of(parent_store, i)):
-                continue
-            os.makedirs(os.path.dirname(store), exist_ok=True)
-            tmp = f"{store}.tmp-{os.getpid()}-{os.urandom(4).hex()}"
+        folder = tree_of(home, ident, parent)
+        if len(os.path.abspath(folder)) > NODE_PATH_MAX:
+            return ""
+        d["place"] = 1 + sum(1 for k in nodes(home) if str(node_record(home, k).get("parent") or "") == parent)
+        os.makedirs(os.path.dirname(folder), exist_ok=True)
+        if os.path.isdir(folder):                 # a folder with no node.json: the node.json goes in whole
+            _write_raw(os.path.join(folder, NODE), d)
+        else:
+            tmp = f"{folder}.tmp-{os.getpid()}-{os.urandom(4).hex()}"
             try:
-                os.makedirs(os.path.join(tmp, "phi"))
-                _write_raw(os.path.join(tmp, "phi", NODE), d)
-                os.rename(tmp, store)
-                break
+                os.makedirs(tmp)
+                _write_raw(os.path.join(tmp, NODE), d)
+                os.rename(tmp, folder)
             except OSError:
-                there = os.path.exists(store)
+                there = os.path.isdir(folder)
                 _drop(tmp)
-                if there:
-                    continue
-                raise
+                if not there:
+                    raise
         forget(home)
-        return nodes(home).get(ident) or store
+        return nodes(home).get(ident) or folder
 
 
 def _drop(folder):
@@ -318,21 +311,154 @@ def _drop(folder):
     shutil.rmtree(folder, ignore_errors=True)
 
 
+# --- stores made before p4-phi 0.11.172 ----------------------------------------------------------------------------
+
+def _old_stores(top):
+    """[the stores `.../p4` under `top` (<home>/.claude) that hold phi/node.json], by a plain walk that looks for
+    p4/phi/node.json at any depth and does not enter a phi folder."""
+    out = []
+    for at, dirs, _ in os.walk(top):
+        dirs[:] = [n for n in dirs if n != "phi"]
+        if os.path.basename(at) == "p4" and os.path.isfile(os.path.join(at, "phi", NODE)):
+            out.append(at)
+    return out
+
+
+def _old_place(store, top):
+    """The place a store held among its siblings, from its path under `top`: `.claude/p4` is 1, `.claude/<i>/.claude/p4`
+    is i, and i `.claude` folders then `p4` is i."""
+    parts = os.path.relpath(store, top).replace("\\", "/").split("/")
+    return int(parts[0]) if parts[0].isdigit() else sum(1 for x in parts if x == ".claude") + 1
+
+
+def _merge(src, dest):
+    """The files and folders of `src` moved into `dest`. A file of the same name that `dest` holds is kept and the
+    old one dropped."""
+    import shutil
+    os.makedirs(dest, exist_ok=True)
+    for name in sorted(os.listdir(src)):
+        s, t = os.path.join(src, name), os.path.join(dest, name)
+        if name.endswith(".lock") and os.path.isfile(s):
+            os.remove(s)
+        elif not os.path.lexists(t):
+            shutil.move(s, t)
+        elif os.path.isdir(s) and os.path.isdir(t):
+            _merge(s, t)
+        elif os.path.isdir(s):
+            shutil.rmtree(s, ignore_errors=True)
+        else:
+            os.remove(s)
+    try:
+        os.rmdir(src)
+    except OSError:
+        pass
+
+
+def _sweep(top):
+    """Removes every folder under `top` that holds nothing but emptied folders, `top` too."""
+    for at, _dirs, _files in os.walk(top, topdown=False):
+        try:
+            os.rmdir(at)
+        except OSError:
+            pass
+
+
+def migrate_nested(home):
+    """Moves each old nested store of `home` into the tree once, for stores made before p4-phi 0.11.172, and is the
+    one place that knows the old layout: `.claude/p4` and `.claude/<i>/.claude/p4` under a store, or i `.claude`
+    folders and `p4`. Under the nodes lock, it finds every <store>/phi/node.json under <home>/.claude, and, parents
+    first, siblings in the order of their node.json `time` and then their old place, moves the store's phi/ into the
+    node's tree folder, tree_of(home, id, parent): a session node's phi/sessions/<id>/* and every other file and
+    folder of its phi/, directly into the folder, with its node.json given `place` by that order. A file of the same
+    name already in the folder is kept and the old one dropped; a session folder of the store that is not the
+    node's goes to the flat phi/sessions. Then it removes <home>/.claude wherever it holds nothing but emptied
+    folders. A start file's paths are not rewritten: a file a worker still writes at its old path is moved in by a
+    later call. Nothing is done where the environment holds P4_PHI_MIGRATE=0, for a store whose sessions still run a
+    copy that reads the nested stores. Idempotent: a second run finds nothing. True where a node was moved."""
+    top = os.path.join(home, ".claude") if home else ""
+    key = _key(home) if home else ""
+    if not top or os.environ.get("P4_PHI_MIGRATE") == "0" or key in _MIGRATING or not os.path.isdir(top):
+        return False
+    moved = False
+    _MIGRATING.add(key)
+    try:
+        with locked(os.path.join(home, "phi", "nodes")):
+            found = []
+            for store in _old_stores(top):
+                d = _read_json(os.path.join(store, "phi", NODE))
+                if str(d.get("id") or ""):
+                    found.append((str(d.get("time") or ""), _old_place(store, top), store, d))
+            found.sort(key=lambda t: (t[0], t[1], t[2]))
+            while found:
+                ids = {str(t[3]["id"]) for t in found}
+                at = next((k for k, t in enumerate(found) if str(t[3].get("parent") or "") not in ids), 0)
+                _, _, store, d = found.pop(at)
+                ident, parent = str(d["id"]), str(d.get("parent") or "")
+                forget(home)
+                folder = nodes(home).get(ident)
+                if not folder:
+                    folder = tree_of(home, ident, parent)
+                    d["place"] = 1 + sum(1 for k in nodes(home) if str(node_record(home, k).get("parent") or "") == parent)
+                    os.makedirs(folder, exist_ok=True)
+                    _write_raw(os.path.join(folder, NODE), d)
+                _move_store(home, store, ident, folder)
+                moved = True
+            _sweep(top)
+    finally:
+        _MIGRATING.discard(key)
+        forget(home)
+    return moved
+
+
+def _move_store(home, store, ident, folder):
+    """The phi/ of the old `store` moved into the node's `folder`; its node.json goes."""
+    phi = os.path.join(store, "phi")
+    own = os.path.join(phi, "sessions", ident)
+    if os.path.isdir(own):
+        _merge(own, folder)
+    sessions = os.path.join(phi, "sessions")
+    if os.path.isdir(sessions):
+        _merge(sessions, os.path.join(home, "phi", "sessions"))
+    try:
+        os.remove(os.path.join(phi, NODE))
+    except OSError:
+        pass
+    if os.path.isdir(phi):
+        _merge(phi, folder)
+
+
 def flat(home, sid):
     """The folder a session had before nodes: <home>/phi/sessions/<safe id>, in the root store."""
     return os.path.join(home, "phi", "sessions", _safe(sid))
 
 
-def session_bases(home):
-    """The phi/sessions folder of each store of the tree, the root's first, whether it is there or not."""
-    return [os.path.join(s, "phi", "sessions") for s in stores(home)]
+def session_dirs(home):
+    """Every session's folder: the flat ones of <home>/phi/sessions, then each tree node of kind `session`."""
+    out = []
+    if not home:
+        return out
+    base = os.path.join(home, "phi", "sessions")
+    try:
+        out += [os.path.join(base, n) for n in sorted(os.listdir(base))]
+    except OSError:
+        pass
+    folders = nodes(home)
+    return out + [folders[k] for k in sorted(folders) if node_record(home, k).get("kind") == "session"]
+
+
+def session_parents(home):
+    """The folders whose list of names shows a new session: the flat phi/sessions, the tree's root, and the folder
+    each tree node's folder sits in, where they are there."""
+    out = [os.path.join(home, "phi", "sessions"), os.path.join(home, "phi", TREE)]
+    out += [os.path.dirname(d) for d in session_dirs(home) if os.path.dirname(d) not in out]
+    return [d for d in dict.fromkeys(out) if os.path.isdir(d)]
 
 
 def _dir(home, sid):
-    """A session's folder: <its node's store>/phi/sessions/<safe id> where its id has a node, else the flat one."""
+    """A session's folder: its node's folder in the tree where its id has a node, else the flat one."""
     safe = _safe(sid)
-    store = nodes(home).get(safe) if safe else ""
-    return os.path.join(store, "phi", "sessions", safe) if store else flat(home, sid)
+    folder = nodes(home).get(safe) if safe else ""
+    return folder or flat(home, sid)
 
 
 def _session(home, sid):
@@ -350,32 +476,26 @@ _SESSION_FILES = {}              # by a session.json's path: its mtime_ns, size 
 def _sessions(home):
     """Every session in the store, as its session.json by its sessionId. One message's hook can ask for this eleven
     times over 75 files, so a file is read again only when its time or size changed; each caller gets its own copy
-    of a session's top level. The sessions of every store of the tree are read, the flat ones of the root and those
-    of each node's store; an id whose node holds a folder is read there."""
+    of a session's top level. The sessions of the tree are read, the flat ones of the root and those
+    of each node's folder; an id whose node holds a folder is read there."""
     out = {}
     if not home:
         return out
     held_at = nodes(home)
-    for base in session_bases(home):
+    for folder in session_dirs(home):
+        path = os.path.join(folder, "session.json")
         try:
-            names = os.listdir(base)
+            st = os.stat(path)
         except OSError:
+            _SESSION_FILES.pop(path, None)
             continue
-        store = os.path.dirname(os.path.dirname(base))
-        for n in names:
-            path = os.path.join(base, n, "session.json")
-            try:
-                st = os.stat(path)
-            except OSError:
-                _SESSION_FILES.pop(path, None)
-                continue
-            held = _SESSION_FILES.get(path)
-            if not held or held[0] != st.st_mtime_ns or held[1] != st.st_size:
-                held = _SESSION_FILES[path] = (st.st_mtime_ns, st.st_size, _read_json(path))
-            d = held[2]
-            sid = d.get("sessionId")
-            if sid and (sid not in out or held_at.get(n) == store):
-                out[sid] = dict(d)
+        held = _SESSION_FILES.get(path)
+        if not held or held[0] != st.st_mtime_ns or held[1] != st.st_size:
+            held = _SESSION_FILES[path] = (st.st_mtime_ns, st.st_size, _read_json(path))
+        d = held[2]
+        sid = d.get("sessionId")
+        if sid and (sid not in out or held_at.get(os.path.basename(folder)) == folder):
+            out[sid] = dict(d)
     return out
 
 
@@ -1419,21 +1539,23 @@ def child_paths(home, s):
 # the rest of the store: session.json, turns.jsonl, notes.jsonl, reports.jsonl, node.json, plan.json and
 # anchor.json are tracked, and what is per machine or made again from them is ignored. While phi.track is off, which is the default, the whole
 # tree is ignored, as UNTRACKED lists. The ignore lines are made sure of here, before anything is added, since the
-# layout hook that seeds the rest of .gitignore runs beside this one at a start. A node's store is a plain folder of
-# the root store, with no git of its own, so each pattern that opens `phi/` has a twin that opens `.claude/**/phi/`.
+# layout hook that seeds the rest of .gitignore runs beside this one at a start. A node's folder is a plain folder of
+# the root store, so each pattern that opens `phi/sessions/*/` has a twin that opens `phi/tree/**/`, where the nodes'
+# folders are, and `phi/sessions/` itself, the tree while phi.track is off, one that is `phi/tree/`.
 
-NESTED = ".claude/**/"           # what a pattern of a node's store has before its `phi/`
+SESSIONS, SESSIONS_TREE = "phi/sessions/*/", "phi/tree/**/"
 
 
 def _twins(lines):
-    """Each line, and after each that opens `phi/` or `!phi/` its twin for every node's store, in the same order."""
+    """Each line, and after each that opens `phi/sessions/*/` or is `phi/sessions/` its twin for the tree of nodes'
+    folders, in the same order."""
     out = []
     for x in lines:
         out.append(x)
-        if x.startswith("phi/"):
-            out.append(NESTED + x)
-        elif x.startswith("!phi/"):
-            out.append("!" + NESTED + x[1:])
+        if x.startswith(SESSIONS):
+            out.append(SESSIONS_TREE + x[len(SESSIONS):])
+        elif x == "phi/sessions/":
+            out.append("phi/tree/")
     return tuple(out)
 
 
@@ -1462,7 +1584,7 @@ TRACKED_MARK = "p4-phi-tracked"
 
 FILTER_ATTR = "phi/** filter=p4path"
 ARCHIVE_ATTR = "phi/archive/** -filter"      # the archive is kept verbatim: no path in it is rewritten
-ATTRS = (FILTER_ATTR, ARCHIVE_ATTR, NESTED + FILTER_ATTR, NESTED + ARCHIVE_ATTR)   # a node's store's files as the root's
+ATTRS = (FILTER_ATTR, ARCHIVE_ATTR)        # phi/** holds phi/tree
 
 
 def _path_filter(home, g=None):
@@ -1601,9 +1723,9 @@ def track(home, first_only=False, wait=False):
 
 
 def _tracked(home):
-    """What the store's git takes of the session tree: the phi/ of each store of the tree, the root's first."""
+    """What the store's git takes of the session tree: the root's phi/, which holds phi/tree."""
     forget(home)
-    return [os.path.relpath(os.path.join(s, "phi"), home).replace("\\", "/") for s in stores(home)]
+    return ["phi"]
 
 
 TRACK_ADD_LEFT_S = 2.0           # the least of the hook's budget a staging add starts with

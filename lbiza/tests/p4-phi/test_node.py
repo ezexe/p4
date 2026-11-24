@@ -43,16 +43,15 @@ def rec(sid, above="", **more):
 
 
 class Address(unittest.TestCase):
-    """A session's address is that of the store that holds its folder: "1" for the root, and one more place for
-    each step of `.claude` folders and a `p4` under it."""
+    """A node's address is its parent node's, or "1" where its parent is no node, and `child` of its place."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.home = self._tmp.name
 
-    def claim(self, sid, above, store=None):
-        return relay.claim(self.home, store or self.home, sid, "session", above)
+    def claim(self, sid, above):
+        return relay.claim(self.home, sid, "session", above)
 
     def test_parent_and_child_give_the_first_five_addresses_of_ezexe_phis_tree(self):
         self.assertEqual([node.child("1", 1), node.child("1", 2), node.child("1", 3), node.child("101", 1)],
@@ -60,37 +59,34 @@ class Address(unittest.TestCase):
         self.assertEqual([node.parent(a) for a in ("1", "101", "1001", "10001", "10101")],
                          [None, "1", "1", "1", "101"])
 
-    def test_the_address_of_a_session_is_its_stores(self):
+    def test_the_address_of_a_session_is_its_nodes(self):
         sessions = {"top": rec("top"), "a": rec("a", "top"), "b": rec("b", "top"), "aa": rec("aa", "a"),
                     "old": rec("old", "top")}
-        a = self.claim("a", "top")
+        self.claim("a", "top")
         self.claim("b", "top")
-        self.claim("aa", "a", a)
+        self.claim("aa", "a")
         self.assertEqual(node.addresses(self.home, sessions),
                          {"top": "1", "a": "101", "b": "1001", "aa": "10101", "old": "1"},
-                         "a flat session is 1, the first two children 101 and 1001, the first child of the first 10101")
-        self.assertEqual(node.place_of(self.home, self.home), ("1", []))
-        deep = os.path.join(self.home, ".claude", ".claude", "p4", ".claude", "p4")
-        self.assertEqual(node.place_of(self.home, deep), ("100101", [2, 1]))
+                         "a session with no node is 1, the first two children 101 and 1001, the first child of the first 10101")
+        self.assertEqual(node.address_of(self.home, "nobody"), "1")
 
-    def test_place_of_reads_the_new_sibling_layout_and_the_old_one(self):
-        for i, want in ((1, "101"), (2, "1001"), (3, "10001")):
-            self.assertEqual(node.place_of(self.home, relay.store_of(self.home, i))[0], want)
-            self.assertEqual(node.place_of(self.home, relay.old_store_of(self.home, i))[0], want)
-        deep = os.path.join(relay.store_of(self.home, 2), ".claude", "p4")
-        self.assertEqual(node.place_of(self.home, deep), ("100101", [2, 1]))
-        self.assertEqual(node.place_of(self.home, os.path.join(self.home, ".claude", "1", ".claude", "p4")), ("1", []))
+    def test_a_session_and_its_two_workers_are_101_10101_and_101001_by_the_childs_rule(self):
+        self.claim("sid", "top")
+        relay.claim(self.home, "w1", "worker", "sid", ["1"])
+        relay.claim(self.home, "w2", "worker", "sid", ["2"])
+        self.assertEqual([node.address_of(self.home, k) for k in ("sid", "w1", "w2")], ["101", "10101", "101001"])
+        self.assertEqual([node.child("101", i) for i in (1, 2)], ["10101", "101001"])
 
     def test_two_tops_of_one_store_are_each_1(self):
         found = node.addresses(self.home, {"a": rec("a"), "b": rec("b"), "c": rec("c", "gone")})
         self.assertEqual(found, {"a": "1", "b": "1", "c": "1"})
 
     def test_no_address_of_a_tree_of_30_sessions_holds_11(self):
-        sessions, stores = {"s0": rec("s0")}, {"s0": self.home}
+        sessions = {"s0": rec("s0")}
         for k in range(1, 30):
             above = f"s{(k - 1) // 3}"                                   # three under each
             sessions[f"s{k}"] = rec(f"s{k}", above)
-            stores[f"s{k}"] = self.claim(f"s{k}", above, stores[above])
+            self.claim(f"s{k}", above)
         found = node.addresses(self.home, sessions)
         self.assertEqual(len(found), 30)
         self.assertEqual(found["s0"], "1")
@@ -106,8 +102,8 @@ class Address(unittest.TestCase):
                     "kid": rec("kid", "top", task="Fix the port", shard=["a.py"]),
                     "grand": rec("grand", "kid", fileSet=["b.py"])}
         self.claim("x", "top")
-        kid = self.claim("kid", "top")
-        self.claim("grand", "kid", kid)
+        self.claim("kid", "top")
+        self.claim("grand", "kid")
         r = node.record(self.home, "grand", sessions)
         self.assertEqual((r["address"], r["places"], r["paths"], r["parent"]), ("100101", [2, 1], ["b.py"], "kid"))
         self.assertEqual(node.record(self.home, "kid", sessions)["paths"], ["a.py"], "shard before fileSet")
@@ -154,16 +150,16 @@ class Level(unittest.TestCase):
             {"id": "t1", "tool": "Bash", "status": "open"}]}], "loose": [
             {"id": "a2", "tool": "Agent", "agent": True, "status": "done", "stepText": ""}]})
         put(self.home, "s", "team.json", {"teammates": [{"name": "fences", "task": "x", "state": "idle", "doing": ""}]})
-        worker = relay.claim(self.home, self.home, "tw-x", "worker", "s", ["8"])
-        relay.claim(self.home, self.home, "cw-z", "reader", "s", ["1"], session="5e55-1")   # no leaf: nothing starts one
-        relay.claim(self.home, self.home, "s2", "session", "s")
-        relay.claim(self.home, self.home, "tw-other", "worker", "t", ["9"])
+        worker = relay.claim(self.home, "tw-x", "worker", "s", ["8"])
+        relay.claim(self.home, "cw-z", "reader", "s", ["1"], session="5e55-1")   # no leaf: nothing starts one
+        relay.claim(self.home, "s2", "session", "s")
+        relay.claim(self.home, "tw-other", "worker", "t", ["9"])
         got = [(x["level"], x["name"], x["state"], x.get("address")) for x in node.leaves(self.home, "s")]
         self.assertEqual(got, [
             ("subagent", "Read the port", "open", None), ("subagent", "a2", "done", None),
             ("teammate", "fences", "idle", None), ("terminal", "tw-x", "started", "101")],
             "a session's node, a reading team's and another's worker are no leaves of it")
-        with open(os.path.join(worker, "phi", "report-tw-x.md"), "w", encoding="utf-8") as f:
+        with open(os.path.join(worker, "report-tw-x.md"), "w", encoding="utf-8") as f:
             f.write("done\n")
         self.assertEqual([x["state"] for x in node.leaves(self.home, "s") if x["name"] == "tw-x"], ["reported"])
         self.assertEqual(node.leaves(self.home, "none"), [])

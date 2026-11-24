@@ -46,7 +46,6 @@ watcher's tick in seconds, P4_PHI_WATCH_NET=0 keeps a look from reading GitHub, 
 the folder of the app's session records.
 """
 
-import glob
 import hashlib
 import itertools
 import json
@@ -486,14 +485,10 @@ def signature(home, top, roots):
     read, and the app's session records."""
     import progress                                # it imports this module at its head, so it is read here
     parts = [_stat(starts.path_of(home)), _stat(states_path(home))]
-    for base in relay.session_bases(home):         # the root's flat sessions and those of each node's store
-        try:
-            names = sorted(os.listdir(base))
-        except OSError:
-            names = []
-        parts.append(_stat(base))
-        parts += [_stat(os.path.join(base, n, "session.json")) for n in names]
-        parts += [_stat(os.path.join(base, n, progress.TEAM)) for n in names]   # a lead can stand outside the subtree
+    parts.append(_stat(os.path.join(home, "phi", "sessions")))     # a new flat session's folder
+    for d in relay.session_dirs(home):             # the root's flat sessions and those of each node's folder
+        parts.append(_stat(os.path.join(d, "session.json")))
+        parts.append(_stat(os.path.join(d, progress.TEAM)))        # a lead can stand outside the subtree
     ids = set()
     for sid, _, _ in subtree(home, top):
         ids.add(sid)
@@ -836,8 +831,8 @@ def routes_path(home, sid):
 def all_routes(home):
     """{route id: route row} of every route registered in the store and not withdrawn since."""
     out = {}
-    for p in sorted(p for base in relay.session_bases(home)
-                    for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))):
+    for p in sorted(os.path.join(d, "routes.jsonl") for d in relay.session_dirs(home)
+                    if os.path.isfile(os.path.join(d, "routes.jsonl"))):
         for r in relay._rows(p):
             rid = r.get("id")
             if r.get("kind") == "route" and rid:
@@ -920,8 +915,8 @@ def route_of(home, s, commit):
 def register_routes(home, top, net=False):
     """Registers each landed topic under an orchestrator once, beside the ledger, when its records back it. Returns
     the routes this call registered."""
-    rows = [r for base in relay.session_bases(home) for p in glob.glob(os.path.join(base, "*", "routes.jsonl"))
-            for r in relay._rows(p) if r.get("kind") == "route"]
+    rows = [r for d in relay.session_dirs(home) for r in relay._rows(os.path.join(d, "routes.jsonl"))
+            if r.get("kind") == "route"]
     held, taken = {r.get("session") for r in rows}, {r.get("issue") for r in rows}
     new = []
     for sid, depth, s in subtree(home, top):
@@ -1243,6 +1238,25 @@ def test_files(base, paths):
     return out
 
 
+def spelled(p):
+    """A path as it is spelled on disk where it is there, with forward slashes; else `p` as given. Each part is
+    matched against the names its folder lists, so a case-insensitive file system gives the spelling it holds, and
+    no link is followed: os.path.realpath fixes no case on macOS and turns /var into /private/var there."""
+    try:
+        if not os.path.lexists(p):
+            return p
+        drive, rest = os.path.splitdrive(os.path.abspath(p))
+        parts = [x for x in rest.replace("\\", "/").split("/") if x]
+        at = drive.upper() + "/" if drive else "/"
+        for part in parts:
+            names = os.listdir(at)
+            got = part if part in names else next((n for n in names if n.lower() == part.lower()), part)
+            at = os.path.join(at, got)
+        return at.replace("\\", "/")
+    except (OSError, ValueError):
+        return p
+
+
 def prompter(home, s, req, read, base):
     """The start draft for a message, the exact next session: its topic, a brief written as an instruction to that
     session, its parent session and the issue it closes when the message names one. The brief states the task by
@@ -1269,9 +1283,9 @@ def prompter(home, s, req, read, base):
                   "Its steps were: " + "; ".join((route.get("shape") or {}).get("steps") or ["none kept"]) + ".", ""]
     paths = read["paths"] or ((route or {}).get("slice") or {}).get("paths") or []
     if paths:
-        lines += ["Area: " + ", ".join(f"`{p}`" for p in paths[:8]) + ".", ""]
+        lines += ["Area: " + ", ".join(f"`{spelled(p)}`" for p in paths[:8]) + ".", ""]
     if paths:                                       # what a worker's brief says it covers; one that names none has none
-        lines += ["Files: " + ", ".join(f"`{p}`" for p in paths[:8]), ""]
+        lines += ["Files: " + ", ".join(f"`{spelled(p)}`" for p in paths[:8]), ""]
     if named:
         lines += [f"This closes {slug}#{named}: every commit says `Closes #{named}`.", ""]
     elif slug:
@@ -1281,7 +1295,8 @@ def prompter(home, s, req, read, base):
         lines += checkout_lines(base)
     tests = test_files(base, paths)
     if tests:                                       # the tests the change touches, and no whole suite
-        lines += ["Run these test files, and no whole suite: " + ", ".join(f"`{t}`" for t in tests) + ".",
+        lines += ["Run these test files, and no whole suite: "
+                  + ", ".join(f"`{spelled(t) if os.path.isabs(t) else t}`" for t in tests) + ".",
                   "Done looks like: the change made, those test files passing, committed and reported.",
                   "Report when done."]
     else:
@@ -1380,11 +1395,40 @@ def verdict_text(home, s, d):
             "no message and saying nothing of who asked or how the request travelled." + tail)
 
 
-def start_draft(home, s, did, base):
+TASK_CHARS_MOST = 20000            # of a task file draft --start puts into a worker's brief
+
+
+def task_text(path):
+    """The task a starter wrote for its worker, from the file `path`, stripped. ValueError where the file is not
+    there, is empty or holds more than TASK_CHARS_MOST characters."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read().strip()
+    except OSError as e:
+        raise ValueError(f"no task file at {path}: {e}")
+    if not text:
+        raise ValueError(f"the task file {path} is empty")
+    if len(text) > TASK_CHARS_MOST:
+        raise ValueError(f"the task file {path} holds more than {TASK_CHARS_MOST} characters")
+    return text
+
+
+def with_task(brief, task):
+    """The drafted brief with the starter's task under `## The task`, before its closing `phi draft` line, and with
+    the drafted `Done looks like:` line dropped where the task holds one."""
+    lines = brief.split("\n")
+    if plans.done_line(task):
+        lines = [x for x in lines if not plans.DONE_LINE.match(x)]
+    at = next((k for k in range(len(lines) - 1, -1, -1) if lines[k].startswith("phi draft ")), len(lines))
+    return "\n".join(lines[:at] + ["## The task", "", task, ""] + lines[at:])
+
+
+def start_draft(home, s, did, base, task=""):
     """`draft --start`: the terminal worker of a kept draft. It claims the worker's node in the store nested in this
     session's, writes its brief, settings and start file there, and returns the lines to print: the worker's name and
     its report, the `mcp__terminal__run_in_terminal` call and the wait for its report. A draft with no parent is an
-    orchestrator's and raises ValueError."""
+    orchestrator's and raises ValueError. `task` is a file of the task in the starter's own words, which the brief
+    carries under `## The task`."""
     import coworker
     phi = _phi()
     d = load_draft(home, s["sessionId"], did)
@@ -1392,7 +1436,8 @@ def start_draft(home, s, did, base):
         raise ValueError(f"no draft {did} in this session")
     if not d.get("parent"):
         raise ValueError("an orchestrator's draft is started with the call the draft printed")
-    node = relay.nodes(home).get(s["sessionId"]) or home
+    text = task_text(task) if task else ""
+    brief = with_task(d["brief"], text) if text else d["brief"]
     name = coworker.draft_name(d["title"], d["id"])
     planner = plans.child_kind(d["title"] + "\n" + d["brief"]) == "plan"
     settings = phi.worker_settings(home, s["sessionId"], d["title"] + "\n" + d["brief"])
@@ -1404,8 +1449,8 @@ def start_draft(home, s, did, base):
     elif planner:
         done = "The plan of the brief is written and put to ezexe"
     else:
-        done = "The task of the brief is done and its checks pass"
-    one = coworker.worker(name, d["brief"], done, base, home, s["sessionId"], node,
+        done = plans.done_line(text) or "The task of the brief is done and its checks pass"
+    one = coworker.worker(name, brief, done, base, home, s["sessionId"],
                           team=planner and not headless,
                           mode="plan" if planner and not headless else coworker.LAND_MODE,
                           prompt=coworker.planner_task(d["title"], plan_file) if planner else "",
@@ -1428,6 +1473,9 @@ def start_draft(home, s, did, base):
         out.append(f"Its plan is {plan_file}: once the report is there, read it and put the plan to ezexe; on "
                    f"approval land it with `{phi.commands()} coworkers \"{plan_file}\" --checkout \"{checkout}\" "
                    "--land`")
+    if not task:
+        out.append("Its brief holds only the drafted title and paths: write the task in your own words to a file and "
+                   "pass `--task <file>` to give the worker its steps.")
     return out
 
 
@@ -1794,7 +1842,7 @@ def command(a, me):
         print(f"phi: {ledger_path(home, sid)} " + ("rewritten" if changed else "unchanged"), file=sys.stderr)
         return 0
     if a.cmd == "draft" and a.start:
-        for line in start_draft(home, s, a.start, base):
+        for line in start_draft(home, s, a.start, base, a.task):
             print(line)
         return 0
     if a.cmd == "draft":
@@ -1843,6 +1891,9 @@ def add_parsers(sub, common):
             p.add_argument("--start", default="", metavar="DRAFT",
                            help="start the terminal worker of a kept draft that has a parent: its node, brief and "
                                 "start file, and the call that opens its tab")
+            p.add_argument("--task", default="", metavar="FILE",
+                           help="with --start: a file holding the task in your own words, which the worker's brief "
+                                "carries under `## The task`")
         if name == "pioneer":
             p.add_argument("draft", help="the draft's id")
         if name == "routes":
