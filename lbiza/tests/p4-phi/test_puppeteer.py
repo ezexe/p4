@@ -1094,6 +1094,17 @@ class Terminal(Base):
         self.assertNotIn("--session-id", resume)
         self.assertNotIn("log-", out)
 
+    def test_an_interactive_draft_start_prints_the_trust_line_and_a_tab_with_no_cwd(self):
+        start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})
+        self.assertEqual(out.count("trust screen"), 1, out)
+        self.assertIn("read_terminal", out)
+        tab = next(x for x in out.splitlines() if "mcp__terminal__open_terminal_tab" in x)
+        self.assertNotIn('"cwd"', tab)
+
+    def test_a_print_draft_start_prints_no_trust_line(self):
+        _, _, out, _ = self.planner_draft()
+        self.assertNotIn("trust screen", out)
+
     def test_a_print_planners_draft_starts_headless_with_its_plan_file_and_prints_the_resume_and_the_land_line(self):
         start, resume, out, name = self.planner_draft()
         self.assertIn("claude -p", start)

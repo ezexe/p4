@@ -421,10 +421,53 @@ class PathChecks(unittest.TestCase):
                                                  "tool_input": {key: self.mine("a.py")}})
             self.assertNotIn("deny", r.stdout, tool)
 
-    def test_the_check_of_each_edit_tool_names_the_path_guard_alone(self):
+    def test_the_check_of_each_edit_tool_names_the_plan_guard_and_the_path_guard(self):
         import hook
         for tool in ("Edit", "Write", "NotebookEdit"):
-            self.assertEqual(hook.PHI_CHECK[tool], ("path-guard",), tool)
+            self.assertEqual(hook.PHI_CHECK[tool], ("plan-guard", "path-guard"), tool)
+        for tool in ("Bash", "PowerShell"):
+            self.assertEqual(hook.PHI_CHECK[tool][0], "plan-guard", tool)
+
+    def test_plan_guard_denies_a_mv_of_a_plan_into_complete_through_the_hook(self):
+        cmd = "mv .claude/p4/temportal/plan-planner/x.md .claude/p4/temportal/plan-planner/complete/x.md"
+        for tool, tool_input in (("Bash", {"command": cmd}),
+                                 ("Write", {"file_path": self.mine(".claude/p4/temportal/plan-planner/complete/x.md")})):
+            r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": tool,
+                                                 "tool_input": tool_input})
+            hso = json.loads(r.stdout)["hookSpecificOutput"]
+            self.assertEqual(hso["permissionDecision"], "deny", tool)
+            self.assertIn("phi.py plan close", hso["permissionDecisionReason"], tool)
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                             "tool_input": {"command": "ls plan-planner"}})
+        self.assertNotIn("deny", r.stdout)
+
+    def test_plan_guard_denies_a_run_in_terminal_move_into_complete_and_lets_an_ls_by(self):
+        import hook
+        self.assertEqual(hook.PHI_CHECK["mcp__terminal__run_in_terminal"], ("plan-guard",))
+        cmd = "mv .claude/p4/temportal/plan-planner/x.md .claude/p4/temportal/plan-planner/complete/x.md"
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse",
+                                             "tool_name": "mcp__terminal__run_in_terminal",
+                                             "tool_input": {"command": cmd}})
+        hso = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("phi.py plan close", hso["permissionDecisionReason"])
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse",
+                                             "tool_name": "mcp__terminal__run_in_terminal",
+                                             "tool_input": {"command": "ls plan-planner"}})
+        self.assertNotIn("deny", r.stdout)
+
+    def test_plan_guard_denies_mv_into_complete_with_no_plan_planner_and_reads_the_payloads_cwd(self):
+        planner = self.mine(".claude/p4/temportal/plan-planner")
+        for cmd, cwd in (("mv x.md complete/", None), ("mv x.md comp*", None), ("mv x.md complete", planner)):
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}}
+            if cwd:
+                payload["cwd"] = cwd
+            hso = json.loads(self.run_recall("lookup-check", payload).stdout)["hookSpecificOutput"]
+            self.assertEqual(hso["permissionDecision"], "deny", cmd)
+            self.assertIn("phi.py plan close", hso["permissionDecisionReason"], cmd)
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                             "tool_input": {"command": "mv x.md complete"}})
+        self.assertNotIn("deny", r.stdout, "outside plan-planner the bare word is no segment")
 
     def bash(self, *changed, diff=True):
         resp = {"stdout": "", "stderr": ""}

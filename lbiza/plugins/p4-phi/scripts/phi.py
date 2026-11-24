@@ -58,6 +58,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import node as nd  # noqa: E402  the content words two texts share
 import p4conf  # noqa: E402  the store's layout, each plugin's files in .claude/p4/<plugin>/
+import planclose  # noqa: E402  the gate a plan closes through into plan-planner/complete/, and the guard of every other way
 import plans  # noqa: E402  each session's task list with step addresses, which its parent's anchor holds
 import relay  # noqa: E402  owned paths, deltas and anchors, which keep linked sessions in step while they work
 import starts  # noqa: E402  the files a brief covers, a start's checkout, and a start request to a puppeteer
@@ -90,6 +91,7 @@ POOL_LOW = 0.9                     # a pool is low at or over this share of its 
 CREDIT_REFUSED = re.compile(r"credit balance (?:is )?too low", re.I)   # the API's refusal of a p4-workers run, 2026-11-24
 REFUSAL_HOURS = 24                 # a credit refusal keeps the API pool low this long, then one print worker tries it again
 WORKER_SLOTS = {"api": 4, "max": 2}   # phi.json `worker_slots`: how many terminal workers each pool runs at once
+INTERACTIVE_HOURS = 1              # an interactive worker with neither log nor report is running for this long
 RUNNING_HOURS = 2                  # a start row with no outcome, report or final result is running for this long
 LAND_COST = 0.4                    # USD a landing worker is taken to cost where no outcome row says better
 POOL_ROWS = 20                     # pool_state reads the logs of this many latest start rows, never the whole ledger
@@ -2808,7 +2810,9 @@ def pool_of(row):
 
 def running_workers(home, now=None):
     """The start rows of worker-starts.jsonl whose worker still runs: no outcome row, no report file, no final
-    `result` row in its log, and started less than RUNNING_HOURS ago."""
+    `result` row in its log, and started less than RUNNING_HOURS ago. An interactive worker with no log is running
+    INTERACTIVE_HOURS from its start at most, and not once its node's transcript was last written QUIET seconds
+    ago."""
     import coworker
     now = time.time() if now is None else now
     rows_ = read_rows(os.path.join(home, "phi", "worker-starts.jsonl")) if home else []
@@ -2822,8 +2826,15 @@ def running_workers(home, now=None):
         except ValueError:
             continue
         out.pop(r.get("name"), None)
-        if now - at > RUNNING_HOURS * 3600 or (r.get("report") and os.path.exists(r["report"])):
+        if r.get("report") and os.path.exists(r["report"]):
             continue
+        interactive = r.get("mode") == "interactive" and not r.get("log")    # no log, so no result row to end it
+        if now - at > (INTERACTIVE_HOURS if interactive else RUNNING_HOURS) * 3600:
+            continue
+        if interactive:                        # its node's transcript, idle QUIET seconds, frees its slot
+            seen = [os.path.getmtime(f) for f in coworker.kept(r.get("name"), home, "") if os.path.isfile(f)]
+            if seen and now - max(seen) >= coworker.QUIET:
+                continue
         if coworker.last_result(log_of_row(home, r), final=True):
             continue
         out[r.get("name")] = r
@@ -2876,7 +2887,8 @@ def slot_assigner(home, sid):
     def pick(text, runner=None):
         runner = runner or {}
         st = worker_settings(home, sid, "")       # a section's words pick no mode: only a set mode or its Runner
-        if runner.get("mode") and st["mode_from"] == "the default":
+        # a team forms only interactively, so a Runner of `team` or `interactive` wins over a set worker_mode
+        if runner.get("mode") and (st["mode_from"] == "the default" or runner["mode"] == "interactive"):
             st = {**st, "mode": runner["mode"], "mode_from": f"the section's Runner: {runner['said']}"}
             if st["profile_from"].startswith(("the pair of", "the pools")):
                 st["profile"], st["profile_from"] = WORKER_PAIRS[st["mode"]], f"the pair of {st['mode']}"
@@ -2916,11 +2928,17 @@ def slots_line(slots):
     return "slots: " + one("api", "API credit") + ", " + one("max", "Max plan")
 
 
+def trust_line():
+    """The one line an interactive start prints: what its first start in a folder Claude Code has not trusted meets."""
+    return ("phi: the first interactive start in a folder Claude Code has not trusted stops at the trust screen, "
+            "which ezexe answers in the tab; read the tab once with `mcp__terminal__read_terminal` after the start.")
+
+
 def tab_lines(name, checkout, typed):
     """The calls that start a terminal worker in a tab the user sees, as one line: run_in_terminal adds its tab
     "without opening the panel" and open_terminal_tab opens one "and show[s] the panel", so the tab is opened first
     and the command typed into it by its tab_id. See more: the two terminal tools' own descriptions."""
-    return ("`mcp__terminal__open_terminal_tab` with " + json.dumps({"title": name, "cwd": checkout}, ensure_ascii=False)
+    return ("`mcp__terminal__open_terminal_tab` with " + json.dumps({"title": name}, ensure_ascii=False)
             + ", which shows the panel, then `mcp__terminal__run_in_terminal` with " + json.dumps(
                 {"tab_id": "<the tab_id it returned>", "command": typed}, ensure_ascii=False))
 
@@ -2968,6 +2986,40 @@ def worker_start(home, settings, name, starter, kind, log, report):
                                     "max_low": p["max"]["low"], "max_utilization": p["max"]["utilization"]}
                                    if p else None)})
     return worker_line(settings)
+
+
+def result_of(log, quiet=None, clock=time.time, sleep=time.sleep, step=1):
+    """The last `result` row of `log`, where it holds none as its last row yet waited for up to `quiet` seconds
+    (coworker.QUIET): a worker writes its report a turn or more before the final row, which carries the cost. {}
+    where the log is not there, which is no wait."""
+    import coworker
+    quiet = coworker.QUIET if quiet is None else quiet
+    if not log or not os.path.exists(log):
+        return {}
+    start = clock()
+    while not coworker.last_result(log, final=True) and clock() - start < quiet:
+        sleep(step)
+    return coworker.last_result(log)
+
+
+def wave_outcomes(home, reports, first, how, quiet=None, clock=time.time, sleep=time.sleep):
+    """The outcome row of each report of a wave that is through, that of `first` with `how`, the others `done` where
+    their report is there, with none written twice for a worker that has a row: the names it wrote."""
+    import coworker
+    had = {r.get("name") for r in read_rows(os.path.join(home, "phi", "worker-starts.jsonl"))
+           if r.get("event") == "outcome"}
+    wrote = []
+    quiet = coworker.QUIET if quiet is None else quiet
+    start = clock()                     # one deadline for the wave's logs: what one wait spent, the next has less of
+    for report in reports:
+        tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
+        if tab in had or not (report == first and how in ("done", "ended") or os.path.exists(report)):
+            continue
+        log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
+        left = max(0, quiet - (clock() - start))
+        worker_outcome(home, tab, how if report == first else "done", result_of(log, left, clock, sleep), log)
+        wrote.append(tab)
+    return wrote
 
 
 def worker_outcome(home, name, how, result, log=""):
@@ -3439,6 +3491,13 @@ def _deny(why, key):
     RAN["path_guard"] = key
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                    "permissionDecisionReason": why}}
+
+
+def h_plan_guard(payload):
+    """PreToolUse on a shell call and on Edit, Write and NotebookEdit: a way into `plan-planner/complete/` other than
+    `phi.py plan close` is refused before it runs (planclose.guard has the arms)."""
+    why = planclose.guard(payload.get("tool_name"), payload.get("tool_input"), payload.get("cwd") or None)
+    return _deny(why, "plan") if why else None
 
 
 def h_path_guard(payload):
@@ -3959,6 +4018,7 @@ HOOKS["restart-check"] = ROUTED["restart-check"] = ("PreToolUse", h_restart_chec
 ROUTED.update({"agent-launch": ("PreToolUse", h_agent_launch), "agent-start": ("SubagentStart", h_agent_start),
                "agent-pre": ("PreToolUse", h_agent_call), "agent-stop": ("SubagentStop", h_agent_stop)})
 HOOKS["path-guard"] = ROUTED["path-guard"] = ("PreToolUse", h_path_guard)
+HOOKS["plan-guard"] = ROUTED["plan-guard"] = ("PreToolUse", h_plan_guard)
 HOOKS["path-seen"] = ROUTED["path-seen"] = ("PostToolUse", h_path_seen)
 HOOKS["issue-guard"] = ROUTED["issue-guard"] = ("PreToolUse", h_issue_guard)
 HOOKS["force-guard"] = ROUTED["force-guard"] = ("PreToolUse", h_force_guard)
@@ -4185,6 +4245,53 @@ def commit_paths(checkout, message, paths, tries=COMMIT_TRIES, wait=COMMIT_WAIT)
     return 0, [short.strip(), *shown.strip().splitlines()]
 
 
+def audit_step(plan, checkout):
+    """What `coworkers --land` prints for a plan whose every run is landed: the audit, then the close."""
+    plan = plan.replace("\\", "/")
+    return "\n".join([
+        f"phi: every section of {plan} is landed; the plan is audited before it closes:",
+        "1. Run the `code-review` skill on the plan's merged range, from the first section's base to the head that "
+        "holds every section's Evidence commit.",
+        "2. Run one `p4-phi:check` that has not seen this conversation, on the same range.",
+        "3. Land each fix the audit confirms as a `-p` worker, one commit for each fix, with its check run; answer "
+        "a finding that is no fault in the plan with its reason.",
+        f"4. Write the `## Audit` of the plan (`Audited: <date>: <base>..<head>, code-review and p4-phi:check`, "
+        "then a `- Finding:` line for each finding, or `- Finding: none`), then close it: "
+        f"`{commands_plan_close(plan, checkout)}`"])
+
+
+def commands_plan_close(plan, checkout):
+    return f"{commands()} plan close {plan} --checkout {checkout}"
+
+
+def plan_main(argv):
+    """`phi.py plan close <plan> --checkout <repo>`: planclose.close, which needs no store. It prints what stops the
+    close and exits 2, else the path the plan moved to."""
+    import argparse
+    ap = argparse.ArgumentParser(prog="phi.py plan")
+    sub = ap.add_subparsers(dest="act", required=True)
+    c = sub.add_parser("close")
+    c.add_argument("plan", help="the plan file, which closes into complete/ past the gate")
+    c.add_argument("--checkout", default="", help="the repository the plan's change was merged into, the folder "
+                                                  "this is run from when left out")
+    a = ap.parse_args(argv)
+    path = os.path.abspath(a.plan)
+    if not os.path.isfile(path):
+        print(f"phi: no plan file at {path}", file=sys.stderr)
+        return 2
+    checkout = os.path.abspath(a.checkout or os.getcwd())
+    try:
+        dest = planclose.close(path, checkout)
+    except planclose.Refused as e:
+        print(f"phi: the plan does not close, {len(e.reasons)} thing{'s' if len(e.reasons) != 1 else ''} stop it:",
+              file=sys.stderr)
+        for r in e.reasons:
+            print(f"- {r}", file=sys.stderr)
+        return 2
+    print(f"phi: the plan is closed: {dest.replace(chr(92), '/')}")
+    return 0
+
+
 def commit_main(argv):
     """`phi.py commit -m <message> [--checkout <dir>] -- <path> ...`: commit_paths, which needs no store."""
     import argparse
@@ -4218,6 +4325,8 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] == ["commit"]:                     # a worker runs with the p4 plugins off and has no session record
         return commit_main(argv[1:])
+    if argv[:1] == ["plan"]:                       # the gate of a plan's close, which needs no store either
+        return plan_main(argv[1:])
     if argv[:1] == ["hook"]:
         return hook_main(argv[1] if len(argv) > 1 else "")
     if argv[:1] == ["rules"]:                      # the hooks module's own, which needs no store
@@ -4508,10 +4617,11 @@ def main(argv=None):
                     report = report or reports[0]
                     tab = os.path.basename(report)[len("report-"):].rsplit(".", 1)[0]
                     log = os.path.join(os.path.dirname(report), coworker.LOG.format(tab)).replace("\\", "/")
-                if how != "long":
-                    worker_outcome(me.home, tab, how, coworker.last_result(log), log)
-                elif len(reports) == 1:
-                    worker_outcome(me.home, tab, how, coworker.last_result(log), log)
+                if len(reports) > 1:
+                    wave_outcomes(me.home, reports, report, how)
+                else:
+                    worker_outcome(me.home, tab, how, result_of(log) if how != "long" else coworker.last_result(log),
+                                   log)
                 if how == "ended":
                     r = coworker.last_result(log)
                     print(f"ended: `{tab}` ended after {waited} seconds with no report {report}: "
@@ -4570,6 +4680,9 @@ def main(argv=None):
                 except ValueError as e:
                     print(f"phi: {e}", file=sys.stderr)
                     return 2
+                if runs and not [r for r in runs if r["state"] != "landed"]:
+                    print(audit_step(plan, checkout))
+                    return 0
                 if not [r for r in runs if r["state"] != "landed"]:
                     print("phi: no section of that plan is left to land: each names no files or holds its "
                           "`Evidence:`", file=sys.stderr)
@@ -4590,6 +4703,8 @@ def main(argv=None):
                         me.home, one["settings"], one["name"], safe_id(me.id), "land", one.get("log") or "",
                         one["report"]))
                     print(tab_lines(one["name"], checkout, one["typed"]))
+                    if one["settings"]["mode"] == "interactive":
+                        print(trust_line())
                     print(f"  continue it, where it ends with no report, in a Terminal-panel tab with "
                           f"`{one['resume_typed']}`")
                 for one in found:
@@ -4603,7 +4718,8 @@ def main(argv=None):
                 if going:
                     print(f"Then wait, as one background command: `{commands()} coworkers --wait --report "
                           + " ".join(going) + "`; when it returns, land the plan again to start what it frees.")
-                return 0 if new else 2
+                # runs that all wait for a slot are a normal state: 2 only where nothing starts and nothing waits
+                return 0 if new or any(one.get("waits") for one in found) else 2
             try:
                 found = coworker.drafts(plan, checkout)
             except ValueError as e:

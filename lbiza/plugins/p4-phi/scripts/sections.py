@@ -124,21 +124,63 @@ def runs(sections):
     return list(out.values())
 
 
-def file_runs(sections):
-    """The sections as the runs one worker each lands, in the plan's order: two sections are in one run only where
-    they share a file, so a `Depends on:` orders runs into waves, waves(), and joins none. A landed section is in
-    none."""
+def _join(run, a, b):
+    old, new = run[a], run[b]
+    return {n: new if r == old else r for n, r in run.items()}
+
+
+def _split(sections):
+    """(the runs of file_runs, the groups of file-joined runs that wait on each other): sections that share a file are
+    joined first; then runs whose `Depends on:` make a cycle between them, as 1 writes x, 2 depends on 1 and 3 writes
+    x and depends on 2, are joined too, since none of them could start. Each is a list of sections in the plan's
+    order; a tangle is a list of the sections it joined."""
     sections = [s for s in sections if not s.get("landed")]
     run = {s["n"]: k for k, s in enumerate(sections)}
     for i, a in enumerate(sections):
         for b in sections[:i]:
             if any(relay.overlap(p, q) for p in a["files"] for q in b["files"]):
-                old, new = run[a["n"]], run[b["n"]]
-                run = {n: new if r == old else r for n, r in run.items()}
+                run = _join(run, a["n"], b["n"])
+    tangled = []
+    while True:
+        need = {}
+        for s in sections:
+            for d in s["after"]:
+                if d in run and run[d] != run[s["n"]]:
+                    need.setdefault(run[s["n"]], set()).add(run[d])
+        found = None
+        for r in need:
+            back = sorted(d for d in _after(need, r) if r in _after(need, d))
+            if back:
+                found = [r] + back
+                break
+        if not found:
+            break
+        keep = found[0]
+        tangled.append([s["n"] for s in sections if run[s["n"]] in found])
+        run = {n: keep if r in found else r for n, r in run.items()}
     out = {}
     for s in sections:
         out.setdefault(run[s["n"]], []).append(s)
-    return list(out.values())
+    return list(out.values()), tangled
+
+
+def _after(need, start):
+    """Every run `start` waits for, directly or through others."""
+    seen, todo = set(), list(need.get(start, ()))
+    while todo:
+        d = todo.pop()
+        if d not in seen:
+            seen.add(d)
+            todo += list(need.get(d, ()))
+    return seen
+
+
+def file_runs(sections):
+    """The sections as the runs one worker each lands, in the plan's order: two sections are in one run where they
+    share a file, so a `Depends on:` orders runs into waves, waves(), and joins none, except runs that wait on each
+    other through their `Depends on:`, which would deadlock and are one run in the plan's order. A landed section is
+    in none."""
+    return _split(sections)[0]
 
 
 def needs(run):
@@ -202,6 +244,8 @@ def lint(text, base=""):
     out = []
     for i, a in enumerate(found):
         for b in found[:i]:
+            if a["landed"] or b["landed"]:         # a landed section runs with nothing
+                continue
             shared = sorted({p for p in a["files"] for q in b["files"] if relay.overlap(p, q)})
             if shared and not ordered(a, b):
                 out.append(("fences", f"sections {b['n']} and {a['n']} both write {', '.join(shared)} and no "
@@ -212,7 +256,7 @@ def lint(text, base=""):
             if d not in have:
                 out.append(("sources", f"section {a['n']} depends on section {d}, which the plan does not hold"))
         for b in found:
-            if a is b or ordered(a, b):
+            if a is b or a["landed"] or b["landed"] or ordered(a, b):
                 continue
             named = sorted(p for p in b["files"] if not HOT.search(p) and re.search(
                 r"(?<![\w/.-])" + re.escape(p) + r"(?![\w/-])", a["body"].replace(a["said"], "")))
@@ -221,6 +265,10 @@ def lint(text, base=""):
                                        f"and states no `Depends on: {b['n']}`"))
         if not a["checks"]:
             out.append(("checks", f"section {a['n']} has no `Checks:` line of its own"))
+    for tangle in _split(found)[1]:
+        out.append(("sources", f"sections {', '.join(tangle)} wait on each other through `Depends on:` and a shared "
+                               "file, so none could start: file_runs lands them as one run in the plan's order; "
+                               "put the shared file in one section or drop a `Depends on:`"))
     return out
 
 

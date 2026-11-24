@@ -253,6 +253,53 @@ class Waves(unittest.TestCase):
         self.assertTrue(any("depends on section 8, which the plan does not hold" in line
                             for _, line in sections.lint(ghost)))
 
+    DEADLOCK = """# Deadlock
+
+## 1. First
+- **Files:** `src/x.py`
+- **Depends on:** none
+- **Checks:** `t1`
+
+## 2. Middle
+- **Files:** `src/y.py`
+- **Depends on:** 1
+- **Checks:** `t2`
+
+## 3. Last
+- **Files:** `src/x.py`
+- **Depends on:** 2
+- **Checks:** `t3`
+"""
+
+    def test_runs_that_wait_on_each_other_through_a_shared_file_are_one_run_and_lint_names_the_cycle(self):
+        found = self.found(self.DEADLOCK)
+        self.assertEqual([[s["n"] for s in r] for r in sections.file_runs(found)], [["1", "2", "3"]])
+        self.assertEqual([[[s["n"] for s in r] for r in w] for w in sections.waves(found)], [[["1", "2", "3"]]])
+        self.assertEqual([[s["n"] for s in r] for r in sections.ready(found)], [["1", "2", "3"]])
+        lines = sections.lint(self.DEADLOCK)
+        self.assertTrue(any(lens == "sources" and "sections 1, 2, 3 wait on each other" in line
+                            for lens, line in lines), lines)
+        self.assertEqual([lens for lens, _ in sections.lint(PIECES)], ["checks"], "no cycle in a plan with none")
+
+    def test_lint_leaves_a_landed_section_out_of_the_fences_and_sources_checks(self):
+        plan = """# Landed beside open
+
+## 1. Landed
+**Evidence:** abc1234
+- **Files:** `src/x.py`
+- **Depends on:** none
+- **Checks:** `t1`
+
+## 2. Open
+It reads src/x.py for its names.
+- **Files:** `src/x.py`
+- **Depends on:** none
+- **Checks:** `t2`
+"""
+        self.assertEqual(sections.lint(plan), [], "a landed section runs with nothing")
+        open_both = plan.replace("**Evidence:** abc1234\n", "")
+        self.assertEqual({lens for lens, _ in sections.lint(open_both)}, {"fences", "sources"})
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

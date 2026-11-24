@@ -487,6 +487,112 @@ def _days(days):
     return f"{days:g}"
 
 
+CLOSED = ".closed.jsonl"                # complete/'s record of the plans `plan close` closed, one JSON row each
+GATE_STATUS = "STATUS: COMPLETED"       # what a close writes on line 2 of the plan
+UNCLOSED = "Unclosed: {date}: moved back from complete/, since plan close did not close it"
+STATUS_LINES = 5                        # a plan's STATUS line is taken out of its first lines
+
+
+def _sha256(path):
+    """The stamp's hash of the plan at `path`, as `plan close` of p4-phi takes it: over its text with a leading BOM
+    out and every CRLF and CR read as LF, encoded as UTF-8, so a git autocrlf checkout of the synced store moves no
+    closed plan back."""
+    import hashlib
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8", errors="surrogateescape")
+    if text.startswith("﻿"):
+        text = text[1:]
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(text.encode("utf-8", errors="surrogateescape")).hexdigest()
+
+
+def _stamps(path):
+    """The rows of complete/'s .closed.jsonl as {name: {sha256, ...}} -> None where it is not there or cannot be read.
+    A row that is no JSON object with a name and a sha256 is left out. p4-temportal reads the format `plan close`
+    of p4-phi writes by itself, since it runs without p4-phi."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    rows = {}
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("name"), str) and isinstance(row.get("sha256"), str):
+            rows.setdefault(row["name"], set()).add(row["sha256"])
+    return rows
+
+
+def _free_name(plans, name):
+    """`name`, or `<stem>.<n>.md` for the smallest n from 2 that no place of a plan holds, where a place holds `name`.
+    complete/ is not asked about `name`, since the plan being moved back is the file there."""
+    places = [os.path.join(plans, folder) for folder in ("", *SHELVES)]
+    if not any(os.path.lexists(os.path.join(d, name)) for d in places if d != os.path.join(plans, COMPLETE)):
+        return name
+    stem, n = name[:-3], 2
+    while any(os.path.lexists(os.path.join(d, f"{stem}.{n}.md")) for d in places):
+        n += 1
+    return f"{stem}.{n}.md"
+
+
+def _unclosed_text(data, date):
+    """The plan's bytes without its STATUS: COMPLETED line, and with the Unclosed line on line 2."""
+    lines = data.decode("utf-8", errors="surrogateescape").splitlines(keepends=True)
+    eol = next((l[len(l.rstrip("\r\n")):] for l in lines if l.endswith(("\n", "\r"))), "\n")
+    kept = [l for i, l in enumerate(lines) if not (i < STATUS_LINES and l.startswith(GATE_STATUS))]
+    if kept and not kept[0].endswith(("\n", "\r")):
+        kept[0] += eol
+    kept.insert(1, UNCLOSED.format(date=date) + eol)
+    return "".join(kept).encode("utf-8", errors="surrogateescape")
+
+
+def sweep_complete(p4, now=None, removed=None):
+    """Move each plan of complete/ that `plan close` did not stamp back into the plans folder -> the names it moved
+    back, as it names them there. complete/.closed.jsonl holds a row {name, sha256, closed, audit} for each plan the
+    command closed. Where the file is not there yet, the plans already in complete/ are stamped first, as grandfather
+    does of p4-phi's, with `"audit": "before the gate"`, so the plans closed before the gate stay. A plan whose bytes
+    match no row of its name goes back under its own name, numbered where a place of a plan holds that name, without
+    its STATUS: COMPLETED line and with an Unclosed line on line 2. Each file removed is added to `removed`."""
+    plans = os.path.join(home(p4), *PLANS.split("/"))
+    folder = os.path.join(plans, COMPLETE)
+    if rel_in(p4, f"{PLANS}/{COMPLETE}") != f"{PLANS}/{COMPLETE}" or not os.path.isdir(folder):
+        return []
+    now = time.time() if now is None else now
+    date = datetime.fromtimestamp(now).date().isoformat()
+    record = os.path.join(folder, CLOSED)
+    names = sorted(n for n in os.listdir(folder) if n.lower().endswith(".md") and os.path.isfile(os.path.join(folder, n))
+                   and not p4conf.is_link(os.path.join(folder, n)))
+    stamps = _stamps(record)
+    if stamps is None:
+        if os.path.lexists(record):
+            return []                                   # a record that cannot be read moves nothing
+        rows = [{"name": n, "sha256": _sha256(os.path.join(folder, n)), "closed": date, "audit": "before the gate"}
+                for n in names]
+        p4conf.replace_text(record, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+        return []
+    back = []
+    for n in names:
+        path = os.path.join(folder, n)
+        try:
+            if _sha256(path) in stamps.get(n, ()):
+                continue
+            with open(path, "rb") as f:
+                data = f.read()
+            new = _free_name(plans, n)
+            with open(os.path.join(plans, new), "xb") as f:
+                f.write(_unclosed_text(data, date))
+        except OSError:
+            continue                                    # this plan stays, and the sweep goes on
+        if remove(path):
+            back.append(new)
+            if removed is not None:
+                removed.append(path)
+    return back
+
+
 def sweep_cookies(p4, now=None):
     """Clear every cookie whose time is up -> [rel cleared]. An entry whose expiry cannot be read is left as it is."""
     now = time.time() if now is None else now
@@ -536,11 +642,13 @@ def sweep(p4, now=None, days=None):
     if not os.path.isdir(home(p4)):
         return ""
     removed = []
+    unclosed = sweep_complete(p4, now, removed)
     cache = sweep_cache(p4, now, removed)
     plans = sweep_plans(p4, days, now, removed)
     cookies = sweep_cookies(p4, now)
-    if not cache and not plans and not cookies:
+    if not unclosed and not cache and not plans and not cookies:
         return ""
+    moved_back = f"moved back out of {PLANS}/{COMPLETE}/, which plan close did not close: {', '.join(unclosed)}"
     if _own_repo(p4):
         _stage_removals(p4, removed + [os.path.join(home(p4), *rel.split("/")) for rel in cookies])
     parts = [f"files past the cache rule: {n}, in {rel}/" for rel, n in cache]
@@ -549,7 +657,8 @@ def sweep(p4, now=None, days=None):
     if cookies:
         shown = ", ".join(cookies[:5]) + (f" and {len(cookies) - 5} more" if len(cookies) > 5 else "")
         parts.append(f"expired files: {len(cookies)}, {shown}")
-    return NAME + "cleared " + "; ".join(parts) + "."
+    said = ["cleared " + "; ".join(parts)] if parts else []
+    return NAME + "; ".join(([moved_back] if unclosed else []) + said) + "."
 
 
 def start_sweep(p4, days=None):

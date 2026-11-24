@@ -2740,7 +2740,7 @@ class TerminalWorker(unittest.TestCase):
         files = sorted(os.listdir(self.node()))
         self.assertEqual([f.split("-")[0].split(".")[0] for f in files], ["brief", "coworker", "node", "resume", "start"])
         self.assertEqual(ran.stdout.count("`mcp__terminal__run_in_terminal` with "), 1, "sections 1 and 2 are one run")
-        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', ran.stdout, "it runs in the checkout")
+        self.assertNotIn('"cwd"', ran.stdout, "the start file sets its own location, the tab gets no cwd")
         start = next(f for f in files if f.startswith("start-"))
         with open(os.path.join(self.node(), start), encoding="utf-8") as f:
             text = f.read()
@@ -2754,6 +2754,18 @@ class TerminalWorker(unittest.TestCase):
         self.assertIn(self.node().replace(chr(92), "/"), again.stderr, "with its node's folder")
         self.assertEqual(sorted(os.listdir(self.node())), files)
         self.assertEqual({f: os.path.getmtime(os.path.join(self.node(), f)) for f in files}, before)
+
+    def test_land_of_a_plan_whose_every_run_is_landed_prints_the_audit_step_and_the_close(self):
+        with open(self.plan, "w", encoding="utf-8") as f:
+            f.write(WORKER_PLAN.replace("- **Checks:**", "- **Evidence:** abc1234, written\n- **Checks:**")
+                    .replace("- **Depends on:** 1", "- **Evidence:** abc1234, written\n- **Depends on:** 1"))
+        self.mode("local_plan0001", "auto")
+        ran = self.run_phi("--land")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        for word in ("`code-review`", "`p4-phi:check`", "`-p` worker", "plan close", "--checkout"):
+            self.assertIn(word, ran.stdout, word)
+        self.assertNotIn("no section of that plan is left", ran.stderr)
+        self.assertFalse(os.path.isdir(os.path.join(self.home, "phi", "tree")), "no worker is started")
 
     def test_land_claims_a_worker_node_under_the_planner_and_leaves_names_it(self):
         self.mode("local_plan0001", "auto")
@@ -2815,14 +2827,69 @@ class TerminalWorker(unittest.TestCase):
         (start,) = self.rows()
         write(start["log"], json.dumps({"type": "assistant", "message": {"id": "m1", "content": []}}) + "\n")
         write(start["report"], "done")
-        self.assertEqual(self.run_phi_report(start["report"]).returncode, 0)
-        self.assertNotIn("total_cost_usd", self.rows()[-1], "no result row yet when the wait ended")
+        phi.worker_outcome(self.home, start["name"], "done", {}, start["log"])
+        self.assertNotIn("total_cost_usd", self.rows()[-1], "no result row yet when the row was written")
         with open(start["log"], "a", encoding="utf-8") as f:
             f.write(json.dumps({"type": "result", "subtype": "success", "is_error": False,
                                 "total_cost_usd": 0.5, "num_turns": 4}) + "\n")
         bal = subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "balance", "--p4",
                               self.home, "--session", "local_plan0001"], capture_output=True, text=True, timeout=60)
         self.assertIn("print: 1 starts, 1 done, 0 failed, cost 0.5000 total 0.5000 mean, turns 4.0 mean", bal.stdout)
+
+    def test_a_wait_gives_a_log_with_no_final_result_up_to_quiet_seconds_and_records_its_cost(self):
+        self.mode("local_plan0001", "auto")
+        self.assertEqual(self.run_phi("--land").returncode, 0)
+        (start,) = self.rows()
+        write(start["log"], json.dumps({"type": "assistant", "message": {"id": "m1", "content": []}}) + "\n")
+        write(start["report"], "done")
+
+        def later():
+            time.sleep(2.5)
+            with open(start["log"], "a", encoding="utf-8") as f:
+                f.write(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                    "total_cost_usd": 0.5, "num_turns": 4}) + "\n")
+        t = threading.Thread(target=later)
+        t.start()
+        ran = self.run_phi_report(start["report"])
+        t.join()
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual((self.rows()[-1]["total_cost_usd"], self.rows()[-1]["num_turns"]), (0.5, 4))
+
+    def test_result_of_waits_for_the_final_row_up_to_quiet_and_not_for_a_log_that_is_not_there(self):
+        log = os.path.join(self.base, "log-x.jsonl")
+        write(log, json.dumps({"type": "assistant"}) + "\n")
+        now, slept, write_it = [0.0], [], [True]
+
+        def sleep(s_):
+            slept.append(s_)
+            now[0] += s_
+            if len(slept) == 3 and write_it[0]:
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "result", "total_cost_usd": 0.2}) + "\n")
+        got = phi.result_of(log, quiet=90, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual((got["total_cost_usd"], len(slept)), (0.2, 3))
+        write(log, json.dumps({"type": "assistant"}) + "\n")
+        now[0], slept[:], write_it[0] = 0.0, [], False
+        self.assertEqual(phi.result_of(log, quiet=5, clock=lambda: now[0], sleep=sleep), {})
+        self.assertEqual(sum(slept), 5, "it gives up after quiet seconds")
+        self.assertEqual(phi.result_of(os.path.join(self.base, "none.jsonl"), quiet=90,
+                                       clock=lambda: now[0], sleep=sleep), {})
+
+    def test_wave_outcomes_waits_one_quiet_for_all_its_logs_and_not_one_for_each(self):
+        reports = []
+        for k in range(3):
+            name = "tw-q%d" % k
+            report, log = os.path.join(self.base, "report-%s.md" % name), os.path.join(self.base, "log-%s.jsonl" % name)
+            write(report, "done")
+            write(log, json.dumps({"type": "assistant"}) + "\n")
+            reports.append(report)
+        now = [0.0]
+
+        def sleep(s_):
+            now[0] += s_
+        wrote = phi.wave_outcomes(self.home, reports, reports[0], "done", quiet=10, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(len(wrote), 3)
+        self.assertEqual(now[0], 10, "one QUIET for the wave, not 30")
 
     def run_phi_report(self, report):
         env = {**os.environ, "P4_PHI_APP_SESSIONS": self.app}
@@ -2848,6 +2915,60 @@ class TerminalWorker(unittest.TestCase):
         now[0] = 0.0
         self.assertEqual(coworker.wait_report(report + ".none", longest=30, clock=lambda: now[0],
                                               sleep=lambda s: now.__setitem__(0, now[0] + s)), ("long", 30))
+
+
+class PlanClose(unittest.TestCase):
+    """`phi.py plan close <plan> --checkout <repo>`: the gate, run with no store."""
+
+    def setUp(self):
+        if not shutil.which("git"):
+            self.skipTest("no git")
+        self._tmp = tempfile.TemporaryDirectory(prefix="p4-phi-close-", dir=FIXTURES or None)
+        self.addCleanup(self._tmp.cleanup)
+        self.base = os.path.realpath(self._tmp.name)
+        self.repo = os.path.join(self.base, "repo")
+        os.makedirs(self.repo)
+
+        def git(*a):
+            return subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *a], cwd=self.repo,
+                                  capture_output=True, text=True, check=True).stdout.strip()
+        git("init", "-q", ".")
+        write(os.path.join(self.repo, "a.txt"), "1\n")
+        git("add", "a.txt")
+        git("commit", "-q", "-m", "one")
+        self.base_sha = git("rev-parse", "HEAD")
+        write(os.path.join(self.repo, "a.txt"), "2\n")
+        git("commit", "-q", "-am", "two")
+        self.head = git("rev-parse", "HEAD")
+        self.folder = os.path.join(self.base, "plan-planner")
+        os.makedirs(self.folder)
+        self.path = os.path.join(self.folder, "move.md")
+
+    def plan(self, finding):
+        write(self.path, "# The move\n\nRead: no\n\n## 1. The writer\n\n**Evidence:** " + self.head[:7]
+              + ", a.txt\n\n- **Files:** `a.txt`\n\n## Audit\n\nAudited: 2026-11-24: " + self.base_sha[:7] + ".."
+              + self.head[:7] + ", code-review and p4-phi:check\n\n" + finding + "\n")
+
+    def close(self):
+        return subprocess.run([sys.executable, "-I", "-X", "utf8", os.path.join(SRC, "phi.py"), "plan", "close",
+                               self.path, "--checkout", self.repo], capture_output=True, text=True, timeout=60)
+
+    def test_plan_close_with_an_open_finding_exits_2_and_moves_nothing(self):
+        self.plan("- Finding: a leak in the writer: open")
+        ran = self.close()
+        self.assertEqual(ran.returncode, 2, ran.stdout)
+        self.assertIn("open", ran.stderr)
+        self.assertTrue(os.path.isfile(self.path))
+        self.assertFalse(os.path.isdir(os.path.join(self.folder, "complete")))
+
+    def test_plan_close_past_the_gate_writes_the_status_line_and_moves_the_plan(self):
+        self.plan("- Finding: none")
+        ran = self.close()
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertFalse(os.path.exists(self.path))
+        (name,) = [n for n in os.listdir(os.path.join(self.folder, "complete")) if n.endswith(".md")]
+        with open(os.path.join(self.folder, "complete", name), encoding="utf-8") as f:
+            self.assertTrue(f.read().split("\n")[1].startswith("STATUS: COMPLETED "))
 
 
 class PoolState(unittest.TestCase):
@@ -3062,6 +3183,13 @@ class Slots(unittest.TestCase):
         named = {"mode": "print", "pool": "max", "said": "print max"}
         self.assertEqual(phi.slot_assigner(self.home, "")("x", named)["profile"], "")
 
+    def test_a_land_whose_ready_runs_all_wait_for_slots_exits_zero(self):
+        self.conf({"worker_slots": {"api": 0, "max": 0}})
+        ran = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertIn("waits for a slot: ", ran.stdout)
+        self.assertNotIn("worker `", ran.stdout, "nothing started")
+        self.assertEqual(ran.returncode, 0, ran.stderr + ran.stdout)
+
     def test_running_workers_take_slots_a_low_pool_has_none_and_a_budget_caps_the_api_credit(self):
         self.conf({"worker_slots": {"api": 1, "max": 1}, "worker_api_budget_usd": 1.0})
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
@@ -3075,6 +3203,85 @@ class Slots(unittest.TestCase):
         self.conf({"worker_slots": {"api": 4, "max": 1}, "worker_api_budget_usd": 1.0})
         self.assertEqual(phi.pool_slots(self.home)["api"], 2, "1 USD left buys two at 0.40")
         self.assertIn("buys 2 more", phi.slots_line(phi.pool_slots(self.home)))
+
+    def test_a_runner_of_team_or_interactive_wins_over_a_set_worker_mode(self):
+        self.conf({"worker_mode": "print"})
+        team = {"mode": "interactive", "pool": "max", "team": True, "said": "team"}
+        got = phi.slot_assigner(self.home, "")("plan", team)
+        self.assertEqual((got["mode"], got["pool"]), ("interactive", "max"))
+        self.assertIn("Runner", got["mode_from"])
+        self.assertEqual(got["profile"], phi.WORKER_PAIRS["interactive"])
+        plain = phi.slot_assigner(self.home, "")("land", {})
+        self.assertEqual(plain["mode"], "print", "no Runner, the set mode stands")
+
+    def test_an_interactive_worker_with_no_log_or_report_runs_an_hour_and_frees_its_slot_once_idle(self):
+        from unittest import mock
+        import coworker
+        ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+        at = time.time()
+        phi.append_line(ledger, {"time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(at)), "event": "start",
+                                 "name": "tw-live", "profile": "", "mode": "interactive", "log": "",
+                                 "report": os.path.join(self.base, "r.md")})
+        self.assertEqual(phi.INTERACTIVE_HOURS, 1)
+        self.assertEqual([r["name"] for r in phi.running_workers(self.home, at + 60)], ["tw-live"])
+        self.assertEqual(phi.running_workers(self.home, at + 3700), [], "an hour and it is no longer counted")
+        transcript = os.path.join(self.base, "session.jsonl")
+        write(transcript, "{}" + "\n")
+        os.utime(transcript, (at, at))
+        with mock.patch.object(coworker, "kept", return_value=[transcript]):
+            self.assertEqual(len(phi.running_workers(self.home, at + coworker.QUIET - 5)), 1, "still writing")
+            self.assertEqual(phi.running_workers(self.home, at + coworker.QUIET + 5), [], "idle QUIET seconds")
+
+    def test_a_print_worker_with_no_log_yet_keeps_its_slot_for_running_hours(self):
+        ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+        at = time.time()
+        phi.append_line(ledger, {"time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(at)), "event": "start",
+                                 "name": "tw-p", "profile": "", "mode": "print",
+                                 "log": os.path.join(self.base, "none.jsonl"), "report": os.path.join(self.base, "r.md")})
+        self.assertEqual(len(phi.running_workers(self.home, at + 3700)), 1)
+
+    def test_tab_lines_passes_no_cwd_and_an_interactive_start_prints_the_trust_line_once(self):
+        line = phi.tab_lines("tw-x", "E:/repo", "& start.ps1")
+        self.assertNotIn("cwd", line)
+        self.assertIn('{"title": "tw-x"}', line)
+        self.conf({"worker_mode": "interactive"})
+        ran = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertGreater(ran.stdout.count("worker `"), 0)
+        self.assertEqual(ran.stdout.count("trust screen"), ran.stdout.count("worker `"), ran.stdout)
+        self.assertIn("read_terminal", ran.stdout)
+        self.conf({"worker_mode": "print"})
+        shutil.rmtree(os.path.join(self.home, "phi", "tree"), ignore_errors=True)
+        os.remove(os.path.join(self.home, "phi", "worker-starts.jsonl"))
+        again = self.run_phi("coworkers", self.plan, "--checkout", self.base, "--land")
+        self.assertNotIn("trust screen", again.stdout)
+
+    def test_a_wave_wait_writes_an_outcome_row_for_each_report_through_and_balance_sums_them(self):
+        ledger = os.path.join(self.home, "phi", "worker-starts.jsonl")
+        reports = []
+        for k, cost in enumerate((0.25, 0.5, None)):
+            folder = os.path.join(self.base, "node%d" % k)
+            name = "tw-w%d" % k
+            report, log = os.path.join(folder, "report-%s.md" % name), os.path.join(folder, "log-%s.jsonl" % name)
+            phi.append_line(ledger, {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "start", "name": name,
+                                     "profile": "", "mode": "print", "log": log, "report": report})
+            write(log, json.dumps({"type": "assistant"}) + "\n")
+            if cost is not None:
+                write(report, "done")
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write(json.dumps({"type": "result", "is_error": False, "total_cost_usd": cost,
+                                        "num_turns": 2}) + "\n")
+            reports.append(report)
+        ran = self.run_phi("coworkers", "--wait", "--report", *reports)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        outs = [r for r in phi.read_rows(ledger) if r["event"] == "outcome"]
+        self.assertEqual(sorted(r["name"] for r in outs), ["tw-w0", "tw-w1"], "not the one still running")
+        self.assertEqual(sorted(r["total_cost_usd"] for r in outs), [0.25, 0.5])
+        again = self.run_phi("coworkers", "--wait", "--report", *reports)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(len([r for r in phi.read_rows(ledger) if r["event"] == "outcome"]), 2, "none twice")
+        bal = self.run_phi("balance")
+        self.assertIn("print: 3 starts, 2 done, 0 failed, cost 0.7500 total 0.3750 mean", bal.stdout)
 
     def test_land_starts_every_ready_run_across_both_pools_shows_each_tab_and_waits_on_the_wave(self):
         self.conf({"worker_slots": {"api": 3, "max": 1}})

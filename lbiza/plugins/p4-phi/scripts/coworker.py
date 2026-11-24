@@ -48,7 +48,7 @@ LOG = "log-{}.jsonl"                     # a worker's stream-json, in its node b
 PLAIN = re.compile(r"[^\w .,:#/-]")               # a task line holds no quote of any kind and no shell character
 
 
-def settings(checkout, temportal=False):
+def settings(checkout, temportal=False, home=""):
     """The settings file's text: p4-phi and p4-temportal off, p4-temportal left on with `temportal`, which a planner
     needs for the skill `plan-planner`, and `claudeMdExcludes` naming, with forward slashes,
     each CLAUDE.local.md in a folder above `checkout` that holds the line p4conf.LINE, the key left out where there
@@ -58,6 +58,8 @@ def settings(checkout, temportal=False):
     the p4 plugins off, so it needs no store text."""
     d = {"enabledPlugins": {f"{n}@{p4conf.MARKET}": bool(temportal and n == "p4-temportal")
                             for n in ("p4-phi", "p4-temportal")}}
+    if temportal and home:             # a planner writes its plan into the store, not into ~/.claude/plans
+        d["plansDirectory"] = p4conf.sub(os.path.abspath(home), "plans").replace("\\", "/")
     out, at = [], os.path.abspath(checkout)
     while True:
         up = os.path.dirname(at)
@@ -115,7 +117,8 @@ def planner_task(title, plan_file=""):
                 "each round in the plan. Edit no file but the plan and the report, and start no worker: the session "
                 "that started you puts the plan to ezexe.")
     return (f"Write the plan for {plain(title)} in plan mode by the skill plan-planner. Form three teammates named "
-            f"fences, sources and checks that only read, run the rounds of the plan in this session, and put the "
+            f"fences, sources and checks that only read, run the rounds of the plan in this session, write your "
+            f"report with the path of the plan and its rounds before you call ExitPlanMode, and then put the "
             f"plan to ezexe with ExitPlanMode.")
 
 
@@ -240,7 +243,7 @@ def write(found, checkout, home=""):
         for one in found:
             if not one.get("folder"):
                 continue
-            files = {SETTINGS_FILE: settings(checkout, bool(one.get("temportal")))}
+            files = {SETTINGS_FILE: settings(checkout, bool(one.get("temportal")), home)}
             if one.get("file"):
                 files[one["file"]] = "\n".join(one["lines"])
             if one.get("resume_file"):
@@ -468,7 +471,7 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
         mode = LAND_MODE
         goal = f"/goal {prompt} The brief is {brief_file}, and the report {report} is written when the plan is whole."
     elif prompt:
-        goal = f"{prompt} The brief is {brief_file}, and the report {report} is written when the plan is put."
+        goal = f"{prompt} The brief is {brief_file}, and the report {report} is written before the plan is put."
     try:
         kw = dict(team=team, extra=extra, session=session, profile=profile, headless=headless, level=level)
         file, lines, typed = script(name, checkout, mode, goal, folder, windows, **kw)
@@ -578,7 +581,7 @@ def wait_any(reports, longest=LONGEST, clock=time.time, sleep=time.sleep, quiet=
                 return report, "done"
             log, offset = logs[report]
             try:
-                idle = time.time() - os.path.getmtime(log)
+                idle = clock() - os.path.getmtime(log)
             except OSError:
                 continue
             if idle >= quiet and last_result(log, offset, final=True):

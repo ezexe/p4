@@ -108,6 +108,30 @@ class Coworker(unittest.TestCase):
         self.assertNotIn(coworker.TEAMS, "\n".join(plain["lines"]))
         self.assertIn("--permission-mode bypassPermissions ", plain["lines"][-1])
 
+    def test_a_planners_settings_name_the_plan_folder_of_the_store_as_plansDirectory_and_a_landers_name_none(self):
+        planner = coworker.worker("tw-plan-0003", "Plan the move.", "The plan is put", "/repo", self.home, PLANNER,
+                                  self.home, windows=False, team=True, mode="plan", headless=False,
+                                  prompt=coworker.planner_task("the move"))
+        lander = coworker.worker("tw-land-0004", "Do it.", "It is done", "/repo", self.home, PLANNER, self.home,
+                                 windows=False)
+        coworker.write([planner, lander], "/repo", self.home)
+        got = []
+        for one in (planner, lander):
+            with open(os.path.join(one["folder"], coworker.SETTINGS_FILE), encoding="utf-8") as f:
+                got.append(json.load(f))
+        want = os.path.join(self.home, "temportal", "plan-planner").replace("\\", "/")
+        self.assertEqual(got[0]["plansDirectory"], want)
+        self.assertNotIn("plansDirectory", got[1])
+        self.assertNotIn("plansDirectory", json.loads(coworker.settings("/repo", True)), "no store, no folder")
+
+    def test_an_interactive_planners_prompt_writes_its_report_before_it_calls_ExitPlanMode(self):
+        said = coworker.planner_task("the move")
+        self.assertLess(said.index("report"), said.index("ExitPlanMode"))
+        self.assertRegex(said, r"report with the path of the plan and its rounds before you call ExitPlanMode")
+        found = coworker.worker("tw-plan-0005", "Plan the move.", "The plan is put", "/repo", self.home, PLANNER,
+                                self.home, windows=False, team=True, mode="plan", headless=False, prompt=said)
+        self.assertIn(f"the report {found['report']} is written before the plan is put", found["goal"])
+
     def test_a_headless_planner_runs_in_bypass_permissions_with_a_goal_that_names_its_plan_file_and_no_team_variable(self):
         plan_file = f"{self.home}/temportal/plan-planner/tw-plan-0001.md".replace("\\", "/")
         found = coworker.worker("tw-plan-0001", "Plan the move.", "The plan is written", "/repo", self.home, PLANNER,
@@ -624,7 +648,7 @@ class Coworker(unittest.TestCase):
         land = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
         self.assertEqual(land.returncode, 0, land.stderr)
         self.assertEqual(land.stdout.count("`mcp__terminal__run_in_terminal` with "), 2)
-        self.assertIn(f'"cwd": "{self.base.replace(chr(92), "/")}"', land.stdout, "each runs in the checkout")
+        self.assertNotIn('"cwd"', land.stdout, "a tab passes no cwd: its start file sets the location")
         relay.forget(self.home)
         self.assertEqual(len(relay.nodes(self.home)), 2)
         again = subprocess.run(command + ["--land"], capture_output=True, text=True, timeout=60)
@@ -721,6 +745,29 @@ class Waves(unittest.TestCase):
         self.assertEqual(coworker.wait_any(reports, clock=lambda: now[0], sleep=sleep), (reports[1], "done", 30))
         self.assertEqual(coworker.wait_any([reports[0]], longest=20, clock=lambda: now[0],
                                            sleep=lambda s: now.__setitem__(0, now[0] + s))[1:], ("long", 20))
+
+    def test_a_waves_wait_reads_idle_time_from_its_clock_and_ends_on_a_final_result_row(self):
+        folder = os.path.join(self.base, "tw-e")
+        os.makedirs(folder)
+        report = os.path.join(folder, "report-tw-e.md")
+        log = os.path.join(folder, coworker.LOG.format("tw-e"))
+        with open(log, "w", encoding="utf-8") as f:
+            f.write("")
+        mtime = os.path.getmtime(log)
+        now = [mtime]
+
+        def sleep(sec):
+            now[0] += sec
+            if sec and now[0] == mtime + 10:         # the run's final row lands in the first round, then it idles
+                with open(log, "a", encoding="utf-8") as f:
+                    f.write('{"type": "result", "subtype": "success"}\n')
+                os.utime(log, (now[0], now[0]))
+        got = coworker.wait_any([report], longest=100, quiet=60, clock=lambda: now[0], sleep=sleep)
+        self.assertEqual(got[:2], (report, "ended"), "idle counts on the clock given, not the wall clock")
+        self.assertGreaterEqual(got[2], 60)
+        now[0] = mtime
+        self.assertEqual(coworker.wait_any([report], longest=20, quiet=60, clock=lambda: now[0],
+                                           sleep=lambda s: now.__setitem__(0, now[0] + s))[1], "long")
 
 
 if __name__ == "__main__":
