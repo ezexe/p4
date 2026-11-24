@@ -707,6 +707,36 @@ class Waves(unittest.TestCase):
         self.assertEqual([one["sections"] for one in wave2], [["3"]])
         self.assertEqual(coworker.worker_name(self.path, ["3"]), wave2[0]["name"], "a run keeps its name")
 
+    def test_a_section_whose_worker_reported_is_landed_and_a_new_section_on_its_file_runs_alone(self):
+        one = ("# Shared\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n")
+        two = one + "\n## 2. B\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t b`\n"
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one)
+        first = [x for x in self.land() if x.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(two)
+        relay.forget(self.home)
+        self.assertEqual(self.states(), {("1",): "done", ("2",): "ready"})
+        second = [x for x in self.land() if x.get("folder")]
+        self.assertEqual([x["sections"] for x in second], [["2"]])
+        self.assertEqual(second[0]["name"], coworker.worker_name(self.path, ["2"]))
+        self.assertIn("section 2", second[0]["brief"])
+        self.assertNotIn("section 1", second[0]["brief"])
+
+    def test_a_plan_whose_every_section_holds_evidence_stays_landed_where_its_workers_reported(self):
+        one = ("# Shared\n\n## 1. A\n\n- **Files:** `src/a.py`\n- **Depends on:** none\n- **Checks:** `t a`\n")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one)
+        first = [x for x in self.land() if x.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(one.replace("## 1. A\n", "## 1. A\n\n**Evidence:** landed as abc1234\n"))
+        relay.forget(self.home)
+        self.assertEqual(self.states(), {(): "landed"})
+
     def test_a_section_runner_gives_its_worker_its_team_and_its_own_model_and_effort(self):
         seen = []
 

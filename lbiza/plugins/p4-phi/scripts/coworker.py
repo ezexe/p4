@@ -373,6 +373,25 @@ def plan_title(path):
         return sections.parse(f.read())[0]
 
 
+def _reported(path, plan_sections, home):
+    """{section number: (node id, node folder)} of every section with no `Evidence:` whose last worker's node, a
+    worker node of this plan, holds its report: landed by its run whether or not the plan holds its line yet."""
+    pre, post = _named("tw", plan_title(path), ["@"], path).split("@")
+    open_ = {s["n"] for s in plan_sections if not s["landed"]}
+    out, at = {}, {}
+    for ident, folder in relay.nodes(home).items():
+        rec = relay.node_record(home, ident)
+        folder = folder.replace("\\", "/")
+        if (rec.get("kind") != "worker" or not (ident.startswith(pre) and ident.endswith(post))
+                or not os.path.exists(f"{folder}/report-{ident}.md")):
+            continue
+        when = relay.node_time(home, ident)
+        for n in (str(n) for n in rec.get("sections") or []):
+            if n in open_ and when >= at.get(n, 0.0):
+                at[n], out[n] = when, (ident, folder)
+    return out
+
+
 def plan_runs(path, checkout, home=""):
     """Every run of the plan at `path`, in the plan's order, landed ones too, so a run keeps its name from wave to
     wave: the sections that share a file, sections.file_runs, each as {"name", "sections", "group", "needs",
@@ -385,8 +404,10 @@ def plan_runs(path, checkout, home=""):
         _, found = sections.parse(f.read(), checkout)
     by_n = {s["n"]: s for s in found}
     nodes = relay.nodes(home) if home else {}
+    reported = _reported(path, found, home) if home else {}
+    rest = [dict(s, landed=False) for s in found if s["n"] not in reported]
     out = []
-    for run in sections.file_runs([dict(s, landed=False) for s in found]):
+    for run in sections.file_runs(rest):
         real = [by_n[s["n"]] for s in run]
         left = [s for s in real if not s.get("landed")]
         name = worker_name(path, [s["n"] for s in run])
@@ -407,9 +428,15 @@ def plan_runs(path, checkout, home=""):
             one["state"] = "todo"
         out.append(one)
     met = {s["n"] for s in found if s.get("landed")}
-    for r, run in zip(out, sections.file_runs([dict(s, landed=False) for s in found])):
+    for r, run in zip(out, sections.file_runs(rest)):
         if r["state"] in ("landed", "done"):
             met |= {s["n"] for s in run}
+    met |= set(reported)
+    for ident in dict.fromkeys(v[0] for _, v in sorted(reported.items(), key=lambda kv: int(kv[0]))):
+        folder = next(v[1] for v in reported.values() if v[0] == ident)
+        out.append({"name": ident, "sections": sorted((n for n, v in reported.items() if v[0] == ident), key=int),
+                    "group": [], "needs": [], "runner": {}, "folder": folder,
+                    "report": f"{folder}/report-{ident}.md", "state": "done"})
     for r in out:
         if r["state"] == "todo":
             r["state"] = "ready" if all(d in met or d not in by_n for d in r["needs"]) else "waiting"
