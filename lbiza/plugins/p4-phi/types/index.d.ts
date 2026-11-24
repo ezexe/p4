@@ -2,9 +2,9 @@
 // `$.state` key of the module to. plugin.json names this file as `types`.
 
 // One page of a session's folder in the store as the pane shows it: a puppeteer's board, the ledger of ezexe's
-// requests or an orchestrator's ledger of its sessions. `text` is the page's markdown as python wrote it, cut where
+// requests, an orchestrator's ledger of its sessions or the `-p` workers a session started. `text` is the page's markdown as python wrote it, cut where
 // it is long, and `path` is the file that holds it whole.
-export type PhiPage = { name: 'board' | 'asks' | 'ledger'; title: string; path: string; text: string }
+export type PhiPage = { name: 'workers' | 'board' | 'asks' | 'ledger'; title: string; path: string; text: string }
 
 // One session of the tree as scripts/progress.py writes it into progress.json: its goal as `asked`, `set`, `met`,
 // `failed` or `cleared`, its steps, and the plan it works with that plan's sections and its loop.

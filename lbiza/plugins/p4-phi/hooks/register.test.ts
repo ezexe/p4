@@ -2402,6 +2402,39 @@ test('a file of the tree that changes is seen within a second, with no look and 
   await ui.unmount()
 })
 
+test('the pane reads workers.md among its pages, first, and a progress run that changed reads the pages again', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  const clock = mock.clock(on)
+  const WORKERS = '# Workers\n\n**Credit balance is too low**  \n`tw-a`: Land section 2  \nfailed\n'
+  const seen = machine(on, {
+    files: { ...GROWN, [`${FOLDER}/workers.md`]: WORKERS },
+    progress: () => ({ path: TREE_FILE, changed: true }),
+  })
+
+  await $.session.start(START)
+  await clock.settle()
+  await $.command.run(TYPED)
+  const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  const pages = (await ui.findAll({ type: 'Markdown' })).map(page => page.text)
+  expect(pages[0]).toBe(WORKERS.trim())
+  expect((await ui.findAll({ type: 'Text' })).map(line => line.text)).toContain('Workers')
+
+  // A log grew: python's next run says it changed and rewrote the page, which the pane reads again with no look.
+  const looks = seen.looks.length
+  const read = seen.read.filter(path => path.endsWith('/workers.md')).length
+  const moved = WORKERS.replace('failed', 'failed, 6 turns')
+  seen.files[`${FOLDER}/workers.md`] = moved
+  seen.files[KID_PLAN] = '{"steps":[{"addr":"2.1"}]}'
+  seen.files[TREE_FILE] = treeOf(NODES.map(one => ({ ...one, title: `${one.title} again` })))
+  await clock.advance(1_000)
+
+  expect(seen.looks.length).toBe(looks)
+  expect(seen.read.filter(path => path.endsWith('/workers.md')).length).toBeGreaterThan(read)
+  expect((await ui.find({ type: 'Markdown', text: /Workers/ }))?.text).toBe(moved.trim())
+  await ui.unmount()
+})
+
 test("the session's own task-list call refreshes the open pane's tree inside the turn, and no other tool's call does", async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)

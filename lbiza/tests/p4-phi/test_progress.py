@@ -236,6 +236,32 @@ class Tree(Store):
         with open(first["path"], encoding="utf-8") as f:
             self.assertEqual(json.load(f)["nodes"][0]["steps"][0]["status"], "completed")
 
+    def test_write_puts_workers_md_beside_the_tree_and_lists_each_worker_log_in_the_sources(self):
+        folder = self.session(TOP)
+        self.assertEqual(progress.write(self.home, TOP)["changed"], True)
+        self.assertFalse(os.path.exists(os.path.join(folder, "workers.md")), "no worker, no page")
+        store = relay.claim(self.home, self.home, "tw-a", "worker", TOP, ["2"])
+        log = os.path.join(store, "phi", "log-tw-a.jsonl")
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"type": "result", "subtype": "success", "is_error": True,
+                                "result": "Credit balance is too low"}) + "\n")
+        with open(os.path.join(store, "phi", "brief-tw-a.md"), "w", encoding="utf-8") as f:
+            f.write("# Land section 2\n")
+        got = progress.write(self.home, TOP)
+        self.assertEqual(got["changed"], True)
+        with open(os.path.join(folder, "workers.md"), encoding="utf-8") as f:
+            page = f.read()
+        self.assertIn("**Credit balance is too low**", page)
+        self.assertIn("`tw-a`: Land section 2", page)
+        with open(got["path"], encoding="utf-8") as f:
+            self.assertIn(log.replace("\\", "/"), json.load(f)["sources"])
+        self.assertEqual(progress.write(self.home, TOP)["changed"], False)
+        with open(log, "a", encoding="utf-8") as f:                 # a log that grows rewrites the page
+            f.write(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "ok"}) + "\n")
+        self.assertEqual(progress.write(self.home, TOP)["changed"], True)
+        with open(os.path.join(folder, "workers.md"), encoding="utf-8") as f:
+            self.assertNotIn("Credit balance", f.read())
+
     def test_a_session_with_no_folder_gets_no_file_and_no_folder(self):
         self.assertEqual(progress.write(self.home, "local_never001"), {})
         self.assertFalse(os.path.exists(os.path.join(self.home, "phi", "sessions", "local_never001")))
