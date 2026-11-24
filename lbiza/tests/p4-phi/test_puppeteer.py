@@ -1109,6 +1109,29 @@ class Terminal(Base):
         land = next(x for x in out.replace("\\", "/").splitlines() if "--land" in x)
         self.assertIn(f'--checkout "{there}"', land)
 
+    def test_a_print_draft_started_with_background_prints_its_log_and_calls_no_terminal(self):
+        """Where every tab is held: `--background` starts the `-p` worker detached and prints its log; an interactive
+        worker is named as needing a tab and keeps its tab lines."""
+        t = self.t
+        did = self.kept_draft("Fix the ports table", "Fix the ports table.\nFiles: src/ports.py")
+        with mock.patch.object(subprocess, "Popen") as popen:
+            r = t.cli(TOP, "draft", "--start", did, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(popen.call_count, 1, "the worker's start file is run as one detached process")
+        name = coworker.draft_name("Fix the ports table", did)
+        log = f"{relay.nodes(t.p4)[name]}/log-{name}.jsonl".replace("\\", "/")
+        self.assertIn(f"started in the background, its log {log}", r.stdout.replace("\\", "/"))
+        self.assertNotIn("mcp__terminal__", r.stdout)
+        did2 = self.kept_draft("Fix the ports map", "Fix the ports map.\nFiles: src/map.py", did="drf-0abcdef013")
+        task = os.path.join(t.tmp, "task.md")
+        write(task, "This session starts in plan mode.\nezexe approves the plan with ExitPlanMode.\n")
+        with mock.patch.object(subprocess, "Popen") as popen:
+            r = t.cli(TOP, "draft", "--start", did2, "--task", task, "--background")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        popen.assert_not_called()
+        self.assertIn("is interactive: it needs a tab", r.stdout)
+        self.assertIn("mcp__terminal__open_terminal_tab", r.stdout)
+
     def test_an_interactive_planners_draft_starts_in_plan_mode_with_the_team_variable(self):
         start, resume, out, name = self.planner_draft({"worker_mode": "interactive"})
         self.assertIn("--permission-mode plan", start)
