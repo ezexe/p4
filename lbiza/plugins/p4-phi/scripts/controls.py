@@ -707,18 +707,6 @@ def pair_text(s, store=""):
     return ""
 
 
-def ask_route(s):
-    """In place of p4-phi's own way to a new orchestrator, for a session a puppeteer controls."""
-    held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}
-    if not held.get("sessionId"):
-        return ""
-    return (f"This session is controlled by a puppeteer, so it starts no new orchestrator itself: write "
-            f"`{PHI.commands()} request \"<title>\" --brief \"<the whole brief>\" --to-puppeteer`, the brief holding "
-            f"{PHI.RESTATE}. Its puppeteer "
-            f"\"{full_title(held['sessionId'])}\" starts it as an orchestrator of this environment, files it in "
-            f"this environment's section and takes it under control, or declines it with one line to ezexe.")
-
-
 def ask_text(s):
     """The line that turns a controlled session's own start of a new orchestrator into a request."""
     held = s.get("puppeteer") if isinstance(s.get("puppeteer"), dict) else {}

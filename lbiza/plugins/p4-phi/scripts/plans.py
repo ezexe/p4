@@ -1,5 +1,5 @@
 """plans.py: each session's task list as numbered steps, the tree of task lists its parent's anchor holds, and the
-advice and checks that ride on them.
+checks that ride on them.
 
   task list  the list a session keeps with `mcp__ccd_turn__update_plan`. Each call, a whole new list, an advance, or
              done and start, is applied to <session>/plan.json: its steps with their addresses, statuses and the step
@@ -19,10 +19,7 @@ advice and checks that ride on them.
              message, through relay.warn, to the children it is the parent step of, down, to the siblings whose step
              in progress shares its words, across, and to the parent, up. A child whose parent step is removed is
              told so.
-  advice     the open steps that can each run on their own are named for children of their own; an orchestrator
-             hands each work step out, a step that only reads or only runs a command to a background subagent and one
-             that asks for several sides to an agent team, and keeps orchestration and landing; each start names the
-             model and effort its kind of work gets.
+  level      each start names the model and effort its kind of work gets.
   subagents  a subagent the Agent tool starts is a task of the step in progress, told what changed beside it.
   turns      at Stop, a turn's report is matched against the open steps of the session's children and siblings and
              delivered to those it bears on.
@@ -447,16 +444,12 @@ def handed(st):
     return f"its `session` field names the session doing it, `{name}`" if name else ""
 
 
-# --- the orchestrator orchestrates ----------------------------------------------------------------------------
+# --- the steps an orchestrator keeps ----------------------------------------------------------------------------
 #
 # A session with no parent keeps itself free for orchestration: planning, messaging and managing sessions, decisions
-# with ezexe, and landing work. Each work step of its task list goes to a fresh child, not only the independent ones,
-# and a serial run, work steps that lean on the step before them or share a path with it, goes to one child that does
-# them in order. With delegation on, a step that only reads or only runs a command goes to a background subagent
-# instead, and one that asks for one question from several sides to an agent team. A step that checks or lands
-# work, such as a test-and-commit, merge, push, release or sync, or the watch
-# of the run on what was pushed, waits on or passes on work, starts a check or session, manages a worker, compiles
-# results or tracks what another does stays; top_stays gives the reason for each.
+# with ezexe, and landing work. A step that checks or lands work, such as a test-and-commit, merge, push, release or
+# sync, or the watch of the run on what was pushed, waits on or passes on work, starts a check or session, manages a
+# worker, compiles results or tracks what another does stays; top_stays gives the reason for each.
 
 # a step that begins with one of these is read-only work of its own, a child's, such as "Verify phi's session tree
 # matches the app", though WAITS matches `verif` and `confirm` anywhere. It stays only when it names a child or a
@@ -470,10 +463,7 @@ SYNCS = re.compile(r"^\W*(?:re-?)?sync(?:s|ed|ing|hronis\w+|hroniz\w+)?\b"
                    r"|\bsync(?:s|ed|ing)?\s+(?:[\w'’-]+\s+){0,3}?stores?\b|\bp4\.py\s+sync\b", re.I)
 # Seeing landed work through is landing too. The orchestrator pushed the work, so the workflow run, the CI run or
 # the release run on it is its own to watch, and so is bringing the installed plugins up to the release that run
-# made: a child in a worktree of its own would wait on what its starter has to read anyway. Seen in an orchestrator
-# on p4-phi 0.11.133 and 0.11.134: for its steps "Watch GitHub's run on piece D" and "Update the installed plugins"
-# the advice named a new session in a worktree for each, and the nudge called the first "a build that changes
-# behaviour, a writer's", while "Land piece D" stayed as landing. The object decides: a watch of anything else, as
+# made: a child in a worktree of its own would wait on what its starter has to read anyway. The object decides: a watch of anything else, as
 # of a lock file or of how a hook runs on one system, is work, and so is a change to a plugin's own files.
 # The run is a noun here. In "Confirm this runs on Windows" and "Verify the actions run correctly" it is a verb, and
 # the step is work. Only CI is read as a run when a verb follows it, as in "CI passed": a workflow or a pipeline that
@@ -501,11 +491,7 @@ OTHERS = re.compile(r"\b(?:reports?|answers?|repl(?:y|ies)|word)\s+from\b"
 BUILDS = re.compile(r"^\W*(?:fix|writ|add|chang|edit|implement|updat|remov|renam|creat|mak|refactor|port|rewrit|"
                     r"replac|patch|build|migrat|delet)\w*\b", re.I)
 AWAITS_WHY = "waits on or checks other sessions' reports, which only this session receives"
-# Planning is the orchestrator's own: a plan file has one writer, the session that holds it. Seen in an
-# orchestrator on p4-phi 0.11.143: for its steps
-# "Enter plan mode", "Research how plans are built and distributed", "Write plan sections with fences and edits"
-# and "Put the plan to ezexe for approval" the advice named a new session in a worktree for each, and the nudge a
-# worker for the second. The opening verb decides, with the plan as its object and a few small words between them at
+# Planning is the orchestrator's own: a plan file has one writer, the session that holds it. The opening verb decides, with the plan as its object and a few small words between them at
 # most, so "Write the docs for plan mode" and "Put the fixtures under tests/plan/" are work. A step that builds code
 # or a page about plans is work too, which the noun after the plan or a file named plan tells: "Write the plan
 # parser in src/plan.py".
@@ -553,33 +539,6 @@ def top_stays(text):
     return ""
 
 
-def top_groups(plan, cwd):
-    """The open steps of an orchestrator's task list, split into the serial runs of work steps, each run one
-    child's to do in order, and the address and the reason of each step that stays."""
-    steps = [st for st in plan.get("steps") or [] if st.get("status") != "completed"]
-    groups, kept, run = [], [], []
-    for st in steps:
-        text = st.get("content", "")
-        why = handed(st) or top_stays(text)       # a step a session already does is no child's to start
-        if why:
-            kept.append((st["addr"], why))
-        else:
-            mine = relay.paths_in(text, cwd)
-            serial = run and (DEPENDS.search(text) or any(relay.overlap(p, q) for p in mine for o in run
-                                                          for q in relay.paths_in(o.get("content"), cwd)))
-            if run and not serial:
-                groups.append(run)
-                run = []
-            run.append(st)
-            continue
-        if run:
-            groups.append(run)
-            run = []
-    if run:
-        groups.append(run)
-    return groups, kept
-
-
 # --- delegation: where a step runs --------------------------------------------------------------------------------
 #
 # A step that only reads or searches is the subagent p4-phi:finder's, the skill sub-agentic's evidence finder; one
@@ -607,21 +566,6 @@ TEAMS = re.compile(r"\b(?:with|by) an? agent[- ]team\b"
                    r"|\b(?:with|by) competing (?:hypothes[ie]s|theories|explanations)\b", re.I)
 # A step that opens on a word of making is a writer's, whatever sides it names: WRITES holds no such word of its own.
 TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|document)\w*\b", re.I)
-
-
-def level_of(text):
-    """'team' for a step that asks for one question from several sides, 'read' for one that only reads or searches,
-    'run' for one that only runs a command, else 'session'. A step that writes is a session's whatever else it says."""
-    text = str(text or "")
-    if WRITES.search(text):
-        return "session"
-    if TEAMS.search(text) and not TEAM_NOT.match(text):
-        return "team"
-    if READS.search(text):
-        return "read"
-    if RUNS.search(text):
-        return "run"
-    return "session"
 
 
 # --- the model and effort a worker is started with ---------------------------------------------------------
@@ -801,16 +745,6 @@ def level_said(brief, level):
     if m:
         return brief[:m.start()] + "\n\n" + level_line(level) + brief[m.start():]
     return brief + "\n\n" + level_line(level)
-
-
-def level_words(text):
-    """The words a line of advice names a step's model and effort in."""
-    level = child_level(text)
-    model = ("no `model`, so it inherits this session's" if str(level["model"]).lower() == "inherit"
-             else f"`model` `{level['model']}`")
-    if str(level["effort"]).lower() == "inherit":
-        return f"{model}, and no `effort`, so it inherits this session's"
-    return f"{model}, `effort` `{level['effort']}`"
 
 
 # --- subagents as tasks of the step that launched them -------------------------------------------------------------

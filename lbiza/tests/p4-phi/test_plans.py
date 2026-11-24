@@ -944,32 +944,6 @@ class Levels(unittest.TestCase):
         self.assertEqual(self.pre(TOP, {**self.LONG, "run_in_background": True}), {}, "a second try goes through")
         self.assertEqual(self.pre(TOP, {"command": "python other.py", "run_in_background": True}), {})
 
-    def test_each_step_is_named_for_the_level_it_runs_at(self):
-        for text, level in (("Find where the exporter is configured across src/", "read"),
-                            ("Read the hooks docs and list what PreToolUse may return", "read"),
-                            ("Research how the exporter reads its table layout", "read"),
-                            ("Research and write the exporter's page", "session"),
-                            ("Run test_flush.py", "run"), ("Re-run the build", "run"),
-                            ("Run the tests and fix what fails", "session"),
-                            ("Port the exporter to the new writer", "session"),
-                            ("Find and remove the dead flags", "session")):
-            self.assertEqual(plans.level_of(text), level, text)
-
-    def test_a_step_argued_from_several_sides_is_named_for_an_agent_team_and_one_that_writes_is_not(self):
-        """agent-teams.md, "Compare with subagents": "Use agent teams when teammates need to share findings,
-        challenge each other, and coordinate on their own." A step asks for that by its words, and one that writes
-        stays a session's."""
-        for text, level in (("Review the exporter's retry design from several angles", "team"),
-                            ("Research why the flush stalls, with competing hypotheses", "team"),
-                            ("Argue the store layout from opposing sides", "team"),
-                            ("Check the plan with an agent team", "team"),
-                            ("Review the agent team rows of progress.py", "session"),
-                            ("Find where p4-phi sends a step to an agent team", "read"),
-                            ("Fix the flush from several angles", "session"),
-                            ("Build the exporter with an agent team", "session"),
-                            ("Read the hooks docs and list what PreToolUse may return", "read")):
-            self.assertEqual(plans.level_of(text), level, text)
-
     def test_no_start_call_or_card_is_handed_out_with_neither_key(self):
         """The plugin-gap line hands no start call at all, and a sentence beginning "Model:" is no choice of the
         parent session's."""
@@ -1086,8 +1060,7 @@ class ParentEffort(unittest.TestCase):
     def test_a_step_whose_item_names_its_session_is_handed_out_to_nobody(self):
         """An item of `update_plan` has the field `session`, by the tool's own text "When you delegated this step to
         a session you started: that session's short name". A step keeps the field, and such a step stays where it
-        is with that as the reason, so top_groups hands out the other
-        work steps alone, no step once every work step names its session."""
+        is with that as the reason."""
         t, p = self.t, self.t.proj
         port = f"Port the exporter in {p}/src/export/flush.py to the new writer"
         parse = f"Rewrite the parser in {p}/src/parse.py for the new grammar"
@@ -1098,11 +1071,8 @@ class ParentEffort(unittest.TestCase):
         self.assertEqual([st.get("session") for st in kept["steps"]], ["exporter-port", None, None])
         self.plan(TOP, {"advance": True})
         self.assertEqual(plans.load(t.p4, TOP)["steps"][0].get("session"), "exporter-port", "kept through an advance")
-        steps = [{"addr": "1", "content": port, "status": "in_progress", "session": "exporter-port"},
-                 {"addr": "2", "content": parse, "status": "pending", "session": "parser"}]
-        self.assertEqual(plans.top_groups({"steps": steps}, p)[0], [], "every work step names its session")
-        bare = [{k: v for k, v in st.items() if k != "session"} for st in steps]
-        self.assertEqual(len(plans.top_groups({"steps": bare}, p)[0]), 2, "with no session named, each is a child's")
+        self.assertIn("exporter-port", plans.handed({"session": "exporter-port"}))
+        self.assertEqual(plans.handed({"content": parse}), "", "with no session named, a step is nobody's yet")
 
     def test_the_level_a_task_list_is_seen_at_is_kept_and_holds_a_build_childs_effort(self):
         p = self.t.proj
@@ -1244,8 +1214,7 @@ class TopOrchestrates(unittest.TestCase):
     def test_a_top_sessions_landing_steps_stay_with_it(self):
         landing = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in
                              enumerate(("Test and commit the port", "Merge and push main", "Release 0.9"))]}
-        groups, kept = plans.top_groups(landing, "")
-        self.assertEqual((groups, [a for a, _ in kept]), ([], ["1", "2", "3"]))
+        self.assertTrue(all(plans.top_stays(st["content"]) for st in landing["steps"]))
 
     def test_handing_something_to_a_named_session_is_orchestration(self):
         """A step that queues, sends, passes, hands or forwards something to a named session is orchestration."""
@@ -1253,10 +1222,10 @@ class TopOrchestrates(unittest.TestCase):
                  "Pass the audit to \"Raise memory patches\"", "Hand the leftover queue to the new owner of p4-phi",
                  "Forward the issue links to the top session", "Relay issue links and queue to top")
         work = ("Pass the parser output to the formatter in src/fmt.py", "Write the queue module in src/queue.py")
-        plan = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(named + work)]}
-        groups, kept = plans.top_groups(plan, "")
-        self.assertEqual([a for a, _ in kept], [str(k + 1) for k in range(len(named))])
-        self.assertEqual([st["content"] for g in groups for st in g], list(work), "work goes to children")
+        for text in named:
+            self.assertTrue(plans.top_stays(text), text)
+        for text in work:
+            self.assertEqual(plans.top_stays(text), "", text)
 
     def test_a_child_marked_report_when_done_leaves_a_replaces_note_and_is_named_to_its_parent(self):
         t, C = self.t, self.C
@@ -1285,27 +1254,19 @@ class TopOrchestrates(unittest.TestCase):
     def test_a_numbered_check_is_work_and_starting_a_check_is_orchestration(self):
         """A numbered check of anything else, such as "Check 1: nothing hidden in AppData", is work, and starting a
         check, such as "Start ezexe's-eye acceptance check", is orchestration."""
-        groups, kept = plans.top_groups({"steps": [
-            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-                "Check 1: nothing hidden in AppData", "Start ezexe's-eye acceptance check",
-                "Check the session's own landed work", "Kick off the review session",
-                "Run the docs check", "Start the dev server and port the CLI in src/cli.py"))]}, "")
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["6"]])
-        why = dict(kept)
-        self.assertEqual(why["2"], "starts a check, test or session, which is orchestration")
-        self.assertEqual(why["3"], "checks or lands the work")
-        self.assertIn("4", why)
-        self.assertIn("5", why)
+        for work in ("Check 1: nothing hidden in AppData", "Start the dev server and port the CLI in src/cli.py"):
+            self.assertEqual(plans.top_stays(work), "", work)
+        self.assertEqual(plans.top_stays("Start ezexe's-eye acceptance check"),
+                         "starts a check, test or session, which is orchestration")
+        self.assertEqual(plans.top_stays("Check the session's own landed work"), "checks or lands the work")
+        self.assertTrue(plans.top_stays("Kick off the review session"))
+        self.assertTrue(plans.top_stays("Run the docs check"))
 
     def test_a_top_sessions_check_steps_go_to_children(self):
-        plan = {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-            "Check 1: nothing hidden in AppData or %TEMP%", "Verify phi's session tree matches the app",
-            "Check the docs child's progress", "Commit locally", "Sync the store"))]}
-        groups, kept = plans.top_groups(plan, "")
-        # two steps that share no file each get a child
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["2"]])
-        self.assertEqual([a for a, _ in kept], ["3", "4", "5"],
-                         "only landing and managing a child stay with the orchestrator")
+        for work in ("Check 1: nothing hidden in AppData or %TEMP%", "Verify phi's session tree matches the app"):
+            self.assertEqual(plans.top_stays(work), "", work)
+        for stays in ("Check the docs child's progress", "Commit locally", "Sync the store"):
+            self.assertTrue(plans.top_stays(stays), "only landing and managing a child stay with the orchestrator")
 
     def test_top_stays_tells_a_step_the_orchestrator_keeps_from_one_that_goes_to_a_child(self):
         for work in ("Verify the tree", "Confirm the store holds no stray file", "Validate the manifest in src/m.json",
@@ -1340,21 +1301,15 @@ class TopOrchestrates(unittest.TestCase):
         # a pipeline that passes its schema test is code of the repository, and none of the session's own work
         self.assertEqual(plans.top_stays("Check the data pipeline passes the schema test"), "")
         # a child is given only the watch that is work
-        steps = [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-            "Watch GitHub's run on piece D", "Update the installed plugins from lbiza/plugins/p4-phi",
-            "Watch the lock file in src/lock.py while two hooks write"))]
-        groups, kept = plans.top_groups({"steps": steps}, "")
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["3"]])
-        self.assertEqual([a for a, _ in kept], ["1", "2"])
+        self.assertTrue(plans.top_stays("Watch GitHub's run on piece D"))
+        self.assertTrue(plans.top_stays("Update the installed plugins from lbiza/plugins/p4-phi"))
+        self.assertEqual(plans.top_stays("Watch the lock file in src/lock.py while two hooks write"), "")
 
     def test_queueing_sending_passing_or_handing_to_a_session_is_orchestration(self):
-        groups, kept = plans.top_groups({"steps": [
-            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-                "Queue the memory-patch flag for the p4-phi fixer session",
-                "Pass the scratchpad findings to the temportal session", "Hand step 3 to a child",
-                "Pass the parser output to the formatter in src/fmt.py"))]}, "")
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]])
-        self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
+        for stays in ("Queue the memory-patch flag for the p4-phi fixer session",
+                      "Pass the scratchpad findings to the temportal session", "Hand step 3 to a child"):
+            self.assertTrue(plans.top_stays(stays), stays)
+        self.assertEqual(plans.top_stays("Pass the parser output to the formatter in src/fmt.py"), "")
 
     def test_children_counted_as_archived_at_once_are_all_kept(self):
         """Children counted as archived at once are all kept, since each write of the parent's session.json takes its
@@ -1503,21 +1458,18 @@ class TopOrchestrates(unittest.TestCase):
         self.assertNotIn(B, plans._children(t.p4, TOP), "a record deleted from the app leaves the session tree")
 
     def test_a_session_management_step_stays_at_the_top(self):
-        groups, kept = plans.top_groups({"steps": [
-            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-                "Archive the finished orchestrator-rule child", "Check the docs child's progress",
-                "Send the exporter child its brief", "Start the dev server and port the CLI in src/cli.py"))]}, "")
-        self.assertEqual([a for a, _ in kept], ["1", "2", "3"])
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["4"]], "starting a server is work")
+        for stays in ("Archive the finished orchestrator-rule child", "Check the docs child's progress",
+                      "Send the exporter child its brief"):
+            self.assertTrue(plans.top_stays(stays), stays)
+        self.assertEqual(plans.top_stays("Start the dev server and port the CLI in src/cli.py"), "",
+                         "starting a server is work")
         # ezexe/p4#203: the tree's levels are named worker and coworker, and a step that manages one stays here too
         self.assertEqual(plans.top_stays("Start a worker for the docs"), "manages a worker, which is orchestration")
-        groups, kept = plans.top_groups({"steps": [
-            {"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate((
-                "Start a worker for the docs", "Message the coworker about the tests", "Check the worker's report",
-                "Stop the co-worker on the old branch", "Fix the worker pool size in src/pool.py",
-                "Stop the worker pool in src/pool.py"))]}, "")
-        self.assertEqual([a for a, _ in kept], ["1", "2", "3", "4"])
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["5", "6"]], "a worker pool is work, not a session")
+        for stays in ("Start a worker for the docs", "Message the coworker about the tests",
+                      "Check the worker's report", "Stop the co-worker on the old branch"):
+            self.assertTrue(plans.top_stays(stays), stays)
+        for work in ("Fix the worker pool size in src/pool.py", "Stop the worker pool in src/pool.py"):
+            self.assertEqual(plans.top_stays(work), "", "a worker pool is work, not a session")
 
     def test_top_level_sessions_hear_each_other_as_siblings_and_an_archived_one_drops_out(self):
         t, T2 = self.t, "local_top00002"
@@ -2105,12 +2057,6 @@ class WaitsOnReports(unittest.TestCase):
 
     plan = TreeOfPlans.plan
 
-    def test_a_step_that_waits_on_reports_stays_with_the_orchestrator(self):
-        groups, kept = plans.top_groups({"steps": [{"addr": str(k + 1), "content": c, "status": "pending"}
-                                                   for k, c in enumerate(self.STEPS)]}, "")
-        self.assertEqual(groups, [], "neither goes to a child")
-        self.assertEqual(kept, [("1", plans.AWAITS_WHY), ("2", plans.AWAITS_WHY)])
-
     def test_other_steps_stay_or_go_by_the_same_rules(self):
         for stays in self.STEPS + ("Collect the children's reports", "Wait until every tree reports",
                                    "Check the acceptance session's results", "Read the reports from the fixers"):
@@ -2125,8 +2071,7 @@ class DoerAndObject(unittest.TestCase):
     """Messaging or handing to sessions stays with the orchestrator; running checks yourself goes to a child."""
 
     def kept(self, text):
-        _, kept = plans.top_groups({"steps": [{"addr": "1", "content": text, "status": "pending"}]}, "")
-        return bool(kept)
+        return bool(plans.top_stays(text))
 
     def test_the_doer_and_the_object_decide(self):
         self.assertTrue(self.kept("Hand fixes to sibling's fixers, stop duplicates"))

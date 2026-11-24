@@ -682,7 +682,7 @@ def _save_session(home, s):
     for k in ("plansSeen", "requestAnswers"):
         if isinstance(disk.get(k), dict):
             s[k] = {**disk[k], **(s.get(k) or {})}
-    for k in ("rootStep", "rootLeft", "shard", "disposable", "doneRetired", "archived", "appRoot", "nudged", "issue",
+    for k in ("rootStep", "rootLeft", "shard", "disposable", "doneRetired", "archived", "appRoot", "issue",
               "issueLooked", "findingsTold", "controls", "puppeteerSeen", "handedTo",
               "handedFrom", "effort", "kidCommits", "planMode", "planFile"):
         if k in disk and k not in s:
@@ -1411,11 +1411,6 @@ def caps_text(home, s):
     return ""
 
 
-CREATES = re.compile(r"^\W*(?:create|add|build|write|make|scaffold|introduce|design)\b[^.;]*?\b(?:modules?|plugins?|"
-                     r"skills?|pages?|formats?|hooks?|commands?|subcommands?|class(?:es)?|scripts?|schemas?|agents?)\b",
-                     re.I)
-
-
 def from_peer(prompt, by=""):
     """True for another session's message: by its origin, rows.whose, and where the origin does not say, by the
     wrapper Claude Code puts around one."""
@@ -1690,94 +1685,8 @@ def h_plan_mode(payload):
     return None
 
 
-# --- the shell words work_command reads a command by -----------------------------------------------------------
-
-NUDGE_LOOKING = (LOOKING | frozenset("""uniq basename dirname realpath stat du df env type command jq less more nl
-column od xxd sha1sum sha256sum md5sum cmp comm false read set ps tasklist whoami hostname uname history
-select-object where-object foreach-object measure-object format-table format-list out-string sort-object
-get-process get-command resolve-path join-path split-path get-date get-location convertfrom-json get-filehash
-compare-object""".split())) - {"mkdir"}
-GIT_READ = frozenset("status log diff show branch rev-parse remote fetch ls-files blame shortlog describe reflog "
-                     "config grep cat-file show-ref ls-tree".split())
-GIT_LANDS = frozenset("add commit merge push pull tag rebase cherry-pick stash notes".split())
-REDIRECT = re.compile(r"(?<![0-9&>])>>?\s*(?!&|/dev/null|\$null|nul\b)\S", re.I)
-
-
-ASSIGN = re.compile(r"^(?:export\s+|set\s+)?\$?([A-Za-z_]\w*)\s*=\s*('[^']*'|\"[^\"]*\"|\S*)\s*(.*)$", re.S)
 PHI_PY = re.compile(r"(?:^|[\/'\"\s])phi\.py\b")
 PYTHONS = ("python", "python3", "py", "uv", "pythonw")
-
-
-def runs_phi(part, phi_vars):
-    """True when one shell command runs phi.py: python with phi.py, or a variable bound to it, among its words, or
-    phi.py itself, or that variable, as the program."""
-    p = re.sub(r"^&\s*", "", clean(part))
-    first = p.split(" ", 1)[0].strip("'\"") if p else ""
-    refs = [rf"\$\{{?(?:env:)?{re.escape(v)}\b" for v in phi_vars]
-    def names_phi(x):
-        return bool(PHI_PY.search(" " + x) or any(re.search(r, x, re.I) for r in refs))
-    if names_phi(first):
-        return True
-    return program(p) in PYTHONS and names_phi(p)
-
-
-def work_command(cmd):
-    """True when a shell command builds, tests or changes files: anything past reading, git's reading and landing
-    commands, and p4-phi's own commands: any that runs phi.py, directly or through a variable bound to it."""
-    raw = str(cmd or "")
-    quoted = []
-
-    def hold(m):
-        quoted.append(m.group(0))
-        return f"'\x00{len(quoted) - 1}\x00'"
-    c = QUOTED.sub(hold, raw)
-    if REDIRECT.search(QUOTED.sub("''", raw)):
-        return True
-    phi_vars = set()
-    for part in re.split(r"&&|\|\||;|\n|\|", c):
-        part = part.strip()
-        whole = re.sub(r"'\x00(\d+)\x00'", lambda m: quoted[int(m.group(1))], part)
-        bind = ASSIGN.match(whole)
-        if bind:                                   # VAR=value, or export / set / $VAR = value: no effect of its own
-            if PHI_PY.search(bind.group(2)):
-                phi_vars.add(bind.group(1))
-            if not bind.group(3).strip():
-                continue
-            whole = bind.group(3).strip()
-            part = whole
-        if runs_phi(whole, phi_vars):
-            continue
-        part = re.sub(r"'\x00\d+\x00'", "''", part)
-        prog = program(part)
-        if prog in NUDGE_LOOKING:
-            if prog == "sed" and re.search(r"\s-i", part):
-                return True
-            continue
-        if prog == "git":
-            # the subcommand is the first word past the options, so `git -C <path> log` is a read
-            words = [w for w in re.sub(r"\s(?:-C|-c|--git-dir|--work-tree)\s+\S+", " ", part).split()[1:]
-                     if not w.startswith("-")]
-            sub = words[0] if words else ""
-            if not sub or sub in GIT_READ or sub in GIT_LANDS:
-                continue
-            return True
-        if prog == "gh":
-            continue
-        return True
-    return False
-
-
-def work_call(s, name, inp):
-    """True for an Edit or Write to the project's own files, outside its .claude folder, or a working command."""
-    if name in EDIT_TOOLS:
-        f = relay.norm(inp.get("file_path") or inp.get("notebook_path") or "")
-        proj = relay.norm(s.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or "")
-        if not f or "/.claude/" in f + "/":
-            return False
-        return not proj or relay.covers(proj, f)
-    if name in SHELL_TOOLS:
-        return work_command(inp.get("command"))
-    return False
 
 
 def h_puppeteer_tool(payload):
@@ -2496,19 +2405,6 @@ def h_turn_end(payload):
     return None
 
 
-def messaged(calls):
-    """The sessions a turn's calls sent a message to."""
-    out = []
-    for c in calls or []:
-        inp = c.get("input") if isinstance(c.get("input"), dict) else {}
-        name = str(c.get("name") or "")
-        to = inp.get("to") if name.endswith("SendMessage") else (
-            inp.get("session_id") or inp.get("to") if name.endswith("send_message") else "")
-        if to and str(to) not in out:
-            out.append(str(to))
-    return out
-
-
 # --- what the hooks module is answered: a worker's starter --------------------------------------------------------
 #
 # hooks/register.ts runs `phi.py look` for a session and acts on the key `starter` of its answer, which no command
@@ -2883,17 +2779,6 @@ def goal_text(s):
                   ", and the look after a later turn's end answers it again." if left else
                   ", so no look answers it again: ask for it anew with the tool `mcp__p4-phi__goal`."))
     return f"goal {state}: {g.get('condition')}" + (f"\n{g['reason']}" if g.get("reason") else "") + why
-
-
-def ended_turn(home, sid):
-    """The id of the turn a session's last Stop hook ended, when no prompt reached the session since, else ''. It is
-    read from the session's log, as puppeteer.working reads it. A turn that ended on an error or with the session
-    logs no turn id, so it answers ''."""
-    last = {}
-    for r in read_rows(os.path.join(session_dir(home, sid), "log.jsonl"), 256 * 1024):
-        if r.get("hook") in ("user-prompt-submit", "stop"):
-            last = r
-    return str(last.get("turn") or "") if last.get("hook") == "stop" else ""
 
 
 RAN = {}       # what the running hook learned, for its line in the session's log

@@ -21,34 +21,25 @@ import relay  # noqa: E402
 from test_phi import KID, KID2, TOP, Tree, context, transcript  # noqa: E402
 
 
-def plan_of(*steps):
-    return {"steps": [{"addr": str(k + 1), "content": c, "status": "pending"} for k, c in enumerate(steps)]}
-
-
 class SplitReads(unittest.TestCase):
     def test_the_four_misread_steps(self):
-        groups, kept = plans.top_groups(plan_of(
-            "Check each plugin in its own folder for stray files in src/a.py",
-            "Check phi session tree for the empty node in src/b.py",
-            "Re-run the acceptance check", "Rerun the acceptance check", "Final six-row pass/fail table",
-            "Compile the results of every check into one report"), "")
-        self.assertEqual([[st["addr"] for st in g] for g in groups], [["1"], ["2"]], "two checks of things: work")
-        why = dict(kept)
-        self.assertIn("orchestration", why["3"])
-        self.assertIn("orchestration", why["4"])
-        self.assertIn("results", why["5"])
-        self.assertIn("results", why["6"])
+        for work in ("Check each plugin in its own folder for stray files in src/a.py",
+                     "Check phi session tree for the empty node in src/b.py"):
+            self.assertEqual(plans.top_stays(work), "", "two checks of things: work")
+        self.assertIn("orchestration", plans.top_stays("Re-run the acceptance check"))
+        self.assertIn("orchestration", plans.top_stays("Rerun the acceptance check"))
+        self.assertIn("results", plans.top_stays("Final six-row pass/fail table"))
+        self.assertIn("results", plans.top_stays("Compile the results of every check into one report"))
         self.assertTrue(plans.LANDS.search("Check our own work before the push"), "a check of its own work lands")
 
 
 class Tracking(unittest.TestCase):
     def test_a_step_another_does_or_ezexe_decides_stays_at_the_top(self):
         """Tracking steps stay with the top-level session."""
-        groups, kept = plans.top_groups(plan_of(
-            "Ledger: p4-phi fixer pushes #25", "ezexe updates the Mac's plugins", "Track the #28 builder's progress",
-            "The top session merges the fold branch", "Write the sync script in src/sync.py"), "")
-        self.assertEqual([a for a, why in kept if "tracks" in why], ["1", "2", "3", "4"])
-        self.assertEqual([[st["content"] for st in g] for g in groups], [["Write the sync script in src/sync.py"]])
+        for text in ("Ledger: p4-phi fixer pushes #25", "ezexe updates the Mac's plugins",
+                     "Track the #28 builder's progress", "The top session merges the fold branch"):
+            self.assertIn("tracks", plans.top_stays(text), text)
+        self.assertEqual(plans.top_stays("Write the sync script in src/sync.py"), "")
 
 
 class Tree_(unittest.TestCase):
