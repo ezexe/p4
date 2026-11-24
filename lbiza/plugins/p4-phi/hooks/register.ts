@@ -142,6 +142,12 @@ const IN_COMPLETE = /plan-planner[\\/]+complete/
 const NAMES_PLANNER = /plan-planner/i
 const NAMES_COMPLETE = /complete/i
 const COMPLETE_SEGMENT = /(^|[\\/])complete([\\/]|$)/i
+// A shell line that names `complete` beside a separator, or a glob that could match it (`comp*`, `compl[e]te`),
+// whether or not it names `plan-planner`, as planclose.guard's names_complete reads one. `complete` with no
+// separator beside it (`-m "audit complete"`) is a word, not a segment. A line sent on a loose match is judged
+// by python, which lets a read-only line by.
+const NAMES_COMPLETE_SEGMENT =
+  /(?<![\w.*?[\]-])complete[\\/]|[\\/]complete(?![\w.-])|(?<![\w.*?[\]-])[cC*?[][\w*?[\]-]*[*?[][\w*?[\]-]*/i
 // The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
 const MOST_TOLD = 256
 
@@ -1074,12 +1080,19 @@ async function isChecked(
   const phi = `${root}/.claude/p4/phi`
   if (e.agentId !== undefined && (await isMarked($, `${phi}/.agents`, e.agentId))) return true
   if (!isListed) return false
-  if (tool === 'mcp__terminal__run_in_terminal') return NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text)
+  if (tool === 'mcp__terminal__run_in_terminal') {
+    return IN_COMPLETE.test(text) || NAMES_COMPLETE_SEGMENT.test(text) || (NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text))
+  }
   if (!isEdit && !isShell) return true
   if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
   if (isShell && CARDS_ON.test(text)) return true
   // A shell call that names the folder of closed plans, and an edit whose path does: plan-guard's to refuse.
-  if (isShell && (IN_COMPLETE.test(text) || (NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text)))) return true
+  if (
+    isShell &&
+    (IN_COMPLETE.test(text) || NAMES_COMPLETE_SEGMENT.test(text) || (NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text)))
+  ) {
+    return true
+  }
   if (isEdit && isRecord(e.input)) {
     const paths = [e.input.file_path, e.input.notebook_path, e.input.path]
     if (paths.some(path => typeof path === 'string' && (IN_COMPLETE.test(path) || COMPLETE_SEGMENT.test(path)))) {

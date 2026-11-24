@@ -1638,6 +1638,32 @@ test('every way into complete/ reaches the check: a cd then a move, any case, ru
   ])
 })
 
+test('a shell line that names complete beside a separator or a glob reaches the check without plan-planner, a word does not', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  await $.tool.check(bash('echo audit complete'))
+  await $.tool.check(bash('grep complete notes.txt'))
+  await $.tool.check(call('mcp__terminal__run_in_terminal', { command: 'echo autocomplete' }))
+  await $.tool.check(call('Write', { file_path: '/work/project/notes/autocomplete/x.md', content: 'x' }))
+  expect(seen.checks).toEqual([])
+
+  const into = [
+    bash('mv x.md complete/'),
+    bash('mv x.md comp*'),
+    bash('mv x.md compl[e]te'),
+    call('PowerShell', { command: 'Move-Item x.md .\\complete' }),
+    call('mcp__terminal__run_in_terminal', { command: 'mv x.md complete/' }),
+    call('Write', { file_path: '/work/project/complete/x.md', content: 'x' }),
+  ]
+  for (const one of into) await $.tool.check(one)
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual([
+    'Bash', 'Bash', 'Bash', 'PowerShell', 'mcp__terminal__run_in_terminal', 'Write',
+  ])
+})
+
 test('a plain shell call starts no python, whatever the store holds', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)

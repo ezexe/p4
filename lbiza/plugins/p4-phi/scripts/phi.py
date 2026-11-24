@@ -3496,7 +3496,7 @@ def _deny(why, key):
 def h_plan_guard(payload):
     """PreToolUse on a shell call and on Edit, Write and NotebookEdit: a way into `plan-planner/complete/` other than
     `phi.py plan close` is refused before it runs (planclose.guard has the arms)."""
-    why = planclose.guard(payload.get("tool_name"), payload.get("tool_input"))
+    why = planclose.guard(payload.get("tool_name"), payload.get("tool_input"), payload.get("cwd") or None)
     return _deny(why, "plan") if why else None
 
 

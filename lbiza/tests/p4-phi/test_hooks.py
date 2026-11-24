@@ -456,6 +456,19 @@ class PathChecks(unittest.TestCase):
                                              "tool_input": {"command": "ls plan-planner"}})
         self.assertNotIn("deny", r.stdout)
 
+    def test_plan_guard_denies_mv_into_complete_with_no_plan_planner_and_reads_the_payloads_cwd(self):
+        planner = self.mine(".claude/p4/temportal/plan-planner")
+        for cmd, cwd in (("mv x.md complete/", None), ("mv x.md comp*", None), ("mv x.md complete", planner)):
+            payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}}
+            if cwd:
+                payload["cwd"] = cwd
+            hso = json.loads(self.run_recall("lookup-check", payload).stdout)["hookSpecificOutput"]
+            self.assertEqual(hso["permissionDecision"], "deny", cmd)
+            self.assertIn("phi.py plan close", hso["permissionDecisionReason"], cmd)
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                                             "tool_input": {"command": "mv x.md complete"}})
+        self.assertNotIn("deny", r.stdout, "outside plan-planner the bare word is no segment")
+
     def bash(self, *changed, diff=True):
         resp = {"stdout": "", "stderr": ""}
         if diff:
