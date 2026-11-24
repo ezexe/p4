@@ -1612,6 +1612,32 @@ test('a call into plan-planner/complete reaches the check, with no git word and 
   expect(seen.checks.map(check => check.payload.tool_name)).toEqual(['Bash', 'Bash', 'PowerShell', 'Write', 'Edit'])
 })
 
+test('every way into complete/ reaches the check: a cd then a move, any case, run_in_terminal and a complete segment', async ($, on) => {
+  mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
+  mock.clock(on)
+  const seen = machine(on, {})
+  on('tool.check', () => ALLOW)
+
+  await $.tool.check(bash('ls'))
+  await $.tool.check(call('mcp__terminal__run_in_terminal', { command: 'ls' }))
+  await $.tool.check(call('mcp__terminal__run_in_terminal', { command: 'ls .claude/p4/temportal/plan-planner' }))
+  await $.tool.check(call('Write', { file_path: '/work/project/notes/completed.md', content: 'x' }))
+  expect(seen.checks).toEqual([])
+
+  const into = [
+    bash('cd .claude/p4/temportal/plan-planner && mv x.md complete/'),
+    bash('mv x.md .claude/p4/temportal/PLAN-PLANNER//./Complete/x.md'),
+    call('mcp__terminal__run_in_terminal', { command: 'mv x.md .claude/p4/temportal/plan-planner/complete/x.md' }),
+    call('mcp__terminal__run_in_terminal', { command: 'cd plan-planner; mv x.md complete' }),
+    call('Write', { file_path: 'complete/x.md', content: 'x' }),
+    call('Edit', { file_path: 'C:\\p\\Complete\\x.md', old_string: 'a', new_string: 'b' }),
+  ]
+  for (const one of into) await $.tool.check(one)
+  expect(seen.checks.map(check => check.payload.tool_name)).toEqual([
+    'Bash', 'Bash', 'mcp__terminal__run_in_terminal', 'mcp__terminal__run_in_terminal', 'Write', 'Edit',
+  ])
+})
+
 test('a plain shell call starts no python, whatever the store holds', async ($, on) => {
   mock.env(on, { CLAUDE_PLUGIN_DATA: DATA })
   const clock = mock.clock(on)

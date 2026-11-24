@@ -281,6 +281,7 @@ PHI_CHECK = {"mcp__ccd_session__start_session": "start-advice",
              "Bash": ("plan-guard", "cards-guard", "issue-guard", "store-guard", "force-guard", "branch-guard", "restart-check"),
              "PowerShell": ("plan-guard", "cards-guard", "issue-guard", "store-guard", "force-guard",
                             "branch-guard", "restart-check"),
+             "mcp__terminal__run_in_terminal": ("plan-guard",),
              "Edit": ("plan-guard", "path-guard"), "Write": ("plan-guard", "path-guard"),
              "NotebookEdit": ("plan-guard", "path-guard")}
 PHI_RECORD = {"mcp__ccd_turn__update_plan": "plan", "mcp__ccd_turn__wrap_up": "wrap-up", "Write": "memory-gap",

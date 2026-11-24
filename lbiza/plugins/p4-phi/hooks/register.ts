@@ -83,6 +83,7 @@ const CHECKED_TOOLS = new Set([
   'mcp__ccd_session_mgmt__send_message',
   'mcp__ccd_session_mgmt__archive_session',
   'mcp__ccd_session__start_session',
+  'mcp__terminal__run_in_terminal',
 ])
 // The tools that send a message to another session, and how the desktop app's answer names a message that waits.
 // The older tool's own text: "queued" means it is waiting behind that session's current work and runs when that
@@ -136,6 +137,11 @@ const CARDS_ON = /phi\.py[^A-Za-z0-9]+cards[^A-Za-z0-9]+on[^A-Za-z0-9]/
 // `plan-planner/complete` or `plan-planner\complete`, which phi.py's plan-guard reads: a plan goes into that folder
 // through `phi.py plan close` alone. In a call's JSON text a backslash is escaped, so any run of them counts.
 const IN_COMPLETE = /plan-planner[\\/]+complete/
+// A shell line that names the plans folder and `complete` in any order, case or separators (`cd .../plan-planner &&
+// mv x.md complete/`), and an edit path that holds a `complete` segment: plan-guard resolves what they mean.
+const NAMES_PLANNER = /plan-planner/i
+const NAMES_COMPLETE = /complete/i
+const COMPLETE_SEGMENT = /(^|[\\/])complete([\\/]|$)/i
 // The calls whose check left words for the model, at most, each until its PostToolUse hooks run.
 const MOST_TOLD = 256
 
@@ -1068,14 +1074,17 @@ async function isChecked(
   const phi = `${root}/.claude/p4/phi`
   if (e.agentId !== undefined && (await isMarked($, `${phi}/.agents`, e.agentId))) return true
   if (!isListed) return false
+  if (tool === 'mcp__terminal__run_in_terminal') return NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text)
   if (!isEdit && !isShell) return true
   if (isShell && (GIT_WORD.some(word => word.test(text)) || LANDS.test(text) || IN_BACKGROUND.test(text))) return true
   if (isShell && CARDS_ON.test(text)) return true
   // A shell call that names the folder of closed plans, and an edit whose path does: plan-guard's to refuse.
-  if (isShell && IN_COMPLETE.test(text)) return true
+  if (isShell && (IN_COMPLETE.test(text) || (NAMES_PLANNER.test(text) && NAMES_COMPLETE.test(text)))) return true
   if (isEdit && isRecord(e.input)) {
     const paths = [e.input.file_path, e.input.notebook_path, e.input.path]
-    if (paths.some(path => typeof path === 'string' && IN_COMPLETE.test(path))) return true
+    if (paths.some(path => typeof path === 'string' && (IN_COMPLETE.test(path) || COMPLETE_SEGMENT.test(path)))) {
+      return true
+    }
   }
   // A session some session's paths are held against, whose edit phi.py's path guard reads.
   if (isEdit && (await $.fs.exists(`${phi}/.paths/on`).catch(() => false))) return true

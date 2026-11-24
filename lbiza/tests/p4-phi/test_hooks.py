@@ -441,6 +441,21 @@ class PathChecks(unittest.TestCase):
                                              "tool_input": {"command": "ls plan-planner"}})
         self.assertNotIn("deny", r.stdout)
 
+    def test_plan_guard_denies_a_run_in_terminal_move_into_complete_and_lets_an_ls_by(self):
+        import hook
+        self.assertEqual(hook.PHI_CHECK["mcp__terminal__run_in_terminal"], ("plan-guard",))
+        cmd = "mv .claude/p4/temportal/plan-planner/x.md .claude/p4/temportal/plan-planner/complete/x.md"
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse",
+                                             "tool_name": "mcp__terminal__run_in_terminal",
+                                             "tool_input": {"command": cmd}})
+        hso = json.loads(r.stdout)["hookSpecificOutput"]
+        self.assertEqual(hso["permissionDecision"], "deny")
+        self.assertIn("phi.py plan close", hso["permissionDecisionReason"])
+        r = self.run_recall("lookup-check", {"hook_event_name": "PreToolUse",
+                                             "tool_name": "mcp__terminal__run_in_terminal",
+                                             "tool_input": {"command": "ls plan-planner"}})
+        self.assertNotIn("deny", r.stdout)
+
     def bash(self, *changed, diff=True):
         resp = {"stdout": "", "stderr": ""}
         if diff:
