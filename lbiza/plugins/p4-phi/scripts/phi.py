@@ -2709,9 +2709,10 @@ def pool_state(home, now=None):
     """What is left of each pool, as {"api": {"low", "why", "spent_month", "budget"}, "max": {"low", "why",
     "utilization", "resets_at"}}. The API credit has no documented balance: it is low where the latest worker on an
     API profile ended refused for credit, or where this month's summed `total_cost_usd` estimates reach POOL_LOW of
-    `worker_api_budget_usd` in phi.json. The Max plan is low where the latest `rate_limit_event` of a worker on the
-    claude.ai sign-in has a window not yet reset whose status is `allowed_warning` or `rejected`, or whose
-    utilization is at or over POOL_LOW."""
+    `worker_api_budget_usd` in phi.json. The Max plan's windows are read from the freshest `usage.json` of the
+    store's sessions, whose `rateLimits` the hooks module writes from `$.session.usage()`, else from the latest
+    `rate_limit_event` of a `-p` worker on the claude.ai sign-in; it is low where a window not yet reset has status
+    `allowed_warning` or `rejected`, or utilization at or over POOL_LOW."""
     import coworker
     now = time.time() if now is None else now
     conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
