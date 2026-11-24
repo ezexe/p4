@@ -576,5 +576,104 @@ class GateRound2(Repo):
             shutil.rmtree(home, ignore_errors=True)
 
 
+class Stamp(Repo):
+    """Section 17 of audit-before-a-plan-closes: a close stamps the plan in `complete/.closed.jsonl`, and the plans
+    closed before the gate are grandfathered once."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.home, ignore_errors=True)
+
+    def rows(self):
+        import json
+        with open(os.path.join(self.home, "complete", ".closed.jsonl"), encoding="utf-8") as f:
+            return [json.loads(line) for line in f.read().splitlines()]
+
+    def test_a_close_writes_a_stamp_that_stamped_reads_true(self):
+        path = os.path.join(self.home, "x.md")
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(self.plan().replace("\n", "\r\n"))
+        dest = planclose.close(path, self.repo, self.home, today="2026-11-24")
+        import hashlib
+        with open(dest, "rb") as f:
+            sha = hashlib.sha256(f.read()).hexdigest()
+        self.assertEqual(self.rows(), [{"name": "the-exporter-s-move.md", "sha256": sha, "closed": "2026-11-24",
+                                        "audit": f"{self.base[:8]}..{self.two[:8]}"}])
+        self.assertTrue(planclose.stamped(dest))
+        with open(dest, "a", encoding="utf-8") as f:
+            f.write("an edit after the close\n")
+        self.assertFalse(planclose.stamped(dest))
+
+    def test_a_file_with_no_stamp_of_its_name_is_unstamped(self):
+        dest = planclose.close(os.path.join(self.home, self.put("x.md")), self.repo, self.home, today="2026-11-24")
+        other = os.path.join(self.home, "complete", "other.md")
+        shutil.copyfile(dest, other)
+        self.assertFalse(planclose.stamped(other))
+        self.assertFalse(planclose.stamped(os.path.join(self.home, "complete", "gone.md")))
+
+    def put(self, name, text=None, folder=""):
+        os.makedirs(os.path.join(self.home, folder), exist_ok=True)
+        with open(os.path.join(self.home, folder, name), "w", encoding="utf-8") as f:
+            f.write(self.plan() if text is None else text)
+        return os.path.join(folder, name) if folder else name
+
+    def test_grandfathering_stamps_the_existing_files_once(self):
+        self.assertEqual(planclose.grandfather(self.home), [])
+        self.assertFalse(os.path.exists(os.path.join(self.home, "complete")))
+        for name in ("old.md", "older.md"):
+            self.put(name, f"# {name}\n", "complete")
+        self.put("notes.txt", "not a plan", "complete")
+        self.assertEqual(planclose.grandfather(self.home, today="2026-11-24"), ["old.md", "older.md"])
+        self.assertEqual([(r["name"], r["audit"], r["closed"]) for r in self.rows()],
+                         [("old.md", "before the gate", "2026-11-24"), ("older.md", "before the gate", "2026-11-24")])
+        self.assertTrue(planclose.stamped(os.path.join(self.home, "complete", "old.md")))
+        self.put("later.md", "# later\n", "complete")
+        self.assertEqual(planclose.grandfather(self.home), [])
+        self.assertEqual(len(self.rows()), 2)
+        self.assertFalse(planclose.stamped(os.path.join(self.home, "complete", "later.md")))
+
+    def test_the_first_close_grandfathers_what_complete_holds(self):
+        self.put("old.md", "# old\n", "complete")
+        dest = planclose.close(os.path.join(self.home, self.put("x.md")), self.repo, self.home, today="2026-11-24")
+        self.assertEqual([r["name"] for r in self.rows()], ["old.md", "the-exporter-s-move.md"])
+        self.assertTrue(planclose.stamped(os.path.join(self.home, "complete", "old.md")))
+        self.assertTrue(planclose.stamped(dest))
+
+
+class ShellWords(unittest.TestCase):
+    """Section 17 of audit-before-a-plan-closes: the guard reads a shell line's words as the shell does."""
+    ELSEWHERE = "E:/projects/p4-phi/p4"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd=self.ELSEWHERE)
+
+    def test_quotes_inside_a_word_are_taken_out(self):
+        for cmd in ("mv x.md plan-planner/comp''lete/", "mv x.md plan-planner/comp\"\"lete/",
+                    "mv x.md \"plan-planner/comp\"lete/", "mv x.md plan-planner/'comp'lete/x.md"):
+            self.assertIn("refused", self.refused(cmd), cmd)
+
+    def test_a_brace_list_is_read_as_its_words(self):
+        self.assertIn("refused", self.refused("cp x.md plan-planner/{complete,todo}/"))
+        self.assertIn("refused", self.refused("cp x.md plan-planner/{todo,{a,complete}}/x.md"))
+        self.assertIsNone(self.refused("cp x.md plan-planner/{todo,unplanned}/"))
+
+    def test_a_powershell_backtick_escape_is_its_character(self):
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner/comp`lete/", "PowerShell"))
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner\\c`omplete\\x.md", "PowerShell"))
+
+    def test_a_trailing_dot_or_space_of_a_path_part_is_dropped(self):
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner/complete./", "PowerShell"))
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner\\complete...\\x.md", "PowerShell"))
+        self.assertIn("refused", self.refused("Move-Item x.md \"plan-planner/complete /x.md\"", "PowerShell"))
+
+    def test_words_stay_words(self):
+        self.assertIsNone(self.refused("git commit -m \"audit complete\""))
+        self.assertIsNone(self.refused("git commit -m \"audit complete.\" -- x.md"))
+        self.assertIsNone(self.refused("echo complete."))
+        self.assertIsNone(self.refused("mv x.md plan-planner/todo/"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -12,12 +12,16 @@ line and, once landed, holds its `Evidence:`. The session that holds the plan th
     - Finding: none
 
 check() is what stops the close, close() writes the STATUS line on line 2 and moves the plan into `complete/` under
-its title's name, numbered where that name is taken, as plan-planner's `Moving a plan` says, and guard() is the
-deny reason for every other way into `complete/`.
+its title's name, numbered where that name is taken, as plan-planner's `Moving a plan` says, and stamps it in
+`complete/.closed.jsonl`, and guard() is the deny reason for every other way into `complete/`. A text guard cannot
+follow every spelling a shell builds, so the stamp is the gate's own record: stamped() tells a plan the gate closed,
+and p4-temportal's sweep moves one with no stamp back out.
 """
 
 import datetime
 import fnmatch
+import hashlib
+import json
 import os
 import posixpath
 import re
@@ -47,6 +51,8 @@ NONE = re.compile(r"(?i)^\W*none\W*$")
 # is none, and no part of a version, a path or an issue number such as `ezexe/p4#256`
 SHA = re.compile(r"(?<![\w./#:-])(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}(?![\w/-]|\.\w)")
 STATUS = re.compile(r"^STATUS:")
+CLOSED = ".closed.jsonl"            # complete/'s record of the plans close() closed, one JSON row each
+BEFORE_GATE = "before the gate"     # the audit of a stamp grandfather() writes
 
 EDITS = ("Write", "Edit", "NotebookEdit")
 SHELLS = ("Bash", "PowerShell", "mcp__terminal__run_in_terminal")
@@ -270,7 +276,9 @@ def close(path, checkout, home=None, today=None):
     `home`, under its title's name, numbered where that name is taken, or taken between free_name and the write.
     Where `home` is None it is the plan's own folder, or that folder's parent where the plan sits in one of the
     SHELVES. The plan's line ends, LF or CRLF, are kept. A plan already in `complete/` is refused as closed already.
-    Returns the path it moved the plan to."""
+    The plans already in `complete/` are grandfathered first, and the plan written is then stamped in
+    `complete/.closed.jsonl` with {"name", "sha256", "closed", "audit"}, the hash of the bytes written. Returns the
+    path it moved the plan to."""
     if os.path.basename(os.path.dirname(os.path.abspath(path))).lower() == COMPLETE:
         raise Refused([f"{path} is in complete/ already: the plan is closed"])
     with open(path, encoding="utf-8", newline="") as f:
@@ -285,7 +293,8 @@ def close(path, checkout, home=None, today=None):
         if os.path.basename(home).lower() in SHELVES:
             home = os.path.dirname(home)
     got = read(text)
-    line = status_line(got, today or datetime.date.today().isoformat())
+    today = today or datetime.date.today().isoformat()
+    line = status_line(got, today)
     lines = text.split("\n")
     if len(lines) > 1 and STATUS.match(lines[1]):
         lines[1] = line
@@ -293,6 +302,8 @@ def close(path, checkout, home=None, today=None):
         lines.insert(1, line)
     shelf = os.path.join(home, COMPLETE)
     os.makedirs(shelf, exist_ok=True)
+    grandfather(home, today)            # the plans closed before the gate keep their place once a stamp is there
+    data = end.join(lines).encode("utf-8")
     wanted = title_name(text) or os.path.basename(path)
     own = os.path.normcase(os.path.abspath(path))
     while True:
@@ -300,13 +311,73 @@ def close(path, checkout, home=None, today=None):
         if os.path.normcase(os.path.abspath(dest)) == own:    # the plan sits where it would go: it is closed
             raise Refused([f"{path} is in complete/ already: the plan is closed"])
         try:
-            with open(dest, "x", encoding="utf-8", newline="") as f:
-                f.write(end.join(lines))
+            with open(dest, "xb") as f:
+                f.write(data)
             break
         except FileExistsError:         # taken since free_name looked: free_name now passes it by
             continue
+    base, head = got["range"]
+    stamp(shelf, os.path.basename(dest), data, today, f"{base}..{head}")
     os.remove(path)
     return dest
+
+
+def _sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def stamp(shelf, name, data, closed, audit):
+    """Append to `shelf`/.closed.jsonl the row {"name", "sha256", "closed", "audit"} of the plan `name` whose bytes
+    are `data`."""
+    row = {"name": name, "sha256": _sha256(data), "closed": closed, "audit": audit}
+    with open(os.path.join(shelf, CLOSED), "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def stamps(shelf):
+    """The rows of `shelf`/.closed.jsonl as {name: {sha256, ...}}, or None where it is not there or cannot be read. A
+    line that is no JSON object with a name and a sha256 is left out."""
+    try:
+        with open(os.path.join(shelf, CLOSED), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    rows = {}
+    for line in text.splitlines():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("name"), str) and isinstance(row.get("sha256"), str):
+            rows.setdefault(row["name"], set()).add(row["sha256"])
+    return rows
+
+
+def stamped(path):
+    """True where the file at `path`'s current bytes match a stamp row of its name in its folder's .closed.jsonl."""
+    try:
+        with open(path, "rb") as f:
+            sha = _sha256(f.read())
+    except OSError:
+        return False
+    return sha in ((stamps(os.path.dirname(os.path.abspath(path))) or {}).get(os.path.basename(path)) or ())
+
+
+def grandfather(home, today=None):
+    """Stamp, with `"audit": "before the gate"`, each `.md` already in `complete/` of the plans folder `home`, where
+    its .closed.jsonl is not there yet, and return their names; where it is there, or there is no `complete/`, stamp
+    nothing and return []. The record is written even where `complete/` holds no plan, so it runs once."""
+    shelf = os.path.join(home, COMPLETE)
+    if not os.path.isdir(shelf) or os.path.lexists(os.path.join(shelf, CLOSED)):
+        return []
+    today = today or datetime.date.today().isoformat()
+    names = sorted(n for n in os.listdir(shelf)
+                   if n.lower().endswith(".md") and os.path.isfile(os.path.join(shelf, n)))
+    open(os.path.join(shelf, CLOSED), "a", encoding="utf-8").close()
+    for n in names:
+        with open(os.path.join(shelf, n), "rb") as f:
+            stamp(shelf, n, f.read(), today, BEFORE_GATE)
+    return names
 
 
 def normal(text):
@@ -336,6 +407,91 @@ def is_complete(run):
                                and fnmatch.fnmatchcase(COMPLETE, run))
 
 
+BRACES = re.compile(r"\{([^{}\s]*,[^{}\s]*)\}")     # a brace list `{a,b}`, the innermost first
+MOST_WORDS = 256                                    # a brace list's words are read up to this many
+SPLITS = "();|&<>"                                  # the marks that end a shell word, as whitespace does
+
+
+def _parts(word):
+    """The parts of the shell word `word` as (quote, text): quote is `'`, `"` or '' for an unquoted run; None where
+    a quote is left open."""
+    out, i = [], 0
+    while i < len(word):
+        c = word[i]
+        if c in QUOTES:
+            j = word.find(c, i + 1)
+            if j < 0:
+                return None
+            out.append((c, word[i + 1:j]))
+            i = j + 1
+        else:
+            j = i
+            while j < len(word) and word[j] not in QUOTES:
+                j += 1
+            out.append(("", word[i:j]))
+            i = j
+    return out
+
+
+def _split(line):
+    """`line` cut into its words and, each on its own, the characters between them: whitespace and the marks of a
+    chain, a redirection or a subexpression, SPLITS; a quote's characters are kept in its word."""
+    out, word, quote = [], "", ""
+    for c in line:
+        if quote:
+            word += c
+            quote = "" if c == quote else quote
+        elif c in QUOTES:
+            word += c
+            quote = c
+        elif c.isspace() or c in SPLITS:
+            if word:
+                out.append(word)
+                word = ""
+            out.append(c)
+        else:
+            word += c
+    if word:
+        out.append(word)
+    return out
+
+
+def _braces(word):
+    """The words the brace lists of `word` expand to, as a shell does: `a/{b,c}/` is `a/b/` and `a/c/`."""
+    words, done = [word], []
+    while words and len(done) + len(words) <= MOST_WORDS:
+        w = words.pop(0)
+        m = BRACES.search(w)
+        if not m:
+            done.append(w)
+            continue
+        words += [w[:m.start()] + part + w[m.end():] for part in m.group(1).split(",")]
+    return done + words
+
+
+def shell_words(cmd):
+    """The shell line `cmd` read as a shell reads its words, so a guard sees the path it builds: a PowerShell
+    backtick escape is its character (``comp`lete``); a word of more than one part with no whitespace in a quote
+    loses its quotes (`comp''lete`, `"plan-planner/comp"lete`), while a word quoted whole, or whose quote holds a
+    space, keeps them; a brace list is read as its words (`{complete,todo}/` is `complete/ todo/`); and a trailing
+    dot of a path part (`complete./`), or a trailing space of one inside a quote, is dropped, as Windows does. A
+    name built from a variable is left as it is."""
+    line = re.sub(r"`(.)", r"\1", str(cmd or ""), flags=re.S)
+    out = []
+    for word in _split(line):
+        parts = _parts(word)
+        if parts is None:
+            out.append(word)
+            continue
+        if any(q for q, _ in parts) and (len(parts) == 1 or any(q and re.search(r"\s", t) for q, t in parts)):
+            out.append(re.sub(r"(?<=[^\s/\\.])[. ]+(?=[/\\])", "", word))
+            continue
+        word = "".join(t for _, t in parts)
+        out.append(" ".join(_braces(word)))
+    line = "".join(out)
+    return re.sub(r"(?<=[^\s/\\.])\.+(?=[/\\'\"\s]|$)", "", line)
+
+
 def names_complete(cmd, cwd):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
@@ -343,8 +499,9 @@ def names_complete(cmd, cwd):
     (`Join-Path 'E:/p/plan-planner' 'complete'`, `os.path.join('plan-planner', 'complete')`). A word with no
     separator beside it, as in `-m "audit complete"` or `grep complete`, is none. A glob outside a quote, as in
     `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
-    `complete` outside a quote is a segment too."""
-    line = normal(cmd)
+    `complete` outside a quote is a segment too. The line is read by shell_words first, so `comp''lete`,
+    ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`."""
+    line = normal(shell_words(cmd))
     planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
     for m in RUN.finditer(line):
         if not is_complete(m.group(0)):
