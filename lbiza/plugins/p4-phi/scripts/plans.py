@@ -1275,7 +1275,7 @@ def turn_relay(home, s, row, calls):
     return unsent
 
 
-AUTHORITY = re.compile(r"\b(push|force|merge|publish|post|deploy|release|credential|password|token|secret|api key|"
+AUTHORITY = re.compile(r"\b(approv|new plan|plan's intent|push|force|merge|publish|post|deploy|release|credential|password|token|secret|api key|"
                        r"permission|sign[ -]?in|log[ -]?in|spend|pay|purchase|billing|delete|destroy|drop|"
                        r"irreversible|cannot be undone|restart|install)\w*", re.I)
 
