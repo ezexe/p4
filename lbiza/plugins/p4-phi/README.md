@@ -170,7 +170,7 @@ A call a plugin's hooks module makes itself, with `$.tool.call` or `$.session.se
 Seen on Claude Code 2.1.328, in a `claude -p` run of the plugin beside a probe mod from a scratch project: no shell started before any of four Bash calls, `tool.check` settled in 44.5 ms and 28.2 ms for two plain commands with no python started and in 523.3 ms for `git status`, where `hook.py lookup-check` ran, a `tool.check` hook's `deny` reached the model as `Permission to use Bash denied by plugins p4-four-probe, p4-phi, cc-plugin-privacy: <reason>`, and context a function hook added at `classic.PostToolUse` reached the model beside the result.
 Seen in the desktop app on 2.1.326: a function hook at `classic.PreToolUse` was handed the tool, the call's id and the tool's arguments and no agent id, and in a `claude -p` run a subagent's call carried `agentId` at `tool.check` and none at `classic.PreToolUse`.
 
-Where a store's `phi.json` sets `goal` true, a worker gets Claude Code's own goal.
+Unless a store's `phi.json` sets `goal` false, a worker gets Claude Code's own goal.
 The line `Done looks like:` of its brief is the goal's condition, and the module sets it once the worker's first turn has ended, by running `/goal <condition>` with `$.command.run`.
 Where the brief asks for changes and `phi.goal_review` is on, as it is by default, the condition also asks for a review of the change by a reader that has not seen the conversation: the skill `code-review` at the level `low` and without `--fix` for a change to code, and the agent `p4-phi:check` for anything else.
 Each finding is mended or answered with the reason it is no fault, one second review reads a mended change, and there is no third, since by `best-practices.md` "A reviewer that's asked to find problems will always find something".
@@ -191,7 +191,7 @@ Seen there on 2026-11-23, with those sentences worded as a rule, "counts as met 
 No other route sets a goal with nobody at the prompt: `goal.md` names the typed command alone, `SetGoal` is no tool of a session, a brief that begins with `/goal` runs no command since the app writes a started session's first message itself, and a `/goal` in another session's message arrives as text.
 The evaluator "does not call tools, so it can only judge what Claude has already surfaced in the conversation", by `goal.md`, so the checks a script makes stay in the Stop hook: the regression test of a worker's issue, the commits on the default branch and the open issue.
 Claude Code writes a goal's verdict to the transcript after the Stop hooks have answered, so the look that follows a turn's end reads it: a goal met marks the turn done with the evaluator's reason, and a goal met, judged impossible or cleared is over.
-With `goal` unset or false no worker is given a goal, and `phi.py goal` prints how a session's goal stands.
+With `goal` false no worker is given a goal, and `phi.py goal` prints how a session's goal stands.
 Any session may also ask for a goal of its own, one no session started too, with the condition it states: the tool `mcp__p4-phi__goal`, or `phi.py goal ask`, keeps the condition, the look at that turn's end answers it, and the module sets it by the same `/goal <condition>`.
 That ask needs no `goal` in `phi.json`, since the key is for the goal a worker is given unasked, and it takes the place of a goal the session has, as `goal.md` says of a second `/goal`.
 A condition under 12 characters is refused, so no word that clears a goal is ever sent as one.
@@ -317,7 +317,7 @@ Seen in a desktop session on Claude Code 2.1.326, in a scratch project that load
 
 ## Upkeep of a session tree
 
-A session that started others keeps them by itself once the project turns `phi.upkeep` on, and with it off everything stays as the other sections say.
+A session that started others keeps them by itself unless the project turns `phi.upkeep` off, and with it off everything stays as the other sections say.
 `phi.py upkeep on` and `phi.py upkeep off` set it in the store's `p4.json` and write what p4-phi asks the keeper for, they do not run the keeper, and `phi.py upkeep` prints what is due.
 With it on, beside every message such a session gets, p4-phi hands the acts that are due for the sessions it started, and the setting is ezexe's standing word for each, so none waits on ezexe.
 
@@ -453,7 +453,7 @@ Every key is optional.
 | `chain_max` | 8 | the sessions, 1 to 50, followed upward from a session |
 | `turn_steps` | 12 | the steps and workers, 1 to 100, kept with a turn |
 | `keep_going_max` | 2 | the most turns, 0 to 7, the hooks module starts for upkeep in a row, until ezexe's own message begins one |
-| `upkeep` | false | true has a session that started others handed their upkeep as acts that wait on nobody; `phi.py upkeep on` and `off` set it |
+| `upkeep` | true | true has a session that started others handed their upkeep as acts that wait on nobody; `phi.py upkeep on` and `off` set it |
 | `cards` | none | the name of the set of what p4-phi settles with no approval card, as `phi.py cards` prints it, which asks for that set; read from the file alone, with no variable, and written by `phi.py cards on <id>` behind one approval card. The set is in force only with ezexe's yes beside it, which p4-phi's hook keeps in the store's `phi/cards.json` at the end of that call |
 | `watch_s` | 5.0 | the watcher's tick in seconds, 1 to 600 |
 | `stale_s` | 86400.0 | the seconds, 60 to 2,592,000, after which an orchestrator with open work and no turn is stale |
@@ -489,7 +489,7 @@ Every key is optional, and the file need not exist.
 | `background_chars` | 3000 |
 | `reports_chars` | 6000 |
 | `wait_s` | 2.0 |
-| `goal` | `false` |
+| `goal` | `true` |
 | `worker_profile` | `p4-workers` |
 | `worker_mode` | `print` |
 
@@ -502,7 +502,7 @@ A terminal worker's mode and profile are read from one place, `phi.worker_settin
 The rule by the piece of work, where neither the session nor the store sets a mode, has a reason for each split: a brief that wants an agent team, a planner that puts its plan to ezexe with `ExitPlanMode`, or a tab ezexe steers (words such as "ezexe steers", "in a tab ezexe watches", "interactive") runs `interactive`, since agent teams form only in an interactive session (agent-teams.md: with `-p` Claude doesn't spawn teammates), `ExitPlanMode` needs a person to answer it, and a steered tab needs a tab; landing, test and check work runs `print`, since the API-credit profile is refused for interactive Claude Code and `claude -p` bills it, and `-p` is for headless landing, test and check.
 `phi.py worker_for [--session <sid>] [--mode print|interactive|default] [--profile <name>|off|default]` writes `workerMode` and `workerProfile` for this session or the named one, `default` removes the key, and with neither flag it only prints the effective mode and profile and where each came from. Each start of a terminal worker prints that same line and appends a row to `phi/worker-starts.jsonl`; `coworkers --wait --report` appends an outcome row with the last result row's cost, turns and error state; `phi.py balance` prints the starts, the done and failed counts, the total and mean cost and the mean turns per mode, which is the data to tune the rule by.
 See more: https://code.claude.com/docs/en/headless.md
-`goal` set to `true` gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition.
+`goal`, on unless set to `false`, gives a worker Claude Code's own goal, with the line `Done looks like:` of its brief as the condition.
 `phi.py goal on` and `phi.py goal off` write the key and print how it stands, since a session writes nothing under `.claude` with its own tools.
 Where no prompt hook saw a worker's brief, as when the plugin was loaded after the session's first message, the line is kept at the first Stop the plugin sees, where the task is.
 `app_tools`, which is on unless a store sets it to `false`, has the hooks module ask the desktop app's own tools for the session and the sessions linked to it after a look, once a minute at most and never while a turn of the session runs, and write the answers to `app.json` beside the prompt's origin.

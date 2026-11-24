@@ -64,6 +64,7 @@ class Base(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory(dir=os.environ.get("P4_PHI_TEST_TMP") or None)
         self.tmp = os.path.realpath(self._tmp.name)
         self.t = Tree(self.tmp)
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"upkeep": False}}))   # set by hand: off
         self.remote = os.path.join(self.tmp, "origin.git")
         self.repo = os.path.join(self.tmp, "code")
         self.wt = os.path.join(self.tmp, "trees", "kid")
@@ -134,8 +135,10 @@ class Base(unittest.TestCase):
 
 
 class Setting(Base):
-    def test_it_is_off_by_default_and_a_command_turns_it_on_and_off_in_the_stores_p4_json(self):
-        self.assertFalse(p4conf.upkeep_on(self.t.p4))
+    def test_it_is_on_by_default_and_a_command_turns_it_on_and_off_in_the_stores_p4_json(self):
+        self.assertFalse(p4conf.upkeep_on(self.t.p4), "the setup set it off by hand")
+        os.remove(os.path.join(self.t.p4, "p4.json"))
+        self.assertTrue(p4conf.upkeep_on(self.t.p4), "a store that sets nothing has it on")
         out = self.turn_on()
         self.assertIn("phi.upkeep is on", out)
         self.assertIs(jload(os.path.join(self.t.p4, "p4.json"))["phi"]["upkeep"], True)

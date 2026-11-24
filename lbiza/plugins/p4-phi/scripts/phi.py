@@ -36,7 +36,7 @@ asks for, and `goal set` is the hooks module's word that the goal command set it
 
 Settings: <home>/phi/phi.json, every key optional: `background`, `reports`, `turns`, `book`, `rules`,
 `background_chars`, `reports_chars` and `wait_s`, `goal`, which gives a worker Claude Code's own goal unasked and is
-off unless set true or P4_PHI_GOAL is 1, and `puppeteer`, which puppeteer.on reads. The `phi`
+on unless set false or P4_PHI_GOAL is 0, and `puppeteer`, which puppeteer.on reads. The `phi`
 section of p4.json: `plan_mode` and `child_levels`, read from the
 session's own store, `home`, which names a shared store for the session tree. P4_PHI=0 turns the plugin off, P4_PHI_BOOK=0 the address book beside a
 message and P4_PHI_RULES=0 the memory lines. P4_PHI_WAIT sets how long a first message waits for the app's
@@ -80,7 +80,7 @@ REPORTS = True
 TURNS = True
 BOOK = True
 RULES = True
-GOAL = False                     # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
+GOAL = True                      # phi.json `goal`: true has a worker's line `Done looks like:` set as its native goal
 WORKER_PROFILE = "p4-workers"    # phi.json `worker_profile`: the Anthropic profile a terminal worker names; "" is off
 WORKER_MODE = "print"            # phi.json `worker_mode`: `print` starts a terminal worker as `claude -p`, `interactive` as a tab
 WORKER_MODES = ("print", "interactive")

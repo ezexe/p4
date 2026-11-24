@@ -160,19 +160,40 @@ class P4Conf(unittest.TestCase):
         self.assertNotIn("max_depth", json.dumps(p4conf.read_json(p4conf.record_path(self.p4))),
                          "nothing of the settings record")
 
+    def test_upkeep_is_on_by_default_and_a_store_an_older_copy_wrote_it_off_in_follows_while_a_hand_set_one_stays(self):
+        self.assertIs(p4conf.DEFAULTS["phi"]["upkeep"], True)
+        self.assertIs(p4conf.load(self.p4)["phi"]["upkeep"], True, "a fresh store")
+        d = self.read(record=True)
+        d["phi"]["upkeep"] = False
+        d[p4conf.WRITTEN]["phi.upkeep"] = {"v": False, "gen": 19}
+        with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        self.assertIs(p4conf.load(self.p4)["phi"]["upkeep"], True, "the old default moves to the new one")
+        d = self.read(record=True)
+        self.assertIs(d["phi"]["upkeep"], True)
+        self.assertEqual(d[p4conf.WRITTEN]["phi.upkeep"], {"v": True, "gen": 20})
+        for entry in (None, {"v": True, "gen": 19}):       # set by hand: no entry, or an entry whose value differs
+            d["phi"]["upkeep"] = False
+            d[p4conf.WRITTEN].pop("phi.upkeep", None)
+            if entry:
+                d[p4conf.WRITTEN]["phi.upkeep"] = entry
+            with open(p4conf.path(self.p4), "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            self.assertIs(p4conf.load(self.p4)["phi"]["upkeep"], False, entry)
+
     def test_gen_is_raised_with_every_change_of_defaults(self):
         """DEFAULTS is pinned to its GEN: a change of a default fails here until GEN is raised and the pin below
         updated."""
         import hashlib
         pins = {1: "cc7604892f2635f2", 2: "13977bb862fc1973", 3: "6f131c04ed9bacca", 4: "857fe1fd14a29f6a", 5: "52f39f39f1f34c83", 6: "80d9cae8899e4527", 7: "58861a65cec942df", 8: "aac06d8c3ca8f985", 9: "a3effadd1ed36009", 10: "909dddd3e3552f7c",
                 11: "909dddd3e3552f7c", 12: "909dddd3e3552f7c", 13: "b5e6072e9ec3eb7c", 14: "db03b4ae71345a63", 15: "95656cb9ae6e2f7f", 16: "b5d9965d5d399131",
-                17: "6a45398a0838bc56", 18: "90cd6fc0182885a7", 19: "84674b30334aba51"}
+                17: "6a45398a0838bc56", 18: "90cd6fc0182885a7", 19: "84674b30334aba51", 20: "f4ff90ac7450a924"}
         # append only: one more for each GEN. 11 came with a key of the keeper, 12 with the plans folder's move,
         # 13 with the default phi.plan_mode, and 14 with the default phi.goal_review
         # and 15 with the default phi.new_issues, and 16 with the removal of the group recall, and 17 with the
         # defaults of p4.json held by the plugin that reads them: this file's are the `phi` section's, 18 with the
         # removal of the default phi.act_dont_wait, and 19 with the removal of the defaults phi.top_orchestrates,
-        # phi.levels and phi.tree_checks
+        # phi.levels and phi.tree_checks, and 20 with the default phi.upkeep on
         got = hashlib.sha256(json.dumps(p4conf.DEFAULTS, sort_keys=True).encode()).hexdigest()[:16]
         self.assertEqual(p4conf.GEN, max(pins))
         self.assertEqual(p4conf.GEN, len(pins), "no generation is skipped or replaced")
@@ -461,6 +482,9 @@ class WantSettings(unittest.TestCase):
             self.assertEqual(sorted(got["permissions"]["allow"]),
                              sorted(self.rules(new) + self.rules(old) + list(p4conf.CARD_TOOLS)
                                     + list(p4conf.GENERAL_RULES) + list(p4conf.GENERAL_WIN)))
+            self.assertEqual(got["p4"], {"adopt": list(p4conf.ASK_RETIRED)}, "upkeep is on by default")
+            p4conf.set_key(p4, "phi.upkeep", False)
+            got = p4conf.want_settings(p4, "win32")
             self.assertNotIn("p4", got, "upkeep is off")
             got = p4conf.want_settings(p4, "linux")
             self.assertFalse([r for r in got["permissions"]["allow"] if r in p4conf.GENERAL_WIN])

@@ -116,6 +116,7 @@ class TreeOfPlans(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = Tree(self._tmp.name)
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"upkeep": False}}))   # set by hand: off
         t = self.t
         t.record(TOP, title="top")
         t.record(A, TOP, title="the layout child")
@@ -1136,6 +1137,7 @@ class TopOrchestrates(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.t = Tree(self._tmp.name)
+        write(os.path.join(self.t.p4, "p4.json"), json.dumps({"phi": {"upkeep": False}}))   # set by hand: off
         self.t.record(TOP, title="top")
         self.t.record(A, TOP, title="the layout child")
         self.t.say(TOP, "Build the exporter")
@@ -1540,6 +1542,7 @@ class NativeGoal(unittest.TestCase):
     LINE = "the flush is ported, its test passes and the commit is on main."
     BRIEF = "Port the flush to the new hook.\nFiles: hooks/flush.py\nDone looks like: " + LINE + "\n\nReport then."
     ON = {"P4_PHI_GOAL": "1"}
+    OFF = {"P4_PHI_GOAL": "0"}
 
     def worded(self, line, review=True):
         """A worker's condition as it is set: the line, the review of its change where its brief asks for changes,
@@ -1616,16 +1619,31 @@ class NativeGoal(unittest.TestCase):
         self.assertEqual(plans.goal_row(path).get("reason"), "the suite passed", "the last one, from the end")
         self.assertEqual(plans.goal_row(path, tail=40), {}, "a tail that holds no whole goal row")
 
+    def test_goal_is_on_by_default_and_a_key_set_false_or_the_variable_at_0_turns_it_off(self):
+        import subprocess as sp
+        def goal(env=None, file=None):
+            home = os.path.join(self._tmp.name, "home")
+            if file is not None:
+                write(os.path.join(home, "phi", "phi.json"), json.dumps(file))
+            code = "import sys; sys.path.insert(0, %r); import phi; phi.configure(%r); print(phi.GOAL)" % (SRC, home)
+            e = {k: v for k, v in os.environ.items() if k != "P4_PHI_GOAL"}
+            e.update(env or {})
+            return sp.run([sys.executable, "-I", "-X", "utf8", "-c", code], capture_output=True, text=True, env=e).stdout.strip()
+        self.assertEqual(goal(), "True", "no key and no variable")
+        self.assertEqual(goal(file={"book": False}), "True")
+        self.assertEqual(goal(file={"goal": False}), "False", "set false by hand")
+        self.assertEqual(goal(file={"goal": True}, env=self.OFF), "False", "P4_PHI_GOAL=0")
+
     def test_with_the_setting_off_nothing_of_the_goal_happens(self):
-        self.brief()
+        self.brief(**self.OFF)
         self.assertNotIn("doneLine", self.t.session(KID))
-        self.assertEqual(self.stop("I ported half the flush.", "u1"), {}, "no turn is sent back for open steps")
-        self.assertNotIn("goal", self.phi("look"))
+        self.assertEqual(self.stop("I ported half the flush.", "u1", **self.OFF), {}, "no turn is sent back for open steps")
+        self.assertNotIn("goal", self.phi("look", **self.OFF))
         s = self.t.session(KID)
         self.assertNotIn("goal", s)
         self.assertNotIn("transcript", s)
-        self.assertEqual(self.phi("goal", "set"), {"set": False}, "no goal was asked for, so none is marked set")
-        self.assertEqual(self.stop("Still porting.", "u2"), {})
+        self.assertEqual(self.phi("goal", "set", **self.OFF), {"set": False}, "no goal was asked for, so none is marked set")
+        self.assertEqual(self.stop("Still porting.", "u2", **self.OFF), {})
 
     def test_goal_on_and_off_write_the_key_the_hooks_read_and_say_how_it_stands(self):
         """A session writes nothing under `.claude` with its own tools, so `phi.py goal on` and `goal off` set the
@@ -1666,7 +1684,7 @@ class NativeGoal(unittest.TestCase):
         self.assertNotIn("goal", self.phi("look", **self.ON), "answered once")
 
     def test_with_the_setting_off_the_first_stop_keeps_the_task_and_no_done_line(self):
-        self.stop("I ported half the flush.", "u1")
+        self.stop("I ported half the flush.", "u1", **self.OFF)
         s = self.t.session(KID)
         self.assertTrue(s.get("task"))
         self.assertNotIn("doneLine", s)
