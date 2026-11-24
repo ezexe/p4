@@ -58,7 +58,8 @@ EDITS = ("Write", "Edit", "NotebookEdit")
 SHELLS = ("Bash", "PowerShell", "mcp__terminal__run_in_terminal")
 # a run of a shell line, once normalised, that may be one path segment: what sits between separators, spaces,
 # quotes, brackets and the marks of a chain, a redirection or an option's value
-RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
+ESCQ = ""     # an escaped quote (`\"`, or a backtick before `"`) once shell_words has read it: it opens no quote
+RUN = re.compile(r"[^\s/'\"`(),;|&<>=:]+")
 QUOTES = ("'", '"')
 # a nested shell a line runs, where a glob in a quote is a path the inner shell expands
 NESTED = re.compile(r"(?i)\b(?:sh|bash|zsh|dash)(?:\.exe)?\b[^\n]*?\s-\w*c\b|\bcmd(?:\.exe)?\s+/[ck]\b"
@@ -492,7 +493,8 @@ def shell_words(cmd):
     space, keeps them; a brace list is read as its words (`{complete,todo}/` is `complete/ todo/`); and a trailing
     dot of a path part (`complete./`), or a trailing space of one inside a quote, is dropped, as Windows does. A
     name built from a variable is left as it is."""
-    line = re.sub(r"`(.)", r"\1", str(cmd or ""), flags=re.S)
+    line = re.sub(r'`"|(?<=\\)"', ESCQ, str(cmd or ""))     # an escaped quote toggles no quote state
+    line = re.sub(r"`(.)", r"\1", line, flags=re.S)
     out = []
     for word in _split(line):
         parts = _parts(word)

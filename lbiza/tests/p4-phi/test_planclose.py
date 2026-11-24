@@ -762,6 +762,10 @@ class DotAndNested(unittest.TestCase):
         self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
         self.assertIsNone(self.refused("echo 'a comp* b'"))
 
+    def test_an_escaped_quote_toggles_no_quote_state(self):
+        self.assertIsNone(self.refused("grep \"a\\\"b[a-z]*|x\" f"))
+        self.assertIsNone(self.refused("grep \"a`\"b[a-z]*|x\" f", "PowerShell"))
+
 
 if __name__ == "__main__":
     unittest.main()
