@@ -2966,7 +2966,7 @@ class PlanClose(unittest.TestCase):
         ran = self.close()
         self.assertEqual(ran.returncode, 0, ran.stderr)
         self.assertFalse(os.path.exists(self.path))
-        (name,) = os.listdir(os.path.join(self.folder, "complete"))
+        (name,) = [n for n in os.listdir(os.path.join(self.folder, "complete")) if n.endswith(".md")]
         with open(os.path.join(self.folder, "complete", name), encoding="utf-8") as f:
             self.assertTrue(f.read().split("\n")[1].startswith("STATUS: COMPLETED "))
 
