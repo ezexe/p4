@@ -1491,6 +1491,7 @@ def start_draft(home, s, did, base, task=""):
            *([f"model and effort: {', '.join(f'{k} {v}' for k, v in sorted(level.items()))}, from the draft's own "
                 "lines"] if level else []),
            phi.tab_lines(name, checkout, one["typed"]),
+           *([phi.trust_line()] if settings["mode"] == "interactive" else []),
            f"Then wait for it, as one background command: `{phi.commands()} coworkers --wait --report "
            f"{one['report']}`",
            f"Where it ends with no report, continue it in a Terminal-panel tab with `{one['resume_typed']}`"]
