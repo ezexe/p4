@@ -722,5 +722,22 @@ class ShellWords(unittest.TestCase):
         self.assertIsNone(self.refused("mv x.md plan-planner/todo/"))
 
 
+class RegexEscapes(unittest.TestCase):
+    """Section 2 of two-level-planning-fixes: a backslash before a regex or shell metacharacter is an escape, not a
+    path separator."""
+    ELSEWHERE = "E:/projects/p4-phi/p4"
+
+    def refused(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd=self.ELSEWHERE)
+
+    def test_a_regex_alternation_names_no_path(self):
+        self.assertIsNone(self.refused("grep -o '^slots.*\\|pool [a-z]*\\|x' f"))
+        self.assertIsNone(self.refused("grep -E 'a\\(b\\)\\+\\{2\\}\\?' f"))
+
+    def test_a_windows_path_with_complete_is_still_refused(self):
+        self.assertIn("refused", self.refused("Move-Item x.md E:\\p\\plan-planner\\complete\\x.md", "PowerShell"))
+        self.assertIn("refused", self.refused("Move-Item x.md plan-planner\\.\\complete\\x.md", "PowerShell"))
+
+
 if __name__ == "__main__":
     unittest.main()

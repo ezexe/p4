@@ -391,8 +391,11 @@ def grandfather(home, today=None):
 
 def normal(text):
     """`text` with its paths normalised: either slash is `/`, repeated separators are one, and a `./` segment is
-    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`."""
-    out = re.sub(r"/{2,}", "/", str(text or "").replace("\\", "/"))
+    gone, so `plan-planner\\.\\\\complete` reads `plan-planner/complete`. A backslash before `|`, `(`, `)`, `{`, `}`,
+    `+`, `?`, `.` or `*` is a regex or shell escape, not a separator, and is dropped (`\\|` is `|`); a `\\.` of a
+    path, one before a word character, a separator or another dot, stays a separator."""
+    out = re.sub(r"\\(?=[|(){}+?*]|\.(?![\w./\\]))", "", str(text or ""))
+    out = re.sub(r"/{2,}", "/", out.replace("\\", "/"))
     out = re.sub(r"/\.(?=/)", "", out)
     out = re.sub(r"(?<![\w.])\./", "", out)
     return out
@@ -501,6 +504,17 @@ def shell_words(cmd):
     return re.sub(r"(?<=[^\s/\\.])\.+(?=[/\\'\"\s]|$)", "", line)
 
 
+def in_quote(line, at):
+    """True where the character of `line` at index `at` is inside a quote that is still open there."""
+    quote = ""
+    for c in line[:at]:
+        if quote:
+            quote = "" if c == quote else quote
+        elif c in QUOTES:
+            quote = c
+    return bool(quote)
+
+
 def names_complete(cmd, cwd):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
@@ -522,7 +536,8 @@ def names_complete(cmd, cwd):
         if before and before in QUOTES and after == before:
             return True
         if (planners or m.group(0).lower() != COMPLETE) and before not in QUOTES and after not in QUOTES:
-            return True
+            if m.group(0).lower() == COMPLETE or not in_quote(line, m.start()):   # `grep 'a[a-z]*|x'` is no path
+                return True
     return False
 
 
