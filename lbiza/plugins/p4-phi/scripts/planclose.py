@@ -503,17 +503,6 @@ def shell_words(cmd):
     return re.sub(r"(?<=[^\s/\\.])\.+(?=[/\\'\"\s]|$)", "", line)
 
 
-def in_quote(line, at):
-    """True where the character of `line` at index `at` is inside a quote that is still open there."""
-    quote = ""
-    for c in line[:at]:
-        if quote:
-            quote = "" if c == quote else quote
-        elif c in QUOTES:
-            quote = c
-    return bool(quote)
-
-
 def names_complete(cmd, cwd):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
@@ -535,8 +524,7 @@ def names_complete(cmd, cwd):
         if before and before in QUOTES and after == before:
             return True
         if (planners or m.group(0).lower() != COMPLETE) and before not in QUOTES and after not in QUOTES:
-            if m.group(0).lower() == COMPLETE or not in_quote(line, m.start()):   # `grep 'a[a-z]*|x'` is no path
-                return True
+            return True
     return False
 
 
