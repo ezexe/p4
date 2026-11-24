@@ -767,5 +767,42 @@ class DotAndNested(unittest.TestCase):
         self.assertIsNone(self.refused("grep \"a`\"b[a-z]*|x\" f", "PowerShell"))
 
 
+class Heredocs(unittest.TestCase):
+    """Section 10 of two-level-planning-fixes: a heredoc's or here-string's text is data, its target a path."""
+    PLANS = "E:/projects/p4-phi/.claude/p4/temportal/plan-planner"
+    BODY = "see plan-planner\\complete\\.closed.jsonl for the record\n"
+
+    def guard(self, cmd, tool="Bash"):
+        return planclose.guard(tool, {"command": cmd}, cwd="E:/projects/p4-phi/p4")
+
+    def test_an_append_to_a_plan_file_with_a_body_naming_complete_passes(self):
+        for tag in ("'EOF'", "EOF", "-EOF"):
+            cmd = f"cat >> {self.PLANS}/two-level-planning-fixes.md <<{tag}\n{self.BODY}EOF\n"
+            self.assertIsNone(self.guard(cmd), tag)
+
+    def test_a_here_string_to_add_content_on_a_plan_file_passes(self):
+        cmd = (f"@'\n{self.BODY}'@ | Add-Content -Path {self.PLANS}/two-level-planning-fixes.md")
+        self.assertIsNone(self.guard(cmd, "PowerShell"))
+
+    def test_a_target_in_complete_is_still_refused(self):
+        cmd = f"cat > {self.PLANS}/complete/x.md <<'EOF'\nhello\nEOF\n"
+        self.assertIn("refused", self.guard(cmd))
+        cmd = f"@'\nhello\n'@ | Set-Content -Path {self.PLANS}/complete/x.md"
+        self.assertIn("refused", self.guard(cmd, "PowerShell"))
+
+    def test_a_heredoc_fed_to_a_shell_still_counts(self):
+        self.assertIn("refused", self.guard(f"bash <<'EOF'\nmv x {self.PLANS}/complete/\nEOF\n"))
+        self.assertIn("refused", self.guard(f"cat <<'EOF' | sh\nmv x {self.PLANS}/complete/\nEOF\n"))
+        self.assertIn("refused", self.guard(f"python3 - <<'EOF'\nopen('{self.PLANS}/complete/x','w')\nEOF\n"))
+
+    def test_a_here_string_fed_to_iex_still_counts(self):
+        cmd = f"@'\nMove-Item x.md {self.PLANS}/complete/\n'@ | iex"
+        self.assertIn("refused", self.guard(cmd, "PowerShell"))
+
+    def test_a_command_after_the_heredoc_is_still_read(self):
+        cmd = f"cat <<'EOF' > /tmp/x\nhi\nEOF\nmv x {self.PLANS}/complete/\n"
+        self.assertIn("refused", self.guard(cmd))
+
+
 if __name__ == "__main__":
     unittest.main()

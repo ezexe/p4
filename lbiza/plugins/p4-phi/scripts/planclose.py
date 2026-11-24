@@ -521,6 +521,44 @@ def in_quote(line, at):
     return bool(quote)
 
 
+# a command that reads a heredoc or a here-string as code: its text counts as command words
+INTERPRETER = re.compile(r"(?i)(?:^|[\s|;&(/\\])(?:bash|sh|zsh|pwsh|powershell|cmd|python3?|node|perl|ruby|eval"
+                         r"|iex|invoke-expression)(?:\.exe)?(?![\w.-])")
+HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)([A-Za-z_]\w*)\2")
+HERESTRING = re.compile(r"(?s)@(['\"])[ \t]*\r?\n.*?\r?\n[ \t]*\1@(?P<tail>[^\n]*)")
+TEXT_SINK = re.compile(r"(?i)\b(?:set-content|add-content|out-file)\b")
+
+
+def data_out(cmd):
+    """`cmd` without the text of its heredocs (`<<EOF`, `<<'EOF'`, `<<-EOF`) and PowerShell here-strings
+    (`@'...'@`, `@"..."@`) that are data: a heredoc's line holds no shell, interpreter or `eval`, and a here-string
+    is piped to `Set-Content`, `Add-Content` or `Out-File` and to no `Invoke-Expression`, `iex` or shell. A
+    redirect target or a `-Path` stays in the line, so it is read as a path."""
+    def herestring(m):
+        tail = m.group("tail")
+        if TEXT_SINK.search(tail) and not INTERPRETER.search(tail):
+            return "@''@" + tail
+        return m.group(0)
+
+    lines = str(cmd or "").split("\n")
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        marks = HEREDOC.findall(line)
+        data = bool(marks) and not INTERPRETER.search(line)
+        for dash, _, word in marks:
+            while i < len(lines):
+                body = lines[i].rstrip("\r")
+                i += 1
+                if (body.lstrip("\t") if dash else body) == word:
+                    break
+                if not data:
+                    out.append(body)
+    return HERESTRING.sub(herestring, "\n".join(out))
+
+
 def names_complete(cmd, cwd):
     """True where the shell line `cmd`, normalised, names `complete` as a path segment, whether or not it names
     `plan-planner`, since the hook cannot know a shell's cwd after a `cd`: a run that is `complete`, or a glob that
@@ -530,7 +568,7 @@ def names_complete(cmd, cwd):
     `mv x.md comp*`, is a path the shell expands, and where the call's cwd is the plans folder, `plan-planner`, a
     `complete` outside a quote is a segment too. The line is read by shell_words first, so `comp''lete`,
     ``comp`lete``, `{complete,todo}/` and `complete./` are `complete`."""
-    line = normal(shell_words(cmd))
+    line = normal(shell_words(data_out(cmd)))
     planners = posixpath.basename(normal(cwd or "").rstrip("/")).lower() == PLANS_FOLDER
     nested = bool(NESTED.search(line))      # a nested shell expands a glob inside the quote it is given in
     for m in RUN.finditer(line):
