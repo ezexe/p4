@@ -216,7 +216,7 @@ def start_background(one, windows=None):
     with open(one["log"], "a", encoding="utf-8"):
         pass
     if windows:
-        argv = ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", start]
+        argv = [shutil.which("pwsh") and "pwsh" or "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", start]
         kw = {"creationflags": 0x00000200 | 0x08000000}     # NEW_PROCESS_GROUP, NO_WINDOW: DETACHED_PROCESS left tee no log
     else:
         argv, kw = ["sh", start], {"start_new_session": True}
@@ -233,6 +233,11 @@ def rerun(path, checkout, home, n):
         if str(n) in r["sections"] and r["state"] == "done" and r["folder"]:
             shutil.rmtree(r["folder"], ignore_errors=True)
             relay.forget(home)
+            row = {"time": time.strftime("%Y-%m-%dT%H:%M:%S"), "event": "outcome", "name": r["name"], "how": "withdrawn"}
+            path_ = os.path.join(home, "phi", "worker-starts.jsonl")      # its old start row holds a slot no longer
+            os.makedirs(os.path.dirname(path_), exist_ok=True)
+            with open(path_, "a", encoding="utf-8", newline=chr(10)) as f:
+                f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + chr(10))
             return r["name"]
     return ""
 
@@ -472,9 +477,9 @@ def plan_runs(path, checkout, home=""):
         if r["state"] in ("landed", "done"):
             met |= {s["n"] for s in run}
     met |= set(reported)
-    for ident in dict.fromkeys(v[0] for _, v in sorted(reported.items(), key=lambda kv: int(kv[0]))):
+    for ident in dict.fromkeys(v[0] for _, v in sorted(reported.items(), key=lambda kv: sections._key(kv[0]))):
         folder = next(v[1] for v in reported.values() if v[0] == ident)
-        out.append({"name": ident, "sections": sorted((n for n, v in reported.items() if v[0] == ident), key=int),
+        out.append({"name": ident, "sections": sorted((n for n, v in reported.items() if v[0] == ident), key=sections._key),
                     "group": [], "needs": [], "runner": {}, "folder": folder,
                     "report": f"{folder}/report-{ident}.md", "state": "done"})
     for r in out:
@@ -650,18 +655,28 @@ def draft_name(title, did):
     return f"tw-{stem}-{str(did)[-4:]}"
 
 
+BOM16LE, BOM16BE = bytes([0xFF, 0xFE]), bytes([0xFE, 0xFF])
 GOAL_TAIL = 1 << 20              # the most of a log's end read for its last result row
 
 
 def last_result(log, offset=0, final=False):
     """The last `result` row of the stream-json log `log` written past byte `offset`, {} where there is none or the
-    file is not there. Lines that are no JSON object (a stderr line, a BOM) are skipped. With `final`, the row only
+    file is not there. A log that opens with a UTF-16 BOM or holds NUL bytes is read as UTF-16. Lines that are no
+    JSON object (a stderr line, a BOM) are skipped. With `final`, the row only
     where it is the last JSON row of the log, since a run under `/goal` may write a `result` row for a turn and go on."""
     try:
         with open(log, "rb") as f:
+            head = f.read(2)
             f.seek(0, 2)
-            f.seek(max(int(offset), f.tell() - GOAL_TAIL))
-            text = f.read().decode("utf-8", "replace")
+            at = max(int(offset), f.tell() - GOAL_TAIL)
+            f.seek(at)
+            data = f.read()
+        if head in (BOM16LE, BOM16BE) or bytes(1) in data:                  # a Windows PowerShell 5.1 log is UTF-16
+            if head == BOM16LE and at % 2:
+                data = data[1:]                                           # keep the code units aligned
+            text = data.decode("utf-16-be" if head == BOM16BE else "utf-16-le", "replace")
+        else:
+            text = data.decode("utf-8", "replace")
     except OSError:
         return {}
     for line in reversed(text.splitlines()):

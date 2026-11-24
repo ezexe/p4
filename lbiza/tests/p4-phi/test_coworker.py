@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 SRC = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
                                     "plugins", "p4-phi", "scripts"))
@@ -761,6 +762,18 @@ class Waves(unittest.TestCase):
     def states(self):
         return {tuple(r["sections"]): r["state"] for r in coworker.plan_runs(self.path, "E:/repo", self.home)}
 
+    def test_a_plan_with_dotted_section_numbers_and_one_reported_run_lands(self):
+        nl = chr(10)
+        with open(self.path, "w", encoding="utf-8") as f:
+            f.write(nl.join(["# Top plan", "", "## Context", "", "No planner.", ""]) + nl + "".join(
+                f"## 3.{k}. Part {k}{nl}{nl}- **Files:** `src/p{k}.py`{nl}- **Depends on:** none{nl}"
+                f"- **Done when:** MARK{k}{nl}{nl}" for k in (1, 2)))
+        first = [o for o in self.land() if o.get("folder")]
+        with open(first[0]["report"], "w", encoding="utf-8") as f:
+            f.write("done")
+        self.assertEqual(sorted(sum(self.states(), ())), ["3.1", "3.2"])
+        self.assertIn("done", self.states().values())
+
     def test_the_first_wave_is_every_run_with_no_open_need_and_the_next_starts_when_its_need_reports(self):
         self.assertEqual(self.states(), {("1",): "ready", ("2",): "ready", ("3",): "waiting"})
         first = self.land()
@@ -970,6 +983,28 @@ class Background(unittest.TestCase):
             with open(plan, "w", encoding="utf-8") as f:
                 f.write(nl.join(["# P", "", "## 1. A", "", "- **Files:** `a.py`", "- **Checks:** `x`", ""]))
             self.assertEqual(coworker.rerun(plan, d, os.path.join(d, "home"), 1), "")
+
+    def test_a_rerun_leaves_the_old_name_with_an_outcome_row_withdrawn(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan, home = os.path.join(d, "plan.md"), os.path.join(d, "home")
+            os.makedirs(home)
+            with open(plan, "w", encoding="utf-8") as f:
+                f.write(chr(10).join(["# P", "", "## 1. A", "", "- **Files:** `a.py`", "- **Checks:** `x`", ""]))
+            with mock.patch.object(coworker, "plan_runs", return_value=[
+                    {"name": "tw-p-1", "sections": ["1"], "state": "done", "folder": os.path.join(d, "node")}]):
+                self.assertEqual(coworker.rerun(plan, d, home, 1), "tw-p-1")
+            with open(os.path.join(home, "phi", "worker-starts.jsonl"), encoding="utf-8") as f:
+                rows = [json.loads(x) for x in f]
+            self.assertEqual([(r["event"], r["name"], r["how"]) for r in rows], [("outcome", "tw-p-1", "withdrawn")])
+
+    def test_last_result_reads_a_utf16le_log_with_a_bom(self):
+        with tempfile.TemporaryDirectory() as d:
+            log = os.path.join(d, "log.jsonl")
+            text = "stderr line" + chr(13) + chr(10) + json.dumps({"type": "result", "result": "ok"}) + chr(13) + chr(10)
+            with open(log, "wb") as f:
+                f.write(bytes([0xFF, 0xFE]) + text.encode("utf-16-le"))
+            self.assertEqual(coworker.last_result(log)["result"], "ok")
+            self.assertEqual(coworker.last_result(log, final=True)["result"], "ok")
 
     def test_the_hint_names_the_refused_tab_and_the_flag(self):
         self.assertIn("open_terminal_tab", coworker.BACKGROUND_HINT)
