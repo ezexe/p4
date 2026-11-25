@@ -108,7 +108,7 @@ def level():
 
 
 def planner_level():
-    """The model and effort a planner starts on: the kind `plan`'s, Fable at its starter's own effort, the
+    """The model and effort a planner starts on: the kind `plan`'s, Mythos at its starter's own effort, the
     effort's `inherit` naming no `--effort`, and where the kind names an effort, held to the starting session's own."""
     out = dict(plans.CHILD_LEVELS["plan"])
     out["effort"] = plans.capped(out["effort"])

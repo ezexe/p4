@@ -1017,8 +1017,8 @@ class SectionPlanners(unittest.TestCase):
             f.write(TOP3.replace("MARK2", "MARK2\n- Model: claude-opus-5-5\n- Effort: high"))
         found = {o["sections"][0]: o for o in self.start(3) if o.get("folder")}
         self.assertIn("--model claude-opus-5-5 --effort high", found["2"]["lines"][-1])
-        self.assertIn("--model claude-fable-5-2 --permission-mode", found["1"]["lines"][-1],
-                      "no Model line: the kind plan's, Fable at the starter's own effort")
+        self.assertIn("--model claude-mythos-5-2 --permission-mode", found["1"]["lines"][-1],
+                      "no Model line: the kind plan's, Mythos at the starter's own effort")
 
 
 class Background(unittest.TestCase):
@@ -1067,8 +1067,8 @@ if __name__ == "__main__":
 
 
 class PlannerReadersOnSonnet(unittest.TestCase):
-    """A planner runs on Fable, the kind `plan`, but its three readers only read: each prompt names Sonnet for them,
-    at high for the headless planner's subagents, so no reader inherits the planner's Fable."""
+    """A planner runs on Mythos, the kind `plan`, but its three readers only read: each prompt names Sonnet for them,
+    at high for the headless planner's subagents, so no reader inherits the planner's Mythos."""
 
     def test_the_interactive_planner_names_sonnet_for_its_teammates(self):
         self.assertIn("each on Sonnet", coworker.planner_task("the move"))
