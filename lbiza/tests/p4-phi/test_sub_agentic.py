@@ -26,9 +26,9 @@ import starts  # noqa: E402
 # Each role of the table, the agent the plugin ships for it, its model alias and effort, and the kinds of step whose
 # start carries that role.
 ROLES = {"writer": ("writer", "opus", "medium", ("build", "design")),
-         "integrator, fixer": ("integrator", "sonnet", "medium", ("static",)),
-         "cross-check, judge, grader, truth check": ("check", "sonnet", "medium", ("review",)),
-         "evidence finder": ("finder", "haiku", "low", ())}
+         "integrator, fixer": ("integrator", "sonnet", "high", ("static",)),
+         "cross-check, judge, grader, truth check": ("check", "sonnet", "high", ("review",)),
+         "evidence finder": ("finder", "haiku", "medium", ())}
 FAMILY = {"opus": "claude-opus-5-5", "sonnet": "claude-sonnet-5-5", "haiku": "claude-haiku-5-5"}
 
 

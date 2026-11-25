@@ -546,7 +546,7 @@ def top_stays(text):
 # that only runs a command is a background command of the session's own; one that asks for one question from several
 # sides is an agent team's; the rest is a worker's. sub-agents.md gives
 # the built-in Explore "the parent conversation's model", and puts "The `model` field in the subagent's definition"
-# in its model order, so agents/finder.md carries `model: haiku` and `effort: low` and no call has to. The page also says "With nothing configured, a subagent
+# in its model order, so agents/finder.md carries `model: haiku` and `effort: medium`, Haiku's own default, and no call has to. The page also says "With nothing configured, a subagent
 # that Claude spawns from your main conversation starts in the background." tools-reference.md, "Background
 # commands", says "Claude can set `run_in_background: true` to start the command as a background task and continue
 # working while it runs.", and interactive-mode.md says "Output is written to a file and Claude can retrieve it using
@@ -573,9 +573,12 @@ TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|docum
 #
 # The skill sub-agentic, rule 5: "Set model and effort on every agent by its role; nothing inherits by default." Each
 # kind of step is a role of that skill's table: static or mechanical work lands what is written, its integrator, on
-# Sonnet at medium; a build or a design writes what the tree does not hold yet, its writer, on Opus at medium; a
-# review re-reads another's work, its cross-check, on Sonnet at medium; and a new top session is an orchestrator, on
-# the session's own model and effort, which the start tool gives a call that names neither. A plugin agent carries a
+# Sonnet at high; a build or a design writes what the tree does not hold yet, its writer, on Opus at medium; a
+# review re-reads another's work, its cross-check, on Sonnet at high; a plan is its planner's, on Fable at the
+# starter's own effort; and a new top session is an orchestrator, on the session's own model and effort, which the
+# start tool gives a call that names neither. Each model starts at the effort choosing-a-model.md gives it as its
+# default, `medium` for Opus 5.5 and Haiku 5.5 and `high` for Sonnet 5.5 and Fable 5.2, and effort is raised
+# before a model is switched. A plugin agent carries a
 # model and an effort in its file, and every start call p4-phi hands out carries an `effort`, and a `model` unless
 # it keeps the parent session's, but for an orchestrator's, which carries neither. `mcp__ccd_session__start_session` takes
 # `model`, the same family or cheaper than the caller's, and `effort`, at or below the caller's, both for a `fresh`
@@ -586,10 +589,10 @@ TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|docum
 
 # start_session's `model` takes a model id, "Same family or cheaper than yours; anything higher is ignored", where an
 # Agent call takes an alias: so each entry names the id of the newest model of its family
-CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "medium"},
+CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "high"},
                 "build": {"model": "claude-opus-5-5", "effort": "medium"},
                 "design": {"model": "claude-opus-5-5", "effort": "medium"},
-                "review": {"model": "claude-sonnet-5-5", "effort": "medium"},
+                "review": {"model": "claude-sonnet-5-5", "effort": "high"},
                 "plan": {"model": "claude-fable-5-2", "effort": "inherit"},
                 "top": {"model": "inherit", "effort": "inherit"}}      # p4.json phi.child_levels sets each kind
 CHILD_KINDS = {"static": "static or mechanical work, an integrator's",
@@ -616,10 +619,12 @@ APPROVES = re.compile(r"\b(?:ezexe|the user)\s+approves\b|\bExitPlanMode\b", re.
 
 
 def worker_mode_for(text):
-    """(`interactive` or `print`, the reason) for a piece of work by its brief: interactive where it wants an agent
-    team, TEAMS, a planner whose plan ezexe approves in its tab, PLANNER with APPROVES, or a tab ezexe steers,
-    STEERED; print for the rest, since
-    headless landing, test and check work runs on the API credit."""
+    """The fallback only: (`interactive` or `print`, the reason) for a piece of work whose draft names no `Runner:`
+    line, by keywords of its brief. The session agent decides a worker's mode by the purpose of the work and states
+    it as `Runner:`, which phi.worker_settings reads first; this rule guesses for a draft that left it out:
+    interactive where it wants an agent team, TEAMS, a planner whose plan ezexe approves in its tab, PLANNER with
+    APPROVES, or a tab ezexe steers, STEERED; print for the rest, since headless landing, test and check work runs
+    on the API credit."""
     text = str(text or "")
     if TEAMS.search(text):
         return "interactive", "the brief wants an agent team, which forms only in an interactive session"

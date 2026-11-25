@@ -1040,7 +1040,7 @@ class Terminal(Base):
         write(task, "This session starts in plan mode.\nezexe approves the plan with ExitPlanMode.\n")
         r = t.cli(TOP, "draft", "--start", did, "--task", task)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("mode interactive (the piece of work)", r.stdout)
+        self.assertIn("mode interactive (fallback: no Runner: line)", r.stdout)
         start = self.start_file(coworker.draft_name("README line", did))
         self.assertIn("--permission-mode plan", start)
         self.assertIn(coworker.TEAMS, start)
@@ -1302,7 +1302,7 @@ class Terminal(Base):
 
 
 class WorkerSettings(Base):
-    """A session's own worker mode and profile, the paired defaults and the rule by the piece of work."""
+    """A session's own worker mode and profile, the paired defaults, the draft's Runner: line and the fallback rule."""
 
     LAND = "Fix the ports table writer.\nFiles: src/writer.py"
     TEAM = "Review the ports table move with an agent team.\nFiles: none"
@@ -1372,7 +1372,7 @@ class WorkerSettings(Base):
         t = self.t
         # PowerShell's `$env:ANTHROPIC_PROFILE = 'p4-workers'` or sh's `export ANTHROPIC_PROFILE=p4-workers`
         self.assertRegex(self.start(TOP, self.LAND), r"ANTHROPIC_PROFILE ?= ?'?p4-workers")
-        self.assertIn("mode print (the piece of work), profile p4-workers (the pair of print)", self.out)
+        self.assertIn("mode print (fallback: no Runner: line), profile p4-workers (the pair of print)", self.out)
         self.setUp()
         t = self.t
         write(os.path.join(t.p4, "phi", "phi.json"), json.dumps({"worker_mode": "interactive"}))
@@ -1415,10 +1415,10 @@ class WorkerSettings(Base):
         self.start(TOP, self.TEAM, title="Review the ports table")
         (row,) = phi.read_rows(os.path.join(t.p4, "phi", "worker-starts.jsonl"))
         self.assertEqual((row["event"], row["mode"], row["profile"], row["starter"], row["mode_from"]),
-                         ("start", "interactive", "", TOP, "the piece of work"))
+                         ("start", "interactive", "", TOP, "fallback: no Runner: line"))
         self.assertIn("agent team", row["reason"])
         self.assertTrue(row["report"].endswith(f"report-{row['name']}.md"))
-        self.assertIn("mode interactive (the piece of work), profile off (the pair of interactive)", self.out)
+        self.assertIn("mode interactive (fallback: no Runner: line), profile off (the pair of interactive)", self.out)
 
 
 class Parallel(Base):

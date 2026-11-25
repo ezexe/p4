@@ -1000,7 +1000,7 @@ class Levels(unittest.TestCase):
         import puppeteer
         import starts
         docs, script = "Write the puppeteer pages under docs/", "Change how plans.py reads the address of a step"
-        self.assertEqual(plans.child_level(docs), {"model": "claude-sonnet-5-5", "effort": "medium", "kind": "static"})
+        self.assertEqual(plans.child_level(docs), {"model": "claude-sonnet-5-5", "effort": "high", "kind": "static"})
         self.assertEqual(plans.child_level(script), {"model": "claude-opus-5-5", "effort": "medium", "kind": "build"})
         self.assertEqual(plans.child_level("Review the relay's design")["kind"], "review")
         self.assertEqual(plans.child_kind("Bump the version to 0.10.1"), "static")
@@ -1013,8 +1013,8 @@ class Levels(unittest.TestCase):
             return rid, plans.with_level({"context": "fresh", "title": title,
                                           "prompt": text + "\n\n" + starts.marker(rid, TOP)}, title + "\n" + text)
         rid, call = requested("docs: the puppeteer pages", brief)
-        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "cheaper and lower")
-        self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at medium effort, since this is static or mechanical "
+        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "high"), "cheaper")
+        self.assertIn("\n\nModel and effort: claude-sonnet-5-5 at high effort, since this is static or mechanical "
                       "work, an integrator's, as the skill sub-agentic gives it.\n\n" + starts.marker(rid, TOP), call["prompt"])
         self.assertEqual(starts.requester_of(self.t.p4, call["prompt"]), (rid, TOP), "the marker is still read")
         brief2 = "Make relay.py hold the lock in warn. Report when done.\nFiles: scripts/relay.py"
@@ -1029,7 +1029,7 @@ class Levels(unittest.TestCase):
         self.assertIn("named by the parent session", call["prompt"])
         draft = {"title": "docs: the levels page", "context": "fresh", "brief": brief, "background": "b" * 90}
         call = puppeteer.call_of(draft)
-        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "medium"), "the start draft's call")
+        self.assertEqual((call["model"], call["effort"]), ("claude-sonnet-5-5", "high"), "the start draft's call")
         fork = puppeteer.call_of({**draft, "context": "fork"})
         self.assertNotIn("effort", fork, "the app gives a fork its parent session's, and takes neither key")
         for c in (plans.with_level({"context": "fresh", "title": t, "prompt": b})
@@ -1113,9 +1113,9 @@ class ParentEffort(unittest.TestCase):
         self.assertEqual(own["effort"], "low", "an effort the brief names itself is held to the starter's too")
 
     def test_an_effort_at_or_below_the_starters_is_named_as_its_kind_gives_it(self):
-        for mine, docs, build in (("", "medium", "medium"), ("low", "low", "low"), ("medium", "medium", "medium"),
-                                  ("high", "medium", "medium"), ("xhigh", "medium", "medium"),
-                                  ("max", "medium", "medium")):
+        for mine, docs, build in (("", "high", "medium"), ("low", "low", "low"), ("medium", "medium", "medium"),
+                                  ("high", "high", "medium"), ("xhigh", "high", "medium"),
+                                  ("max", "high", "medium")):
             plans.PARENT_EFFORT = mine
             self.assertEqual((plans.child_level(self.DOCS)["effort"], plans.child_level(self.BUILD)["effort"]),
                              (docs, build), mine or "no level seen")

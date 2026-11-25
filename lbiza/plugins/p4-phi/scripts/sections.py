@@ -352,7 +352,7 @@ def plan_brief(title, s):
         "This session starts in plan mode.", "ezexe approves the plan with ExitPlanMode.", "",
         "You are the team planner of one section of a top plan, and you see only this section. Write it as a "
         "whole plan of its own by the skill plan-planner, read it in rounds with your three teammates fences, "
-        "sources and checks, and put it to ezexe with ExitPlanMode.", "",
+        "sources and checks, each on Sonnet, and put it to ezexe with ExitPlanMode.", "",
         f"The plan's title is: {plan_name(title, s)}", "", "The brief, from the orchestrator's top plan:", "",
         s["text"], "",
         "Write your report, with a line `Plan file: <the plan file's full path>` and its rounds, before you call "

@@ -833,7 +833,7 @@ class Waves(unittest.TestCase):
         self.assertIn("--model claude-opus-5-5 --effort high", b["lines"][-1])
         self.assertIn("export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1", b["lines"])
         self.assertNotIn(" -p ", b["lines"][-1])
-        self.assertIn("--model claude-sonnet-5-5", found[("1",)]["lines"][-1], "no Model line: the integrator's")
+        self.assertIn("--model claude-sonnet-5-5 --effort high", found[("1",)]["lines"][-1], "no Model line: the integrator's")
         self.assertEqual([r.get("said") for r in seen], [None, "team"])
 
     def test_a_run_no_pool_has_a_slot_for_waits_and_claims_no_node(self):
@@ -1017,7 +1017,8 @@ class SectionPlanners(unittest.TestCase):
             f.write(TOP3.replace("MARK2", "MARK2\n- Model: claude-opus-5-5\n- Effort: high"))
         found = {o["sections"][0]: o for o in self.start(3) if o.get("folder")}
         self.assertIn("--model claude-opus-5-5 --effort high", found["2"]["lines"][-1])
-        self.assertIn("--model claude-sonnet-5-5", found["1"]["lines"][-1])
+        self.assertIn("--model claude-fable-5-2 --permission-mode", found["1"]["lines"][-1],
+                      "no Model line: the kind plan's, Fable at the starter's own effort")
 
 
 class Background(unittest.TestCase):
@@ -1063,3 +1064,15 @@ class Background(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
+
+
+class PlannerReadersOnSonnet(unittest.TestCase):
+    """A planner runs on Fable, the kind `plan`, but its three readers only read: each prompt names Sonnet for them,
+    at high for the headless planner's subagents, so no reader inherits the planner's Fable."""
+
+    def test_the_interactive_planner_names_sonnet_for_its_teammates(self):
+        self.assertIn("each on Sonnet", coworker.planner_task("the move"))
+
+    def test_the_headless_planner_names_sonnet_at_high_for_its_subagents(self):
+        said = coworker.planner_task("the move", "E:/p/plan.md")
+        self.assertIn("model sonnet and effort high", said)
