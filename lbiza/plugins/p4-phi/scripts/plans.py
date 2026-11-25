@@ -616,10 +616,12 @@ APPROVES = re.compile(r"\b(?:ezexe|the user)\s+approves\b|\bExitPlanMode\b", re.
 
 
 def worker_mode_for(text):
-    """(`interactive` or `print`, the reason) for a piece of work by its brief: interactive where it wants an agent
-    team, TEAMS, a planner whose plan ezexe approves in its tab, PLANNER with APPROVES, or a tab ezexe steers,
-    STEERED; print for the rest, since
-    headless landing, test and check work runs on the API credit."""
+    """The fallback only: (`interactive` or `print`, the reason) for a piece of work whose draft names no `Runner:`
+    line, by keywords of its brief. The session agent decides a worker's mode by the purpose of the work and states
+    it as `Runner:`, which phi.worker_settings reads first; this rule guesses for a draft that left it out:
+    interactive where it wants an agent team, TEAMS, a planner whose plan ezexe approves in its tab, PLANNER with
+    APPROVES, or a tab ezexe steers, STEERED; print for the rest, since headless landing, test and check work runs
+    on the API credit."""
     text = str(text or "")
     if TEAMS.search(text):
         return "interactive", "the brief wants an agent team, which forms only in an interactive session"

@@ -2631,21 +2631,35 @@ def switch(home, key, on):
     return "on" if read_json(path).get(key) is True else "off", path.replace(chr(92), "/")
 
 
+FALLBACK = "fallback: no Runner: line"
+# The facts a session agent decides a worker's mode by. The plugin states them; the agent reads what each piece of
+# work is for and writes its choice as the draft's `Runner:` line.
+WORKER_FACTS = ("Billing: the worker profile p4-workers bills a Claude Console account, whose credit covers `claude -p` "
+                "but not interactive Claude Code (measured 2026-11-24). Purpose: `-p` is meant for headless work, "
+                "such as landing changes, tests and checks. What you lose: under `-p` no teammates spawn, so an agent "
+                "team needs an interactive session, as do ExitPlanMode and a tab a person steers.")
+
+
 def worker_settings(home, sid="", text=""):
     """The mode and profile a terminal worker of the session `sid` starts with, for the piece of work `text`, as
     {"mode", "profile", "mode_from", "profile_from", "reason"}. The mode: the session's `workerMode`, else phi.json's
-    `worker_mode`, else plans.worker_mode_for(text), else WORKER_MODE. The profile: the session's `workerProfile`,
-    else phi.json's `worker_profile` where the key is set, else the mode's pair, WORKER_PAIRS."""
+    `worker_mode`, else the draft's `Runner:` line in `text` (sections.runner_of), the session agent's stated choice,
+    else, as the labelled FALLBACK, plans.worker_mode_for(text), else WORKER_MODE. The profile: the session's
+    `workerProfile`, else phi.json's `worker_profile` where the key is set, else the mode's pair, WORKER_PAIRS, which
+    a Runner of `print max` turns off."""
     conf = read_json(os.path.join(home, "phi", "phi.json")) if home else {}
     rec = load_session(home, safe_id(sid)) if home and sid else {}
     reason = ""
+    runner = sections.runner_of(text) if text else {}
     if rec.get("workerMode") in WORKER_MODES:
         mode, mode_from = rec["workerMode"], "the session's workerMode"
     elif conf.get("worker_mode") in WORKER_MODES:
         mode, mode_from = conf["worker_mode"], "phi.json worker_mode"
+    elif runner.get("mode"):
+        mode, mode_from = runner["mode"], f"the draft's Runner: {runner['said']}"
     elif text:
         mode, reason = plans.worker_mode_for(text)
-        mode_from = "the piece of work"
+        mode_from = FALLBACK
     else:
         mode, mode_from = WORKER_MODE, "the default"
     pools = None
@@ -2662,6 +2676,8 @@ def worker_settings(home, sid="", text=""):
             reason = (reason + "; " if reason else "") + "both pools are low, so the pair applies"
         elif pools and mode == "interactive" and pools["max"]["low"]:
             reason = (reason + "; " if reason else "") + f"the Max plan is low ({pools['max']['why']}), and interactive work has no other pool"
+        if mode == "print" and runner.get("pool") == "max" and mode_from.startswith("the draft's Runner"):
+            profile, profile_from = "", f"the draft's Runner: {runner['said']}"
     return {"mode": mode, "profile": profile, "mode_from": mode_from, "profile_from": profile_from,
             "reason": reason, "pools": pools}
 
@@ -3006,7 +3022,17 @@ def worker_start(home, settings, name, starter, kind, log, report):
                          "pools": ({"api_low": p["api"]["low"], "api_spent_month": round(p["api"]["spent_month"], 4),
                                     "max_low": p["max"]["low"], "max_utilization": p["max"]["utilization"]}
                                    if p else None)})
+    if settings["mode_from"] == FALLBACK:
+        return worker_line(settings) + "\n" + fallback_line(settings)
     return worker_line(settings)
+
+
+def fallback_line(settings):
+    """The line a start whose draft named no `Runner:` prints: the keyword rule's pick, the three facts, and the ask
+    for a `Runner:` line next time, so the session agent states its choice."""
+    return (f"phi: this draft names no Runner: line, so the keyword fallback picked {settings['mode']}"
+            + (f" ({settings['reason']})" if settings.get("reason") else "") + f". {WORKER_FACTS} Decide by Purpose, "
+            "and give the next draft's task file a `Runner:` line: print, print api, print max, interactive or team.")
 
 
 def build_by_planner(home, plan, checkout, name, starter, folder, nums):
