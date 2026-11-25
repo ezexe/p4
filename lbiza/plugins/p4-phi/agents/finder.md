@@ -3,7 +3,7 @@ name: finder
 description: Finds evidence and decides nothing - paths, line numbers, snippets, inventories, link checks and counts across a codebase or a set of files. The evidence finder of the skill sub-agentic's table. Use it for a search or a read across more than a couple of files, with a brief that says what to find and where to look.
 tools: Read, Grep, Glob
 model: haiku
-effort: low
+effort: medium
 background: true
 ---
 

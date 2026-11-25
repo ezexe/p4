@@ -3,7 +3,7 @@ name: check
 description: An independent read of a result that is no code change, such as a finding, a plan, a page or a set of records, not anchored on the view of the session that made it. A code change goes to the bundled skill `code-review` instead. Use it before the result is reported as done, with the files to read and what the result is meant to show. It is read-only, runs in the background and returns findings with paths and line numbers.
 tools: Read, Grep, Glob
 model: sonnet
-effort: medium
+effort: high
 maxTurns: 60
 background: true
 ---

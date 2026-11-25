@@ -107,6 +107,14 @@ def level():
     return out
 
 
+def planner_level():
+    """The model and effort a planner starts on: the kind `plan`'s, Fable at its starter's own effort, the
+    effort's `inherit` naming no `--effort`, and where the kind names an effort, held to the starting session's own."""
+    out = dict(plans.CHILD_LEVELS["plan"])
+    out["effort"] = plans.capped(out["effort"])
+    return out
+
+
 def planner_task(title, plan_file=""):
     """A planner's prompt, one line with no quote and no shell character. With `plan_file`, a headless planner's: the
     plan written into that file by the skill plan-planner, read in rounds by three read-only subagents, no
@@ -517,7 +525,8 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
     plugin, and its goal is its prompt. With `prompt`, a planner's, that line stands in place of the goal, closed with
     the brief's file, and the settings file leaves p4-temportal on for the skill plan-planner; a headless planner's
     mode is LAND_MODE whatever `mode` is, since `plan` cannot be approved under `-p`, its prompt is a /goal, and
-    `plan_file` is where its plan is."""
+    `plan_file` is where its plan is. A planner starts on planner_level(), the kind `plan`'s, and `level`, what its
+    brief names itself, is laid over it."""
     windows = upkeep.WINDOWS if windows is None else windows
     checkout = checkout.replace("\\", "/")
     _quoted(checkout, home)
@@ -528,6 +537,8 @@ def worker(name, brief, done, checkout, home, starter, nums=(), windows=None, te
         one["started"] = there
         return one
     one["folder"] = folder
+    if prompt:
+        level = {**planner_level(), **{k: v for k, v in (level or {}).items() if v}}
     brief_file, report = f"{folder}/brief-{name}.md", f"{folder}/report-{name}.md"
     where = [f"Work in {checkout}, on the branch that is checked out, and make no worktree and no branch.",
              "Commit only with this command, one commit for each part, naming every path it changed, added or "
