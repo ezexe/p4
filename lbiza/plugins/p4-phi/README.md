@@ -242,13 +242,13 @@ These are the defaults:
 | `static`: docs pages, a rename, a version bump and other mechanical work that names no code | integrator | `claude-sonnet-5-5` | `high` |
 | `build`: every other step, such as a change to behaviour or anything that names code | writer | `claude-opus-5-5` | `medium` |
 | `design`: a design or a decision with its sources | writer | `claude-opus-5-5` | `medium` |
-| `plan`: a brief that says its session starts in plan mode, and a step that plans | planner | `claude-fable-5-2` | the parent session's own |
+| `plan`: a brief that says its session starts in plan mode, and a step that plans | planner | `claude-mythos-5-2` | the parent session's own |
 | `review`: a review, an audit or a check of another's work | cross-check | `claude-sonnet-5-5` | `high` |
 | `top`: a brief that says its session is an orchestrator under the session that started it | orchestrator | the parent session's own | the parent session's own |
 
 Each model starts at the effort `choosing-a-model.md` gives it by default: "On Claude Opus 5.5 and Claude Haiku 5.5, the default is `medium`", and `high` on Sonnet 5.5 and Fable 5.2.
 `optimizing-for-cost-and-intelligence.md` adds that `low` pays only where failures are re-run at a higher effort, which needs a checkable outcome such as tests, and that an orchestrator with cheaper workers pays only where the work fans out; the skill `sub-agentic`, rule 5, says how the levels follow.
-A terminal planner, started by `draft --start` or by `coworkers --plan-sections`, starts on the kind `plan`: `coworker.planner_level` gives it `--model claude-fable-5-2` and no `--effort`, so it runs at its starter's own effort, and a `Model:` or `Effort:` line of its brief wins over either.
+A terminal planner, started by `draft --start` or by `coworkers --plan-sections`, starts on the kind `plan`: `coworker.planner_level` gives it `--model claude-mythos-5-2` and no `--effort`, so it runs at its starter's own effort, and a `Model:` or `Effort:` line of its brief wins over either.
 A terminal worker that lands, and the lead of a team, start on the kind `static`, `coworker.level`.
 
 No start is named above the effort of the session that makes it.

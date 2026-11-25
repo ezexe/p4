@@ -3341,7 +3341,9 @@ def h_start_advice(payload):
     `deny`, `ask` or `defer`;
     where `permissions.denyInsteadOfPrompting` is set, a call that would wait on a prompt is denied. The input is
     never rewritten with `updatedInput`, since a fresh start needs a brief and background only the caller can
-    write. A call that carries the marker of a start request to a puppeteer claims it, and is advised nothing."""
+    write. A call that carries the marker of a start request to a puppeteer claims it, and is advised nothing.
+    A start whose title or brief plans, planner_start, is asked about: a plan's session is drafted as a terminal
+    planner, which has the team variable and plan mode a desktop session lacks."""
     me = Me(payload)
     if not me.home or not me.id:
         return None
@@ -3370,6 +3372,14 @@ def h_start_advice(payload):
     base = str(payload.get("cwd") or load_session(me.home, me.id).get("cwd") or "")
     here = str(inp.get("target") or "local") == "local" and not any(inp.get(k) for k in relay.ELSEWHERE)
     brief = str(inp.get("prompt") or "")
+    if planner_start(inp, base):                    # a plan's session is a terminal planner, never a desktop session
+        RAN["planner"] = True
+        return cards.raised(cards_on(me), "", (
+            "phi (p4-phi) advises starting this planner in the Terminal panel, not as a desktop session: run `"
+            + commands() + " draft \"<the task>\"` and then the `draft --start` line it prints. A desktop session "
+            "holds no agent-team variable and starts outside plan mode, so its plan is read by one reader and "
+            "carries no `ExitPlanMode` approval card, where a drafted planner reads it with its team or its three "
+            "readers."))
     if brief and here and not starts.ORCHESTRATOR.search(brief) and starts.writes(brief, base):
         files = starts.files_of(brief, base)
         if not files:
@@ -3413,6 +3423,22 @@ def h_start_advice(payload):
     if advised == wanted:
         return None
     return cards.raised(on, parent, f"phi (p4-phi) advises context \"{advised}\" here, not \"{wanted}\": {why}.")
+
+
+def planner_start(inp, base):
+    """True for a start_session call that would make a plan's session a desktop session on this machine: its title
+    or brief plans, as plans.is_planner reads a drafted worker's, it is no new orchestrator's, and it starts here,
+    in the starter's folder. A start on another host, in the cloud, from a preset or in another folder is left
+    alone, since `draft --start` starts a planner only in its starter's checkout."""
+    brief = str(inp.get("prompt") or "")
+    if not brief or starts.ORCHESTRATOR.search(brief):
+        return False
+    if str(inp.get("target") or "local") != "local" or any(inp.get(k) for k in relay.ELSEWHERE if k != "cwd"):
+        return False
+    there = str(inp.get("cwd") or "")
+    if there and base and os.path.normcase(os.path.abspath(there)) != os.path.normcase(os.path.abspath(base)):
+        return False
+    return plans.is_planner(inp.get("title"), brief)
 
 
 def cards_on(me):

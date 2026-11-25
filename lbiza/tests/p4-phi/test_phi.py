@@ -3554,6 +3554,23 @@ class SharedCheckout(unittest.TestCase):
         self.assertIsNone(self.start(brief, use_worktree=False), "false is what p4-phi's own call passes")
         self.assertIsNone(self.start(brief), "and so is leaving it out")
 
+    def test_a_start_whose_brief_plans_is_asked_about_and_pointed_at_the_draft(self):
+        brief = ("Finish and widen the plan at `.claude/p4/temportal/plan-planner/rebuilds.md` and run its check "
+                 "loop. This is planning only: change no code.")
+        out = self.start(brief, title="Plan a build system that never rebuilds needlessly")
+        self.assertEqual(out["permissionDecision"], "ask", "asked, never blocked")
+        self.assertIn("draft --start", out["permissionDecisionReason"])
+        self.assertIn("phi.py", out["permissionDecisionReason"], "the run line, whole")
+        out = self.start("Write a plan that makes every build rebuild only what changed.")
+        self.assertEqual(out["permissionDecision"], "ask", "a brief that plans under any title")
+        build = "Port the exporter's flush to the new writer and run its suite.\nFiles: src/flush.py"
+        self.assertIsNone(self.start(build), "a brief that builds is not a planner's")
+        self.assertIsNone(self.start(brief, title="Plan the build", target="cloud"), "nor is a start elsewhere")
+        self.assertIsNone(self.start(brief, title="Plan the build", cwd=os.path.join(self._tmp.name, "other")),
+                          "nor one in another folder, where no draft starts")
+        top = brief + "\n" + phi.starts.ORCHESTRATOR_BRIEF
+        self.assertIsNone(self.start(top, title="Plan the build"), "nor a new orchestrator's")
+
     def test_a_child_in_the_main_checkout_is_refused_what_takes_the_others_changes(self):
         for cmd in ('git commit -m x', 'git add -A', 'git stash', 'x && git commit -qm y', 'git add . && git status',
                     'git stash pop', 'git rm a.py', 'git mv a.py b.py', 'git -C . commit -m x'):

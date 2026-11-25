@@ -574,7 +574,7 @@ TEAM_NOT = re.compile(r"^\W*(?:build|draft|develop|generat|convert|extract|docum
 # The skill sub-agentic, rule 5: "Set model and effort on every agent by its role; nothing inherits by default." Each
 # kind of step is a role of that skill's table: static or mechanical work lands what is written, its integrator, on
 # Sonnet at high; a build or a design writes what the tree does not hold yet, its writer, on Opus at medium; a
-# review re-reads another's work, its cross-check, on Sonnet at high; a plan is its planner's, on Fable at the
+# review re-reads another's work, its cross-check, on Sonnet at high; a plan is its planner's, on Mythos at the
 # starter's own effort; and a new top session is an orchestrator, on the session's own model and effort, which the
 # start tool gives a call that names neither. Each model starts at the effort choosing-a-model.md gives it as its
 # default, `medium` for Opus 5.5 and Haiku 5.5 and `high` for Sonnet 5.5 and Fable 5.2, and effort is raised
@@ -593,7 +593,7 @@ CHILD_LEVELS = {"static": {"model": "claude-sonnet-5-5", "effort": "high"},
                 "build": {"model": "claude-opus-5-5", "effort": "medium"},
                 "design": {"model": "claude-opus-5-5", "effort": "medium"},
                 "review": {"model": "claude-sonnet-5-5", "effort": "high"},
-                "plan": {"model": "claude-fable-5-2", "effort": "inherit"},
+                "plan": {"model": "claude-mythos-5-2", "effort": "inherit"},
                 "top": {"model": "inherit", "effort": "inherit"}}      # p4.json phi.child_levels sets each kind
 CHILD_KINDS = {"static": "static or mechanical work, an integrator's",
                "build": "a build that changes behaviour, a writer's",
