@@ -29,8 +29,8 @@ Every behaviour below rests on a sentence of the Claude Code docs at `https://co
 | What the plugin does | The page | The sentence it rests on |
 | :- | :- | :- |
 | Decides whether to delegate, how many agents, and each one's type, model and effort by the skill `sub-agentic` it ships, whose table of roles each agent and each drafted start follows | `plugins/components.md`, "Skills", and `sub-agents.md`, "Choose a model" | A plugin's skill is "One `<name>/SKILL.md` per skill", and the model order puts "The `model` field in the subagent's definition" after the call's own `model` |
-| Sends a search or a read across files to its own read-only subagent `p4-phi:finder`, the skill's evidence finder, with `model: haiku` and `effort: low` in its file | `sub-agents.md`, "Built-in subagents" and "Choose a model" | The built-in Explore's model is "the parent conversation's model", so it runs small only while each call names a model; a definition's `model` field holds with nothing on the call |
-| Ships `p4-phi:writer` on `opus` at `medium` and `p4-phi:integrator` on `sonnet` at `medium`, the skill's writer and integrator | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
+| Sends a search or a read across files to its own read-only subagent `p4-phi:finder`, the skill's evidence finder, with `model: haiku` and `effort: medium` in its file | `sub-agents.md`, "Built-in subagents" and "Choose a model" | The built-in Explore's model is "the parent conversation's model", so it runs small only while each call names a model; a definition's `model` field holds with nothing on the call |
+| Ships `p4-phi:writer` on `opus` at `medium` and `p4-phi:integrator` on `sonnet` at `high`, the skill's writer and integrator | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
 | Sends a review of a code change to the bundled skill `code-review`, run without `--fix` | `code-review-local.md`, "Let Claude start the review" and "What the review reads and edits" | "Claude can start `/code-review` on its own, without you typing the command" and "without `--fix`, the review's instructions ask Claude for a report only." |
 | Keeps a reviewer of its own only for a result that is no code change | `code-review-local.md`, "Choose what to review" and "Change or build on the review" | "A target can be a pull request number, a branch name, a file path, or a Git revision range." and "Build your own reviewer: write a reviewer subagent or a review skill" |
 | Ships its reviewer in `agents/`, named `p4-phi:check`, the skill's cross-check for a result that is no code change | `plugins/components.md`, "Agents" | "Each Markdown file under `agents/` defines one" and "The name form is `<plugin>:<name>`" |
@@ -239,12 +239,17 @@ These are the defaults:
 
 | Kind of step | Role | Model | Effort |
 | :- | :- | :- | :- |
-| `static`: docs pages, a rename, a version bump and other mechanical work that names no code | integrator | `claude-sonnet-5-5` | `medium` |
+| `static`: docs pages, a rename, a version bump and other mechanical work that names no code | integrator | `claude-sonnet-5-5` | `high` |
 | `build`: every other step, such as a change to behaviour or anything that names code | writer | `claude-opus-5-5` | `medium` |
 | `design`: a design or a decision with its sources | writer | `claude-opus-5-5` | `medium` |
 | `plan`: a brief that says its session starts in plan mode, and a step that plans | planner | `claude-fable-5-2` | the parent session's own |
-| `review`: a review, an audit or a check of another's work | cross-check | `claude-sonnet-5-5` | `medium` |
+| `review`: a review, an audit or a check of another's work | cross-check | `claude-sonnet-5-5` | `high` |
 | `top`: a brief that says its session is an orchestrator under the session that started it | orchestrator | the parent session's own | the parent session's own |
+
+Each model starts at the effort `choosing-a-model.md` gives it by default: "On Claude Opus 5.5 and Claude Haiku 5.5, the default is `medium`", and `high` on Sonnet 5.5 and Fable 5.2.
+`optimizing-for-cost-and-intelligence.md` adds that `low` pays only where failures are re-run at a higher effort, which needs a checkable outcome such as tests, and that an orchestrator with cheaper workers pays only where the work fans out; the skill `sub-agentic`, rule 5, says how the levels follow.
+A terminal planner, started by `draft --start` or by `coworkers --plan-sections`, starts on the kind `plan`: `coworker.planner_level` gives it `--model claude-fable-5-2` and no `--effort`, so it runs at its starter's own effort, and a `Model:` or `Effort:` line of its brief wins over either.
+A terminal worker that lands, and the lead of a team, start on the kind `static`, `coworker.level`.
 
 No start is named above the effort of the session that makes it.
 p4-phi reads that session's level from the hook input's `effort.level`, or from `CLAUDE_EFFORT`, keeps the last level seen on the session's record, and holds each start's `effort` to it.
@@ -256,9 +261,9 @@ p4-phi has no setting for a subagent's model or effort, since Claude Code sets b
 
 | Subagent | What sets its model and effort | How a project or ezexe sets another |
 | :- | :- | :- |
-| `p4-phi:finder`, the plugin's own | `model: haiku` and `effort: low` in `agents/finder.md` | A `model` or an `effort` on the Agent call |
-| `p4-phi:writer` and `p4-phi:integrator`, the plugin's own | `model: opus` and `model: sonnet`, each with `effort: medium`, in their files | A `model` or an `effort` on the Agent call |
-| `p4-phi:check`, the plugin's own | `model: sonnet` and `effort: medium` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
+| `p4-phi:finder`, the plugin's own | `model: haiku` and `effort: medium` in `agents/finder.md` | A `model` or an `effort` on the Agent call |
+| `p4-phi:writer` and `p4-phi:integrator`, the plugin's own | `model: opus` with `effort: medium` and `model: sonnet` with `effort: high`, in their files | A `model` or an `effort` on the Agent call |
+| `p4-phi:check`, the plugin's own | `model: sonnet` and `effort: high` in `agents/check.md` | A `model` or an `effort` on the Agent call: "The parameter overrides the `effort` field", and for the effort "The `CLAUDE_CODE_EFFORT_LEVEL` environment variable takes precedence over both." |
 | Every subagent | One model under `env` of a settings file: "set `CLAUDE_CODE_SUBAGENT_MODEL` to that model and `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` to `1`" | "While `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is on, Claude Code ignores the `model` field in subagent definitions, and Claude can't pass a model when it starts a subagent." |
 
 ### The round for what a subagent wrote
@@ -285,7 +290,7 @@ A plan closes only through `phi.py plan close <plan file> --checkout <repo>`, wh
 The same teammates read every round of their group, so a later round reads only what the mends changed.
 See more: https://code.claude.com/docs/en/worktrees.md
 A teammate was seen with no tool that fetches a page, so the lead reads each live page through one `web-fetch` subagent.
-The start file's last line names the lead's model and effort, Sonnet at medium, and a teammate on the lead's model inherits its effort: the teams seen live ran under a lead on the terminal's own model, Fable 5.2, with no effort recorded for a teammate, and a lead on Sonnet was not seen.
+The start file's last line names the lead's model and effort, Sonnet at high, Sonnet's own default, and a teammate on the lead's model inherits its effort: the teams seen live ran under a lead on the terminal's own model, Fable 5.2, with no effort recorded for a teammate, and a lead on Sonnet was not seen.
 `phi.py spend <session>` prints what a session and each teammate and subagent under it spent, from the transcripts Claude Code keeps: a teammate's finish notice held no token count, and on Claude Code 2.1.328 each teammate's transcript was beside its lead's, in the folder `subagents` under the lead's session id, with a `.meta.json` that names it.
 A terminal session has no record in the store, so `phi.py spend <name>` reads it by the transcripts of the session id its node keeps.
 The read of one plan on 2026-11-23 by three Sonnet teammates and one page subagent, one round, took 140 API calls, 18,613,450 tokens in, 17,759,246 of them read from the cache, and 125,587 tokens out.
