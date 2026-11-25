@@ -1064,3 +1064,15 @@ class Background(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
+
+
+class PlannerReadersOnSonnet(unittest.TestCase):
+    """A planner runs on Fable, the kind `plan`, but its three readers only read: each prompt names Sonnet for them,
+    at high for the headless planner's subagents, so no reader inherits the planner's Fable."""
+
+    def test_the_interactive_planner_names_sonnet_for_its_teammates(self):
+        self.assertIn("each on Sonnet", coworker.planner_task("the move"))
+
+    def test_the_headless_planner_names_sonnet_at_high_for_its_subagents(self):
+        said = coworker.planner_task("the move", "E:/p/plan.md")
+        self.assertIn("model sonnet and effort high", said)

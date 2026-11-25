@@ -123,11 +123,11 @@ def planner_task(title, plan_file=""):
     if plan_file:
         return (f"Write the plan for {plain(title)} into the file {plain(plan_file)} by the skill plan-planner. This "
                 "run is headless: no agent team forms and no ExitPlanMode is answered. Read the plan in rounds with "
-                "three read-only subagents named fences, sources and checks, one lens each, mend what held, and log "
+                "three read-only subagents named fences, sources and checks, one lens each, each with model sonnet and effort high, mend what held, and log "
                 "each round in the plan. Edit no file but the plan and the report, and start no worker: the session "
                 "that started you puts the plan to ezexe.")
     return (f"Write the plan for {plain(title)} in plan mode by the skill plan-planner. Form three teammates named "
-            f"fences, sources and checks that only read, run the rounds of the plan in this session, write your "
+            f"fences, sources and checks, each on Sonnet, that only read, run the rounds of the plan in this session, write your "
             f"report with the path of the plan and its rounds before you call ExitPlanMode, and then put the "
             f"plan to ezexe with ExitPlanMode.")
 
