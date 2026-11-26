@@ -561,6 +561,31 @@ def gone(home, s):
 # be the empty string." Git Bash, which writes E:/x as /e/x, runs on Windows alone, so on macOS and Linux /w/lib is the
 # folder lib in /w.
 DRIVES = bool(os.path.splitdrive("C:/x")[0])
+# A store whose path is longer than this is reached by its extended-length form on Windows. Win32 file calls stop
+# at MAX_PATH, 260 characters, unless the path carries the \\?\ prefix or the machine has LongPathsEnabled set,
+# which is off by default ("Maximum Path Length Limitation", Microsoft Learn; Python's "Removing the MAX_PATH
+# Limitation"). The store's own files run up to about 120 characters below it: a session's node folder, its
+# session.json.lock, a tree node's nested folders. Seen in the desktop app: a session in a scratch workspace whose
+# store path was some 200 characters could not make its own session folder.
+LONG_STORE = 120
+LONG_PREFIX = "\\\\?\\"
+
+
+def long_path(p):
+    """`p` in the extended-length form Windows reads past MAX_PATH, when it is a long path on Windows; as it is
+    otherwise. The form is absolute with backslashes only and no . or .. parts, which Windows no longer resolves
+    under the prefix, so it is normalised first."""
+    p = str(p or "")
+    if os.name != "nt" or not p or p.startswith("\\\\") or p.startswith("//"):
+        return p                                  # off Windows, already extended, or a share: left as it is
+    p = os.path.abspath(p)
+    return LONG_PREFIX + p if len(p) > LONG_STORE else p
+
+
+def plain(p):
+    """`p` without the extended-length prefix: the form git, a shell and a person read."""
+    p = str(p or "")
+    return p[len(LONG_PREFIX):] if p.startswith(LONG_PREFIX) else p
 
 
 # tools-reference.md has `PushNotification` send "a desktop notification from a local session", and desktop.md, "Get
@@ -576,7 +601,7 @@ PUSH = ("Where this session's tool list holds `PushNotification`, also send one 
 def norm(p, base=""):
     """A path or glob as one form: absolute when a base is given, forward slashes, no trailing slash, case folded
     on Windows."""
-    p = str(p or "").strip().strip("'\"")
+    p = plain(str(p or "").strip().strip("'\""))
     if not p:
         return ""
     p = p.replace("\\", "/")
@@ -1040,7 +1065,7 @@ def default_status(title, lines):
 
 def _git(cwd, *args, timeout=None):
     try:
-        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=timeout or GIT_S)
+        return subprocess.run(["git", "-C", plain(cwd), *args], capture_output=True, text=True, timeout=timeout or GIT_S)
     except (OSError, subprocess.SubprocessError):
         return None
 

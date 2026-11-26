@@ -3974,5 +3974,28 @@ class RunningBuilds(unittest.TestCase):
         self.assertEqual(self.names(), ["p"])
 
 
+@unittest.skipUnless(os.name == "nt", "MAX_PATH is a Windows limit")
+class LongStorePath(unittest.TestCase):
+    """A store whose path is near MAX_PATH, as a desktop session's scratch workspace has: the session's folder, its
+    lock and its session.json lie past 260 characters, and are made by their extended-length paths."""
+
+    def test_session_saved_past_max_path(self):
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, "\\\\?\\" + os.path.abspath(base), True)   # files past MAX_PATH too
+        pad = 215 - len(os.path.join(base, ".claude", "p4"))
+        if pad < 2:
+            self.skipTest("the temp folder is too long already")
+        project = os.path.join(base, *(["x" * 40] * (pad // 41)), "y" * max(1, pad % 41 - 1))
+        home = os.path.join(project, ".claude", "p4")
+        os.makedirs(home)
+        sid = "local_fda73b41-439c-4e39-8566-a9e8c3f72c13"
+        self.assertGreater(len(os.path.join(home, "phi", "sessions", sid, "session.json.lock")), 260)
+        me = phi.Me({"session_id": "26c9fe71-bbbb", "cwd": project}, session=sid, p4=home)
+        s = phi.ensure_session(me.home, sid)
+        self.assertEqual(s.get("sessionId"), sid)
+        self.assertEqual(phi.load_session(me.home, sid).get("sessionId"), sid)
+        self.assertEqual(relay.norm(me.home), relay.norm(home))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=1)
