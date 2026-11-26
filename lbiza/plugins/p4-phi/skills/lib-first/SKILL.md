@@ -21,6 +21,6 @@ A live page wins over anything recalled.
 
 ## Where it is enforced
 
-- The agents `p4-phi:writer` and `p4-phi:integrator` list this skill in their `skills` field, so its full text is in their context at start, and each returns its pieces by rule 4.
+- The agents `p4-phi:writer` and `p4-phi:integrator` list this skill as `p4-phi:lib-first` in their `skills` field, the namespaced name of a plugin skill, so its full text is in their context at start, and each returns its pieces by rule 4.
 - The skill `plan-planner` of p4-temportal has every section that changes code carry the line of rule 4.
 - A skill's description is how Claude decides to load it, so the description above names the moments, planning and writing code, that load it. See more: https://code.claude.com/docs/en/skills.md and https://code.claude.com/docs/en/sub-agents.md

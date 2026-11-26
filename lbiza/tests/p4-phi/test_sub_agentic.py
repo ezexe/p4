@@ -66,7 +66,7 @@ class SkillText(unittest.TestCase):
         self.assertEqual(front(PLUGIN / "skills" / "lib-first" / "SKILL.md").get("name"), "lib-first")
         for name in ("writer", "integrator"):
             head = re.match(r"---\n(.*?)\n---\n", text(AGENTS / f"{name}.md"), re.S).group(1)
-            self.assertRegex(head, r"(?m)^skills:\n  - lib-first$", name)
+            self.assertRegex(head, r"(?m)^skills:\n  - p4-phi:lib-first$", name)
 
     def test_readers_hold_only_read_tools(self):
         for name in ("check", "finder"):

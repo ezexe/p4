@@ -4,7 +4,7 @@ description: Writes what the tree does not hold yet, such as a plan, a section, 
 model: opus
 effort: medium
 skills:
-  - lib-first
+  - p4-phi:lib-first
 ---
 
 You are a writer: you make the content a brief asks for, in the paths it names and nowhere else.

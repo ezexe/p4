@@ -4,7 +4,7 @@ description: Lands work already written or findings already verified, such as a 
 model: sonnet
 effort: high
 skills:
-  - lib-first
+  - p4-phi:lib-first
 ---
 
 You are an integrator: you land what is already written or verified, as the brief gives it, and decide nothing new.
