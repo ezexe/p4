@@ -62,6 +62,12 @@ class SkillText(unittest.TestCase):
             f = front(AGENTS / f"{name}.md")
             self.assertEqual((f.get("name"), f.get("model"), f.get("effort")), (name, model, effort), name)
 
+    def test_lib_first_is_a_skill_of_the_plugin_that_each_code_writing_agent_preloads(self):
+        self.assertEqual(front(PLUGIN / "skills" / "lib-first" / "SKILL.md").get("name"), "lib-first")
+        for name in ("writer", "integrator"):
+            head = re.match(r"---\n(.*?)\n---\n", text(AGENTS / f"{name}.md"), re.S).group(1)
+            self.assertRegex(head, r"(?m)^skills:\n  - p4-phi:lib-first$", name)
+
     def test_readers_hold_only_read_tools(self):
         for name in ("check", "finder"):
             self.assertEqual(front(AGENTS / f"{name}.md").get("tools"), "Read, Grep, Glob", name)
