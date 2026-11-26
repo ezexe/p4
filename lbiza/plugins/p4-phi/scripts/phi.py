@@ -539,6 +539,8 @@ class Me:
                 self.home = own_store(self.rec, self.id, project) or self.home
             self.home, self.home_missing = relay.tree_home(self.home)   # a shared store, when p4.json names one
         self.store = self.store or self.home
+        # A store past MAX_PATH's reach on Windows, its files read and written by their extended-length paths
+        self.home, self.store = relay.long_path(self.home), relay.long_path(self.store)
         if self.home and self.id and not session:  # where the module writes them for a project with no store
             APP_AT["folder"] = session_dir(self.home, self.id)
             # That file was not known while the records above were read, so this session's and its starter's came
